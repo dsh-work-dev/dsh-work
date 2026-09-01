@@ -1,0 +1,120 @@
+version: '3'
+
+vars:
+  APP_NAME: work
+  BIN_DIR: bin
+  DSH_VERSION: 0.1.2-alpha.3
+
+tasks:
+  default:
+    cmds:
+      - task: verify
+
+  verify:
+    summary: Run all local checks that do not require a real DSH runtime
+    deps:
+      - verify:toolchain
+      - format:check
+      - test
+      - frontend:test
+      - frontend:typecheck
+      - frontend:build
+      - build
+
+  verify:toolchain:
+    summary: Check the locked local toolchain
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-toolchain.ps1
+
+  format:
+    summary: Format Go source
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-go.ps1
+
+  format:check:
+    summary: Ensure Go source is formatted
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-gofmt.ps1
+
+  test:
+    summary: Run the complete Go unit and contract suite
+    cmds:
+      - go test . ./cmd/... ./internal/...
+
+  frontend:install:
+    summary: Install the locked frontend dependencies
+    dir: frontend
+    cmds:
+      - npm ci
+
+  frontend:test:
+    summary: Run frontend state-contract tests
+    dir: frontend
+    deps:
+      - frontend:install
+    cmds:
+      - npm run test
+
+  frontend:typecheck:
+    summary: Typecheck the frontend and generated bindings
+    dir: frontend
+    deps:
+      - frontend:install
+      - generate:bindings
+    cmds:
+      - npm run typecheck
+
+  frontend:build:
+    summary: Build the trusted frontend assets
+    dir: frontend
+    deps:
+      - frontend:install
+      - generate:bindings
+    cmds:
+      - npm run build
+
+  generate:bindings:
+    summary: Generate the narrow Wails TypeScript Host bindings
+    cmds:
+      - wails3 generate bindings -ts -i -clean=true
+
+  build:
+    summary: Build Work for the current platform
+    deps:
+      - frontend:build
+    cmds:
+      - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
+      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}" .
+
+  build:smoke:
+    summary: Build the real Windows DSH smoke harness
+    platforms: [windows]
+    cmds:
+      - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
+      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}-smoke.exe" ./cmd/work-smoke
+
+  run:
+    summary: Run the already-built Work application
+    cmds:
+      - "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}"
+
+  dev:
+    summary: Run the Wails development loop
+    cmds:
+      - wails3 dev -config ./build/config.yml
+
+  setup:dsh:
+    summary: Explicitly install the pinned local DSH runtime
+    dir: tools/dsh
+    cmds:
+      - npm install --package-lock-only --ignore-scripts
+      - npm install --ignore-scripts
+
+  test:windows-real-dsh:
+    summary: Run the real Windows DSH tracer-bullet smoke test
+    platforms: [windows]
+    deps:
+      - build
+      - build:smoke
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-real-dsh.ps1

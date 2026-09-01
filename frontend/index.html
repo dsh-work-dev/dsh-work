@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d121b" />
+    <title>Work</title>
+  </head>
+  <body>
+    <main class="shell" aria-labelledby="app-title">
+      <header class="shell-header">
+        <div>
+          <p class="eyebrow">WORK PC</p>
+          <h1 id="app-title">Starting your local workspace</h1>
+        </div>
+        <span class="state-dot" id="state-dot" aria-hidden="true"></span>
+      </header>
+
+      <section class="status-card" aria-live="polite" aria-atomic="true">
+        <p class="status-label" id="status-label">Preparing</p>
+        <p class="status-message" id="status-message">Work is preparing the managed DSH process.</p>
+        <p class="status-detail" id="status-detail"></p>
+        <div class="progress-track" id="progress-track" role="progressbar" aria-label="Workspace startup progress" aria-valuetext="Preparing">
+          <span></span>
+        </div>
+      </section>
+
+      <section class="workspace-card" aria-label="Workspace handoff">
+        <div>
+          <p class="card-label">Workspace</p>
+          <p id="workspace-url">Waiting for a trusted loopback origin.</p>
+        </div>
+        <span class="lock-mark" aria-hidden="true">LOCAL</span>
+      </section>
+
+      <footer class="actions" aria-label="Host actions">
+        <button class="button button-secondary" id="cancel" type="button">Cancel</button>
+        <button class="button button-primary" id="retry" type="button" hidden>Retry</button>
+        <button class="button button-quiet" id="quit" type="button">Quit</button>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

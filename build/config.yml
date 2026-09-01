@@ -1,0 +1,34 @@
+version: '3'
+
+info:
+  companyName: "Work"
+  productName: "Work"
+  productIdentifier: "com.local.work"
+  description: "Local-first desktop host for DeepSeek Harness"
+  copyright: "Copyright 2026 Work"
+  comments: "Work desktop foundation"
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 750
+  ignore:
+    dir:
+      - .git
+      - frontend
+      - tools/dsh
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+      - "*.ts"
+    git_ignore: true
+  executes:
+    - cmd: wails3 task build DEV=true
+      type: blocking
+    - cmd: wails3 task run
+      type: primary

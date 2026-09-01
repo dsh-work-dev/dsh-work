@@ -1,0 +1,23 @@
+{
+  "name": "work-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:dev": "vite build --minify false --mode development",
+    "build": "vite build --mode production",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/state.test.ts"
+  },
+  "dependencies": {
+    "@wailsio/runtime": "3.0.0-beta.16"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "tsx": "4.19.4",
+    "typescript": "5.9.2",
+    "vite": "8.0.5"
+  }
+}

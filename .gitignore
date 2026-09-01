@@ -1,0 +1,13 @@
+# Local-only project material.
+.research/
+
+# Generated application and dependency artifacts.
+.task/
+bin/
+.npm-cache/
+frontend/dist/
+frontend/node_modules/
+tools/dsh/node_modules/
+
+# Temporary scaffolds used only while bootstrapping the repository.
+.tmp-wails-*/

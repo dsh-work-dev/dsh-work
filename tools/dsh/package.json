@@ -1,0 +1,9 @@
+{
+  "name": "@local/work-dsh-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pinned local DSH runtime used by Work development",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.2-alpha.3"
+  }
+}
