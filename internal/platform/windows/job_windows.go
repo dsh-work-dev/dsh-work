@@ -34,7 +34,7 @@ func NewJobObjectAdapter() supervisor.Adapter {
 	return JobObjectAdapter{}
 }
 
-func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan) (supervisor.Worker, error) {
+func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
 	if err := plan.Validate(); err != nil {
 		return nil, fmt.Errorf("validate launch plan: %w", err)
 	}
@@ -109,17 +109,34 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan) (su
 		return nil, fmt.Errorf("encode DSH working directory: %w", err)
 	}
 
-	startup := win.StartupInfo{
-		Cb:         uint32(unsafe.Sizeof(win.StartupInfo{})),
-		Flags:      win.STARTF_USESTDHANDLES,
-		StdInput:   stdin,
-		StdOutput:  stdoutWrite,
-		StdErr:     stderrWrite,
-		ShowWindow: win.SW_HIDE,
+	startup := win.StartupInfoEx{
+		StartupInfo: win.StartupInfo{
+			Cb:         uint32(unsafe.Sizeof(win.StartupInfoEx{})),
+			Flags:      win.STARTF_USESTDHANDLES,
+			StdInput:   stdin,
+			StdOutput:  stdoutWrite,
+			StdErr:     stderrWrite,
+			ShowWindow: win.SW_HIDE,
+		},
 	}
+	attributeList, err := win.NewProcThreadAttributeList(1)
+	if err != nil {
+		return nil, fmt.Errorf("prepare DSH process handle list: %w", err)
+	}
+	defer attributeList.Delete()
+	inheritedHandles := []win.Handle{stdin, stdoutWrite, stderrWrite}
+	if err := attributeList.Update(win.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&inheritedHandles[0]), uintptr(len(inheritedHandles))*unsafe.Sizeof(inheritedHandles[0])); err != nil {
+		return nil, fmt.Errorf("configure DSH process handle list: %w", err)
+	}
+	startup.ProcThreadAttributeList = attributeList.List()
+	startup.Flags = win.STARTF_USESTDHANDLES
+	startup.StdInput = stdin
+	startup.StdOutput = stdoutWrite
+	startup.StdErr = stderrWrite
+	startup.ShowWindow = win.SW_HIDE
 	processInfo := win.ProcessInformation{}
-	creationFlags := uint32(win.CREATE_UNICODE_ENVIRONMENT | win.CREATE_SUSPENDED | win.CREATE_NEW_PROCESS_GROUP | win.CREATE_NO_WINDOW)
-	if err := win.CreateProcess(application16, &commandLine16[0], nil, nil, true, creationFlags, &environment16[0], workingDirectory16, &startup, &processInfo); err != nil {
+	creationFlags := uint32(win.CREATE_UNICODE_ENVIRONMENT | win.CREATE_SUSPENDED | win.CREATE_NEW_PROCESS_GROUP | win.CREATE_NO_WINDOW | win.EXTENDED_STARTUPINFO_PRESENT)
+	if err := win.CreateProcess(application16, &commandLine16[0], nil, nil, true, creationFlags, &environment16[0], workingDirectory16, &startup.StartupInfo, &processInfo); err != nil {
 		return nil, fmt.Errorf("create DSH process: %w", err)
 	}
 
@@ -152,7 +169,7 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan) (su
 	}
 	closeHandle(processInfo.Thread)
 
-	worker := newJobWorker(job, processInfo.Process, processInfo.ProcessId, stdoutRead, stderrRead)
+	worker := newJobWorker(job, processInfo.Process, processInfo.ProcessId, stdoutRead, stderrRead, rawHandler)
 	closeJob = false
 	closeStdout = false
 	closeStderr = false
@@ -242,10 +259,13 @@ type jobWorker struct {
 	events      chan supervisor.OutputEvent
 	stop        chan struct{}
 	stopOnce    sync.Once
-	closeOnce   sync.Once
+	closeMu     sync.Mutex
+	closed      bool
 	readers     sync.WaitGroup
 	readersDone chan struct{}
 	exited      chan struct{}
+	waitDone    chan struct{}
+	rawHandler  supervisor.RawOutputHandler
 	exitMu      sync.RWMutex
 	exit        supervisor.ExitResult
 	tailMu      sync.RWMutex
@@ -253,7 +273,7 @@ type jobWorker struct {
 	stderrTail  string
 }
 
-func newJobWorker(job, process win.Handle, pid uint32, stdoutHandle, stderrHandle win.Handle) *jobWorker {
+func newJobWorker(job, process win.Handle, pid uint32, stdoutHandle, stderrHandle win.Handle, rawHandler supervisor.RawOutputHandler) *jobWorker {
 	worker := &jobWorker{
 		job:         job,
 		process:     process,
@@ -264,6 +284,8 @@ func newJobWorker(job, process win.Handle, pid uint32, stdoutHandle, stderrHandl
 		stop:        make(chan struct{}),
 		readersDone: make(chan struct{}),
 		exited:      make(chan struct{}),
+		waitDone:    make(chan struct{}),
+		rawHandler:  rawHandler,
 	}
 	worker.readers.Add(2)
 	go worker.readOutput(supervisor.StreamStdout, worker.stdout)
@@ -356,7 +378,7 @@ func (w *jobWorker) activeProcesses() (uint32, error) {
 	// process-list query is unavailable, retain a conservative non-zero value.
 	event, err := win.WaitForSingleObject(w.job, 0)
 	if err != nil {
-		return 0, err
+		return 1, err
 	}
 	if event == win.WAIT_OBJECT_0 {
 		return 0, nil
@@ -364,45 +386,68 @@ func (w *jobWorker) activeProcesses() (uint32, error) {
 	if event == waitTimeout {
 		return 1, nil
 	}
-	return 0, fmt.Errorf("unexpected job wait result %d", event)
+	return 1, fmt.Errorf("unexpected job wait result %d", event)
 }
 
 func (w *jobWorker) Diagnostics() supervisor.Diagnostics {
 	w.tailMu.RLock()
 	stdoutTail, stderrTail := w.stdoutTail, w.stderrTail
 	w.tailMu.RUnlock()
-	active, _ := w.activeProcesses()
+	active, activeErr := w.activeProcesses()
+	exit := w.ExitResult()
+	if activeErr != nil && exit.Err == "" {
+		exit.Err = "active process query failed: " + activeErr.Error()
+	}
 	return supervisor.Diagnostics{
 		PID:             w.pid,
 		ActiveProcesses: active,
 		StdoutTail:      stdoutTail,
 		StderrTail:      stderrTail,
-		Exit:            w.ExitResult(),
+		Exit:            exit,
 	}
 }
 
 func (w *jobWorker) Close() error {
+	w.closeMu.Lock()
+	defer w.closeMu.Unlock()
+	if w.closed {
+		return nil
+	}
+	w.stopOnce.Do(func() { close(w.stop) })
 	var closeErr error
-	w.closeOnce.Do(func() {
-		w.stopOnce.Do(func() { close(w.stop) })
-		if active, err := w.activeProcesses(); err == nil && active > 0 {
-			if err := win.TerminateJobObject(w.job, 1); err != nil {
-				closeErr = err
-			}
+	active, activeErr := w.activeProcesses()
+	if activeErr != nil || active > 0 {
+		if err := win.TerminateJobObject(w.job, 1); err != nil && !isAlreadyExited(err) {
+			closeErr = fmt.Errorf("terminate DSH job during close: %w", err)
 		}
-		_, _ = win.WaitForSingleObject(w.process, 5000)
-		_ = w.stdout.Close()
-		_ = w.stderr.Close()
-		select {
-		case <-w.readersDone:
-		case <-time.After(2 * time.Second):
-			if closeErr == nil {
-				closeErr = fmt.Errorf("timed out draining DSH output")
-			}
+	}
+	if err := waitForProcess(w.process, 5*time.Second); err != nil {
+		if closeErr == nil {
+			closeErr = fmt.Errorf("wait for DSH process during close: %w", err)
 		}
-		closeHandle(w.process)
-		closeHandle(w.job)
-	})
+	}
+	_ = w.stdout.Close()
+	_ = w.stderr.Close()
+	select {
+	case <-w.readersDone:
+	case <-time.After(2 * time.Second):
+		if closeErr == nil {
+			closeErr = fmt.Errorf("timed out draining DSH output")
+		}
+	}
+	select {
+	case <-w.waitDone:
+	case <-time.After(2 * time.Second):
+		if closeErr == nil {
+			closeErr = fmt.Errorf("timed out joining DSH wait")
+		}
+		// Do not close native process/job handles while waitForExit may
+		// still be using them. The next Close call can retry the join.
+		return closeErr
+	}
+	closeHandle(w.process)
+	closeHandle(w.job)
+	w.closed = true
 	return closeErr
 }
 
@@ -415,6 +460,9 @@ func (w *jobWorker) readOutput(stream supervisor.OutputStream, file *os.File) {
 			return
 		}
 		rawText := string(line)
+		if w.rawHandler != nil {
+			w.rawHandler(stream, rawText)
+		}
 		text := supervisor.Redact(rawText)
 		w.tailMu.Lock()
 		if stream == supervisor.StreamStdout {
@@ -424,7 +472,7 @@ func (w *jobWorker) readOutput(stream supervisor.OutputStream, file *os.File) {
 		}
 		w.tailMu.Unlock()
 		select {
-		case w.events <- supervisor.OutputEvent{Stream: stream, Text: text, RawText: rawText}:
+		case w.events <- supervisor.OutputEvent{Stream: stream, Text: text}:
 		case <-w.stop:
 		default:
 		}
@@ -458,6 +506,7 @@ func (w *jobWorker) readOutput(stream supervisor.OutputStream, file *os.File) {
 }
 
 func (w *jobWorker) waitForExit() {
+	defer close(w.waitDone)
 	_, err := win.WaitForSingleObject(w.process, win.INFINITE)
 	result := supervisor.ExitResult{Started: true}
 	if err != nil {
@@ -474,6 +523,29 @@ func (w *jobWorker) waitForExit() {
 	w.exit = result
 	w.exitMu.Unlock()
 	close(w.exited)
+}
+
+func waitForProcess(handle win.Handle, timeout time.Duration) error {
+	deadline := uint32(timeout.Milliseconds())
+	if timeout < 0 {
+		deadline = win.INFINITE
+	}
+	event, err := win.WaitForSingleObject(handle, deadline)
+	if err != nil {
+		return err
+	}
+	switch event {
+	case win.WAIT_OBJECT_0:
+		return nil
+	case waitTimeout:
+		return fmt.Errorf("timeout after %s", timeout)
+	default:
+		return fmt.Errorf("unexpected wait result %d", event)
+	}
+}
+
+func isAlreadyExited(err error) bool {
+	return err == win.ERROR_ACCESS_DENIED || err == win.ERROR_INVALID_HANDLE
 }
 
 func appendTail(current, addition string) string {

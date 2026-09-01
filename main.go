@@ -9,6 +9,7 @@ import (
 	"github.com/local/work/internal/dshadapter"
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/platform"
+	"github.com/local/work/internal/workergateway"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -23,9 +24,11 @@ func main() {
 	config := workapp.DefaultConfig(currentWorkspace())
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetWorkspaceRoot(config.WorkspaceRoot)
+	gateway := workergateway.New()
 	host := workapp.NewHost(workapp.Dependencies{
 		DSH:           dsh,
 		Supervisor:    dependencies.Supervisor,
+		Gateway:       gateway,
 		PlatformError: dependencies.Err,
 	}, config)
 	service := workapp.NewHostService(host)
@@ -43,6 +46,7 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+	gateway.SetOpenExternal(desktop.Browser.OpenURL)
 
 	window := desktop.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "host",
@@ -61,6 +65,9 @@ func main() {
 	})
 	host.SetReadyHandler(func(workspaceURL string) {
 		window.SetURL(workspaceURL)
+	})
+	host.SetRecoveryHandler(func() {
+		window.SetURL("/")
 	})
 	host.SetQuitHandler(func() {
 		desktop.Quit()

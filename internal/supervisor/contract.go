@@ -50,15 +50,16 @@ const (
 	StreamStderr OutputStream = "stderr"
 )
 
+// RawOutputHandler is a synchronous, machine-only readiness seam. A native
+// adapter invokes it while a bounded output line is still on its reader stack;
+// callers must parse it immediately and must not retain the raw value.
+type RawOutputHandler func(OutputStream, string)
+
 // OutputEvent is bounded, redacted process output. It is diagnostic input,
 // never a command channel.
 type OutputEvent struct {
 	Stream OutputStream
 	Text   string
-	// RawText is a transient machine-only view for a trusted Adapter that must
-	// parse a one-launch credential from process output. It must never be
-	// buffered, logged or projected; Text is the redacted diagnostic view.
-	RawText string `json:"-"`
 }
 
 type ExitResult struct {
@@ -90,7 +91,7 @@ type Worker interface {
 // Adapter is the only process ownership seam. Native handles, signals,
 // process groups and job objects must remain behind this interface.
 type Adapter interface {
-	Start(context.Context, LaunchPlan) (Worker, error)
+	Start(context.Context, LaunchPlan, RawOutputHandler) (Worker, error)
 }
 
 // Redact is intentionally conservative: it removes common secret-shaped
@@ -120,12 +121,56 @@ func redactKeyValue(input, key string) string {
 			continue
 		}
 		separator := index + len(key)
-		for separator < len(input) && (input[separator] == ' ' || input[separator] == '\t' || input[separator] == ':' || input[separator] == '=') {
+		for separator < len(input) && (input[separator] == ' ' || input[separator] == '\t') {
 			separator++
 		}
-		if separator == index+len(key) {
+		if separator < len(input) && input[separator] == '"' {
+			separator++
+			for separator < len(input) && (input[separator] == ' ' || input[separator] == '\t') {
+				separator++
+			}
+		}
+		if separator < len(input) && (input[separator] == ':' || input[separator] == '=') {
+			separator++
+			for separator < len(input) && (input[separator] == ' ' || input[separator] == '\t') {
+				separator++
+			}
+		} else {
 			searchFrom = separator
 			continue
+		}
+		if separator >= len(input) {
+			return input
+		}
+		if input[separator] == '"' {
+			valueStart := separator + 1
+			end := valueStart
+			for end < len(input) {
+				if input[end] == '"' && input[end-1] != '\\' {
+					break
+				}
+				end++
+			}
+			if end >= len(input) {
+				end = len(input)
+			}
+			input = input[:valueStart] + "[REDACTED]" + input[end:]
+			lower = strings.ToLower(input)
+			searchFrom = valueStart + len("[REDACTED]")
+			continue
+		}
+		if strings.EqualFold(key, "authorization") {
+			if schemeEnd := strings.IndexAny(input[separator:], " \t"); schemeEnd > 0 {
+				schemeEnd += separator
+				scheme := strings.ToLower(input[separator:schemeEnd])
+				if scheme == "bearer" || scheme == "basic" || scheme == "digest" {
+					valueStart := schemeEnd
+					for valueStart < len(input) && (input[valueStart] == ' ' || input[valueStart] == '\t') {
+						valueStart++
+					}
+					separator = valueStart
+				}
+			}
 		}
 		end := separator
 		for end < len(input) && input[end] != ' ' && input[end] != '\t' && input[end] != '\r' && input[end] != '\n' && input[end] != ',' && input[end] != ';' {

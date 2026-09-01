@@ -93,6 +93,10 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: -.04em; }
 
 @keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(190%); } }
 
+@media (prefers-reduced-motion: reduce) {
+  .progress-track span { animation: none; transform: translateX(0); }
+}
+
 @media (max-width: 600px) {
   .shell { width: min(100% - 32px, 760px); padding-top: 48px; }
   .workspace-card { align-items: flex-start; flex-direction: column; }

@@ -13,6 +13,7 @@ import (
 	"github.com/local/work/internal/dshadapter"
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/supervisor"
+	"github.com/local/work/internal/workergateway"
 )
 
 // DSHAdapter is the Work-owned contract for discovery, launch construction,
@@ -27,9 +28,14 @@ type DSHAdapter interface {
 	RequestShutdown(context.Context, supervisor.Worker) error
 }
 
+type WorkerGateway interface {
+	Start(context.Context, string) (workergateway.Session, error)
+}
+
 type Dependencies struct {
 	DSH           DSHAdapter
 	Supervisor    supervisor.Adapter
+	Gateway       WorkerGateway
 	PlatformError error
 }
 
@@ -108,6 +114,7 @@ type Host struct {
 	current         *generationRun
 	publish         func(lifecycle.Status)
 	onReady         func(string)
+	recovery        func()
 	quit            func()
 	shutdownMu      sync.Mutex
 	lastDiagnostics supervisor.Diagnostics
@@ -120,9 +127,12 @@ type generationRun struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 
-	mu     sync.RWMutex
-	worker supervisor.Worker
-	plan   supervisor.LaunchPlan
+	mu          sync.RWMutex
+	worker      supervisor.Worker
+	plan        supervisor.LaunchPlan
+	readiness   <-chan dshadapter.ReadyAnnouncement
+	gateway     workergateway.Session
+	cleanupDone bool
 }
 
 func NewHost(deps Dependencies, config Config) *Host {
@@ -143,6 +153,15 @@ func (h *Host) SetPublish(fn func(lifecycle.Status)) {
 func (h *Host) SetReadyHandler(fn func(string)) {
 	h.mu.Lock()
 	h.onReady = fn
+	h.mu.Unlock()
+}
+
+// SetRecoveryHandler restores the trusted Host surface after a Worker that
+// was already ready exits or disconnects. The callback is a UI composition
+// concern; lifecycle state remains platform-neutral.
+func (h *Host) SetRecoveryHandler(fn func()) {
+	h.mu.Lock()
+	h.recovery = fn
 	h.mu.Unlock()
 }
 
@@ -182,23 +201,49 @@ func (h *Host) Diagnostics() supervisor.Diagnostics {
 }
 
 func (h *Host) Start() lifecycle.Status {
-	generation, status, err := h.machine.BeginStart()
-	if err != nil {
-		return status
+	for {
+		h.mu.Lock()
+		if h.current == nil {
+			generation, status, err := h.machine.BeginStart()
+			if err != nil {
+				h.mu.Unlock()
+				return status
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			run := &generationRun{
+				generation: generation,
+				ctx:        ctx,
+				cancel:     cancel,
+				done:       make(chan struct{}),
+			}
+			h.current = run
+			h.mu.Unlock()
+			h.emit(status)
+			go h.run(run)
+			return status
+		}
+		run := h.current
+		status := h.machine.Snapshot()
+		h.mu.Unlock()
+
+		select {
+		case <-run.done:
+			if !run.cleanupPending() {
+				return status
+			}
+			if failure := h.cleanupWorker(run, run.getWorker()); failure != nil {
+				h.emit(h.Status())
+				return h.Status()
+			}
+			h.mu.Lock()
+			if h.current == run {
+				h.current = nil
+			}
+			h.mu.Unlock()
+		default:
+			return status
+		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	run := &generationRun{
-		generation: generation,
-		ctx:        ctx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-	}
-	h.mu.Lock()
-	h.current = run
-	h.mu.Unlock()
-	h.emit(status)
-	go h.run(run)
-	return status
 }
 
 func (h *Host) Cancel() lifecycle.Status {
@@ -223,15 +268,48 @@ func (h *Host) ShutdownForApp() error {
 	if run == nil {
 		return nil
 	}
+	select {
+	case <-run.done:
+		if run.cleanupPending() {
+			return h.shutdownPendingRun(run)
+		}
+		return nil
+	default:
+	}
 	h.requestStop(false)
 	timer := time.NewTimer(h.config.ShutdownTimeout)
 	defer timer.Stop()
 	select {
 	case <-run.done:
+		if run.cleanupPending() {
+			return h.shutdownPendingRun(run)
+		}
 		return nil
 	case <-timer.C:
 		return fmt.Errorf("host shutdown timed out")
 	}
+}
+
+func (h *Host) shutdownPendingRun(run *generationRun) error {
+	if _, err := h.machine.BeginStop(run.generation); err == nil {
+		h.emit(h.Status())
+	}
+	failure := h.cleanupWorker(run, run.getWorker())
+	if failure != nil {
+		h.finish(run, failure)
+		return failure
+	}
+	status, err := h.machine.CompleteStop(run.generation, nil)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	if h.current == run {
+		h.current = nil
+	}
+	h.mu.Unlock()
+	h.emit(status)
+	return nil
 }
 
 func (h *Host) requestStop(_ bool) lifecycle.Status {
@@ -315,6 +393,9 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	if h.deps.Supervisor == nil {
 		return nil, h.failureFor(errors.New("process supervisor is unavailable"), lifecycle.ErrorPlatformUnsupported, "The native process supervisor is unavailable.", false)
 	}
+	if h.deps.Gateway == nil {
+		return nil, h.failureFor(errors.New("trusted DSH workspace gateway is unavailable"), lifecycle.ErrorGatewayUnavailable, "The trusted DSH workspace gateway is unavailable.", false)
+	}
 	if err := os.MkdirAll(h.config.DSHHome, 0o700); err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "Work could not prepare the DSH workspace home.", true)
 	}
@@ -347,12 +428,26 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	if err := h.checkCancelled(run); err != nil {
 		return nil, nil
 	}
-	worker, err := h.deps.Supervisor.Start(run.ctx, plan)
+	readiness := make(chan dshadapter.ReadyAnnouncement, 8)
+	rawHandler := func(_ supervisor.OutputStream, text string) {
+		candidate, ok := h.deps.DSH.ParseReadyAnnouncement(text)
+		if !ok {
+			return
+		}
+		select {
+		case readiness <- candidate:
+		default:
+			// A noisy process cannot block the native output reader. The Host
+			// consumes the first bounded set of structured candidates.
+		}
+	}
+	worker, err := h.deps.Supervisor.Start(run.ctx, plan, rawHandler)
 	if err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorProcessStartFailed, "Work could not start the managed DSH process.", true)
 	}
 	run.mu.Lock()
 	run.plan = plan
+	run.readiness = readiness
 	run.mu.Unlock()
 	h.debugf("managed DSH worker started for expected port %d", plan.ExpectedPort)
 	return worker, nil
@@ -365,6 +460,7 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 	deadline := time.NewTimer(h.config.ReadinessTimeout)
 	defer deadline.Stop()
 	deadlineAt := time.Now().Add(h.config.ReadinessTimeout)
+	readiness := run.readinessChannel()
 	var output <-chan supervisor.OutputEvent = worker.Events()
 	var announcement dshadapter.ReadyAnnouncement
 	plan := run.launchPlan()
@@ -373,44 +469,8 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 		case <-run.ctx.Done():
 			return announcement, nil
 		case <-worker.Exited():
-			if output != nil {
-				for {
-					select {
-					case event, ok := <-output:
-						if !ok {
-							output = nil
-							continue
-						}
-						readinessText := event.Text
-						if event.RawText != "" {
-							readinessText = event.RawText
-						}
-						if candidate, ok := h.deps.DSH.ParseReadyAnnouncement(readinessText); ok {
-							announcement = candidate
-							_ = h.deps.DSH.ValidateReady(candidate, plan)
-						}
-					default:
-						output = nil
-					}
-					if output == nil {
-						break
-					}
-				}
-			}
 			return announcement, h.failureFor(errors.New("DSH exited before readiness"), lifecycle.ErrorDSHEarlyExit, "The DSH process exited before its workspace became ready.", true)
-		case event, ok := <-output:
-			if !ok {
-				output = nil
-				continue
-			}
-			readinessText := event.Text
-			if event.RawText != "" {
-				readinessText = event.RawText
-			}
-			candidate, ok := h.deps.DSH.ParseReadyAnnouncement(readinessText)
-			if !ok {
-				continue
-			}
+		case candidate := <-readiness:
 			announcement = candidate
 			h.debugf("readiness signal observed at %s", readinessOrigin(candidate.URL))
 			if err := h.deps.DSH.ValidateReady(candidate, plan); err != nil {
@@ -419,7 +479,11 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 			}
 			if failure := h.probeUntilReady(run, worker, candidate, plan, deadlineAt); failure == nil {
 				h.debugf("active readiness probe passed")
-				if err := h.markReady(run, cleanWorkspaceURL(candidate.URL), candidate.URL); err != nil {
+				gateway, err := h.startGateway(run, candidate.URL)
+				if err != nil {
+					return announcement, h.failureFor(err, lifecycle.ErrorGatewayStartFailed, "Work could not establish the trusted DSH workspace path.", true)
+				}
+				if err := h.markReady(run, gateway.Origin(), gateway.URL()); err != nil {
 					return announcement, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not publish DSH readiness.", false)
 				}
 				return announcement, nil
@@ -427,6 +491,11 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 				return announcement, failure
 			} else {
 				h.debugf("active readiness probe is still pending")
+			}
+		case _, ok := <-output:
+			if !ok {
+				output = nil
+				continue
 			}
 		case <-deadline.C:
 			return announcement, h.failureFor(errors.New("DSH readiness deadline exceeded"), lifecycle.ErrorDSHReadinessTimeout, "DSH did not become ready before the bounded startup deadline.", true)
@@ -440,6 +509,11 @@ func (h *Host) probeUntilReady(run *generationRun, worker supervisor.Worker, ann
 		err := h.deps.DSH.Probe(probeCtx, announcement, plan)
 		cancel()
 		if err == nil {
+			select {
+			case <-worker.Exited():
+				return h.failureFor(errors.New("DSH exited after readiness probe"), lifecycle.ErrorDSHEarlyExit, "The DSH process exited before its workspace became ready.", true)
+			default:
+			}
 			return nil
 		}
 		if run.ctx.Err() != nil {
@@ -478,15 +552,63 @@ func (h *Host) probeUntilReady(run *generationRun, worker supervisor.Worker, ann
 	}
 }
 
+func (h *Host) startGateway(run *generationRun, upstreamURL string) (workergateway.Session, error) {
+	if h.deps.Gateway == nil {
+		return nil, lifecycle.Failure{
+			Code:    lifecycle.ErrorGatewayUnavailable,
+			Summary: "The trusted DSH workspace gateway is unavailable.",
+		}
+	}
+	gateway, err := h.deps.Gateway.Start(run.ctx, upstreamURL)
+	if err != nil {
+		return nil, err
+	}
+	if gateway == nil || gateway.URL() == "" || gateway.Origin() == "" {
+		if gateway != nil {
+			_ = gateway.Close()
+		}
+		return nil, lifecycle.Failure{
+			Code:    lifecycle.ErrorGatewayStartFailed,
+			Summary: "The trusted DSH workspace gateway returned no usable URL.",
+		}
+	}
+	if err := validateGatewaySession(gateway); err != nil {
+		_ = gateway.Close()
+		return nil, lifecycle.Failure{
+			Code:    lifecycle.ErrorGatewayStartFailed,
+			Summary: "The trusted DSH workspace gateway returned an invalid session.",
+			Detail:  err.Error(),
+		}
+	}
+	run.setGateway(gateway)
+	return gateway, nil
+}
+
+func validateGatewaySession(gateway workergateway.Session) error {
+	origin, err := url.Parse(gateway.Origin())
+	if err != nil || origin.Scheme != "http" || origin.Hostname() != "127.0.0.1" || origin.Port() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || origin.Path != "" && origin.Path != "/" {
+		return errors.New("gateway origin is not an HTTP loopback origin")
+	}
+	handoff, err := url.Parse(gateway.URL())
+	if err != nil || handoff.Scheme != origin.Scheme || handoff.Host != origin.Host || handoff.Path != "/__work/bootstrap" || handoff.Fragment != "" || handoff.User != nil {
+		return errors.New("gateway bootstrap URL is not bound to its origin")
+	}
+	query := handoff.Query()
+	if len(query) != 1 || len(query["session"]) != 1 || query.Get("session") == "" || len(query.Get("session")) > 128 {
+		return errors.New("gateway bootstrap URL has an invalid session")
+	}
+	return nil
+}
+
 func (h *Host) markReady(run *generationRun, workspaceURL, handoffURL string) error {
 	status, err := h.machine.MarkReady(run.generation, workspaceURL)
 	if err != nil {
 		return err
 	}
 	if ready := h.readyHandler(); ready != nil {
-		// The WebView receives the one-launch URL so DSH can mint its own
-		// browser session cookie. The lifecycle model only carries the clean
-		// loopback origin and never projects the launch credential.
+		// The WebView receives the per-generation gateway bootstrap URL. The
+		// DSH launch credential stays inside the gateway and never crosses the
+		// Host/UI lifecycle contract.
 		ready(handoffURL)
 	}
 	h.emit(status)
@@ -497,6 +619,10 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 	if worker == nil {
 		return nil
 	}
+	gatewayErr := h.closeGateway(run)
+	if gatewayErr != nil {
+		return h.failureFor(gatewayErr, lifecycle.ErrorGatewayCloseFailed, "Work could not close the trusted DSH workspace path.", true)
+	}
 	gracefulCtx, cancel := context.WithTimeout(context.Background(), h.config.GracefulStopTimeout)
 	_ = h.deps.DSH.RequestShutdown(gracefulCtx, worker)
 	cancel()
@@ -505,24 +631,32 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 		forceErr := worker.ForceStop(forceCtx)
 		forceCancel()
 		if forceErr != nil {
-			_ = worker.Close()
 			return h.failureFor(forceErr, lifecycle.ErrorProcessStopFailed, "Work could not stop the managed DSH process.", true)
 		}
 	}
 	emptyCtx, emptyCancel := context.WithTimeout(context.Background(), h.config.EmptyTimeout)
 	emptyErr := worker.WaitEmpty(emptyCtx)
 	emptyCancel()
-	closeErr := worker.Close()
 	h.mu.Lock()
 	h.lastDiagnostics = worker.Diagnostics()
 	h.mu.Unlock()
 	if emptyErr != nil {
 		return h.failureFor(emptyErr, lifecycle.ErrorProcessCleanupFailed, "Work could not verify that the managed process boundary is empty.", true)
 	}
+	closeErr := worker.Close()
 	if closeErr != nil {
 		return h.failureFor(closeErr, lifecycle.ErrorProcessCleanupFailed, "Work could not close the managed DSH process boundary.", true)
 	}
+	run.setCleanupComplete(true)
 	return nil
+}
+
+func (h *Host) closeGateway(run *generationRun) error {
+	gateway := run.getGateway()
+	if gateway == nil {
+		return nil
+	}
+	return gateway.Close()
 }
 
 func waitForClosed(done <-chan struct{}, timeout time.Duration) bool {
@@ -541,6 +675,7 @@ func (h *Host) finish(run *generationRun, failure *lifecycle.Failure) {
 	if status.GenerationID != run.generation {
 		return
 	}
+	wasReady := status.State == lifecycle.StateReady || status.WorkspaceURL != ""
 	if status.State == lifecycle.StateStopping {
 		status, _ = h.machine.CompleteStop(run.generation, failure)
 	} else if failure != nil {
@@ -550,12 +685,18 @@ func (h *Host) finish(run *generationRun, failure *lifecycle.Failure) {
 			status, _ = h.machine.CompleteStop(run.generation, nil)
 		}
 	}
-	h.emit(status)
+	keepCleanupOwner := failure != nil && !run.isCleanupDone() && (failure.Code == lifecycle.ErrorProcessCleanupFailed || failure.Code == lifecycle.ErrorProcessStopFailed || failure.Code == lifecycle.ErrorGatewayCloseFailed)
 	h.mu.Lock()
-	if h.current == run {
+	if h.current == run && !keepCleanupOwner {
 		h.current = nil
 	}
 	h.mu.Unlock()
+	if failure != nil && wasReady {
+		if recovery := h.recoveryHandler(); recovery != nil {
+			recovery()
+		}
+	}
+	h.emit(status)
 }
 
 func (h *Host) setPhase(run *generationRun, phase lifecycle.Phase) error {
@@ -583,6 +724,9 @@ func (h *Host) failureFor(err error, fallbackCode lifecycle.ErrorCode, summary s
 			if copy.CorrelationID == "" {
 				copy.CorrelationID = h.Status().CorrelationID
 			}
+			if copy.Detail == "" {
+				copy.Detail = defaultRemediation(copy.Code)
+			}
 			return &copy
 		}
 		var pointer *lifecycle.Failure
@@ -591,6 +735,9 @@ func (h *Host) failureFor(err error, fallbackCode lifecycle.ErrorCode, summary s
 			if copy.CorrelationID == "" {
 				copy.CorrelationID = h.Status().CorrelationID
 			}
+			if copy.Detail == "" {
+				copy.Detail = defaultRemediation(copy.Code)
+			}
 			return &copy
 		}
 	}
@@ -598,12 +745,32 @@ func (h *Host) failureFor(err error, fallbackCode lifecycle.ErrorCode, summary s
 		Code:      fallbackCode,
 		Summary:   summary,
 		Retryable: retryable,
+		Detail:    defaultRemediation(fallbackCode),
 	}
 	if h.Status().State == lifecycle.StateStarting || h.Status().State == lifecycle.StateReady {
 		failure.EffectOccurred = true
 	}
 	failure.CorrelationID = h.Status().CorrelationID
 	return failure
+}
+
+func defaultRemediation(code lifecycle.ErrorCode) string {
+	switch code {
+	case lifecycle.ErrorDSHRuntimeNotFound:
+		return "Set WORK_DSH_EXECUTABLE or run task setup:dsh, then retry."
+	case lifecycle.ErrorDSHUnsupportedVersion, lifecycle.ErrorDSHVersionCheckFailed:
+		return "Install the pinned DSH version and retry."
+	case lifecycle.ErrorDSHReadinessTimeout, lifecycle.ErrorDSHStartFailed, lifecycle.ErrorProcessStartFailed:
+		return "Check the DSH installation and loopback port, then retry."
+	case lifecycle.ErrorGatewayUnavailable, lifecycle.ErrorGatewayStartFailed, lifecycle.ErrorGatewayCloseFailed:
+		return "Retry the trusted local workspace handoff."
+	case lifecycle.ErrorProcessStopFailed, lifecycle.ErrorProcessCleanupFailed:
+		return "Retry cleanup before starting another workspace."
+	case lifecycle.ErrorPlatformUnsupported:
+		return "Run the Windows-first Work build on a supported native platform."
+	default:
+		return "Retry after checking the current Work configuration."
+	}
 }
 
 func isInvalidReadiness(err error) bool {
@@ -647,6 +814,12 @@ func (h *Host) readyHandler() func(string) {
 	return h.onReady
 }
 
+func (h *Host) recoveryHandler() func() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.recovery
+}
+
 func (h *Host) quitHandler() func() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -657,6 +830,46 @@ func (r *generationRun) setWorker(worker supervisor.Worker) {
 	r.mu.Lock()
 	r.worker = worker
 	r.mu.Unlock()
+}
+
+func (r *generationRun) getWorker() supervisor.Worker {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.worker
+}
+
+func (r *generationRun) readinessChannel() <-chan dshadapter.ReadyAnnouncement {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.readiness
+}
+
+func (r *generationRun) setGateway(gateway workergateway.Session) {
+	r.mu.Lock()
+	r.gateway = gateway
+	r.mu.Unlock()
+}
+
+func (r *generationRun) getGateway() workergateway.Session {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.gateway
+}
+
+func (r *generationRun) setCleanupComplete(value bool) {
+	r.mu.Lock()
+	r.cleanupDone = value
+	r.mu.Unlock()
+}
+
+func (r *generationRun) isCleanupDone() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.cleanupDone
+}
+
+func (r *generationRun) cleanupPending() bool {
+	return !r.isCleanupDone() && r.getWorker() != nil
 }
 
 func (r *generationRun) launchPlan() supervisor.LaunchPlan {
@@ -691,14 +904,3 @@ func (s *HostService) Quit() lifecycle.Status {
 }
 
 var _ DSHAdapter = (*dshadapter.Adapter)(nil)
-
-func cleanWorkspaceURL(value string) string {
-	u, err := url.Parse(value)
-	if err != nil {
-		return value
-	}
-	u.RawQuery = ""
-	u.ForceQuery = false
-	u.Fragment = ""
-	return u.String()
-}

@@ -31,16 +31,25 @@ jobs:
           node-version: 24.20.0
           check-latest: true
 
+      - name: Verify Node and npm lock
+        run: node scripts/verify-node.mjs
+
+      - name: Check public content
+        run: node scripts/check-public-content.mjs
+
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
 
-      - name: Frontend tests and typecheck
+      - name: Frontend tests, typecheck and build
         run: |
           npm run --prefix frontend test
           npm run --prefix frontend typecheck
+          npm run --prefix frontend build
 
-      - name: Shared Go contracts
+      - name: Shared Go contracts and build
         run: go test ./internal/...
+      - name: Build shared Go packages
+        run: go build ./internal/...
 
   windows-build:
     name: Windows Wails build
@@ -62,8 +71,17 @@ jobs:
           node-version: 24.20.0
           check-latest: true
 
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Build frontend assets
+        run: npm run --prefix frontend build
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+
+      - name: Verify Wails CLI
+        run: wails3 version
 
       - name: Build application
         run: wails3 build

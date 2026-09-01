@@ -15,6 +15,7 @@ tasks:
     deps:
       - verify:toolchain
       - format:check
+      - docs:check
       - test
       - frontend:test
       - frontend:typecheck
@@ -25,6 +26,12 @@ tasks:
     summary: Check the locked local toolchain
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-toolchain.ps1
+      - node scripts/verify-node.mjs
+
+  docs:check:
+    summary: Check public-content and Git hygiene contracts
+    cmds:
+      - node scripts/check-public-content.mjs
 
   format:
     summary: Format Go source

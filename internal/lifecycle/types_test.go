@@ -65,6 +65,23 @@ func TestMachineRejectsIllegalAndStaleTransitions(t *testing.T) {
 	}
 }
 
+func TestMachineRejectsOutOfOrderPhases(t *testing.T) {
+	machine := NewMachine()
+	generation, _, err := machine.BeginStart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := machine.SetPhase(generation, PhaseReadiness); err == nil {
+		t.Fatal("expected a phase jump to be rejected")
+	}
+	if _, err := machine.SetPhase(generation, PhaseRuntime); err != nil {
+		t.Fatalf("configuration to runtime should be legal: %v", err)
+	}
+	if _, err := machine.SetPhase(generation, PhaseConfiguration); err == nil {
+		t.Fatal("expected a phase regression to be rejected")
+	}
+}
+
 func TestMachineFailureCanBeRetriedAndCarriesCorrelation(t *testing.T) {
 	machine := NewMachine()
 	generation, status, err := machine.BeginStart()

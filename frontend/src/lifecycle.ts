@@ -48,7 +48,7 @@ export function viewModel(status: LifecycleStatus): LifecycleViewModel {
     return {
       label: "Failed",
       message: failure?.summary ?? "Work could not start the local workspace.",
-      detail: failure?.code ?? "UNKNOWN_FAILURE",
+      detail: failure?.detail ?? failure?.code ?? "UNKNOWN_FAILURE",
       tone: "failed",
       showCancel: false,
       showRetry: status.canRetry,

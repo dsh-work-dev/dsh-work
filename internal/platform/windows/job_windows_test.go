@@ -26,7 +26,10 @@ func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
 		ExpectedHost:     "127.0.0.1",
 		ExpectedPort:     4321,
 	}
-	worker, err := NewJobObjectAdapter().Start(context.Background(), plan)
+	rawOutput := make(chan string, 4)
+	worker, err := NewJobObjectAdapter().Start(context.Background(), plan, func(_ supervisor.OutputStream, text string) {
+		rawOutput <- text
+	})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -34,6 +37,14 @@ func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
 
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
+	select {
+	case raw := <-rawOutput:
+		if raw != "worker-ready" {
+			t.Fatalf("unexpected raw readiness callback: %q", raw)
+		}
+	case <-deadline.C:
+		t.Fatal("timed out waiting for raw output callback")
+	}
 	seenOutput := false
 	for !seenOutput {
 		select {
@@ -81,7 +92,7 @@ func TestJobObjectWorkerPassesExplicitEnvironment(t *testing.T) {
 		ExpectedHost:     "127.0.0.1",
 		ExpectedPort:     4321,
 	}
-	worker, err := NewJobObjectAdapter().Start(context.Background(), plan)
+	worker, err := NewJobObjectAdapter().Start(context.Background(), plan, nil)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

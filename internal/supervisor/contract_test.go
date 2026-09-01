@@ -1,6 +1,9 @@
 package supervisor
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLaunchPlanRequiresLoopbackHTTPOrigin(t *testing.T) {
 	plan := LaunchPlan{
@@ -34,5 +37,18 @@ func TestRedactRemovesSecretShapedValuesWithoutDroppingText(t *testing.T) {
 	want := "token=[REDACTED] request=ok tokenizer=keep password:[REDACTED]"
 	if got != want {
 		t.Fatalf("Redact() = %q, want %q", got, want)
+	}
+}
+
+func TestRedactCoversHeaderAndJSONSecretFormats(t *testing.T) {
+	input := `Authorization: Bearer bearer-secret Cookie: session-secret {"token":"json-secret","safe":"value"}`
+	got := Redact(input)
+	for _, secret := range []string{"bearer-secret", "session-secret", "json-secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("Redact() leaked %q in %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, `"safe":"value"`) {
+		t.Fatalf("Redact() dropped safe content: %q", got)
 	}
 }

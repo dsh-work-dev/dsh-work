@@ -17,6 +17,7 @@ import (
 	"github.com/local/work/internal/dshadapter"
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/platform"
+	"github.com/local/work/internal/workergateway"
 )
 
 // work-smoke exercises the same Host, DSH Adapter and native Windows
@@ -50,9 +51,11 @@ func main() {
 
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetWorkspaceRoot(root)
+	gateway := workergateway.New()
 	host := workapp.NewHost(workapp.Dependencies{
 		DSH:        dsh,
 		Supervisor: dependencies.Supervisor,
+		Gateway:    gateway,
 	}, config)
 	statuses := make(chan lifecycle.Status, 32)
 	var handoffURL string

@@ -48,6 +48,7 @@ Run these commands from the repository root:
 ```text
 task verify:toolchain
 task format:check
+task docs:check
 task test
 task frontend:test
 task build

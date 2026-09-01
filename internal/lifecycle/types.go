@@ -47,6 +47,9 @@ const (
 	ErrorDSHEarlyExit          ErrorCode = "DSH_EARLY_EXIT"
 	ErrorDSHReadinessTimeout   ErrorCode = "DSH_READINESS_TIMEOUT"
 	ErrorDSHInvalidReadiness   ErrorCode = "DSH_INVALID_READINESS"
+	ErrorGatewayUnavailable    ErrorCode = "WORKER_GATEWAY_UNAVAILABLE"
+	ErrorGatewayStartFailed    ErrorCode = "WORKER_GATEWAY_START_FAILED"
+	ErrorGatewayCloseFailed    ErrorCode = "WORKER_GATEWAY_CLOSE_FAILED"
 	ErrorProcessStartFailed    ErrorCode = "PROCESS_START_FAILED"
 	ErrorProcessCleanupFailed  ErrorCode = "PROCESS_CLEANUP_FAILED"
 	ErrorProcessStopFailed     ErrorCode = "PROCESS_STOP_FAILED"
@@ -157,8 +160,35 @@ func (m *Machine) SetPhase(generationID string, phase Phase) (Status, error) {
 	if m.status.State != StateStarting && m.status.State != StateStopping {
 		return cloneStatus(m.status), &TransitionError{From: m.status.State, To: m.status.State, Why: "phase cannot change after a terminal result"}
 	}
+	if !validPhaseTransition(m.status.State, m.status.Phase, phase) {
+		return cloneStatus(m.status), &TransitionError{From: m.status.State, To: m.status.State, Why: fmt.Sprintf("phase cannot move from %s to %s", m.status.Phase, phase)}
+	}
 	m.status.Phase = phase
 	return cloneStatus(m.status), nil
+}
+
+func validPhaseTransition(state State, from, to Phase) bool {
+	if from == to {
+		return true
+	}
+	if state == StateStopping {
+		return from == PhaseStopping && to == PhaseStopping
+	}
+	if state != StateStarting {
+		return false
+	}
+	switch from {
+	case PhaseConfiguration:
+		return to == PhaseRuntime
+	case PhaseRuntime:
+		return to == PhaseWorker
+	case PhaseWorker:
+		return to == PhaseReadiness
+	case PhaseReadiness:
+		return false
+	default:
+		return false
+	}
 }
 
 func (m *Machine) MarkReady(generationID, workspaceURL string) (Status, error) {
