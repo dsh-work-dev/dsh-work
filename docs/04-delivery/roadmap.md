@@ -44,6 +44,8 @@ reliably. The selection seam does not require the Host to embed or install DSH.
 Deliver:
 
 - single-instance, window, tray, open, close and quit behaviour;
+- separate trusted Manager and external DSH Workspace windows, with a native
+  Work function menu on the Workspace window;
 - complete Host lifecycle state machine with generation IDs;
 - bounded startup, shutdown, cancellation and retry;
 - structured logging, redaction and correlation IDs;

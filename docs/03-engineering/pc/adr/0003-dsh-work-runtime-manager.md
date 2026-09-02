@@ -70,6 +70,25 @@ Work must not duplicate those profile or plugin semantics.
    for that Worker generation. Its generated overlay is Work-owned and
    disposable, but it is not a global runtime plugin and must not alter other
    profiles.
+9. Runtime, DSH home, profile and plugin management is presented in a second
+   trusted Manager window. The DSH Workspace window only loads the external
+   DSH Web UI through the Worker gateway. The two windows share the Host
+   process and manager state, but never share a WebView document or inject
+   Host management markup into DSH content.
+10. The DSH Workspace window receives a native Work menu through the Wails
+    window/application menu seam. Its commands may open or focus the Manager
+    window, show the current launch selection, request a restart or open
+    profile-scoped plugin management. These commands are handled by the Host;
+    they are not JavaScript inserted into the DSH page.
+11. Every plugin management command requires an explicit `ProfileRef`
+    consisting of a DSH home identity and profile name. The menu may prefill
+    the active profile, but the backend never infers a profile from a missing
+    command field. A plugin operation against an active profile is gated by
+    the Worker lifecycle and reports when a restart is required.
+12. The Manager window is created lazily and reused as one application-level
+    management surface. Closing it hides the window without stopping DSH;
+    application quit still cancels management operations and cleans the DSH
+    Worker before the Host exits.
 
 ## Consequences
 
@@ -80,6 +99,8 @@ Positive:
 - DSH remains the source of truth for profile and plugin composition.
 - Plugin enablement and configuration stay isolated per profile while one
   package can be reused physically by a package manager.
+- Management UI cannot contaminate the DSH Web UI, while the Workspace window
+  still has a discoverable native Work menu.
 - Package-manager side effects are explicit and kept out of GUI startup.
 - Runtime resolution is testable independently of Wails and platform process
   supervision.
@@ -100,6 +121,8 @@ Costs and risks:
   rules and risks corrupting user-owned profile data.
 - **Run npm/pnpm during GUI startup:** makes startup non-deterministic and can
   mutate or download dependencies without an explicit user action.
+- **Inject a Work toolbar into the DSH DOM:** mixes ownership, depends on DSH
+  page structure and risks exposing Host controls to untrusted content.
 
 ## Follow-up implementation seam
 
@@ -109,3 +132,7 @@ Module, while the Host only consumes a resolved executable, DSH home and
 profile-specific launch arguments. The exact command names and persisted
 selection format must be kept in one CLI contract rather than spread through
 the Host.
+
+The GUI implementation must expose the same Module through a thin Manager
+window service and route Workspace-window native menu commands to that service.
+The plugin command seam must carry `ProfileRef` end to end.

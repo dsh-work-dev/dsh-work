@@ -2,7 +2,16 @@
 
 ## Application shell
 
-The Host chrome contains application status and entry points for Activity, Diagnostics and Settings. The embedded workspace uses the remaining area. Host controls remain available even if Worker content is loading or failed.
+Work uses two native WebView windows. The Manager window contains trusted
+runtime, profile and plugin management. The Workspace window contains the
+external DSH Web UI. The Workspace window also has a native Work function
+menu; no Work HTML or JavaScript is injected into the DSH document. Host state
+and recovery actions remain available even if Worker content is loading or
+failed.
+
+The plugin management entry always carries an explicit DSH home and profile
+reference. The active Workspace profile may be used as a prefilled context,
+but it is not an implicit backend target.
 
 ### Window close and quit
 

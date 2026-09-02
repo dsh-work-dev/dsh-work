@@ -96,6 +96,11 @@ The DSH endpoint stays on loopback behind a Host-controlled access policy. The a
 
 The gateway is not a general reverse proxy. It rejects unknown upstream targets, unsafe methods outside the required surface, untrusted WebSocket upgrades and requests after generation shutdown.
 
+The Workspace window is the only Work WebView that navigates to the gateway
+URL. The Manager window never receives a DSH URL and remains a trusted Host
+surface. A native Work menu may be attached to the Workspace window, but its
+handlers execute in the Host and do not modify the DSH document.
+
 ## Profile ownership
 
 The ownership and relationship model is:
@@ -116,6 +121,9 @@ Worker generation = selected runtime + selected DSH home/profile
 
 - The profile is the logical owner and enablement scope of its plugins. The
   same plugin in another profile is a separate association.
+- Plugin management always carries a `ProfileRef` (DSH home identity plus
+  profile name); an active profile is only a default UI context, never an
+  implicit backend target.
 - A package manager may deduplicate physical package artifacts. Work must not
   configure or relocate that store, and physical deduplication does not make a
   plugin global or runtime-owned.

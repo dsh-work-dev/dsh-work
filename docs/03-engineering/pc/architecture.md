@@ -7,7 +7,8 @@ User
   │
   ▼
 Work desktop Host (Go + native WebView)
-  ├── trusted Host UI
+  ├── Manager window ─────────────── trusted Work management UI
+  ├── Workspace window ───────────── DSH Web UI through Worker gateway
   ├── Worker gateway ───────────► DSH Web UI on loopback
   ├── Supervisor ───────────────► DSH Worker process
   │                                  ├── Work Tool classifier
@@ -36,6 +37,8 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - `dsh-work` CLI and runtime manager resolve an installed DSH runtime plus a
   DSH home/profile; Work does not embed the DSH Web UI or mutate profiles
   during GUI startup.
+- The Manager window is Host-owned; the Workspace window is DSH-owned and
+  receives only the native Work menu, not injected Host markup.
 - Work-owned DSH plugin attached to the selected profile through a supported
   profile or patch seam.
 - Private Host–plugin IPC; loopback HTTP only for the embedded DSH Web UI.
@@ -81,7 +84,7 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 4. The selected platform adapter creates the Worker inside its managed process boundary.
 5. DSH adapter reads structured process events, validates the announced origin, then performs an active readiness probe.
 6. Worker gateway establishes the per-generation trusted application session and validates upstream HTTP／WebSocket behaviour.
-7. Lifecycle enters `Ready`; only then may the embedded view navigate through the gateway.
+7. Lifecycle enters `Ready`; only then may the Workspace window navigate through the gateway. The Manager window remains on trusted Work content.
 8. Work Tool classifier returns `allow`, `ask` or `deny`; `ask` reuses DSH's approval service and official UI.
 9. After DSH policy permits execution, the Work plugin sends the typed operation over private IPC.
 10. Host hard-policy guard revalidates schema, browser connection and assigned tab before Browser service acts.

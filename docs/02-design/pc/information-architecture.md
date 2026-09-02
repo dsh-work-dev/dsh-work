@@ -8,9 +8,14 @@ Work desktop shell
 │   ├── current startup step
 │   ├── error details
 │   └── retry / safe mode / quit
-├── DSH workspace
-│   ├── embedded Worker view
-│   └── DSH Tool call and approval UI
+├── Workspace window
+│   ├── external DSH Worker view
+│   ├── DSH Tool call and approval UI
+│   └── native Work function menu
+├── Manager window
+│   ├── DSH runtimes
+│   ├── DSH homes and profiles
+│   └── plugins for an explicitly selected profile
 ├── Activity drawer
 │   ├── active browser task
 │   ├── step progress
@@ -38,8 +43,9 @@ System tray
 
 ## Navigation model
 
-- The DSH workspace is the default ready-state destination.
-- Startup and failure surfaces replace, rather than overlay, untrusted or unavailable Worker content.
+- The DSH workspace window is the default ready-state destination.
+- The Manager window is opened separately and never replaces or overlays DSH content.
+- Startup and failure surfaces replace unavailable Worker content in the Workspace window.
 - Activity opens as a drawer so the user can observe or cancel a task without losing DSH context.
 - Model-action approval stays in DSH's official Tool call UI; Host status and tray actions focus the matching call instead of drawing a duplicate dialog.
 - Diagnostics and Settings are Host-owned routes. They remain available when the Worker is down.
@@ -49,8 +55,9 @@ System tray
 
 The UI must make the boundary between Work and embedded DSH content understandable:
 
-- Host-owned chrome contains status, Activity, Settings and Diagnostics.
-- Worker content is framed as the workspace and has no direct access to Host APIs.
+- Host-owned surfaces contain status, Activity, Settings, Diagnostics and the Manager window.
+- The Workspace window's native Work menu is Host-owned; Worker content is framed as the workspace and has no direct access to Host APIs.
+- Plugin management is always labelled with its DSH home and profile reference.
 - DSH approval is trusted only when correlated with the active DSH call ID and official approval channel; ordinary page content cannot create Host action-required state.
 - A disconnected Worker is covered by a Host-owned recovery page to prevent stale content from appearing usable.
 

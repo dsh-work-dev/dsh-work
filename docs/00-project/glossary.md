@@ -14,6 +14,9 @@
 | Runtime/profile compatibility | The result of validating one DSH runtime against one profile's bundle, plugin and patch composition. |
 | Runtime selection | The exact DSH runtime selected for one launch; it is paired with, but does not own, a profile. |
 | Launch selection | The immutable runtime, DSH home/profile and workspace inputs resolved for one Work Worker generation. |
+| Profile reference | The stable pair of DSH home identity and profile name required by profile-scoped operations; a profile name alone is not sufficient. |
+| Manager window | A separate trusted Work WebView window for runtime, DSH home, profile and profile-scoped plugin management. It never loads the DSH Web UI. |
+| Workspace window | The Work WebView window that displays the external DSH workspace. It may expose native Work menu commands without modifying DSH page content. |
 | Host | The Work desktop process and its trusted backend services. |
 | Worker | A DSH process started and supervised by the Host. |
 | Supervisor | Host module responsible for the Worker lifecycle and health. |
