@@ -16,6 +16,7 @@ tasks:
       - verify:toolchain
       - format:check
       - docs:check
+      - dev:check
       - test
       - frontend:test
       - frontend:typecheck
@@ -32,6 +33,11 @@ tasks:
     summary: Check public-content and Git hygiene contracts
     cmds:
       - node scripts/check-public-content.mjs
+
+  dev:check:
+    summary: Check the Wails development server contract
+    cmds:
+      - node scripts/check-wails-dev.mjs
 
   format:
     summary: Format Go source
@@ -51,6 +57,11 @@ tasks:
   frontend:install:
     summary: Install the locked frontend dependencies
     dir: frontend
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/*
     cmds:
       - npm ci
 
@@ -79,6 +90,14 @@ tasks:
       - generate:bindings
     cmds:
       - npm run build
+
+  frontend:dev:
+    summary: Run the Vite frontend for Wails development mode
+    dir: frontend
+    deps:
+      - frontend:install
+    cmds:
+      - npm run dev -- --port {{.WAILS_VITE_PORT | default 9245}} --strictPort
 
   generate:bindings:
     summary: Generate the narrow Wails TypeScript Host bindings

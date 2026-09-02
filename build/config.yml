@@ -28,6 +28,10 @@ dev_mode:
       - "*.ts"
     git_ignore: true
   executes:
+    - cmd: wails3 task frontend:install
+      type: blocking
+    - cmd: wails3 task frontend:dev
+      type: background
     - cmd: wails3 task build DEV=true
       type: blocking
     - cmd: wails3 task run
