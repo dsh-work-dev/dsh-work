@@ -12,14 +12,48 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as dshmanager$0 from "../dshmanager/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as lifecycle$0 from "../lifecycle/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as settings$0 from "../settings/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
 
 export function Cancel(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(2192368078);
 }
 
+/**
+ * GetLocale reads the Work-owned language preference for the trusted startup
+ * surface. It is read-only here; SettingsService remains the write boundary.
+ */
+export function GetLocale(): $CancellablePromise<settings$0.Locale> {
+    return $Call.ByID(2222441474);
+}
+
+/**
+ * GetStartupOutput returns the bounded, redacted stdout/stderr tails for the
+ * active or last startup attempt so the user can inspect and copy them.
+ */
+export function GetStartupOutput(): $CancellablePromise<$models.StartupOutput> {
+    return $Call.ByID(2529442400);
+}
+
 export function GetStatus(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(3548614106);
+}
+
+/**
+ * GetTheme projects the selected DSH home's appearance preference. DSH owns
+ * the value; Work only uses it to paint its trusted startup surface.
+ */
+export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
+    return $Call.ByID(2409500109);
 }
 
 export function Quit(): $CancellablePromise<lifecycle$0.Status> {

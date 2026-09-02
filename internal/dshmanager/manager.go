@@ -32,6 +32,7 @@ type Config struct {
 	StateStore       StateStore
 	ProfileCatalog   ProfileCatalog
 	ProfileReader    ProfileReader
+	ThemeReader      ThemeReader
 }
 
 // CommandRunner is the narrow seam for invoking the selected DSH public CLI.
@@ -324,7 +325,22 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 		Profiles: profiles,
 		Desired:  desired,
 		Active:   active,
+		Theme:    selectedTheme(ctx, config.Homes, active, desired, config.ThemeReader),
 	}, nil
+}
+
+// Theme returns the selected DSH home's appearance preference without
+// discovering the runtime, home and profile catalogs.
+func (m *Manager) Theme(ctx context.Context) (ThemePreference, error) {
+	if err := contextError(ctx); err != nil {
+		return ThemePreferenceSystem, err
+	}
+	m.mu.RLock()
+	config := m.configSnapshotLocked()
+	active := cloneSelection(m.active)
+	desired := cloneSelection(m.desired)
+	m.mu.RUnlock()
+	return selectedTheme(ctx, config.Homes, active, desired, config.ThemeReader), nil
 }
 
 func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([]PluginInfo, error) {
@@ -585,6 +601,9 @@ func normalizeConfig(config Config) (Config, error) {
 	}
 	if config.ProfileReader == nil {
 		config.ProfileReader = FileProfileReader{}
+	}
+	if config.ThemeReader == nil {
+		config.ThemeReader = FileThemeReader{}
 	}
 	if config.WorkspaceRoot == "" {
 		workspace, err := os.Getwd()

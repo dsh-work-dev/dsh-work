@@ -13,6 +13,7 @@ import (
 	"github.com/local/work/internal/dshadapter"
 	"github.com/local/work/internal/dshmanager"
 	"github.com/local/work/internal/lifecycle"
+	"github.com/local/work/internal/settings"
 	"github.com/local/work/internal/supervisor"
 	"github.com/local/work/internal/workergateway"
 )
@@ -52,6 +53,7 @@ type Dependencies struct {
 type Config struct {
 	WorkspaceRoot       string
 	DSHHome             string
+	SettingsPath        string
 	ExpectedDSHVersion  string
 	ReadinessTimeout    time.Duration
 	ProbeTimeout        time.Duration
@@ -73,6 +75,7 @@ func DefaultConfig(workspaceRoot string) Config {
 	return Config{
 		WorkspaceRoot:       workspaceRoot,
 		DSHHome:             filepath.Join(configRoot, "Work", "dsh"),
+		SettingsPath:        filepath.Join(configRoot, "Work", "dsh-work", "settings.json"),
 		ExpectedDSHVersion:  dshadapter.SupportedVersion,
 		ReadinessTimeout:    20 * time.Second,
 		ProbeTimeout:        750 * time.Millisecond,
@@ -90,6 +93,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.DSHHome == "" {
 		c.DSHHome = defaults.DSHHome
+	}
+	if c.SettingsPath == "" {
+		c.SettingsPath = defaults.SettingsPath
 	}
 	if c.ExpectedDSHVersion == "" {
 		c.ExpectedDSHVersion = defaults.ExpectedDSHVersion
@@ -903,7 +909,7 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorDSHUnsupportedVersion, lifecycle.ErrorDSHVersionCheckFailed:
 		return "Install the pinned DSH version and retry."
 	case lifecycle.ErrorProfileRequired, lifecycle.ErrorProfileNotFound, lifecycle.ErrorProfileInvalid:
-		return "Open Work Manager and choose an existing DSH home and profile."
+		return "Open Work Settings and choose an existing DSH home and profile."
 	case lifecycle.ErrorRuntimeInUse, lifecycle.ErrorProfileInUse:
 		return "Choose another launch selection before removing this runtime or DSH home."
 	case lifecycle.ErrorPluginSpecInvalid, lifecycle.ErrorPluginCommandUnavailable, lifecycle.ErrorPluginCommandFailed:
@@ -919,7 +925,7 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorPlatformUnsupported:
 		return "Run the Windows-first Work build on a supported native platform."
 	case lifecycle.ErrorTrustedSurfaceRequired:
-		return "Use the trusted Work shell or Manager window for this control."
+		return "Use the trusted Work shell or Settings window for this control."
 	default:
 		return "Retry after checking the current Work configuration."
 	}
@@ -1052,10 +1058,19 @@ func (r *generationRun) launchPlan() supervisor.LaunchPlan {
 type HostService struct {
 	host             *Host
 	workspaceTrusted func() bool
+	localeProvider   func() settings.Locale
 }
 
-func NewHostService(host *Host, workspaceTrusted func() bool) *HostService {
-	return &HostService{host: host, workspaceTrusted: workspaceTrusted}
+// StartupOutput is the redacted DSH process output retained by the supervisor
+// while Work is starting or recovering. It intentionally omits process
+// metadata and exposes no raw, unredacted stream.
+type StartupOutput struct {
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
+func NewHostService(host *Host, workspaceTrusted func() bool, localeProvider func() settings.Locale) *HostService {
+	return &HostService{host: host, workspaceTrusted: workspaceTrusted, localeProvider: localeProvider}
 }
 
 func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
@@ -1063,6 +1078,42 @@ func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
 		return trustedSurfaceStatus()
 	}
 	return s.host.Status()
+}
+
+// GetTheme projects the selected DSH home's appearance preference. DSH owns
+// the value; Work only uses it to paint its trusted startup surface.
+func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
+	if !s.authorized(ctx) || s.host.deps.Manager == nil {
+		return dshmanager.ThemePreferenceSystem
+	}
+	snapshot, err := s.host.deps.Manager.Snapshot(ctx)
+	if err != nil || !snapshot.Theme.Valid() {
+		return dshmanager.ThemePreferenceSystem
+	}
+	return snapshot.Theme
+}
+
+// GetLocale reads the Work-owned language preference for the trusted startup
+// surface. It is read-only here; SettingsService remains the write boundary.
+func (s *HostService) GetLocale(ctx context.Context) settings.Locale {
+	if !s.authorized(ctx) || s.localeProvider == nil {
+		return settings.DefaultLocale
+	}
+	locale := s.localeProvider()
+	if !locale.Valid() {
+		return settings.DefaultLocale
+	}
+	return locale
+}
+
+// GetStartupOutput returns the bounded, redacted stdout/stderr tails for the
+// active or last startup attempt so the user can inspect and copy them.
+func (s *HostService) GetStartupOutput(ctx context.Context) StartupOutput {
+	if !s.authorized(ctx) {
+		return StartupOutput{}
+	}
+	diagnostics := s.host.Diagnostics()
+	return StartupOutput{Stdout: diagnostics.StdoutTail, Stderr: diagnostics.StderrTail}
 }
 func (s *HostService) Start(ctx context.Context) lifecycle.Status {
 	if !s.authorized(ctx) {

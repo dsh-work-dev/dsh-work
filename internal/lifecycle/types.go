@@ -62,6 +62,8 @@ const (
 	ErrorRuntimeProfileIncompatible ErrorCode = "RUNTIME_PROFILE_INCOMPATIBLE"
 	ErrorManagerOperationBusy       ErrorCode = "MANAGER_OPERATION_BUSY"
 	ErrorManagerStateInvalid        ErrorCode = "MANAGER_STATE_INVALID"
+	ErrorSettingsStateInvalid       ErrorCode = "SETTINGS_STATE_INVALID"
+	ErrorSettingsUnavailable        ErrorCode = "SETTINGS_UNAVAILABLE"
 	ErrorRestartRequired            ErrorCode = "RESTART_REQUIRED"
 	ErrorPluginSpecInvalid          ErrorCode = "PLUGIN_SPEC_INVALID"
 	ErrorPluginCommandUnavailable   ErrorCode = "PLUGIN_COMMAND_UNAVAILABLE"

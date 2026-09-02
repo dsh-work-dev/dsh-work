@@ -3,7 +3,13 @@
 
 import * as HostService from "./hostservice.js";
 import * as ManagerService from "./managerservice.js";
+import * as SettingsService from "./settingsservice.js";
 export {
     HostService,
-    ManagerService
+    ManagerService,
+    SettingsService
 };
+
+export type {
+    StartupOutput
+} from "./models.js";

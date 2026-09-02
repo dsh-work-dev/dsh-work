@@ -24,7 +24,7 @@ The F0–F3 Work PC foundation is implemented for the primary Windows target:
 - Go 1.25.14, Wails CLI v3.0.0-beta.16, Node 24.20.0 and npm 11.19.0 are locked in [`toolchain.lock.json`](toolchain.lock.json).
 - The shared lifecycle, DSH and process-supervisor contracts compile on Windows, macOS and Linux. Native process supervision is intentionally implemented only by the Windows adapter at this stage.
 - Windows starts the pinned DSH Web profile on an explicit loopback port, validates readiness, hands the authenticated workspace to the Wails WebView, and verifies bounded cleanup through a Job Object.
-- The trusted Manager window and the `dsh-work` CLI share one catalog for runtime/home/profile selection. Profile plugin changes are explicit DSH CLI operations and always carry both the DSH home id and profile name.
+- The trusted Work Settings window and its nested DSH manager share one catalog with the `dsh-work` CLI for runtime/home/profile selection. Profile plugin changes are explicit DSH CLI operations and always carry both the DSH home id and profile name.
 
 ## Local checks
 

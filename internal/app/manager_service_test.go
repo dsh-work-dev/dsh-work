@@ -10,7 +10,7 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-func TestManagerServiceRequiresTheManagerWindow(t *testing.T) {
+func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {
 	root := t.TempDir()
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath:     filepath.Join(root, "manager.json"),
@@ -24,7 +24,7 @@ func TestManagerServiceRequiresTheManagerWindow(t *testing.T) {
 }
 
 func TestHostServiceRefusesControlsFromAnUntrustedSurface(t *testing.T) {
-	status := NewHostService(nil, func() bool { return true }).GetStatus(context.Background())
+	status := NewHostService(nil, func() bool { return true }, nil).GetStatus(context.Background())
 	if status.Error == nil || status.Error.Code != lifecycle.ErrorTrustedSurfaceRequired {
 		t.Fatalf("untrusted Host status = %+v", status)
 	}

@@ -10,11 +10,16 @@ Given Work is running, when the user launches it again, then no second Host or W
 
 ### AC-002 — Visible bounded startup
 
-Given a compatible runtime, when Work starts, then named startup steps are visible, the embedded workspace is not shown before readiness, and startup reaches `Ready` or a stable error state.
+Given a compatible runtime, when Work starts, then named startup steps and bounded DSH stdout/stderr are visible, the embedded workspace is not shown before readiness, the output can be copied locally, and startup reaches `Ready` or a stable error state.
 
-### AC-003 — Tray close and quit
+### AC-003 — Configurable tray close and quit
 
-Given Work is ready, when the window is closed, then Work remains available in the tray; when `Quit` is chosen, Work enters `Stopping`, cancels active work and exits after cleanup.
+Given Work is ready with the default close policy, when any Work window is
+closed, then that window is hidden and Work remains available in the tray even
+when no Work window is visible. Given the close-to-tray setting is disabled,
+when the last visible Work window is closed, then Work enters `Stopping`,
+cancels active work and exits after cleanup. In either mode, choosing `Quit
+DSH Work` performs the full managed shutdown.
 
 ### AC-004 — Loopback and trusted navigation
 
@@ -32,9 +37,89 @@ Given fixtures for missing runtime, unsupported version, bind failure, readiness
 
 Given a catalog containing more than one registered DSH runtime, home and profile, when the user selects one complete launch tuple, then Work verifies that runtime and launches its external DSH Web UI with the exact home, profile and workspace after readiness. Normal startup performs no package installation or profile reconciliation.
 
-### AC-030 — Separate Manager surface and native DSH menu
+### AC-030 — Separate Settings surface with nested DSH manager
 
-Given the DSH Workspace window is open, when the user chooses a DSH management command, then Work opens or focuses a separate Manager window without injecting management markup into the DSH document; the Manager window has no application menu, and the native DSH menu also offers restart and quit commands.
+Given the DSH Workspace window is open, when the user chooses a DSH management
+command or Settings, then Work opens or focuses the separate trusted Settings
+window without injecting management markup into the DSH document; its rail
+starts with a read-only Overview, has one top-level General page, and exposes
+top-level Notifications plus shallow DSH resource pages. The application menu exposes Settings and Help;
+Help contains Check for Updates and About Work.
+
+### AC-034 — DSH-owned appearance
+
+Given the selected DSH home stores `ui-theme.preference` as `light`, `dark` or
+`system`, when a trusted Work surface opens, the operating system theme changes,
+or DSH changes the preference while both windows are open, then Work uses that
+preference without presenting or persisting a second Work appearance setting.
+
+### AC-035 — Work language preference
+
+Given Work is open, when the user chooses English, Simplified Chinese or
+Japanese in General, then the choice is persisted and the trusted Work surfaces
+update immediately, including dynamic status, controls, native menu and tray
+labels; the external DSH workspace is not modified.
+
+## Notifications
+
+### AC-036 — Notification preferences are available from first use
+
+Given a new or older Work settings document, when the user opens the top-level
+`Notifications` route, then Work shows the global desktop-notification switch
+and the four class switches with the documented defaults. Missing values are
+defaulted without invalidating unrelated settings, and every switch persists
+immediately without restarting DSH.
+
+### AC-037 — Global and class preferences route delivery
+
+Given a structured notification event, when the global desktop switch is off,
+then no desktop delivery occurs. Given the global switch is on and the event's
+class switch is off, then no desktop delivery occurs for that class. In both
+cases, any DSH-owned in-page notice remains available.
+
+### AC-038 — Foreground and background delivery
+
+Given the Workspace is active, when a completed or routine lifecycle event
+arrives, then Work does not send a duplicate desktop notification. Given the
+Workspace is hidden or unfocused and the relevant preference is enabled, then
+Work sends one eligible desktop notification. Action-required and error events
+remain eligible only when their structured event says the DSH context needs
+promotion.
+
+### AC-039 — DSH contextual notices remain owned by DSH
+
+Given DSH emits a contextual input, queue or message notice, when Work receives
+or displays related state, then Work does not remove, rewrite or duplicate the
+DSH notice. Work's desktop preference affects only Work desktop delivery.
+
+### AC-040 — Deduplication and safe notification actions
+
+Given the same logical event is received more than once, then Work emits at
+most one desktop delivery per Work session. Given the user clicks that
+notification, then Work focuses the Workspace or a verified target and does not
+approve, deny or execute a DSH operation.
+
+### AC-041 — Localised and bounded notification content
+
+Given Work is set to English, Simplified Chinese or Japanese, when Work creates
+a desktop notification, then all Work-owned copy uses the selected locale.
+Given synthetic secrets, raw logs or unbounded agent text in an event, then the
+desktop notification contains none of those values and remains within the
+documented size bound.
+
+### AC-042 — Delivery failure is contained
+
+Given the operating-system notification adapter is unavailable or rejects a
+delivery, then Work reports a bounded actionable diagnostic while preserving
+the source event outcome and keeping DSH's in-page surface usable.
+
+### AC-033 — Persisted close policy
+
+Given a user changes the top-level close-to-tray setting, when Work is
+restarted, then the setting is loaded from the versioned Work settings store;
+the default for a missing setting is tray, an invalid settings document fails
+closed to the tray-safe default and reports a recoverable Settings error, and
+the setting does not alter DSH home or profile data.
 
 ### AC-031 — Profile-owned plugin management
 
@@ -142,7 +227,7 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 |---|---|
 | FR-LIFE-001 | AC-001 |
 | FR-LIFE-002, FR-LIFE-004, FR-LIFE-005 | AC-002, AC-006, AC-023 |
-| FR-LIFE-003 | AC-003 |
+| FR-LIFE-003 | AC-003, AC-033 |
 | FR-SUP-001, FR-SUP-002 | AC-002, AC-006 |
 | FR-SUP-003, FR-SUP-004 | AC-002, AC-004 |
 | FR-SUP-005 | AC-006, AC-019 |
@@ -152,6 +237,15 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | FR-MGR-004 | AC-031 |
 | FR-MGR-005 | AC-030 |
 | FR-MGR-006, FR-MGR-007 | AC-032, AC-025 |
+| FR-MGR-008 | AC-034 |
+| FR-MGR-009 | AC-035 |
+| FR-NOT-001, FR-NOT-002, FR-NOT-003 | AC-036 |
+| FR-NOT-004 | AC-037 |
+| FR-NOT-005 | AC-038 |
+| FR-NOT-006, FR-NOT-008 | AC-040 |
+| FR-NOT-007 | AC-038, AC-039 |
+| FR-NOT-009 | AC-041 |
+| FR-NOT-010 | AC-036, AC-041 |
 | FR-WEB-001, FR-WEB-002, FR-WEB-005 | AC-004 |
 | FR-WEB-003 | AC-006 |
 | FR-WEB-004 | AC-008, AC-015 |
@@ -172,6 +266,7 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | FR-REC-001, FR-REC-002 | AC-017 |
 | FR-REC-003, FR-REC-004 | AC-006, AC-019 |
 | FR-REC-005 | AC-017, AC-018 |
+| FR-REC-006 | AC-002, AC-019 |
 | NFR-REL-001, NFR-REL-002 | AC-002, AC-013, AC-023 |
 | NFR-SEC-001 | AC-004, AC-008 |
 | NFR-SEC-002 | AC-024 |
@@ -180,3 +275,4 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | NFR-MNT-001 | AC-006, AC-008, AC-010 |
 | NFR-MNT-002 | AC-008, AC-018 |
 | NFR-PORT-001 | AC-005, AC-025 |
+| NFR-NOT-001, NFR-NOT-002 | AC-040, AC-042 |

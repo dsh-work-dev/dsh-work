@@ -7,6 +7,7 @@ toolchain go1.25.14
 require (
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	golang.org/x/sys v0.46.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

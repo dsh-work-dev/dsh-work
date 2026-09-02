@@ -4,19 +4,54 @@
 
 1. User starts Work.
 2. Work checks its own configuration and DSH runtime compatibility.
-3. The window shows `Starting` with current step and a cancel action.
-4. Work starts the Worker and waits for a validated readiness signal.
-5. On success, Work navigates the embedded view to the loopback Worker URL and enters `Ready`.
-6. On failure, Work shows a stable error code, plain-language cause and safe next actions.
+3. The window shows `Starting` with the current step, bounded DSH output and a cancel action.
+4. User can copy the redacted output when startup needs support.
+5. Work starts the Worker and waits for a validated readiness signal.
+6. On success, Work navigates the embedded view to the loopback Worker URL and enters `Ready`.
+7. On failure, Work shows a stable error code, plain-language cause and safe next actions.
 
 The user never needs to choose a port or inspect a terminal.
 
 ## UF-02 — Return from tray
 
-1. Closing the window hides it while Work remains available in the system tray.
+1. Closing the window applies the close-to-tray setting; by default it hides
+   the window while Work remains available in the system tray.
 2. The tray indicates current state without relying on colour alone.
-3. Selecting `Open Work` restores and focuses the window.
-4. Selecting `Quit` starts a full managed shutdown and exits only after cleanup finishes or a bounded fallback completes.
+3. Selecting `Open Workspace` restores and focuses the Workspace window.
+4. Selecting `Quit DSH Work` starts a full managed shutdown and exits only
+   after cleanup finishes or a bounded fallback completes.
+
+## UF-02A — Manage Work settings
+
+1. User opens `Settings` from the application menu or system tray.
+2. Work opens the separate trusted Settings window on its flat top-level
+   `General` route; `Overview` is read-only and DSH workspace markup is not
+   changed.
+3. User changes the launch target or close-to-tray preference. The launch
+   target uses an explicit save action; close-to-tray persists immediately.
+4. The next window close applies the selected policy; explicit `Quit DSH Work`
+   remains a full shutdown in either mode.
+
+## UF-02B — Manage desktop notifications
+
+1. User opens `Settings` from the application menu or system tray.
+2. Work opens the separate trusted Settings window on the flat top-level
+   `Notifications` route.
+3. User turns desktop delivery or an individual notification class on or off.
+4. Work persists each switch immediately and applies it to future desktop
+   deliveries without restarting DSH.
+5. DSH in-page notices continue to follow DSH's own contextual UI rules.
+
+## UF-02C — Receive a desktop notification
+
+1. DSH or Work emits a structured action-required, completed, error or enabled
+   lifecycle event.
+2. Work checks the event identity, current window state and notification
+   preferences.
+3. If delivery is eligible, Work sends one bounded, localised desktop
+   notification.
+4. User selects the notification; Work focuses the Workspace or its verified
+   target without approving or executing any operation.
 
 ## UF-03 — Run a browser task
 

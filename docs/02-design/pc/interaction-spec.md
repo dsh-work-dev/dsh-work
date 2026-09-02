@@ -2,12 +2,29 @@
 
 ## Application shell
 
-Work uses two native WebView windows. The Manager window contains trusted
-runtime, profile and plugin management. The Workspace window contains the
-external DSH Web UI. The Workspace window also has a native Work function
-menu; no Work HTML or JavaScript is injected into the DSH document. Host state
+Work uses two native WebView windows. The separate Settings window contains a
+flat, shallow rail and no HTML application menu: `Overview` first and read-only, one top-level `General`
+page for launch target and close-to-tray behaviour, one top-level `Notifications`
+page for Work desktop-notification preferences, then DSH resource pages for
+profiles/plugins, runtimes and homes. The Workspace window contains the
+external DSH Web UI. Work's native application menu and system tray remain
+Host-owned; no Work HTML or JavaScript is injected into the DSH document. Host state
 and recovery actions remain available even if Worker content is loading or
 failed.
+
+The native settings command and window title are `设置`; the Workspace window
+title is `dsh-work`.
+
+Work does not own an appearance setting. It reads the selected DSH home's
+`ui-theme.preference`; `system` resolves through the operating system and
+changes are reflected in Work's trusted surfaces. If DSH changes the
+preference while the Settings window is open, the window updates automatically.
+
+Work's chrome supports English, Simplified Chinese and Japanese. Language is a
+Work preference in General; switching it updates both trusted WebView surfaces
+and the native menu/tray through the same locale event. The default locale is
+Simplified Chinese, and the DSH workspace remains the owner of its own content
+and language.
 
 The plugin management entry always carries an explicit DSH home and profile
 reference. The active Workspace profile may be used as a prefilled context,
@@ -15,14 +32,17 @@ but it is not an implicit backend target.
 
 ### Window close and quit
 
-- Window close hides Work to the tray and announces that it is still running the first time this happens.
-- `Quit` is distinct from close and initiates managed shutdown.
+- The default close policy hides the closed Work window. When all Work windows
+  are hidden, the process remains available from the tray.
+- If the user disables the close-to-tray setting, closing the last visible Work
+  window initiates managed shutdown instead of hiding it.
+- `Quit DSH Work` is always distinct from close and initiates managed shutdown.
 - During shutdown, the tray and window show `Stopping`; duplicate quit actions are ignored.
 - If a task is active, quit explains that it will cancel the task and detach browser control; it does not close the user's browser.
 
 ## Startup surface
 
-Show a determinate sequence of named steps, even when individual step duration is unknown:
+Show a named five-step sequence and the active step, even when individual step duration is unknown:
 
 1. checking configuration;
 2. checking runtime compatibility;
@@ -30,11 +50,58 @@ Show a determinate sequence of named steps, even when individual step duration i
 4. waiting for readiness;
 5. opening workspace.
 
-The surface includes elapsed context, a cancel action where cancellation is safe, and a Diagnostics link. It never shows a blank WebView as startup feedback.
+Completed steps, the current step and a failed step remain visually distinct
+through text, structure and focus—not colour alone. A small progress indicator
+may reflect completed lifecycle steps, but MUST NOT invent a percentage or time
+estimate. The surface includes a cancel action where cancellation is safe and a
+bounded, redacted DSH stdout/stderr view with a `Copy` action. A Diagnostics
+entry is available when diagnostics exist. It never shows a blank WebView as
+startup feedback.
+
+### Application menu
+
+The application menu exposes `Settings` and `Help`. `Help` contains
+`Check for Updates…` and `About Work`. The update command must report its
+availability truthfully until an update channel is implemented; it must not
+claim that a check succeeded when no service exists.
+
+## Notifications
+
+Work desktop notifications are a background companion to the DSH workspace, not
+a second conversation surface. DSH keeps its contextual notices and toast
+feedback. Work owns desktop delivery, preference checks, foreground/background
+routing and event deduplication.
+
+The top-level Settings route `Notifications` contains these immediate-save
+switches:
+
+- `Desktop notifications`;
+- `Task completed`;
+- `Needs attention`;
+- `Errors`;
+- `DSH status`.
+
+Defaults are on for desktop notifications, completed tasks, needs attention and
+errors; DSH status is off. Sound follows the operating system. There is no
+visible success confirmation after a switch saves. A disabled desktop channel
+does not remove a DSH in-page notice.
+
+Completion and routine lifecycle events are suppressed while the Workspace is
+the active surface. When it is hidden or unfocused, an enabled class may reach
+the operating-system notification surface. Action-required and error events
+may also reach that surface when the DSH context cannot provide the required
+attention signal. A notification click focuses the Workspace; it never approves
+or executes a DSH operation.
+
+See the [notification interaction design](notifications.md) and [notification product specification](../../01-product/pc/notifications.md) for the complete delivery matrix and content rules.
 
 ## Tray
 
-Tray status uses icon shape plus text, not colour alone. Its menu always offers `Open Work` and `Quit`. `Diagnostics` is available in failure states. An active approval is surfaced as `Action required` and selecting it focuses the trusted approval surface.
+Tray status uses icon shape plus text, not colour alone. Its menu offers
+`Open Workspace`, `Settings`, `Restart DSH` and `Quit DSH Work`.
+`Diagnostics` is available in failure states. An active approval is
+surfaced as `Action required` and selecting it focuses the trusted approval
+surface.
 
 ## Activity drawer
 

@@ -1,136 +1,151 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN" data-theme="dark" data-theme-preference="system">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0d121b" />
-    <title>Work</title>
+    <meta name="theme-color" content="#f4f6f8" />
+    <title>dsh-work</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main id="host-surface" class="shell" aria-labelledby="app-title">
       <header class="shell-header">
-        <div>
-          <p class="eyebrow">WORK PC</p>
-          <h1 id="app-title">Starting your local workspace</h1>
+        <div class="brand-lockup">
+          <strong class="brand-name">Work</strong>
+          <span class="brand-context" data-i18n="host.brandContext">Local DSH host</span>
         </div>
-        <span class="state-dot" id="state-dot" aria-hidden="true"></span>
+        <div class="shell-status" aria-live="polite">
+          <span class="state-dot" id="state-dot" aria-hidden="true"></span>
+          <span id="status-label" data-i18n="status.preparing">Preparing</span>
+        </div>
       </header>
 
-      <section class="status-card" aria-live="polite" aria-atomic="true">
-        <p class="status-label" id="status-label">Preparing</p>
-        <p class="status-message" id="status-message">Work is preparing the managed DSH process.</p>
-        <p class="status-detail" id="status-detail"></p>
-        <div class="progress-track" id="progress-track" role="progressbar" aria-label="Workspace startup progress" aria-valuetext="Preparing">
-          <span></span>
-        </div>
-      </section>
+      <div class="startup-layout">
+        <section class="status-card" aria-live="polite" aria-atomic="true">
+          <div class="status-intro">
+            <p class="eyebrow" data-i18n="host.startupEyebrow">Workspace startup</p>
+            <h1 id="app-title" data-i18n="host.titleStarting">Starting workspace</h1>
+            <p class="status-message" id="status-message" data-i18n="host.startupMessage">Work is starting your DSH workspace.</p>
+          </div>
+          <div class="status-context">
+            <p class="status-label" data-i18n="host.currentStep">Current step</p>
+            <p class="status-detail" id="status-detail"></p>
+          </div>
+          <ol class="startup-steps" data-i18n-aria-label="host.startupSteps" aria-label="Workspace startup steps">
+            <li data-startup-step="configuration">
+              <span class="step-index">01</span>
+              <span><strong data-i18n="host.checkConfiguration">Check configuration</strong><small data-i18n="host.confirmConfiguration">Confirm the selected launch target.</small></span>
+            </li>
+            <li data-startup-step="runtime">
+              <span class="step-index">02</span>
+              <span><strong data-i18n="host.checkRuntime">Check DSH runtime</strong><small data-i18n="host.verifyRuntime">Verify the compatible local version.</small></span>
+            </li>
+            <li data-startup-step="worker">
+              <span class="step-index">03</span>
+              <span><strong data-i18n="host.startDsh">Start DSH</strong><small data-i18n="host.startSelectedDsh">Start the selected DSH runtime.</small></span>
+            </li>
+            <li data-startup-step="readiness">
+              <span class="step-index">04</span>
+              <span><strong data-i18n="host.waitReadiness">Wait for readiness</strong><small data-i18n="host.waitDsh">Wait for DSH to respond.</small></span>
+            </li>
+            <li data-startup-step="workspace">
+              <span class="step-index">05</span>
+              <span><strong data-i18n="host.openWorkspace">Open workspace</strong><small data-i18n="host.openDshWorkspace">Open the DSH workspace.</small></span>
+            </li>
+          </ol>
+          <div class="progress-track" id="progress-track" role="progressbar" data-i18n-aria-label="host.startupProgress" aria-label="Workspace startup progress" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0" aria-valuetext="Preparing">
+            <span></span>
+          </div>
+        </section>
 
-      <section class="workspace-card" aria-label="Workspace handoff">
-        <div>
-          <p class="card-label">Workspace</p>
-          <p id="workspace-url">Waiting for a trusted loopback origin.</p>
-        </div>
-        <span class="lock-mark" aria-hidden="true">LOCAL</span>
-      </section>
+        <aside class="workspace-card" data-i18n-aria-label="host.workspaceHandoff" aria-label="Workspace handoff">
+          <div class="card-heading">
+            <p class="card-label" data-i18n="field.workspace">Workspace</p>
+            <span class="lock-mark" data-i18n="common.local">Local</span>
+          </div>
+          <p class="workspace-summary" data-i18n="host.workspaceSummary">The workspace opens when DSH is ready.</p>
+          <dl class="workspace-facts">
+            <div>
+              <dt data-i18n="common.origin">Origin</dt>
+              <dd id="workspace-url" data-i18n="status.waitingWorkspace">Waiting for the DSH workspace.</dd>
+            </div>
+          </dl>
+          <section class="startup-output-panel" aria-labelledby="startup-output-title">
+            <div class="output-heading">
+              <div>
+                <h2 id="startup-output-title" data-i18n="host.output">DSH startup output</h2>
+              </div>
+              <button class="button button-secondary button-compact" id="copy-startup-output" data-i18n="common.copy" type="button" disabled>Copy</button>
+            </div>
+            <pre id="startup-output" data-i18n="host.waitOutput" tabindex="0">Waiting for DSH output.</pre>
+          </section>
+        </aside>
+      </div>
 
-      <footer class="actions" aria-label="Host actions">
-        <button class="button button-secondary" id="cancel" type="button">Cancel</button>
-        <button class="button button-primary" id="retry" type="button" hidden>Retry</button>
-        <button class="button button-quiet" id="quit" type="button">Quit</button>
+      <footer class="actions" data-i18n-aria-label="host.actions" aria-label="Host actions">
+        <button class="button button-secondary" id="cancel" data-i18n="common.cancel" type="button">Cancel</button>
+        <button class="button button-primary" id="retry" data-i18n="common.retry" type="button" hidden>Retry</button>
+        <button class="button button-quiet" id="quit" data-i18n="common.quit" type="button">Quit</button>
       </footer>
     </main>
     <main id="manager-surface" class="manager-app" aria-labelledby="manager-title" hidden>
-      <aside class="manager-sidebar" aria-label="Manager sections">
+      <aside class="manager-sidebar" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
         <div class="manager-brand">
-          <span class="brand-mark" aria-hidden="true">DSH</span>
-          <span class="brand-copy"><strong>DSH Work</strong><small>Manager</small></span>
+          <strong class="brand-name">Work</strong>
         </div>
-        <nav class="manager-nav" aria-label="Manager sections">
-          <button class="manager-nav-item is-active" data-manager-section="overview" type="button">Overview</button>
-          <button class="manager-nav-item" data-manager-section="profiles" type="button">Profiles &amp; plugins</button>
-          <button class="manager-nav-item" data-manager-section="runtimes" type="button">Runtimes</button>
-          <button class="manager-nav-item" data-manager-section="homes" type="button">DSH homes</button>
+        <nav class="manager-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+          <button class="manager-nav-item is-active" data-manager-section="overview" data-i18n="manager.overview" type="button">Overview</button>
+          <button class="manager-nav-item" data-manager-section="settings" data-i18n="manager.general" type="button">General</button>
+          <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles &amp; plugins</button>
+          <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
+          <button class="manager-nav-item" data-manager-section="homes" data-i18n="manager.homes" type="button">DSH homes</button>
         </nav>
-        <div class="manager-sidebar-footer">
-          <span class="manager-trust">Trusted manager window</span>
-          <p>Runtime files stay outside this interface and are controlled through DSH.</p>
-        </div>
       </aside>
 
       <div class="manager-main">
         <header class="manager-topbar">
-          <div>
-            <p class="eyebrow">DSH WORK</p>
-            <h1 id="manager-title">Manager</h1>
-            <p class="manager-lede">Configure the external DSH runtime used by your workspace.</p>
-          </div>
-          <div class="manager-toolbar">
-            <span id="manager-active" class="manager-state">Not running</span>
-            <button class="button button-secondary button-compact" id="manager-refresh" type="button">Refresh</button>
-          </div>
+          <h1 id="manager-title" data-i18n="manager.overview">Overview</h1>
         </header>
 
-        <p id="manager-feedback" class="manager-feedback" role="status" aria-live="polite">Loading catalog…</p>
+        <p id="manager-feedback" class="manager-feedback" role="status" aria-live="polite" hidden></p>
 
         <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
           <div class="panel-heading">
             <div>
-              <p class="card-label">Launch target</p>
-              <h2 id="selection-title">Choose the DSH instance for this workspace</h2>
-              <p class="panel-description">A launch is always tied to one runtime, home, profile and workspace.</p>
+              <h2 id="selection-title" data-i18n="manager.launchContext">Launch context</h2>
             </div>
-            <span class="panel-badge">Next start</span>
           </div>
-          <div class="selection-layout">
-            <div class="manager-grid">
-              <label>DSH runtime<select id="manager-runtime"></select></label>
-              <label>DSH home<select id="manager-home"></select></label>
-              <label>Profile<select id="manager-profile"></select></label>
-              <label class="wide-field">Workspace<input id="manager-workspace" type="text" autocomplete="off" /></label>
-            </div>
-            <aside class="selection-summary" aria-label="Selected launch target">
-              <p class="card-label">Selected target</p>
-              <strong id="manager-selection-runtime">No runtime selected</strong>
-              <span id="manager-selection-home">Choose a DSH home</span>
-              <span id="manager-selection-profile">Choose a profile</span>
-              <p id="manager-selection-workspace">Workspace path will appear here.</p>
-            </aside>
-          </div>
-          <div class="panel-footer">
-            <p id="manager-selection-note">Selection changes apply to the next DSH Worker generation.</p>
-            <button class="button button-primary" id="manager-save" type="button">Save launch target</button>
+          <div class="overview-facts-layout">
+            <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.currentDshContext" aria-label="Current DSH context">
+              <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-selection-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+              <div><dt data-i18n="field.home">Home</dt><dd id="manager-selection-home" data-i18n="value.noHome">No home selected</dd></div>
+              <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-selection-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+              <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-selection-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
+              <div><dt data-i18n="field.launchState">Launch state</dt><dd id="manager-selection-state" data-i18n="value.saved">Saved</dd></div>
+            </dl>
           </div>
         </section>
 
-        <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="profiles-title" hidden>
-          <div class="panel-heading">
-            <div>
-              <p class="card-label">Profile composition</p>
-              <h2 id="profiles-title">Profiles keep their own plugins</h2>
-              <p class="panel-description">Choose an exact DSH home and profile before changing its plugin set.</p>
-            </div>
-            <span class="panel-badge">Profile scoped</span>
-          </div>
+        <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
           <div class="profiles-layout">
             <div class="profile-directory">
-              <div class="subheading"><strong>Available profiles</strong><span>Across registered homes</span></div>
+              <div class="subheading"><strong data-i18n="profiles.title">Profiles</strong></div>
               <div id="manager-profiles" class="manager-list"></div>
             </div>
             <div class="plugin-editor">
-              <p class="card-label">Selected profile</p>
-              <strong id="manager-selected-profile" class="selected-profile">Choose a profile above</strong>
-              <p id="manager-profile-scope-note" class="manager-note">Plugin changes are sent to DSH with this profile as the explicit target.</p>
-              <label>Plugin package<input id="manager-plugin-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+              <p class="card-label" data-i18n="field.profile">Profile</p>
+              <strong id="manager-selected-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</strong>
+              <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile.</p>
+              <label><span data-i18n="profiles.package">Package</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
               <div class="button-row">
-                <button class="button button-primary" id="manager-plugin-install" type="button">Install plugin</button>
-                <button class="button button-secondary" id="manager-plugin-remove" type="button">Remove plugin</button>
+                <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
+                <button class="button button-secondary" id="manager-plugin-remove" data-i18n="action.remove" type="button">Remove</button>
               </div>
               <div class="create-profile-block">
-                <div class="subheading"><strong>Create a profile</strong><span>Initialized by DSH</span></div>
-                <label>Profile name<input id="manager-new-profile" type="text" placeholder="coding" autocomplete="off" /></label>
-                <label>Initial plugin package<input id="manager-new-profile-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-                <button class="button button-secondary" id="manager-create-profile" type="button">Create through DSH</button>
+                <div class="subheading"><strong data-i18n="profiles.create">Create profile</strong></div>
+                <label><span data-i18n="field.name">Name</span><input id="manager-new-profile" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
+                <label><span data-i18n="profiles.package">Package</span><input id="manager-new-profile-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+                <button class="button button-secondary" id="manager-create-profile" data-i18n="action.create" type="button">Create</button>
               </div>
             </div>
           </div>
@@ -139,15 +154,12 @@
         <section id="manager-section-runtimes" class="manager-section" data-manager-panel="runtimes" aria-labelledby="runtimes-title" hidden>
           <div class="panel-heading">
             <div>
-              <p class="card-label">Runtime catalog</p>
-              <h2 id="runtimes-title">Installed DSH versions</h2>
-              <p class="panel-description">Startup never downloads packages. Add or install a runtime explicitly here.</p>
+              <h2 id="runtimes-title" data-i18n="runtimes.installedVersions">Installed versions</h2>
             </div>
-            <span class="panel-badge">No startup downloads</span>
           </div>
           <div class="runtime-install-card">
-            <label>Install DSH version<input id="manager-runtime-version" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
-            <button class="button button-primary" id="manager-runtime-install" type="button">Install runtime</button>
+            <label><span data-i18n="field.version">Version</span><input id="manager-runtime-version" data-i18n-placeholder="placeholder.runtimeVersion" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
+            <button class="button button-primary" id="manager-runtime-install" data-i18n="action.install" type="button">Install</button>
           </div>
           <div id="manager-runtimes" class="manager-list"></div>
         </section>
@@ -155,25 +167,67 @@
         <section id="manager-section-homes" class="manager-section" data-manager-panel="homes" aria-labelledby="homes-title" hidden>
           <div class="panel-heading">
             <div>
-              <p class="card-label">DSH home catalog</p>
-              <h2 id="homes-title">Keep home data in its own boundary</h2>
-              <p class="panel-description">Work can create its own home; user homes must already exist and are never deleted here.</p>
+              <h2 id="homes-title" data-i18n="homes.registeredHomes">Registered homes</h2>
             </div>
-            <span class="panel-badge">Data safe</span>
           </div>
           <div class="home-register-card">
-            <div>
-              <strong>Register an existing home</strong>
-              <p>Point to a DSH_HOME directory that already exists on this machine.</p>
-            </div>
             <div class="home-register-grid">
-              <label class="wide-field">Existing DSH home path<input id="manager-new-home-path" type="text" placeholder="C:\\Users\\you\\.dsh" autocomplete="off" /></label>
-              <label>Home id<input id="manager-new-home-id" type="text" placeholder="personal" autocomplete="off" /></label>
-              <label>Display name<input id="manager-new-home-name" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
-              <button class="button button-secondary" id="manager-register-home" type="button">Register home</button>
+              <label class="wide-field"><span data-i18n="field.path">Path</span><input id="manager-new-home-path" data-i18n-placeholder="placeholder.homePath" type="text" placeholder="C:\\Users\\you\\.dsh" autocomplete="off" /></label>
+              <label><span data-i18n="field.id">ID</span><input id="manager-new-home-id" data-i18n-placeholder="placeholder.homeId" type="text" placeholder="personal" autocomplete="off" /></label>
+              <label><span data-i18n="field.name">Name</span><input id="manager-new-home-name" data-i18n-placeholder="placeholder.homeName" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
+              <button class="button button-secondary" id="manager-register-home" data-i18n="action.register" type="button">Register</button>
             </div>
           </div>
           <div id="manager-homes" class="manager-list"></div>
+        </section>
+
+        <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="settings-title" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="settings-title" data-i18n="general.launchTarget">Launch target</h2>
+            </div>
+          </div>
+          <div class="settings-block launch-settings">
+            <div class="manager-grid">
+              <label><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
+              <label><span data-i18n="field.home">Home</span><select id="manager-home"></select></label>
+              <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
+              <label class="wide-field"><span data-i18n="field.workspace">Workspace</span><input id="manager-workspace" type="text" autocomplete="off" /></label>
+            </div>
+            <div class="panel-footer">
+              <button class="button button-primary" id="manager-save" data-i18n="general.save" type="button">Save</button>
+            </div>
+          </div>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong data-i18n="general.closeToTray">Close to tray</strong>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-close-to-tray">
+                  <span class="sr-only" data-i18n="general.closeWorkToTray">Close Work to tray</span>
+                  <input id="settings-close-to-tray" type="checkbox" role="switch" aria-describedby="settings-close-to-tray-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong data-i18n="general.language">Language</strong>
+              </div>
+              <div class="setting-control">
+                <label for="settings-locale">
+                  <span class="sr-only" data-i18n="general.languageLabel">Language</span>
+                  <select id="settings-locale">
+                    <option value="en" data-i18n="locale.english">English</option>
+                    <option value="zh-CN" data-i18n="locale.chinese">中文</option>
+                    <option value="ja-JP" data-i18n="locale.japanese">日本語</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+          <p id="settings-close-to-tray-status" class="sr-only" role="status" aria-live="polite"></p>
         </section>
       </div>
     </main>

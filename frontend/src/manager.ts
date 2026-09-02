@@ -1,5 +1,8 @@
 import {ManagerService} from "../bindings/github.com/local/work/internal/app";
 import {HomeOwnership, type HomeInfo, type LaunchSelection, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import {mountSettings} from "./settings";
+import {applyTheme} from "./theme";
+import {subscribeLocale, t} from "./i18n";
 
 export type ManagerProfileRef = ProfileRef;
 export type ManagerLaunchSelection = LaunchSelection;
@@ -11,6 +14,7 @@ export type ManagerSnapshot = Snapshot;
 export type ManagerPluginResult = PluginResult;
 
 const getSnapshot = ManagerService.GetSnapshot;
+const getTheme = ManagerService.GetTheme;
 const setDesiredSelection = ManagerService.SetDesiredSelection;
 const installPlugin = ManagerService.InstallPlugin;
 const removePlugin = ManagerService.RemovePlugin;
@@ -19,7 +23,7 @@ const removeRuntime = ManagerService.RemoveRuntime;
 const registerHome = ManagerService.RegisterHome;
 const removeHome = ManagerService.RemoveHome;
 
-function managerErrorMessage(error: unknown, fallback: string): string {
+function managerErrorMessage(error: unknown, fallbackKey: string): string {
   let message = "";
   if (error instanceof Error) {
     message = error.message;
@@ -29,14 +33,49 @@ function managerErrorMessage(error: unknown, fallback: string): string {
     message = error.message;
   }
   message = message.replace(/[\r\n]+/g, " ").trim();
-  return message.length > 0 && message.length <= 240 ? message : fallback;
+  return message.length > 0 && message.length <= 240 ? message : t(fallbackKey);
 }
 
-function sectionName(value: string | null): "overview" | "profiles" | "runtimes" | "homes" {
+function homeOwnershipLabel(value: HomeOwnership): string {
+  if (value === HomeOwnership.HomeOwnershipWork) {
+    return "Work";
+  }
+  if (value === HomeOwnership.HomeOwnershipUser) {
+    return t("value.user");
+  }
+  return t("value.other");
+}
+
+function profileKindLabel(value: string): string {
+  if (value === "built-in") {
+    return t("value.builtIn");
+  }
+  if (value === "custom") {
+    return t("value.custom");
+  }
+  return t("value.other");
+}
+
+function runtimeSourceLabel(value: string): string {
+  if (value === "managed") {
+    return t("value.managed");
+  }
+  if (value === "development-fixture") {
+    return t("value.development");
+  }
+  if (value === "system") {
+    return t("value.system");
+  }
+  return t("value.other");
+}
+
+type ManagerSection = "overview" | "profiles" | "runtimes" | "homes" | "settings";
+
+function sectionName(value: string | null): ManagerSection {
   if (value === "plugins") {
     return "profiles";
   }
-  if (value === "profiles" || value === "runtimes" || value === "homes") {
+  if (value === "overview" || value === "profiles" || value === "runtimes" || value === "homes" || value === "settings") {
     return value;
   }
   return "overview";
@@ -48,7 +87,6 @@ export function mountManager() {
   const profile = document.getElementById("manager-profile") as HTMLSelectElement;
   const workspace = document.getElementById("manager-workspace") as HTMLInputElement;
   const save = document.getElementById("manager-save") as HTMLButtonElement;
-  const refreshButton = document.getElementById("manager-refresh") as HTMLButtonElement;
   const packageInput = document.getElementById("manager-plugin-package") as HTMLInputElement;
   const install = document.getElementById("manager-plugin-install") as HTMLButtonElement;
   const remove = document.getElementById("manager-plugin-remove") as HTMLButtonElement;
@@ -62,12 +100,12 @@ export function mountManager() {
   const runtimeVersion = document.getElementById("manager-runtime-version") as HTMLInputElement;
   const installRuntimeButton = document.getElementById("manager-runtime-install") as HTMLButtonElement;
   const feedback = document.getElementById("manager-feedback") as HTMLParagraphElement;
-  const active = document.getElementById("manager-active") as HTMLSpanElement;
+  const managerTitle = document.getElementById("manager-title") as HTMLHeadingElement;
   const selectionRuntime = document.getElementById("manager-selection-runtime") as HTMLElement;
   const selectionHome = document.getElementById("manager-selection-home") as HTMLElement;
   const selectionProfile = document.getElementById("manager-selection-profile") as HTMLElement;
   const selectionWorkspace = document.getElementById("manager-selection-workspace") as HTMLElement;
-  const selectionNote = document.getElementById("manager-selection-note") as HTMLParagraphElement;
+  const selectionState = document.getElementById("manager-selection-state") as HTMLElement;
   const selectedProfileLabel = document.getElementById("manager-selected-profile") as HTMLElement;
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
   const profileList = document.getElementById("manager-profiles") as HTMLDivElement;
@@ -77,14 +115,46 @@ export function mountManager() {
   const panels = Array.from(document.querySelectorAll<HTMLElement>("[data-manager-panel]"));
   let currentSection = sectionName(new URLSearchParams(window.location.search).get("section"));
   let snapshot: ManagerSnapshot | undefined;
+  let themeSyncTimer: number | undefined;
+  let themeSyncAvailable = false;
+
+  const sectionCopy: Record<ManagerSection, {title: string}> = {
+    overview: {title: "manager.overview"},
+    settings: {title: "manager.general"},
+    profiles: {title: "manager.profiles"},
+    runtimes: {title: "manager.runtimes"},
+    homes: {title: "manager.homes"}
+  };
 
   function setFeedback(message: string, tone: "neutral" | "success" | "error" = "neutral") {
     feedback.textContent = message;
     feedback.className = tone === "neutral" ? "manager-feedback" : `manager-feedback is-${tone}`;
+    feedback.hidden = message.length === 0;
   }
 
-  function showSection(next: "overview" | "profiles" | "runtimes" | "homes") {
+  const settings = mountSettings(setFeedback);
+
+  async function syncTheme() {
+    if (!themeSyncAvailable) {
+      return;
+    }
+    try {
+      applyTheme(await getTheme());
+    } catch (error) {
+      console.error("Could not read DSH theme preference", error);
+    }
+  }
+
+  function startThemeSync() {
+    if (themeSyncTimer !== undefined) {
+      return;
+    }
+    themeSyncTimer = window.setInterval(() => void syncTheme(), 1000);
+  }
+
+  function showSection(next: ManagerSection) {
     currentSection = next;
+    managerTitle.textContent = t(sectionCopy[next].title);
     for (const panel of panels) {
       panel.hidden = panel.dataset.managerPanel !== next;
     }
@@ -107,25 +177,25 @@ export function mountManager() {
     const selectedRuntime = (snapshot?.runtimes ?? []).find((item) => item.id === runtime.value);
     const selectedHome = (snapshot?.homes ?? []).find((item) => item.id === home.value);
     selectionRuntime.textContent = selectedRuntime
-      ? `${selectedRuntime.version} · ${selectedRuntime.installed ? "verified" : "not verified"}`
-      : "No runtime selected";
-    selectionHome.textContent = selectedHome ? `${selectedHome.name} · ${selectedHome.ownership}` : "Choose a DSH home";
-    selectionProfile.textContent = profile.value ? `${home.value} / ${profile.value}` : "Choose a profile";
-    selectionWorkspace.textContent = workspace.value || "Workspace path will appear here.";
+      ? `${selectedRuntime.version} · ${t(selectedRuntime.installed ? "value.verified" : "value.unverified")}`
+      : t("value.noRuntime");
+    selectionHome.textContent = selectedHome?.name ?? t("value.noHome");
+    selectionProfile.textContent = profile.value ? `${home.value} / ${profile.value}` : t("value.noProfile");
+    selectionWorkspace.textContent = workspace.value || t("value.noWorkspace");
   }
 
   function renderProfileSelection() {
     const item = selectedProfile();
     if (!item) {
-      selectedProfileLabel.textContent = "Choose a profile above";
-      profileScopeNote.textContent = "Plugin changes are sent to DSH with this profile as the explicit target.";
+      selectedProfileLabel.textContent = t("value.noProfile");
+      profileScopeNote.textContent = t("profiles.choose");
       renderSelectionSummary();
       return;
     }
     selectedProfileLabel.textContent = `${item.ref.homeId} / ${item.ref.name}`;
     profileScopeNote.textContent = item.exists
-      ? "Plugin changes are sent to DSH with this profile as the explicit target."
-      : "This built-in profile will be initialized by DSH on first use.";
+      ? t("value.ready")
+      : t("value.notInitialized");
     renderSelectionSummary();
   }
 
@@ -135,7 +205,7 @@ export function mountManager() {
     if (profiles.length === 0) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = "No profiles in this home";
+      option.textContent = t("profiles.noInHome");
       option.disabled = true;
       option.selected = true;
       profile.append(option);
@@ -145,7 +215,7 @@ export function mountManager() {
     for (const item of profiles) {
       const option = document.createElement("option");
       option.value = item.ref.name;
-      option.textContent = item.exists ? item.ref.name : `${item.ref.name} (created on first use)`;
+      option.textContent = item.exists ? item.ref.name : `${item.ref.name} · ${t("value.new")}`;
       option.disabled = !item.launchable;
       profile.append(option);
     }
@@ -163,14 +233,14 @@ export function mountManager() {
     for (const item of snapshot?.runtimes ?? []) {
       const option = document.createElement("option");
       option.value = item.id;
-      option.textContent = `${item.version}${item.installed ? "" : " (not verified)"}`;
+      option.textContent = `${item.version}${item.installed ? "" : ` · ${t("value.unverified")}`}`;
       runtime.append(option);
     }
     home.replaceChildren();
     for (const item of snapshot?.homes ?? []) {
       const option = document.createElement("option");
       option.value = item.id;
-      option.textContent = `${item.name} · ${item.ownership}`;
+      option.textContent = item.name;
       home.append(option);
     }
     if (desired) {
@@ -186,13 +256,9 @@ export function mountManager() {
     }
     fillProfiles(desired?.profile);
     if (snapshot?.active) {
-      active.textContent = `Active · ${snapshot.active.profile.name}`;
-      active.className = "manager-state ready";
-      selectionNote.textContent = "The active DSH Worker is using its current target. Save changes, then restart DSH to apply a new target.";
+      selectionState.textContent = t("value.activeRestart");
     } else {
-      active.textContent = "Not running";
-      active.className = "manager-state";
-      selectionNote.textContent = "Selection changes apply to the next DSH Worker generation.";
+      selectionState.textContent = t("value.saved");
     }
     renderSelectionSummary();
   }
@@ -211,7 +277,7 @@ export function mountManager() {
     if (profiles.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
-      empty.textContent = "No profiles found in the configured DSH homes.";
+      empty.textContent = t("profiles.noProfiles");
       profileList.append(empty);
       return;
     }
@@ -224,12 +290,18 @@ export function mountManager() {
       name.textContent = `${item.ref.homeId} / ${item.ref.name}`;
       const detail = document.createElement("span");
       const pluginNames = (item.plugins ?? []).map((plugin) => plugin.name).join(", ");
-      detail.textContent = `${item.kind} · ${item.pluginCount} plugin${item.pluginCount === 1 ? "" : "s"}${pluginNames ? ` · ${pluginNames}` : ""}${item.exists ? "" : " · initialized by DSH on first use"}`;
+      detail.textContent = t("profiles.pluginDetail", {
+        kind: profileKindLabel(item.kind),
+        count: item.pluginCount,
+        plural: item.pluginCount === 1 ? "" : "s",
+        plugins: pluginNames ? ` · ${pluginNames}` : "",
+        state: item.exists ? "" : ` · ${t("value.new")}`
+      });
       text.append(name, detail);
       const choose = document.createElement("button");
       choose.className = "button button-secondary";
       choose.type = "button";
-      choose.textContent = selected ? "Selected" : "Use profile";
+      choose.textContent = t(selected ? "action.selected" : "action.select");
       choose.disabled = selected;
       choose.addEventListener("click", () => selectProfile(item.ref));
       row.append(text, choose);
@@ -243,7 +315,7 @@ export function mountManager() {
     if (runtimes.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
-      empty.textContent = "No DSH runtimes are in the catalog.";
+      empty.textContent = t("runtimes.noRuntimes");
       runtimeList.append(empty);
       return;
     }
@@ -253,27 +325,27 @@ export function mountManager() {
       row.className = `manager-list-item${selected ? " is-selected" : ""}`;
       const text = document.createElement("div");
       const name = document.createElement("strong");
-      name.textContent = `${item.version}${selected ? " · selected" : ""}`;
+      name.textContent = `${item.version}${selected ? ` · ${t("action.selected")}` : ""}`;
       const detail = document.createElement("span");
-      detail.textContent = `${item.source} · ${item.installed ? "verified" : "verify before launch"} · ${item.path}`;
+      detail.textContent = `${runtimeSourceLabel(item.source)} · ${t(item.installed ? "value.verified" : "value.unverified")} · ${item.path}`;
       text.append(name, detail);
       row.append(text);
       if (item.removable) {
         const removeButton = document.createElement("button");
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
-        removeButton.textContent = "Remove";
+        removeButton.textContent = t("action.remove");
         removeButton.addEventListener("click", () => void (async () => {
           removeButton.disabled = true;
           try {
             snapshot = await removeRuntime(item.id);
-            setFeedback(`Removed runtime ${item.version} from the catalog. Its files are retained for now.`, "success");
+            setFeedback(t("feedback.removedRuntime", {version: item.version}), "success");
             renderSelection();
             renderProfiles();
             renderRuntimes();
             renderHomes();
           } catch (error) {
-            setFeedback(managerErrorMessage(error, "The runtime could not be removed while it is selected or in use."), "error");
+            setFeedback(managerErrorMessage(error, "error.removeRuntime"), "error");
             console.error("Could not remove DSH runtime", error);
           } finally {
             removeButton.disabled = false;
@@ -291,7 +363,7 @@ export function mountManager() {
     if (homes.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
-      empty.textContent = "No DSH homes are registered.";
+      empty.textContent = t("homes.noHomes");
       homeList.append(empty);
       return;
     }
@@ -301,27 +373,27 @@ export function mountManager() {
       row.className = `manager-list-item${selected ? " is-selected" : ""}`;
       const text = document.createElement("div");
       const name = document.createElement("strong");
-      name.textContent = `${item.name}${selected ? " · selected" : ""}`;
+      name.textContent = `${item.name}${selected ? ` · ${t("action.selected")}` : ""}`;
       const detail = document.createElement("span");
-      detail.textContent = `${item.ownership} · ${item.path}`;
+      detail.textContent = `${homeOwnershipLabel(item.ownership)} · ${item.path}`;
       text.append(name, detail);
       row.append(text);
       if (item.ownership === HomeOwnership.HomeOwnershipUser) {
         const removeButton = document.createElement("button");
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
-        removeButton.textContent = "Unregister";
+        removeButton.textContent = t("action.unregister");
         removeButton.addEventListener("click", () => void (async () => {
           removeButton.disabled = true;
           try {
             snapshot = await removeHome(item.id);
-            setFeedback(`Unregistered ${item.name}. Home files were not changed.`, "success");
+            setFeedback(t("feedback.unregisteredHome", {name: item.name}), "success");
             renderSelection();
             renderProfiles();
             renderRuntimes();
             renderHomes();
           } catch (error) {
-            setFeedback(managerErrorMessage(error, "The DSH home could not be unregistered while it is selected or in use."), "error");
+            setFeedback(managerErrorMessage(error, "error.unregisterHome"), "error");
             console.error("Could not unregister DSH home", error);
           } finally {
             removeButton.disabled = false;
@@ -334,27 +406,35 @@ export function mountManager() {
   }
 
   async function refresh() {
-    refreshButton.disabled = true;
+    setFeedback("");
     try {
       snapshot = await getSnapshot();
+      applyTheme(snapshot.theme);
       renderSelection();
       renderProfiles();
       renderRuntimes();
       renderHomes();
       showSection(currentSection);
-      setFeedback("Catalog refreshed.");
+      themeSyncAvailable = true;
+      startThemeSync();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "The manager could not load its catalog."), "error");
+      setFeedback(managerErrorMessage(error, "error.loadDshData"), "error");
       console.error("Could not read DSH manager snapshot", error);
-    } finally {
-      refreshButton.disabled = false;
     }
+    await settings.refresh();
   }
 
   for (const item of navItems) {
     item.addEventListener("click", () => showSection(sectionName(item.dataset.managerSection ?? null)));
   }
   showSection(currentSection);
+  subscribeLocale(() => {
+    showSection(currentSection);
+    renderSelection();
+    renderProfiles();
+    renderRuntimes();
+    renderHomes();
+  });
 
   home.addEventListener("change", () => {
     fillProfiles();
@@ -366,11 +446,16 @@ export function mountManager() {
     renderProfiles();
   });
   workspace.addEventListener("input", renderSelectionSummary);
-  refreshButton.addEventListener("click", () => void refresh());
+  window.addEventListener("focus", () => void syncTheme());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void syncTheme();
+    }
+  });
 
   save.addEventListener("click", () => void (async () => {
     if (!runtime.value || !home.value || !profile.value) {
-      setFeedback("Choose a runtime, DSH home and profile before saving.", "error");
+      setFeedback(t("error.selectLaunchTarget"), "error");
       return;
     }
     save.disabled = true;
@@ -380,13 +465,14 @@ export function mountManager() {
         profile: {homeId: home.value, name: profile.value},
         workspace: workspace.value
       });
-      setFeedback(snapshot.active ? "Saved. Restart DSH to apply this selection." : "Saved. Work will use this selection on the next start.", "success");
+      applyTheme(snapshot.theme);
+      setFeedback(snapshot.active ? t("feedback.savedRestart") : t("feedback.savedNextStart"), "success");
       renderSelection();
       renderProfiles();
       renderRuntimes();
       renderHomes();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "The selection was rejected. Choose an existing runtime and profile."), "error");
+      setFeedback(managerErrorMessage(error, "error.saveLaunchTarget"), "error");
       console.error("Could not save DSH launch selection", error);
     } finally {
       save.disabled = false;
@@ -395,7 +481,7 @@ export function mountManager() {
 
   function explicitPluginTarget() {
     if (!runtime.value || !home.value || !profile.value) {
-      throw new Error("an explicit runtime, home and profile are required");
+      throw new Error(t("error.selectPluginTarget"));
     }
     return {runtimeId: runtime.value, profile: {homeId: home.value, name: profile.value}};
   }
@@ -403,7 +489,7 @@ export function mountManager() {
   async function mutatePlugin(operation: "install" | "remove") {
     const packageSpec = packageInput.value.trim();
     if (!packageSpec) {
-      setFeedback("Enter a package name before changing plugins.", "error");
+      setFeedback(t("error.enterPackage"), "error");
       packageInput.focus();
       return;
     }
@@ -416,10 +502,10 @@ export function mountManager() {
         : await removePlugin({target, package: packageSpec});
       await refresh();
       setFeedback(result.restartRequired
-        ? "Plugin changed in the active profile. Restart DSH to apply it."
-        : `Plugin ${operation === "install" ? "installed" : "removed"} in ${result.profile.name}.`, "success");
+        ? t("feedback.pluginChangedRestart")
+        : t(operation === "install" ? "feedback.pluginInstalled" : "feedback.pluginRemoved", {profile: result.profile.name}), "success");
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "The profile plugin operation was rejected by DSH."), "error");
+      setFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
       console.error("Could not change profile plugin", error);
     } finally {
       install.disabled = false;
@@ -432,7 +518,7 @@ export function mountManager() {
 
   registerHomeButton.addEventListener("click", () => void (async () => {
     if (!newHomeId.value.trim() || !newHomeName.value.trim() || !newHomePath.value.trim()) {
-      setFeedback("Enter a home id, display name and existing DSH home path.", "error");
+      setFeedback(t("error.completeHome"), "error");
       return;
     }
     registerHomeButton.disabled = true;
@@ -443,7 +529,7 @@ export function mountManager() {
         path: newHomePath.value.trim(),
         ownership: HomeOwnership.HomeOwnershipUser
       });
-      setFeedback(`Registered DSH home ${newHomeId.value.trim()}.`, "success");
+      setFeedback(t("feedback.registeredHome", {id: newHomeId.value.trim()}), "success");
       newHomePath.value = "";
       newHomeId.value = "";
       newHomeName.value = "";
@@ -452,7 +538,7 @@ export function mountManager() {
       renderRuntimes();
       renderHomes();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "The DSH home could not be registered."), "error");
+      setFeedback(managerErrorMessage(error, "error.registerHome"), "error");
       console.error("Could not register DSH home", error);
     } finally {
       registerHomeButton.disabled = false;
@@ -463,7 +549,7 @@ export function mountManager() {
     const name = newProfile.value.trim();
     const packageSpec = newProfilePackage.value.trim();
     if (!runtime.value || !home.value || !name || !packageSpec) {
-      setFeedback("Choose a runtime and home, then enter a profile name and initial plugin package.", "error");
+      setFeedback(t("error.createProfileFields"), "error");
       return;
     }
     createProfile.disabled = true;
@@ -475,12 +561,12 @@ export function mountManager() {
       await refresh();
       selectProfile({homeId: home.value, name});
       setFeedback(result.restartRequired
-        ? "Profile created in the active selection. Restart DSH to apply it."
-        : `Profile ${name} created through DSH.`, "success");
+        ? t("feedback.profileCreatedRestart")
+        : t("feedback.profileCreated"), "success");
       newProfile.value = "";
       newProfilePackage.value = "";
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "DSH could not create the profile with that plugin package."), "error");
+      setFeedback(managerErrorMessage(error, "error.createProfile"), "error");
       console.error("Could not create DSH profile", error);
     } finally {
       createProfile.disabled = false;
@@ -490,20 +576,20 @@ export function mountManager() {
   installRuntimeButton.addEventListener("click", () => void (async () => {
     const version = runtimeVersion.value.trim();
     if (!version) {
-      setFeedback("Enter a DSH version before installing a runtime.", "error");
+      setFeedback(t("error.enterVersion"), "error");
       return;
     }
     installRuntimeButton.disabled = true;
     try {
       snapshot = await installRuntime(version);
-      setFeedback(`Installed DSH ${version}. Select it for the next Worker generation.`, "success");
+      setFeedback(t("feedback.installedRuntime", {version}), "success");
       runtimeVersion.value = "";
       renderSelection();
       renderProfiles();
       renderRuntimes();
       renderHomes();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "The DSH runtime installation failed or is unavailable on this platform."), "error");
+      setFeedback(managerErrorMessage(error, "error.installRuntime"), "error");
       console.error("Could not install DSH runtime", error);
     } finally {
       installRuntimeButton.disabled = false;

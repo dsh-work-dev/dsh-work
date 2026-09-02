@@ -70,16 +70,17 @@ Work must not duplicate those profile or plugin semantics.
    for that Worker generation. Its generated overlay is Work-owned and
    disposable, but it is not a global runtime plugin and must not alter other
    profiles.
-9. Runtime, DSH home, profile and plugin management is presented in a second
-   trusted Manager window. The DSH Workspace window only loads the external
-   DSH Web UI through the Worker gateway. The two windows share the Host
-   process and manager state, but never share a WebView document or inject
-   Host management markup into DSH content.
-10. The DSH Workspace window receives a native DSH menu through the Wails
-    window/application menu seam. Its commands may open or focus the Manager
-    window, show the current launch selection, request a restart or open
-    profile-scoped plugin management. These commands are handled by the Host;
-    they are not JavaScript inserted into the DSH page.
+9. Runtime, DSH home, profile and plugin management is presented in a flat,
+   shallow rail inside a second trusted Settings window. `Overview` is first
+   and read-only; one top-level `General` page owns launch target and close
+   policy; resource pages own profiles/plugins, runtimes and homes. The DSH
+   Workspace window only loads the external DSH Web UI through the Worker
+   gateway. The two windows share the Host process and manager state, but never
+   share a WebView document or inject Host management markup into DSH content.
+10. The native application menu contains only `Settings` and `Help`; `Help`
+    contains update-check and About commands. Workspace lifecycle actions stay
+    in the system tray. These commands are handled by the Host and are not
+    JavaScript inserted into the DSH page.
 11. Every plugin management command requires an explicit `ProfileRef`
     consisting of a DSH home identity and profile name. The menu may prefill
     the active profile, but the backend never infers a profile from a missing
@@ -87,10 +88,10 @@ Work must not duplicate those profile or plugin semantics.
     report `restartRequired` when they target the active profile; the running
     Worker is not hot-reloaded and the user must explicitly restart it before
     the changed profile composition is used.
-12. The Manager window is created lazily and reused as one application-level
-    management surface. Closing it hides the window without stopping DSH;
-    application quit still cancels management operations and cleans the DSH
-    Worker before the Host exits.
+12. The Settings window is created lazily and reused as one application-level
+    settings and DSH management surface. Closing it hides the window without
+    stopping DSH; application quit still cancels management operations and
+    cleans the DSH Worker before the Host exits.
 
 ## Consequences
 
@@ -101,8 +102,9 @@ Positive:
 - DSH remains the source of truth for profile and plugin composition.
 - Plugin enablement and configuration stay isolated per profile while one
   package can be reused physically by a package manager.
-- Management UI cannot contaminate the DSH Web UI, while the Workspace window
-  still has a discoverable native DSH menu.
+- Management UI cannot contaminate the DSH Web UI, while Settings and Help
+  remain discoverable from the native application menu and lifecycle actions
+  remain available from the tray.
 - Package-manager side effects are explicit and kept out of GUI startup.
 - Runtime resolution is testable independently of Wails and platform process
   supervision.

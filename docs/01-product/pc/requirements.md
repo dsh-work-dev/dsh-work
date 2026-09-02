@@ -8,7 +8,7 @@ Status: normative specification for the first PC release.
 |---|---|
 | FR-LIFE-001 | Work MUST enforce one active desktop instance per user session and focus the existing instance when launched again. |
 | FR-LIFE-002 | Work MUST expose `Starting`, `Ready`, `Busy`, `Waiting for approval`, `Stopping`, `Failed` and `Safe mode` as explicit user-visible states. |
-| FR-LIFE-003 | Closing the main window MUST hide it to the tray; choosing `Quit` MUST perform a full managed shutdown. |
+| FR-LIFE-003 | Work MUST apply the persisted close policy to every Work window. The default `closeToTray=true` hides a closed window and keeps Work available from the tray when no windows remain; when disabled, closing the last visible window MUST perform a full managed shutdown. Explicit `Quit DSH Work` MUST always perform a full managed shutdown. |
 | FR-LIFE-004 | Work MUST remain operable enough to show diagnostics and recovery actions when the Worker fails. |
 | FR-LIFE-005 | Every startup and shutdown attempt MUST reach a terminal success or failure state; indefinite spinners are not allowed. |
 
@@ -35,9 +35,26 @@ Status: normative specification for the first PC release.
 | FR-MGR-002 | `dsh-work` and the Manager service MUST maintain a versioned catalog that can contain multiple DSH runtimes, while normal Work startup MUST NOT download or reconcile runtime packages. |
 | FR-MGR-003 | Every launch selection MUST identify exactly one DSH runtime, DSH home, profile and workspace; a profile name without its home identity MUST be rejected. |
 | FR-MGR-004 | A DSH profile MUST own its plugin associations. Plugin list, install and removal operations MUST require an explicit profile reference and MUST delegate composition to the selected DSH runtime's supported CLI. |
-| FR-MGR-005 | Runtime, DSH home, profile and plugin management MUST be available in a separate trusted Manager window without an application menu; the DSH Workspace window MUST expose only native DSH menu commands for opening or focusing that surface, restarting DSH and quitting Work. |
+| FR-MGR-005 | Runtime, DSH home, profile and plugin management MUST live inside a separate trusted Work Settings window. Its rail MUST be flat and shallow, with `Overview` first and read-only, one top-level `General` page for Work preferences, one top-level `Notifications` page for desktop-notification preferences, and separate resource pages for profiles/plugins, runtimes and homes. The application menu MUST expose `Settings` and `Help`; `Help` MUST contain `Check for Updates…` and `About Work`. |
 | FR-MGR-006 | Work-owned DSH homes may be created by Work; user-owned DSH homes MUST be registered from an existing directory and MUST NOT be silently created, relocated or deleted by Work. |
 | FR-MGR-007 | Runtime or home removal MUST be rejected while selected or active, and the Manager UI/CLI MUST state whether removal unregisters catalog metadata or removes files; user-owned DSH data MUST never be silently deleted. |
+| FR-MGR-008 | Work appearance MUST read the selected DSH home's `ui-theme.preference`; `light`, `dark` and `system` MUST resolve consistently across trusted Work surfaces, including when the preference changes while both windows are open. Work MUST NOT expose or persist a second appearance preference. |
+| FR-MGR-009 | Work MUST provide English, Simplified Chinese and Japanese UI copy through one persisted language preference. Changing the preference in Settings MUST update the trusted Work surfaces, native menu and tray without restarting DSH. |
+
+## Notifications
+
+| ID | Requirement |
+|---|---|
+| FR-NOT-001 | Work MUST provide desktop-notification preferences in the first notification implementation, in a flat top-level `Notifications` Settings route. |
+| FR-NOT-002 | Work MUST persist the global desktop-notification switch and the `completed`, `interactionRequired`, `errors` and `lifecycle` class switches in the versioned Work settings document. |
+| FR-NOT-003 | Missing notification preferences MUST use the safe defaults: global, completed, interaction-required and errors enabled; lifecycle disabled. Invalid notification values MUST fail closed to those defaults without discarding the rest of the settings document. |
+| FR-NOT-004 | Work MUST evaluate the global switch and then the matching class switch before every desktop delivery; a disabled Work preference MUST NOT hide a DSH in-page notice. |
+| FR-NOT-005 | Work MUST suppress completion and routine lifecycle desktop notifications while the Workspace is the active surface, and MUST make eligible enabled events available when the Workspace is hidden or unfocused. |
+| FR-NOT-006 | One logical DSH or Work notification event MUST produce at most one desktop delivery per Work session, using a stable event identity or a bounded deduplication key. |
+| FR-NOT-007 | DSH notification events MUST enter Work through a structured, versioned bridge carrying event class, source context, identity and a verified focus target when available; DOM scraping, arbitrary log parsing and gateway presentation parsing MUST NOT be the contract. |
+| FR-NOT-008 | Notification clicks MUST focus the Workspace or a verified target and MUST NOT approve, deny or execute a DSH operation. |
+| FR-NOT-009 | Desktop notification copy MUST be bounded, localised and redacted; raw process output, credentials, tokens, cookies, stack traces and unbounded agent text MUST NOT be placed in a desktop notification. |
+| FR-NOT-010 | Work MUST apply notification preference changes immediately across both trusted Work windows without restarting DSH, and Work-owned notification copy MUST support English, Simplified Chinese and Japanese. |
 
 ## Embedded content and navigation
 
@@ -89,6 +106,7 @@ Status: normative specification for the first PC release.
 | FR-REC-003 | Diagnostic export MUST support preview, redaction and an explicit local destination. |
 | FR-REC-004 | Error displays MUST include a stable code, summary, likely cause and next action. |
 | FR-REC-005 | Work MUST preserve the original configuration until a recovery change has been confirmed successful. |
+| FR-REC-006 | The startup surface MUST show bounded, redacted DSH stdout/stderr for the active or last startup attempt and MUST provide a local copy action. |
 
 ## Quality requirements
 
@@ -103,6 +121,8 @@ Status: normative specification for the first PC release.
 | NFR-MNT-001 | Platform, DSH and browser dependencies MUST be isolated behind interfaces with contract tests. |
 | NFR-MNT-002 | Public interfaces and persisted schemas MUST be versioned before the first stable release. |
 | NFR-PORT-001 | A PC release candidate MUST pass lifecycle, WebView, credential-store and packaging tests on every declared Windows, macOS and Linux target. |
+| NFR-NOT-001 | Desktop notification delivery MUST be isolated behind a platform-neutral Work interface and separate native adapters for the declared desktop targets. |
+| NFR-NOT-002 | Notification delivery failure MUST remain bounded and MUST NOT change the source DSH or Work event outcome. |
 
 ## Requirement changes
 

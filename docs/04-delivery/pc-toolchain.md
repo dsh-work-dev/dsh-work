@@ -44,7 +44,7 @@ On Windows the locked local install is invoked through the checked-in
 `tools/dsh/run-dsh.cmd` launcher, which calls the installed DSH entry module
 directly and avoids package-manager shim behavior at runtime.
 
-The Manager window and `dsh-work` CLI share the same catalog. Plugin changes
+The Settings window's DSH manager and `dsh-work` CLI share the same catalog. Plugin changes
 are delegated to `dsh plugin --profile <name> ...` with an explicit DSH home
 identity; Work does not configure or relocate npm/pnpm stores.
 

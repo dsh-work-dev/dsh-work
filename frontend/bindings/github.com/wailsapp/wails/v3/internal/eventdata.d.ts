@@ -8,11 +8,15 @@ import type { Events } from "@wailsio/runtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import type * as lifecycle$0 from "../../../../local/work/internal/lifecycle/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import type * as settings$0 from "../../../../local/work/internal/settings/models.js";
 
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "lifecycle": lifecycle$0.Status;
+            "locale": settings$0.Locale;
         }
     }
 }

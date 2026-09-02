@@ -35,6 +35,8 @@ export enum ErrorCode {
     ErrorRuntimeProfileIncompatible = "RUNTIME_PROFILE_INCOMPATIBLE",
     ErrorManagerOperationBusy = "MANAGER_OPERATION_BUSY",
     ErrorManagerStateInvalid = "MANAGER_STATE_INVALID",
+    ErrorSettingsStateInvalid = "SETTINGS_STATE_INVALID",
+    ErrorSettingsUnavailable = "SETTINGS_UNAVAILABLE",
     ErrorRestartRequired = "RESTART_REQUIRED",
     ErrorPluginSpecInvalid = "PLUGIN_SPEC_INVALID",
     ErrorPluginCommandUnavailable = "PLUGIN_COMMAND_UNAVAILABLE",

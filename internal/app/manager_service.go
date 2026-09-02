@@ -9,10 +9,10 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// ManagerService is the trusted Manager-window binding. It exposes catalog,
-// selection, runtime/home and profile-plugin operations; profile composition
-// and plugin mutation still go through DSH's public CLI seam, never direct
-// file edits.
+// ManagerService is the trusted Settings-window binding for the nested DSH
+// manager. It exposes catalog, selection, runtime/home and profile-plugin
+// operations; profile composition and plugin mutation still go through DSH's
+// public CLI seam, never direct file edits.
 type ManagerService struct {
 	manager *dshmanager.Manager
 }
@@ -27,20 +27,36 @@ func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, 
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
 	return s.manager.Snapshot(ctx)
 }
 
+// GetTheme reads the selected DSH home's appearance preference. Settings uses
+// it while both trusted windows are open so its surface follows changes made
+// by DSH.
+func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
+	if s == nil || s.manager == nil || !isTrustedWindow(ctx, "settings") {
+		return dshmanager.ThemePreferenceSystem
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	theme, err := s.manager.Theme(ctx)
+	if err != nil || !theme.Valid() {
+		return dshmanager.ThemePreferenceSystem
+	}
+	return theme
+}
+
 func (s *ManagerService) SetDesiredSelection(ctx context.Context, selection dshmanager.LaunchSelection) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -51,8 +67,8 @@ func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (ds
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -63,8 +79,8 @@ func (s *ManagerService) RemoveRuntime(ctx context.Context, id string) (dshmanag
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -75,8 +91,8 @@ func (s *ManagerService) RegisterHome(ctx context.Context, home dshmanager.HomeI
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -87,8 +103,8 @@ func (s *ManagerService) RemoveHome(ctx context.Context, id string) (dshmanager.
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -99,8 +115,8 @@ func (s *ManagerService) ResolveLaunch(ctx context.Context, request dshmanager.L
 	if s == nil || s.manager == nil {
 		return dshmanager.ResolvedLaunch{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.ResolvedLaunch{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.ResolvedLaunch{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -111,8 +127,8 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	if s == nil || s.manager == nil {
 		return nil, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return nil, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return nil, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -123,8 +139,8 @@ func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -135,8 +151,8 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "manager") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("Manager controls are available only in the Manager window.")
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -170,7 +186,7 @@ func trustedSurfaceRequired(detail string) error {
 func managerUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerStateInvalid,
-		Summary:       "The Work manager is unavailable.",
+		Summary:       "The DSH manager in Work Settings is unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Restart Work and try again.",

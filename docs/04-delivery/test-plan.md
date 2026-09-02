@@ -79,6 +79,18 @@ The fixture matrix includes clean and signed-in Chrome／Edge／Chromium profile
 - DSH call ID correlation and UI-close semantics;
 - audit failure behaviour.
 
+### Notifications
+
+- default and invalid preference migration;
+- global and per-class filtering;
+- immediate preference changes while both trusted windows are open;
+- foreground/background routing;
+- duplicate and reconnect event suppression;
+- verified target focus without operation execution;
+- DSH in-page notice preservation;
+- locale projection and bounded redaction;
+- native delivery failure containment on each desktop target.
+
 ### Browser
 
 - Chrome auto-connect enable, approval, reconnect and disconnect on Windows, macOS and Linux;

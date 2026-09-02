@@ -44,9 +44,11 @@ reliably. The selection seam does not require the Host to embed or install DSH.
 
 Deliver:
 
-- single-instance, window, tray, open, close and quit behaviour;
-- separate trusted Manager and external DSH Workspace windows, with a native
-  Work function menu on the Workspace window;
+- single-instance, window, tray, open, close and quit behaviour, including the
+  persisted default close-to-tray policy and explicit full quit;
+- separate trusted Settings and external DSH Workspace windows, with a native
+  application menu containing Settings and Help, plus nested DSH management
+  inside the Settings window;
 - complete Host lifecycle state machine with generation IDs;
 - bounded startup, shutdown, cancellation and retry;
 - structured logging, redaction and correlation IDs;
@@ -55,6 +57,8 @@ Deliver:
 - graceful and forced cleanup;
 - stable startup and process error mapping;
 - minimum startup, failure and accessibility surfaces;
+- versioned Work notification preferences and native desktop delivery for Work
+  lifecycle and error events;
 - DSH-aligned visual convergence after the real first-run path is stable.
 
 Exit gate: on Windows, Work starts the pinned DSH Web profile from a clean environment, handles all defined fixture failure modes, and leaves no managed descendants after normal or forced Host exit; lifecycle tests reject stale generations and duplicate terminal results. The shared Interface contains no Windows-only types, and the documented macOS and Linux Implementations can satisfy it without changing callers.
@@ -69,9 +73,11 @@ Deliver:
 - exhaustive Work Tool `allow`／`ask`／`deny` classifier;
 - DSH official one-shot approval integration without a duplicate Host prompt;
 - browser-connection grant and Host hard-policy state;
-- correlated DSH approval and Host execution events with redaction.
+- correlated DSH approval and Host execution events with redaction;
+- structured DSH notification event bridge for action-required, completed,
+  error and lifecycle events, with preference-aware desktop routing;
 
-Exit gate: on Windows, every Work Tool variant has a deterministic classifier result; high-impact calls execute only after DSH `allowed-once`, while altered, replayed, unclassified and stale-generation requests are rejected. The wire and policy contracts remain platform-neutral.
+Exit gate: on Windows, every Work Tool variant has a deterministic classifier result; high-impact calls execute only after DSH `allowed-once`, while altered, replayed, unclassified and stale-generation requests are rejected. Notification fixtures prove preference filtering, foreground/background routing, deduplication and safe focus actions. The wire and policy contracts remain platform-neutral.
 
 ## M4 — User-browser vertical slice
 

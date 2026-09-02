@@ -4,7 +4,8 @@
 export {
     HomeOwnership,
     ProfileKind,
-    RuntimeSource
+    RuntimeSource,
+    ThemePreference
 } from "./models.js";
 
 export type {

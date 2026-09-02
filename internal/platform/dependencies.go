@@ -2,6 +2,7 @@ package platform
 
 import (
 	"github.com/local/work/internal/dshadapter"
+	"github.com/local/work/internal/settings"
 	"github.com/local/work/internal/supervisor"
 )
 
@@ -11,6 +12,7 @@ import (
 type Dependencies struct {
 	Supervisor      supervisor.Adapter
 	CommandExecutor dshadapter.CommandExecutor
+	FileReplacer    settings.FileReplacer
 	Err             error
 }
 

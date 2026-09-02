@@ -4,14 +4,16 @@ Status: normative UI guidance for the first PC release. This document defines th
 
 ## Design direction
 
-Work is a **restrained, desktop-native and information-clear AI workspace**.
+Work is a **quiet, desktop-native and information-clear local control plane**.
 
-- **Restrained:** the shell supports the work instead of competing with it. Colour, elevation and motion communicate meaning rather than decoration.
+- **Quiet:** the shell supports the work instead of competing with it. Colour, elevation and motion communicate meaning rather than decoration.
 - **Desktop-native:** the application respects operating-system window, menu, focus, shortcut and notification conventions.
 - **Information-clear:** current state, required action and safe next step are visually obvious without exposing unnecessary technical detail.
-- **AI workspace:** streaming activity, Tool calls, approvals, browser attachment and task progress are first-class interface patterns rather than generic chat decoration.
+- **Control plane:** runtime, home, profile, permission, recovery and task state are organised as inspectable resources and named steps.
 
-The DSH workspace is the visual subject. Work-owned chrome is quiet, stable and recognisable. The product must not look like a traditional IDE, a web administration dashboard or a game launcher.
+The DSH workspace is the visual subject when it is available. Work-owned chrome is quiet, stable and recognisable. The product must not look like a traditional IDE, a web administration dashboard, a marketing landing page or a game launcher.
+
+The visual system is a synthesis of platform conventions, adjacent local-tool workflows and the Haystack admin-settings reference, not a copy of one reference image. It uses a neutral utility surface, restrained ink emphasis and explicit ownership/state cues. It MUST avoid gradient backgrounds, glass effects, glow, oversized display typography, all-caps microcopy, decorative metric tiles, pill-shaped labels and persistent shadows.
 
 ## Scope
 
@@ -72,6 +74,13 @@ The screen map is maintained in [information architecture](information-architect
 
 Exact measurements belong to theme tokens and validated screen specifications. Feature code MUST NOT invent local spacing values.
 
+For the Settings manager, the rail is a 240px navigation surface and the main
+area is one continuous work surface with a 1040px content maximum. The reading
+order remains one column; only related short form fields may share a two-column
+row. Long paths and workspace values span the content width. At 760px and
+below, forms collapse to one column and the rail becomes a horizontally
+scrollable, shallow navigation row.
+
 ## Colour system
 
 Colour is semantic and theme-driven. At minimum, themes define these roles:
@@ -85,7 +94,8 @@ Colour is semantic and theme-driven. At minimum, themes define these roles:
 | `text-primary` | main content and labels |
 | `text-secondary` | supporting information |
 | `text-disabled` | unavailable content that remains legible |
-| `accent` | selected state and primary action |
+| `action` | primary action and strong interactive emphasis |
+| `selection` | selected row or navigation destination |
 | `info` | neutral operational information |
 | `success` | verified completion or healthy state |
 | `warning` | attention needed without immediate failure |
@@ -96,12 +106,36 @@ Rules:
 
 - Semantic roles MUST be used instead of raw colour names in feature code.
 - Status MUST NOT rely on colour alone; pair it with text, icon shape or structure.
-- Accent colour is reserved for selection, focus and the primary action. It is not general decoration.
+- Blue is not a Work brand or interaction colour. Selection uses a neutral surface change, text weight and alignment; primary actions use an ink control with a clear verb; focus uses a neutral high-contrast outline.
+- Selection, focus and action emphasis MUST remain distinguishable without a coloured left rail or a coloured accent line.
 - Danger colour MUST NOT be used for ordinary cancellation or neutral close actions unless data or external state is at risk.
 - Light and dark themes preserve hierarchy and contrast rather than mechanically invert values.
 - Embedded DSH content may have its own theme, but Work chrome and ownership cues must remain recognisable in both themes.
 
-Specific palette values are selected and locked only with a reviewed visual reference. Until then, the semantic roles are the contract.
+The initial Settings window, startup surface and nested DSH manager use the
+quiet local control-plane direction: a stable navigation rail, one continuous
+work surface, flat structural borders and resource rows. Haystack contributes
+the pale surrounding field, quiet white work surface, raised active navigation
+segment and restrained black action; the second-pass Dribbble and Pinterest
+references reinforce the left-label/right-control rows, two-column short forms,
+single-focus pages and restrained group spacing. Microsoft, Apple, GNOME, VS
+Code, Toolbox, Docker and Podman contribute the shallow navigation and
+resource-management patterns. None is copied literally. Both themes preserve
+hierarchy without mechanically inverting values. The dark implementation uses `canvas #1F252C`,
+`navigation #1B2026`, `surface #252C34`, `surface-soft #20262D`,
+`border #3A444E`, `text-primary #F1F4F7`, `text-secondary #9CA7B2`,
+`action #E4E8EB` and `selection #303840`; the light implementation uses
+`canvas #F4F6F8`, `navigation #EEF1F4`, `surface #FFFFFF`,
+`surface-soft #F8FAFB`, `border #D9DFE5`, `text-primary #1F2933`,
+`text-secondary #5D6B78`, `action #1F252C` and `selection #E7EAED`.
+These values are implementation tokens, not permission to use raw colours in
+feature code; new surfaces must still map to the semantic roles above. The
+source observations and rejection criteria are maintained in
+[PC manager style research](../../../.research/pc-manager-style-research.md).
+
+DSH owns the appearance preference. Work reads `ui-theme.preference` from the
+selected DSH home, resolves `system` through the operating system and does not
+display or persist a second Work appearance setting.
 
 ## Typography
 
@@ -116,13 +150,23 @@ Specific palette values are selected and locked only with a reviewed visual refe
 
 Font families, sizes, weights and line heights are theme tokens. Individual screens consume semantic text roles.
 
+## UI copy
+
+- User-facing copy describes only the action, state, result or decision the user needs.
+- Agent guidance, implementation instructions, product rules, architecture constraints, acceptance criteria and internal notes belong in project documentation, not in the product UI.
+- Prefer concise labels and one short sentence when context is needed; remove repeated explanations.
+- In Settings, show the page title once; add a local heading only when it names a distinct collection or task. A field label names the value, and an action uses the shortest unambiguous verb in its local context.
+- Translate internal enum values into human-readable state labels before rendering them. Do not expose storage names, ownership constants or fixture names as UI copy.
+
 ## Surfaces, borders and elevation
 
 - Prefer flat, aligned surfaces with subtle structural separation.
 - Use borders for persistent relationships and elevation for transient overlap.
+- Do not use a coloured left border to mark the active navigation item, current
+  startup step or selected resource. Use a neutral fill, weight and text state.
 - A raised surface MUST correspond to a real interaction layer such as a menu, popover or dialog.
-- Avoid cards nested inside cards and shadows on every container.
-- Corner radius follows one small semantic scale for controls, containers and overlays.
+- Avoid cards nested inside cards, shadows on persistent containers and badge-like pills used as decoration.
+- Corner radius follows one small semantic scale for controls, containers and overlays; switches may use a fully rounded track because it is a known control convention.
 - The same kind of surface uses the same border and elevation treatment across the application.
 - Focus indication is independent of border styling and remains visible against every supported surface.
 
@@ -157,6 +201,20 @@ Every shared control defines default, hover, pressed, focused, selected, disable
 - Popovers provide short contextual interaction and close without losing work.
 - Dialogs are reserved for blocking decisions or focused tasks that cannot safely remain inline.
 - Focus enters a trusted dialog and returns to its invoker when the dialog closes.
+
+### Notifications
+
+- Treat desktop notifications as a background companion to the DSH workspace,
+  not as a second conversation surface.
+- Use the operating system's notification language for native delivery. Any
+  Work-owned fallback uses the existing neutral surface tokens and stays near
+  the state or control it describes.
+- Do not use a blue left border, gradient, glow, glass, oversized icon,
+  decorative badge or repeated success copy for notification emphasis.
+- A notification title names the event; its body states the useful context or
+  next action. Raw logs and technical detail belong in Diagnostics.
+- The user's notification preferences control Work desktop delivery only;
+  DSH remains responsible for contextual in-page notices.
 
 ## AI and operational patterns
 
@@ -310,7 +368,7 @@ Review checks:
 ## Prohibited UI shortcuts
 
 - blank loading views or indefinite unlabeled spinners;
-- decorative card nesting, excessive shadows or accent colour everywhere;
+- decorative card nesting, excessive shadows, blue accent lines or active-item left rails;
 - a second Work approval dialog for a DSH approval;
 - hidden browser connection or automation state;
 - status communicated only with colour, animation or an icon;
@@ -318,6 +376,6 @@ Review checks:
 - hover-only actions or invisible keyboard focus;
 - emoji and improvised glyphs used as functional icons;
 - arbitrary per-screen colours, spacing, typography or z-index values;
+- gradient, glass, glow, oversized display type, all-caps microcopy or decorative metric tiles used as visual filler;
 - pixel-identical platform chrome that conflicts with native conventions;
 - technical logs or stack traces in primary user-facing error content.
-

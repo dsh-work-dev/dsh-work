@@ -37,8 +37,9 @@ export interface LaunchRequest {
 
 /**
  * LaunchSelection is the persisted desired state and the active state
- * projected to the manager window. Workspace is deliberately separate from
- * the profile so one profile can be used for multiple projects.
+ * projected to the DSH manager inside the Settings window. Workspace is
+ * deliberately separate from the profile so one profile can be used for
+ * multiple projects.
  */
 export interface LaunchSelection {
     "runtimeId": string;
@@ -158,4 +159,20 @@ export interface Snapshot {
     "profiles": ProfileInfo[] | null;
     "desired"?: LaunchSelection | null;
     "active"?: LaunchSelection | null;
+    "theme": ThemePreference;
 }
+
+/**
+ * ThemePreference is the DSH-owned appearance preference consumed by Work's
+ * trusted surfaces. Work does not persist or edit this value.
+ */
+export enum ThemePreference {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    ThemePreferenceLight = "light",
+    ThemePreferenceDark = "dark",
+    ThemePreferenceSystem = "system",
+};

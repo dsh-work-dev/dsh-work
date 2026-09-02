@@ -9,6 +9,7 @@ func newDependencies() Dependencies {
 	return Dependencies{
 		Supervisor:      winplatform.NewJobObjectAdapter(),
 		CommandExecutor: winplatform.NewCommandExecutor(),
+		FileReplacer:    winplatform.NewFileReplacer(),
 	}
 }
 

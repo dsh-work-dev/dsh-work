@@ -89,11 +89,46 @@ worker_generation_id
 one-launch credential proof
 plugin version
 supported request types
+supported notification event types
 ```
 
 Every request includes a unique request ID, correlation ID, operation kind, canonical payload and cancellation identifier. Duplicate request IDs return the original terminal result or a protocol error; they never execute twice.
 
 Browser-operation requests additionally carry the immutable DSH `callId`, task ID and browser connection／tab generations. The Host does not ask the user again; it correlates DSH audit with its execution event and denies any operation that violates a non-interactive hard rule.
+
+## Notification bridge
+
+The DSH notification bridge is a separate structured projection from the Work
+Tool request path. It carries only bounded event metadata:
+
+```text
+protocol_version
+worker_generation_id
+source_context
+event_id
+event_class
+session_or_task_id
+verified_focus_target (optional)
+localised or bounded display data
+```
+
+The initial event classes are action-required, completed, error and lifecycle.
+The bridge must provide stable identity for deduplication and must distinguish a
+contextual notice already rendered by DSH from an event that needs desktop
+promotion. Work evaluates user preferences and window state after validation;
+the DSH bridge does not decide whether a desktop notification is allowed.
+
+The bridge must not scrape DSH DOM, parse arbitrary stdout/stderr, inspect page
+text or turn a notification click into an approval or operation request. A
+missing or invalid focus target degrades to focusing the Workspace only.
+
+The first implementation keeps DSH's existing in-page notice and toast paths
+unchanged. Work's desktop notification adapter is independent of the DSH
+rendering surface and reports delivery failure without changing DSH state.
+Notification capability negotiation is non-blocking for Workspace readiness:
+when a pinned DSH version does not advertise a notification event class, Work
+does not invent one and continues with the DSH in-page surface plus any
+Work-owned lifecycle events that remain available.
 
 ## Worker web access
 
@@ -102,15 +137,16 @@ The DSH endpoint stays on loopback behind a Host-controlled access policy. The a
 The gateway is not a general reverse proxy. It rejects unknown upstream targets, unsafe methods outside the required surface, untrusted WebSocket upgrades and requests after generation shutdown.
 
 The Workspace window is the only Work WebView that navigates to the gateway
-URL. The Manager window never receives a DSH URL and remains a trusted Host
-surface without an application menu. A native DSH menu may be attached to the
-Workspace window, but its handlers execute in the Host and do not modify the
-DSH document.
+URL. The Settings window never receives a DSH URL and remains a trusted Host
+surface with a flat rail: read-only Overview, top-level General and
+Notifications pages and shallow DSH resource pages. The application menu exposes Settings and Help;
+Help contains update-check and About commands. Native menu handlers execute in
+the Host and do not modify the DSH document.
 
 Wails may inject its runtime core after an external navigation. Therefore
 surface isolation is enforced at the binding boundary as well as by asset
-ownership: Manager methods accept only calls carrying the `manager` window
-context, while Host controls accept only the `workspace` context while the
+ownership: DSH manager and Settings methods accept only calls carrying the
+`settings` window context, while Host controls accept only the `workspace` context while the
 trusted recovery shell is active. Once the Workspace window is handed to the
 DSH gateway, its Host binding gate is closed until recovery restores the
 embedded shell.

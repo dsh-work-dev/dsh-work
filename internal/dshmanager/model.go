@@ -18,6 +18,20 @@ const (
 	RuntimeSourceSystem             RuntimeSource = "system"
 )
 
+// ThemePreference is the DSH-owned appearance preference consumed by Work's
+// trusted surfaces. Work does not persist or edit this value.
+type ThemePreference string
+
+const (
+	ThemePreferenceLight  ThemePreference = "light"
+	ThemePreferenceDark   ThemePreference = "dark"
+	ThemePreferenceSystem ThemePreference = "system"
+)
+
+func (p ThemePreference) Valid() bool {
+	return p == ThemePreferenceLight || p == ThemePreferenceDark || p == ThemePreferenceSystem
+}
+
 // RuntimeInfo is the platform-neutral read model for one immutable DSH
 // distribution. Path is the executable (or launcher) path, not a DSH home.
 type RuntimeInfo struct {
@@ -109,8 +123,9 @@ type PluginResult struct {
 }
 
 // LaunchSelection is the persisted desired state and the active state
-// projected to the manager window. Workspace is deliberately separate from
-// the profile so one profile can be used for multiple projects.
+// projected to the DSH manager inside the Settings window. Workspace is
+// deliberately separate from the profile so one profile can be used for
+// multiple projects.
 type LaunchSelection struct {
 	RuntimeID string     `json:"runtimeId"`
 	Profile   ProfileRef `json:"profile"`
@@ -139,4 +154,5 @@ type Snapshot struct {
 	Profiles []ProfileInfo    `json:"profiles"`
 	Desired  *LaunchSelection `json:"desired,omitempty"`
 	Active   *LaunchSelection `json:"active,omitempty"`
+	Theme    ThemePreference  `json:"theme"`
 }

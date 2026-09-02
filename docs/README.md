@@ -10,8 +10,10 @@ This directory contains publishable project documentation. Every file must be un
 | Technical guidance | [Global technical guidance](00-project/technical-guidance.md) | Cross-module engineering rules and review criteria |
 | PC product | [Scope](01-product/pc/scope.md) | First-release scope and non-goals |
 | PC behaviour | [Requirements](01-product/pc/requirements.md) | Normative, testable product contract |
+| PC notifications | [Notification product specification](01-product/pc/notifications.md) | Notification classes, preferences and delivery rules |
 | PC UI | [UI design guidelines](02-design/pc/ui-guidelines.md) | Global visual language, patterns and acceptance |
 | PC interaction | [Interaction specification](02-design/pc/interaction-spec.md) | Screens, actions, feedback and accessibility |
+| PC notification design | [Notification interaction design](02-design/pc/notifications.md) | Notification surfaces, routing and accessibility |
 | PC engineering | [Architecture](03-engineering/pc/architecture.md) | Modules, boundaries and runtime flow |
 | Delivery | [Roadmap](04-delivery/roadmap.md) | Build order and completion gates |
 | First implementation | [PC foundation plan](04-delivery/pc-foundation-plan.md) | Windows-first DSH path governed by three-platform contracts |

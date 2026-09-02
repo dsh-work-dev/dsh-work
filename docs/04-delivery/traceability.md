@@ -9,6 +9,7 @@ This index connects public project contracts only. Product rationale outside the
 | Embedded navigation | FR-WEB-* | `information-architecture.md` | `architecture.md`, `storage-and-security.md` | AC-004, AC-006, AC-015 |
 | Browser tasks | FR-BRW-* | `interaction-spec.md` | `browser-automation.md` | AC-009–AC-015 |
 | Permission and audit | FR-SEC-* | `permissions-and-safety.md` | `storage-and-security.md` | AC-008, AC-011–AC-016, AC-019 |
+| Notifications | FR-NOT-* | `notifications.md` | `notifications.md`, `dsh-integration.md`, ADR-0006 | AC-036–AC-042 |
 | Recovery | FR-REC-* | `states-and-errors.md` | `dsh-integration.md`, `storage-and-security.md` | AC-006, AC-017–AC-019 |
 | Reliability | NFR-REL-* | `states-and-errors.md` | `architecture.md`, `process-supervision.md` | AC-002, AC-013, AC-023 |
 | Security | NFR-SEC-* | `permissions-and-safety.md` | `storage-and-security.md` | AC-004, AC-008, AC-024 |

@@ -43,13 +43,16 @@ This plan covers the detailed execution of roadmap milestones M0 through M2:
 - three-platform Supervisor Interface, invariants, error vocabulary and test-contract design;
 - baseline tests and continuous integration;
 - minimum startup, ready and failure presentation;
+- first-class Work notification preferences and native delivery for Work-owned
+  lifecycle and failure events;
 - DSH-aligned visual convergence after the functional path works.
 
 The following are intentionally deferred to later roadmap milestones:
 
 - DSH Tool registration and approval integration;
 - browser connection or automation;
-- full Settings, Activity and Diagnostics features;
+- broader Settings, Activity and Diagnostics features beyond the initial
+  close-to-tray and notification preferences;
 - deep visual customisation;
 - installers, update flows and release polish.
 
@@ -58,6 +61,8 @@ The following are intentionally deferred to later roadmap milestones:
 - Go and Wails 3 form the desktop Host baseline; the frontend uses TypeScript.
 - DSH remains an out-of-process, pinned external runtime.
 - The Host is the final authority for process and native effects.
+- Work owns desktop notification preferences and delivery; DSH owns
+  contextual in-page notices.
 - The real DSH workspace is embedded only after active readiness validation.
 - Windows, macOS and Linux share one Supervisor Interface and require separate native Adapter Implementations; Windows is implemented first.
 - Test fakes may implement an Interface inside tests; no production platform placeholder may report success without establishing a real native process boundary.
@@ -224,15 +229,22 @@ Work:
 
 1. display named startup steps: configuration, runtime, Worker, readiness and workspace;
 2. show stable error code, summary and one safe primary recovery action;
-3. implement Windows window, tray, close and full-quit behaviour through the platform Adapter;
+3. implement window, tray, close and full-quit behaviour through the shared
+   policy contract and Wails' native composition-edge window/tray APIs; do not
+   add fake macOS or Linux production adapters;
 4. keep Diagnostics entry visible in failures, initially backed by a bounded in-memory snapshot;
 5. verify keyboard focus, live status announcements and reduced-motion behaviour;
 6. ensure no sensitive Worker output appears in primary UI;
-7. confirm that UI state consumes platform-neutral lifecycle projection rather than Windows events.
+7. add the flat Notifications Settings route with immediate-save global and
+   per-class preferences;
+8. deliver Work-owned lifecycle and failure notifications through the native
+   adapter without changing DSH in-page notices;
+9. confirm that UI state consumes platform-neutral lifecycle projection rather than Windows events.
 
 Exit gate:
 
-- the Windows portions of AC-002, AC-003, AC-004, AC-005, AC-006 and AC-023 pass;
+- the Windows portions of AC-002, AC-003, AC-004, AC-005, AC-006, AC-023,
+  AC-036, AC-037, AC-038, AC-041 and AC-042 pass;
 - startup never presents a blank embedded view;
 - users can identify the current step, cancel or quit safely, and understand a failure without reading raw logs;
 - later platform Adapters can project the same lifecycle states without changing the frontend Interface.

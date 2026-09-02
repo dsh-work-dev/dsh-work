@@ -31,6 +31,8 @@ export interface LifecycleViewModel {
   workspace: string;
 }
 
+export type LifecycleTranslator = (key: string, fallback: string) => string;
+
 const phaseLabels: Record<LifecyclePhase, string> = {
   idle: "Idle",
   configuration: "Preparing",
@@ -42,59 +44,71 @@ const phaseLabels: Record<LifecyclePhase, string> = {
   failed: "Needs attention"
 };
 
-export function viewModel(status: LifecycleStatus): LifecycleViewModel {
-  const failure = status.error;
-  if (status.state === "Failed") {
-    return {
-      label: "Failed",
-      message: failure?.summary ?? "Work could not start the local workspace.",
-      detail: failure?.detail ?? failure?.code ?? "UNKNOWN_FAILURE",
-      tone: "failed",
-      showCancel: false,
-      showRetry: status.canRetry,
-      workspace: "No trusted workspace origin was accepted."
-    };
-  }
-  if (status.state === "Ready") {
-    return {
-      label: "Ready",
-      message: "The trusted DSH workspace is ready.",
-      detail: "Handing the window over to the loopback workspace.",
-      tone: "ready",
-      showCancel: true,
-      showRetry: false,
-      workspace: status.workspaceUrl ?? "Loopback origin accepted."
-    };
-  }
-  if (status.state === "Stopping") {
-    return {
-      label: "Stopping",
-      message: "Cleaning up the managed DSH process.",
-      detail: "Work will verify that the process boundary is empty.",
-      tone: "progress",
-      showCancel: false,
-      showRetry: false,
-      workspace: "Workspace is closing."
-    };
-  }
-  if (status.state === "Stopped") {
-    return {
-      label: "Stopped",
-      message: "The local workspace is stopped.",
-      detail: "Start again when you are ready.",
-      tone: "quiet",
-      showCancel: false,
-      showRetry: true,
-      workspace: "No active workspace."
-    };
-  }
-  return {
-    label: phaseLabels[status.phase],
-    message: "Work is preparing the managed DSH process.",
-    detail: "Only a validated loopback origin can become the workspace.",
-    tone: "progress",
-    showCancel: status.canCancel,
-    showRetry: false,
-    workspace: "Waiting for a trusted loopback origin."
-  };
+const phaseLabelKeys: Record<LifecyclePhase, string> = {
+  idle: "status.idle",
+  configuration: "status.preparing",
+  runtime: "status.checkingDsh",
+  worker: "status.startingDsh",
+  readiness: "status.checkingReadiness",
+  workspace: "status.workspaceReady",
+  stopping: "status.stopping",
+  failed: "status.needsAttention"
+};
+
+export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslator): LifecycleViewModel {
+	const copy = (key: string, fallback: string) => translate?.(key, fallback) ?? fallback;
+	const failure = status.error;
+	if (status.state === "Failed") {
+		return {
+			label: copy("status.failed", "Failed"),
+			message: failure?.summary ?? copy("status.failureFallback", "Work could not start the local workspace."),
+			detail: failure?.detail ?? failure?.code ?? "UNKNOWN_FAILURE",
+			tone: "failed",
+			showCancel: false,
+			showRetry: status.canRetry,
+			workspace: copy("status.noWorkspace", "No workspace is available.")
+		};
+	}
+	if (status.state === "Ready") {
+		return {
+			label: copy("status.ready", "Ready"),
+			message: copy("status.readyMessage", "The DSH workspace is ready."),
+			detail: copy("status.openingWorkspace", "Opening the DSH workspace."),
+			tone: "ready",
+			showCancel: true,
+			showRetry: false,
+			workspace: status.workspaceUrl ?? copy("status.loopbackOrigin", "Loopback origin accepted.")
+		};
+	}
+	if (status.state === "Stopping") {
+		return {
+			label: copy("status.stopping", "Stopping"),
+			message: copy("status.stoppingMessage", "Stopping DSH."),
+			detail: copy("status.closingWorkspace", "Closing the workspace."),
+			tone: "progress",
+			showCancel: false,
+			showRetry: false,
+			workspace: copy("status.workspaceClosing", "Workspace is closing.")
+		};
+	}
+	if (status.state === "Stopped") {
+		return {
+			label: copy("status.stopped", "Stopped"),
+			message: copy("status.stoppedMessage", "The DSH workspace is stopped."),
+			detail: copy("status.startAgain", "Start again when you are ready."),
+			tone: "quiet",
+			showCancel: false,
+			showRetry: true,
+			workspace: copy("status.noActiveWorkspace", "No active workspace.")
+		};
+	}
+	return {
+		label: copy(phaseLabelKeys[status.phase], phaseLabels[status.phase]),
+		message: copy("status.startupMessage", "Work is starting your DSH workspace."),
+		detail: copy("status.waitingDsh", "Waiting for DSH to respond."),
+		tone: "progress",
+		showCancel: status.canCancel,
+		showRetry: false,
+		workspace: copy("status.waitingWorkspace", "Waiting for the DSH workspace.")
+	};
 }
