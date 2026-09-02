@@ -28,21 +28,48 @@ Work must not duplicate those profile or plugin semantics.
    Worker and is navigated only after readiness and gateway validation.
 3. Add a separate `dsh-work` CLI and a shared runtime-manager Module. The CLI
    owns explicit installation, discovery, selection and removal of DSH
-   runtimes; the Module provides Work with a resolved launch selection.
-4. A launch selection contains at least an exact DSH runtime version and a DSH
-   profile name. The initial F3 version/profile remains the default compatibility
-   fixture, not the long-term product limit.
-5. Profile creation and plugin operations use DSH's supported profile/plugin
-   seam. `dsh-work` may orchestrate those commands, but does not parse or
-   reimplement DSH's patch-layer composition.
+   runtimes. The Module resolves a launch selection containing an exact
+   runtime, DSH home and profile; it does not become the source of truth for
+   profile composition.
+4. A DSH runtime and a DSH profile are separate concepts:
+
+   ```text
+   DSH runtime (immutable installed distribution)
+     └── executable, launcher and built-in bundles
+
+   DSH home (data root)
+     └── profile: web / coding / ...
+           ├── package.json and plugin dependency state
+           ├── dsh.profile and ordered bundle references
+           ├── profile patch layers
+           └── profile data
+
+   launch selection = runtime + DSH home + profile + Work workspace
+   ```
+
+   A runtime loads a profile; it does not own that profile. The initial F3
+   version/profile remains the default compatibility fixture, not the
+   long-term product limit.
+5. A DSH profile is the logical owner and enablement scope for its plugins.
+   Installing the same plugin into two profiles creates two independent
+   profile associations. A package manager may physically deduplicate package
+   artifacts, but that implementation detail does not make a plugin global or
+   runtime-owned. Profile creation and plugin operations use DSH's supported
+   profile/plugin seam. `dsh-work` may orchestrate those commands, but does not
+   parse or reimplement DSH's patch-layer composition.
 6. Normal Work GUI startup is read-only with respect to runtime management. It
    must never invoke npm, pnpm, npx or an implicit download. Installation,
    update, rollback and plugin changes are explicit CLI operations.
-7. Runtime and profile data are owned by the manager and must be isolated from
-   user-owned DSH data unless the user explicitly selects an existing DSH home.
-   The first manager implementation will treat a profile as compatible only
-   with the runtime selection it was created for; cross-version reuse requires
-   an explicit compatibility decision and migration path.
+7. The manager's runtime installation store and Work-managed DSH homes are
+   distinct from user-owned DSH homes unless the user explicitly selects an
+   existing home. A profile is not version-scoped by ownership. A profile may
+   be paired with another runtime only after explicit runtime/profile
+   compatibility validation; there is no implicit copy, migration or upgrade
+   of profile data.
+8. Work's integration plugin, when needed, is attached to the selected profile
+   for that Worker generation. Its generated overlay is Work-owned and
+   disposable, but it is not a global runtime plugin and must not alter other
+   profiles.
 
 ## Consequences
 
@@ -51,6 +78,8 @@ Positive:
 - The Work binary stays a Host, not a second DSH distribution.
 - Work can switch DSH versions and profiles without changing lifecycle code.
 - DSH remains the source of truth for profile and plugin composition.
+- Plugin enablement and configuration stay isolated per profile while one
+  package can be reused physically by a package manager.
 - Package-manager side effects are explicit and kept out of GUI startup.
 - Runtime resolution is testable independently of Wails and platform process
   supervision.
@@ -59,8 +88,8 @@ Costs and risks:
 
 - The manager needs a versioned local catalog, installation integrity checks and
   rollback-safe updates.
-- Each supported DSH version/profile combination needs its own adapter contract
-  tests.
+- Each supported runtime/profile compatibility pair needs adapter contract
+  tests; profile ownership remains independent of the runtime catalog.
 - The CLI and GUI need a stable, versioned selection/configuration format.
 
 ## Rejected alternatives

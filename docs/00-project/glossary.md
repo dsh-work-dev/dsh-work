@@ -5,12 +5,15 @@
 | Work | The desktop host application described by this repository. |
 | Host shell | The embedded trusted Work startup, status and recovery UI; it is not the DSH Web UI. |
 | DSH | DeepSeek Harness, the agent runtime hosted and supervised by Work. |
-| DSH runtime | One installed, versioned DSH distribution and its launch entry point. |
-| DSH profile | A DSH_HOME profile whose ordered bundle and user patch layers define one DSH configuration. |
-| DSH plugin | A package or bundle managed through DSH's supported profile plugin seam. |
-| DSH workspace | The Web UI served by the out-of-process DSH Worker after readiness validation. |
+| DSH runtime | One immutable, installed and versioned DSH distribution: its executable, launcher and built-in bundles. It does not own profile-specific plugin state. |
+| DSH home | A DSH data root containing named profiles and related runtime data. It may be Work-managed or an explicitly selected existing user home. |
+| DSH profile | A named configuration under a DSH home. It owns ordered bundle references, plugin dependency state, profile patch layers and profile data; it is not owned by a DSH runtime. |
+| DSH plugin | A package or bundle associated with one DSH profile through DSH's supported profile plugin seam. The same package in another profile is a separate association. |
+| DSH workspace | The Web UI and session served by the out-of-process DSH Worker for one runtime/profile launch; it is not the profile store or the Host shell. |
 | dsh-work CLI | The explicit operator tool that installs and selects DSH runtimes and manages profile/plugin operations. |
-| Runtime selection | The immutable DSH runtime version and profile chosen for one Work launch. |
+| Runtime/profile compatibility | The result of validating one DSH runtime against one profile's bundle, plugin and patch composition. |
+| Runtime selection | The exact DSH runtime selected for one launch; it is paired with, but does not own, a profile. |
+| Launch selection | The immutable runtime, DSH home/profile and workspace inputs resolved for one Work Worker generation. |
 | Host | The Work desktop process and its trusted backend services. |
 | Worker | A DSH process started and supervised by the Host. |
 | Supervisor | Host module responsible for the Worker lifecycle and health. |

@@ -4,12 +4,14 @@
 
 Work treats DSH as a versioned external runtime. The adapter uses public DSH launcher, profile and patch behaviour and does not modify DSH source code. DSH is currently a fast-moving developer-preview dependency, so Work pins and tests an explicit supported version range.
 
-The `dsh-work` runtime manager may keep multiple installed DSH runtimes. One
-immutable launch selection chooses an exact runtime version and profile for a
-Worker generation. The Host consumes the resolved executable, DSH home and
-profile; it does not install packages or edit profile composition during GUI
-startup. The initial F3 exact version remains the baseline fixture while each
-additional supported version earns its own adapter contract tests.
+The `dsh-work` runtime manager may keep multiple installed DSH runtimes. A
+runtime is an immutable installed distribution; a profile is named data under
+a DSH home and owns its own bundle, plugin and patch composition. One
+immutable launch selection pairs an exact runtime with a DSH home and profile
+for a Worker generation. The Host consumes that resolved tuple; it does not
+install packages or edit profile composition during GUI startup. The initial
+F3 exact version remains the baseline fixture while each additional supported
+runtime/profile compatibility pair earns its own adapter contract tests.
 
 Official references:
 
@@ -28,10 +30,11 @@ The DSH adapter owns:
 - graceful-shutdown request when supported;
 - classification of exit and protocol failures.
 
-The runtime manager owns installation, local catalog state, selection and
-explicit profile/plugin management commands. Plugin operations delegate to
-DSH's supported `dsh plugin --profile` seam; they are not reimplemented by the
-Host or DSH Adapter.
+The runtime manager owns runtime installation, local catalog state, launch
+selection and explicit profile/plugin management commands. DSH remains the
+source of truth for profile composition. Plugin operations delegate to DSH's
+supported `dsh plugin --profile` seam; they are not reimplemented by the Host
+or DSH Adapter.
 
 No other package builds a DSH command or parses DSH log text.
 
@@ -95,11 +98,38 @@ The gateway is not a general reverse proxy. It rejects unknown upstream targets,
 
 ## Profile ownership
 
-- Work-owned overlays live in Work application data and may be recreated from their schema.
+The ownership and relationship model is:
+
+```text
+DSH runtime (immutable distribution)
+  └── executable, launcher and built-in bundles
+
+DSH home (data root)
+  └── DSH profile
+        ├── plugin dependency declarations and installed profile state
+        ├── ordered bundle references (`dsh.profile`)
+        ├── profile patch layers (`cordis.patch.yml`)
+        └── profile data
+
+Worker generation = selected runtime + selected DSH home/profile
+```
+
+- The profile is the logical owner and enablement scope of its plugins. The
+  same plugin in another profile is a separate association.
+- A package manager may deduplicate physical package artifacts. Work must not
+  configure or relocate that store, and physical deduplication does not make a
+  plugin global or runtime-owned.
+- Work-owned overlays live in Work application data, are attached to the
+  selected profile for one Worker generation and may be recreated from their
+  schema.
 - User-owned DSH data is never edited in place without an explicit migration.
 - A user-selected existing DSH home is mounted through an adapter and backed up before a migration.
 - Generated files contain a schema version and generation marker.
 - Safe mode uses a separate generated overlay; it does not delete the normal overlay or user profile.
+
+The runtime manager must validate runtime/profile compatibility before launch.
+A profile is not automatically copied, migrated or made version-scoped when a
+different runtime is selected.
 
 ## Compatibility policy
 

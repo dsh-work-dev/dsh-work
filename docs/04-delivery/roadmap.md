@@ -13,8 +13,9 @@ Deliver:
 - automated formatting, unit test, build and documentation checks;
 - minimum lifecycle and error value types;
 - narrow Host command and event projection;
-- `dsh-work` runtime-manager Interface for explicit DSH version/profile
-  selection, with CLI implementation staged before multi-runtime support;
+- `dsh-work` runtime-manager Interface for a Launch selection (exact runtime,
+  DSH home and profile) plus profile-scoped plugin operations, with CLI
+  implementation staged before multi-runtime support;
 - test-only Worker fake for deterministic shell-state tests.
 
 Exit gate: clean Windows, macOS and Linux checkouts build the trusted shell; the current development platform launches it, and CI runs deterministic minimum lifecycle tests.
@@ -25,15 +26,16 @@ Deliver:
 
 - explicitly selected runtime discovery and pinned compatibility for the initial
   DSH baseline;
-- `dsh-work` CLI path for managing installed DSH versions, profiles and plugins;
+- `dsh-work` CLI path for managing installed DSH runtimes and profiles, with
+  plugin operations delegated to DSH per selected profile;
 - first concrete DSH and Windows process Adapters behind the planned Seams;
 - explicit loopback port and active readiness validation;
-- embedded trusted-origin DSH navigation;
+- embedded trusted-origin navigation to the selected external DSH workspace;
 - graceful stop and initial child cleanup;
 - stable missing-runtime, incompatible-version, early-exit and timeout failures.
 
 Exit gate: on the primary Windows development environment, Work launches the
-selected initial DSH Web profile, displays the external DSH page only after
+selected runtime/profile pair, displays the external DSH page only after
 readiness, exits without manual process or port cleanup, and repeats the path
 reliably. The selection seam does not require the Host to embed or install DSH.
 
@@ -58,7 +60,7 @@ Exit gate: on Windows, Work starts the pinned DSH Web profile from a clean envir
 
 Deliver:
 
-- Work-owned DSH plugin;
+- Work-owned DSH plugin attached to the selected profile;
 - private authenticated IPC handshake;
 - versioned request and result schemas;
 - exhaustive Work Tool `allow`／`ask`／`deny` classifier;
