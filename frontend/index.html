@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0d121b" />
     <title>Work</title>
+    <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main id="host-surface" class="shell" aria-labelledby="app-title">
@@ -39,75 +40,142 @@
         <button class="button button-quiet" id="quit" type="button">Quit</button>
       </footer>
     </main>
-    <main id="manager-surface" class="manager-shell" aria-labelledby="manager-title" hidden>
-      <header class="shell-header">
-        <div>
-          <p class="eyebrow">WORK MANAGER</p>
-          <h1 id="manager-title">DSH setup</h1>
+    <main id="manager-surface" class="manager-app" aria-labelledby="manager-title" hidden>
+      <aside class="manager-sidebar" aria-label="Manager sections">
+        <div class="manager-brand">
+          <span class="brand-mark" aria-hidden="true">DSH</span>
+          <span class="brand-copy"><strong>DSH Work</strong><small>Manager</small></span>
         </div>
-        <span class="lock-mark">TRUSTED</span>
-      </header>
+        <nav class="manager-nav" aria-label="Manager sections">
+          <button class="manager-nav-item is-active" data-manager-section="overview" type="button">Overview</button>
+          <button class="manager-nav-item" data-manager-section="profiles" type="button">Profiles &amp; plugins</button>
+          <button class="manager-nav-item" data-manager-section="runtimes" type="button">Runtimes</button>
+          <button class="manager-nav-item" data-manager-section="homes" type="button">DSH homes</button>
+        </nav>
+        <div class="manager-sidebar-footer">
+          <span class="manager-trust">Trusted manager window</span>
+          <p>Runtime files stay outside this interface and are controlled through DSH.</p>
+        </div>
+      </aside>
 
-      <section class="manager-card" aria-labelledby="selection-title">
-        <div class="section-heading">
+      <div class="manager-main">
+        <header class="manager-topbar">
           <div>
-            <p class="card-label">Launch selection</p>
-            <h2 id="selection-title">Choose what Work starts</h2>
+            <p class="eyebrow">DSH WORK</p>
+            <h1 id="manager-title">Manager</h1>
+            <p class="manager-lede">Configure the external DSH runtime used by your workspace.</p>
           </div>
-          <span id="manager-active" class="manager-state">Not running</span>
-        </div>
-        <div class="manager-grid">
-          <label>DSH runtime<select id="manager-runtime"></select></label>
-          <label>DSH home<select id="manager-home"></select></label>
-          <label>Profile<select id="manager-profile"></select></label>
-          <label class="wide-field">Workspace<input id="manager-workspace" type="text" autocomplete="off" /></label>
-        </div>
-        <div class="manager-subcontrols">
-          <label>Register existing DSH home<input id="manager-new-home-path" type="text" placeholder="Path to existing DSH home" autocomplete="off" /></label>
-          <label>Home id<input id="manager-new-home-id" type="text" placeholder="personal" autocomplete="off" /></label>
-          <label>Display name<input id="manager-new-home-name" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
-          <button class="button button-secondary" id="manager-register-home" type="button">Register home</button>
-        </div>
-        <div class="manager-actions">
-          <p id="manager-feedback" class="status-detail" aria-live="polite"></p>
-          <button class="button button-primary" id="manager-save" type="button">Save selection</button>
-        </div>
-      </section>
+          <div class="manager-toolbar">
+            <span id="manager-active" class="manager-state">Not running</span>
+            <button class="button button-secondary button-compact" id="manager-refresh" type="button">Refresh</button>
+          </div>
+        </header>
 
-      <section class="manager-card" aria-labelledby="profiles-title">
-        <div class="section-heading">
-          <div>
-            <p class="card-label">Profiles and plugins</p>
-            <h2 id="profiles-title">Plugin ownership stays with each profile</h2>
-          </div>
-        </div>
-        <p class="manager-note">Select a DSH home and profile before managing plugins. Work never treats a plugin as global.</p>
-        <div class="profile-create-controls">
-          <label>New profile name<input id="manager-new-profile" type="text" placeholder="coding" autocomplete="off" /></label>
-          <label>Initial plugin package<input id="manager-new-profile-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-          <button class="button button-secondary" id="manager-create-profile" type="button">Create profile</button>
-        </div>
-        <div class="plugin-controls">
-          <label>Plugin package<input id="manager-plugin-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-          <button class="button button-primary" id="manager-plugin-install" type="button">Install in profile</button>
-          <button class="button button-secondary" id="manager-plugin-remove" type="button">Remove from profile</button>
-        </div>
-        <div id="manager-profiles" class="manager-list"></div>
-      </section>
+        <p id="manager-feedback" class="manager-feedback" role="status" aria-live="polite">Loading catalog…</p>
 
-      <section class="manager-card" aria-labelledby="runtimes-title">
-        <div class="section-heading">
-          <div>
-            <p class="card-label">Runtime catalog</p>
-            <h2 id="runtimes-title">Installed DSH versions</h2>
+        <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
+          <div class="panel-heading">
+            <div>
+              <p class="card-label">Launch target</p>
+              <h2 id="selection-title">Choose the DSH instance for this workspace</h2>
+              <p class="panel-description">A launch is always tied to one runtime, home, profile and workspace.</p>
+            </div>
+            <span class="panel-badge">Next start</span>
           </div>
-        </div>
-        <div class="runtime-install-controls">
-          <label>Install DSH version<input id="manager-runtime-version" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
-          <button class="button button-primary" id="manager-runtime-install" type="button">Install runtime</button>
-        </div>
-        <div id="manager-runtimes" class="manager-list"></div>
-      </section>
+          <div class="selection-layout">
+            <div class="manager-grid">
+              <label>DSH runtime<select id="manager-runtime"></select></label>
+              <label>DSH home<select id="manager-home"></select></label>
+              <label>Profile<select id="manager-profile"></select></label>
+              <label class="wide-field">Workspace<input id="manager-workspace" type="text" autocomplete="off" /></label>
+            </div>
+            <aside class="selection-summary" aria-label="Selected launch target">
+              <p class="card-label">Selected target</p>
+              <strong id="manager-selection-runtime">No runtime selected</strong>
+              <span id="manager-selection-home">Choose a DSH home</span>
+              <span id="manager-selection-profile">Choose a profile</span>
+              <p id="manager-selection-workspace">Workspace path will appear here.</p>
+            </aside>
+          </div>
+          <div class="panel-footer">
+            <p id="manager-selection-note">Selection changes apply to the next DSH Worker generation.</p>
+            <button class="button button-primary" id="manager-save" type="button">Save launch target</button>
+          </div>
+        </section>
+
+        <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="profiles-title" hidden>
+          <div class="panel-heading">
+            <div>
+              <p class="card-label">Profile composition</p>
+              <h2 id="profiles-title">Profiles keep their own plugins</h2>
+              <p class="panel-description">Choose an exact DSH home and profile before changing its plugin set.</p>
+            </div>
+            <span class="panel-badge">Profile scoped</span>
+          </div>
+          <div class="profiles-layout">
+            <div class="profile-directory">
+              <div class="subheading"><strong>Available profiles</strong><span>Across registered homes</span></div>
+              <div id="manager-profiles" class="manager-list"></div>
+            </div>
+            <div class="plugin-editor">
+              <p class="card-label">Selected profile</p>
+              <strong id="manager-selected-profile" class="selected-profile">Choose a profile above</strong>
+              <p id="manager-profile-scope-note" class="manager-note">Plugin changes are sent to DSH with this profile as the explicit target.</p>
+              <label>Plugin package<input id="manager-plugin-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+              <div class="button-row">
+                <button class="button button-primary" id="manager-plugin-install" type="button">Install plugin</button>
+                <button class="button button-secondary" id="manager-plugin-remove" type="button">Remove plugin</button>
+              </div>
+              <div class="create-profile-block">
+                <div class="subheading"><strong>Create a profile</strong><span>Initialized by DSH</span></div>
+                <label>Profile name<input id="manager-new-profile" type="text" placeholder="coding" autocomplete="off" /></label>
+                <label>Initial plugin package<input id="manager-new-profile-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+                <button class="button button-secondary" id="manager-create-profile" type="button">Create through DSH</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="manager-section-runtimes" class="manager-section" data-manager-panel="runtimes" aria-labelledby="runtimes-title" hidden>
+          <div class="panel-heading">
+            <div>
+              <p class="card-label">Runtime catalog</p>
+              <h2 id="runtimes-title">Installed DSH versions</h2>
+              <p class="panel-description">Startup never downloads packages. Add or install a runtime explicitly here.</p>
+            </div>
+            <span class="panel-badge">No startup downloads</span>
+          </div>
+          <div class="runtime-install-card">
+            <label>Install DSH version<input id="manager-runtime-version" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
+            <button class="button button-primary" id="manager-runtime-install" type="button">Install runtime</button>
+          </div>
+          <div id="manager-runtimes" class="manager-list"></div>
+        </section>
+
+        <section id="manager-section-homes" class="manager-section" data-manager-panel="homes" aria-labelledby="homes-title" hidden>
+          <div class="panel-heading">
+            <div>
+              <p class="card-label">DSH home catalog</p>
+              <h2 id="homes-title">Keep home data in its own boundary</h2>
+              <p class="panel-description">Work can create its own home; user homes must already exist and are never deleted here.</p>
+            </div>
+            <span class="panel-badge">Data safe</span>
+          </div>
+          <div class="home-register-card">
+            <div>
+              <strong>Register an existing home</strong>
+              <p>Point to a DSH_HOME directory that already exists on this machine.</p>
+            </div>
+            <div class="home-register-grid">
+              <label class="wide-field">Existing DSH home path<input id="manager-new-home-path" type="text" placeholder="C:\\Users\\you\\.dsh" autocomplete="off" /></label>
+              <label>Home id<input id="manager-new-home-id" type="text" placeholder="personal" autocomplete="off" /></label>
+              <label>Display name<input id="manager-new-home-name" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
+              <button class="button button-secondary" id="manager-register-home" type="button">Register home</button>
+            </div>
+          </div>
+          <div id="manager-homes" class="manager-list"></div>
+        </section>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -98,18 +98,18 @@ func main() {
 	if runtime.GOOS == "darwin" {
 		menu.AddRole(application.AppMenu)
 	}
-	workMenu := menu.AddSubmenu("Work")
-	workMenu.Add("Open Manager…").SetAccelerator("CmdOrCtrl+,").OnClick(func(*application.Context) {
+	dshMenu := menu.AddSubmenu("DSH")
+	dshMenu.Add("Open Manager…").SetAccelerator("CmdOrCtrl+,").OnClick(func(*application.Context) {
 		openManager("overview")
 	})
-	workMenu.Add("Manage Plugins…").OnClick(func(*application.Context) {
+	dshMenu.Add("Manage Plugins…").OnClick(func(*application.Context) {
 		openManager("plugins")
 	})
-	workMenu.Add("Restart DSH").SetAccelerator("CmdOrCtrl+R").OnClick(func(*application.Context) {
+	dshMenu.Add("Restart DSH").SetAccelerator("CmdOrCtrl+R").OnClick(func(*application.Context) {
 		host.Restart()
 	})
-	workMenu.AddSeparator()
-	workMenu.Add("Quit Work").SetAccelerator("CmdOrCtrl+Q").OnClick(func(*application.Context) {
+	dshMenu.AddSeparator()
+	dshMenu.Add("Quit").SetAccelerator("CmdOrCtrl+Q").OnClick(func(*application.Context) {
 		host.Quit()
 	})
 	desktop.Menu.Set(menu)
@@ -128,7 +128,7 @@ func main() {
 				BackgroundColour:   application.NewRGB(13, 18, 27),
 				URL:                managerURL(manager, section),
 				InitialPosition:    application.WindowCentered,
-				UseApplicationMenu: true,
+				UseApplicationMenu: false,
 			})
 			window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 				window.Hide()

@@ -37,8 +37,9 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - `dsh-work` CLI and runtime manager resolve an installed DSH runtime plus a
   DSH home/profile; Work does not embed the DSH Web UI or mutate profiles
   during GUI startup.
-- The Manager window is Host-owned; the Workspace window is DSH-owned and
-  receives only the native Work menu, not injected Host markup.
+- The Manager window is Host-owned and has no application menu; the Workspace
+  window is DSH-owned and receives only the native DSH menu, not injected Host
+  markup.
 - Work-owned DSH plugin attached to the selected profile through a supported
   profile or patch seam.
 - Private Host–plugin IPC; loopback HTTP only for the embedded DSH Web UI.

@@ -35,7 +35,7 @@ Status: normative specification for the first PC release.
 | FR-MGR-002 | `dsh-work` and the Manager service MUST maintain a versioned catalog that can contain multiple DSH runtimes, while normal Work startup MUST NOT download or reconcile runtime packages. |
 | FR-MGR-003 | Every launch selection MUST identify exactly one DSH runtime, DSH home, profile and workspace; a profile name without its home identity MUST be rejected. |
 | FR-MGR-004 | A DSH profile MUST own its plugin associations. Plugin list, install and removal operations MUST require an explicit profile reference and MUST delegate composition to the selected DSH runtime's supported CLI. |
-| FR-MGR-005 | Runtime, DSH home, profile and plugin management MUST be available in a separate trusted Manager window; the DSH Workspace window MUST expose only native Work menu commands for opening or focusing that surface, restarting DSH and quitting Work. |
+| FR-MGR-005 | Runtime, DSH home, profile and plugin management MUST be available in a separate trusted Manager window without an application menu; the DSH Workspace window MUST expose only native DSH menu commands for opening or focusing that surface, restarting DSH and quitting Work. |
 | FR-MGR-006 | Work-owned DSH homes may be created by Work; user-owned DSH homes MUST be registered from an existing directory and MUST NOT be silently created, relocated or deleted by Work. |
 | FR-MGR-007 | Runtime or home removal MUST be rejected while selected or active, and the Manager UI/CLI MUST state whether removal unregisters catalog metadata or removes files; user-owned DSH data MUST never be silently deleted. |
 

@@ -103,8 +103,9 @@ The gateway is not a general reverse proxy. It rejects unknown upstream targets,
 
 The Workspace window is the only Work WebView that navigates to the gateway
 URL. The Manager window never receives a DSH URL and remains a trusted Host
-surface. A native Work menu may be attached to the Workspace window, but its
-handlers execute in the Host and do not modify the DSH document.
+surface without an application menu. A native DSH menu may be attached to the
+Workspace window, but its handlers execute in the Host and do not modify the
+DSH document.
 
 Wails may inject its runtime core after an external navigation. Therefore
 surface isolation is enforced at the binding boundary as well as by asset

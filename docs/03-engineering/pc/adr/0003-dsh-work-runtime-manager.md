@@ -75,7 +75,7 @@ Work must not duplicate those profile or plugin semantics.
    DSH Web UI through the Worker gateway. The two windows share the Host
    process and manager state, but never share a WebView document or inject
    Host management markup into DSH content.
-10. The DSH Workspace window receives a native Work menu through the Wails
+10. The DSH Workspace window receives a native DSH menu through the Wails
     window/application menu seam. Its commands may open or focus the Manager
     window, show the current launch selection, request a restart or open
     profile-scoped plugin management. These commands are handled by the Host;
@@ -102,7 +102,7 @@ Positive:
 - Plugin enablement and configuration stay isolated per profile while one
   package can be reused physically by a package manager.
 - Management UI cannot contaminate the DSH Web UI, while the Workspace window
-  still has a discoverable native Work menu.
+  still has a discoverable native DSH menu.
 - Package-manager side effects are explicit and kept out of GUI startup.
 - Runtime resolution is testable independently of Wails and platform process
   supervision.

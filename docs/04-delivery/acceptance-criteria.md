@@ -32,9 +32,9 @@ Given fixtures for missing runtime, unsupported version, bind failure, readiness
 
 Given a catalog containing more than one registered DSH runtime, home and profile, when the user selects one complete launch tuple, then Work verifies that runtime and launches its external DSH Web UI with the exact home, profile and workspace after readiness. Normal startup performs no package installation or profile reconciliation.
 
-### AC-030 — Separate Manager surface and native Work menu
+### AC-030 — Separate Manager surface and native DSH menu
 
-Given the DSH Workspace window is open, when the user chooses a Work management command, then Work opens or focuses a separate Manager window without injecting management markup into the DSH document; the native menu also offers restart and quit commands.
+Given the DSH Workspace window is open, when the user chooses a DSH management command, then Work opens or focuses a separate Manager window without injecting management markup into the DSH document; the Manager window has no application menu, and the native DSH menu also offers restart and quit commands.
 
 ### AC-031 — Profile-owned plugin management
 

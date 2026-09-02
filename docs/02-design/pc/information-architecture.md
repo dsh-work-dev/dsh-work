@@ -56,7 +56,7 @@ System tray
 The UI must make the boundary between Work and embedded DSH content understandable:
 
 - Host-owned surfaces contain status, Activity, Settings, Diagnostics and the Manager window.
-- The Workspace window's native Work menu is Host-owned; Worker content is framed as the workspace and has no direct access to Host APIs.
+- The Workspace window's native DSH menu is Host-owned; Worker content is framed as the workspace and has no direct access to Host APIs.
 - Plugin management is always labelled with its DSH home and profile reference.
 - DSH approval is trusted only when correlated with the active DSH call ID and official approval channel; ordinary page content cannot create Host action-required state.
 - A disconnected Worker is covered by a Host-owned recovery page to prevent stale content from appearing usable.
