@@ -1,6 +1,6 @@
 # ADR-0003: External DSH workspace and dsh-work runtime manager
 
-- Status: Accepted direction; CLI contract to be implemented next
+- Status: Accepted; initial shared manager/CLI and Windows GUI slice implemented
 - Date: 2026-09-02
 
 ## Context
@@ -83,8 +83,10 @@ Work must not duplicate those profile or plugin semantics.
 11. Every plugin management command requires an explicit `ProfileRef`
     consisting of a DSH home identity and profile name. The menu may prefill
     the active profile, but the backend never infers a profile from a missing
-    command field. A plugin operation against an active profile is gated by
-    the Worker lifecycle and reports when a restart is required.
+    command field. Plugin commands are serialized with catalog persistence and
+    report `restartRequired` when they target the active profile; the running
+    Worker is not hot-reloaded and the user must explicitly restart it before
+    the changed profile composition is used.
 12. The Manager window is created lazily and reused as one application-level
     management surface. Closing it hides the window without stopping DSH;
     application quit still cancels management operations and cleans the DSH
@@ -112,6 +114,9 @@ Costs and risks:
 - Each supported runtime/profile compatibility pair needs adapter contract
   tests; profile ownership remains independent of the runtime catalog.
 - The CLI and GUI need a stable, versioned selection/configuration format.
+- The first slice's runtime/home `remove` operation unregisters catalog
+  metadata only and retains files. Physical deletion is a separate future
+  data-management operation with its own confirmation and recovery contract.
 
 ## Rejected alternatives
 
@@ -126,12 +131,14 @@ Costs and risks:
 
 ## Follow-up implementation seam
 
-The next vertical slice should define a small `RuntimeManager` Interface with
-resolution as its primary operation. CLI commands can sit on top of the same
-Module, while the Host only consumes a resolved executable, DSH home and
-profile-specific launch arguments. The exact command names and persisted
-selection format must be kept in one CLI contract rather than spread through
-the Host.
+The implemented first slice defines the shared manager resolution contract and
+the `dsh-work` commands for catalog inspection, explicit runtime registration/
+installation, home registration, selection and profile-scoped plugin add/list/
+remove. Runtime/home removal currently unregisters catalog entries while
+retaining files. Runtime installation is native Windows work at present; other
+platforms return an unavailable result until their native installer exists.
+Additional DSH versions still require an adapter compatibility contract before
+the Host will launch them.
 
 The GUI implementation must expose the same Module through a thin Manager
 window service and route Workspace-window native menu commands to that service.

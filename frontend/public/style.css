@@ -91,6 +91,76 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: -.04em; }
 .button-secondary { color: #d6e1f0; border-color: #3b506c; background: transparent; }
 .button-quiet { color: #8ea5c5; background: transparent; }
 
+.manager-shell {
+  width: min(1040px, calc(100% - 48px));
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 56px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.manager-card {
+  border: 1px solid #26364d;
+  border-radius: 18px;
+  padding: 24px;
+  background: rgba(18, 28, 43, .82);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .18);
+}
+
+.section-heading, .manager-actions, .manager-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+h2 { margin: 0; color: #eef3fb; font-size: 20px; letter-spacing: -.02em; }
+.manager-state { color: #f3b562; font-size: 13px; }
+.manager-state.ready { color: #74d6a0; }
+.manager-note { margin: 18px 0; color: #8ea5c5; font-size: 14px; line-height: 1.5; }
+
+.manager-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.manager-grid label { color: #8ea5c5; font-size: 13px; font-weight: 700; }
+.manager-grid select, .manager-grid input {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #3b506c;
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: #eef3fb;
+  background: #111d2d;
+  font: inherit;
+}
+.manager-grid select:focus-visible, .manager-grid input:focus-visible { outline: 3px solid rgba(117, 167, 232, .55); outline-offset: 2px; }
+.wide-field { grid-column: 1 / -1; }
+.manager-subcontrols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(120px, .6fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; margin-top: 18px; }
+.manager-subcontrols label, .profile-create-controls label, .runtime-install-controls label { color: #8ea5c5; font-size: 13px; font-weight: 700; }
+.manager-subcontrols input, .profile-create-controls input, .runtime-install-controls input { width: 100%; margin-top: 8px; border: 1px solid #3b506c; border-radius: 9px; padding: 10px 12px; color: #eef3fb; background: #111d2d; font: inherit; }
+.manager-subcontrols input:focus-visible, .profile-create-controls input:focus-visible, .runtime-install-controls input:focus-visible { outline: 3px solid rgba(117, 167, 232, .55); outline-offset: 2px; }
+.manager-actions { align-items: flex-end; margin-top: 20px; }
+.manager-actions .status-detail { flex: 1; margin: 0; }
+.plugin-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 12px; }
+.plugin-controls label { color: #8ea5c5; font-size: 13px; font-weight: 700; }
+.plugin-controls input { width: 100%; margin-top: 8px; border: 1px solid #3b506c; border-radius: 9px; padding: 10px 12px; color: #eef3fb; background: #111d2d; font: inherit; }
+.plugin-controls input:focus-visible { outline: 3px solid rgba(117, 167, 232, .55); outline-offset: 2px; }
+.manager-list { display: grid; gap: 8px; margin-top: 18px; }
+.manager-list-item { align-items: flex-start; border-top: 1px solid #26364d; padding: 14px 0 4px; }
+.manager-list-item:first-child { border-top: 0; padding-top: 0; }
+.manager-list-item strong { display: block; color: #d6e1f0; font-size: 14px; }
+.manager-list-item span { display: block; margin-top: 4px; color: #8ea5c5; font-size: 12px; overflow-wrap: anywhere; }
+.manager-empty { margin: 0; color: #8ea5c5; font-size: 14px; }
+.profile-create-controls, .runtime-install-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; margin-top: 18px; }
+.runtime-install-controls { grid-template-columns: minmax(0, 1fr) auto; }
+.manager-list-item .button { padding: 7px 10px; font-size: 12px; }
+
 @keyframes progress { from { transform: translateX(-100%); } to { transform: translateX(190%); } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -100,4 +170,10 @@ h1 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: -.04em; }
 @media (max-width: 600px) {
   .shell { width: min(100% - 32px, 760px); padding-top: 48px; }
   .workspace-card { align-items: flex-start; flex-direction: column; }
+  .manager-shell { width: min(100% - 32px, 1040px); padding-top: 32px; }
+  .manager-grid { grid-template-columns: 1fr; }
+  .wide-field { grid-column: auto; }
+  .manager-subcontrols, .profile-create-controls, .runtime-install-controls { grid-template-columns: 1fr; }
+  .manager-actions { align-items: stretch; flex-direction: column; }
+  .plugin-controls { grid-template-columns: 1fr; }
 }

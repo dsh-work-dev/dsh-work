@@ -7,7 +7,7 @@
     <title>Work</title>
   </head>
   <body>
-    <main class="shell" aria-labelledby="app-title">
+    <main id="host-surface" class="shell" aria-labelledby="app-title">
       <header class="shell-header">
         <div>
           <p class="eyebrow">WORK PC</p>
@@ -38,6 +38,76 @@
         <button class="button button-primary" id="retry" type="button" hidden>Retry</button>
         <button class="button button-quiet" id="quit" type="button">Quit</button>
       </footer>
+    </main>
+    <main id="manager-surface" class="manager-shell" aria-labelledby="manager-title" hidden>
+      <header class="shell-header">
+        <div>
+          <p class="eyebrow">WORK MANAGER</p>
+          <h1 id="manager-title">DSH setup</h1>
+        </div>
+        <span class="lock-mark">TRUSTED</span>
+      </header>
+
+      <section class="manager-card" aria-labelledby="selection-title">
+        <div class="section-heading">
+          <div>
+            <p class="card-label">Launch selection</p>
+            <h2 id="selection-title">Choose what Work starts</h2>
+          </div>
+          <span id="manager-active" class="manager-state">Not running</span>
+        </div>
+        <div class="manager-grid">
+          <label>DSH runtime<select id="manager-runtime"></select></label>
+          <label>DSH home<select id="manager-home"></select></label>
+          <label>Profile<select id="manager-profile"></select></label>
+          <label class="wide-field">Workspace<input id="manager-workspace" type="text" autocomplete="off" /></label>
+        </div>
+        <div class="manager-subcontrols">
+          <label>Register existing DSH home<input id="manager-new-home-path" type="text" placeholder="Path to existing DSH home" autocomplete="off" /></label>
+          <label>Home id<input id="manager-new-home-id" type="text" placeholder="personal" autocomplete="off" /></label>
+          <label>Display name<input id="manager-new-home-name" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
+          <button class="button button-secondary" id="manager-register-home" type="button">Register home</button>
+        </div>
+        <div class="manager-actions">
+          <p id="manager-feedback" class="status-detail" aria-live="polite"></p>
+          <button class="button button-primary" id="manager-save" type="button">Save selection</button>
+        </div>
+      </section>
+
+      <section class="manager-card" aria-labelledby="profiles-title">
+        <div class="section-heading">
+          <div>
+            <p class="card-label">Profiles and plugins</p>
+            <h2 id="profiles-title">Plugin ownership stays with each profile</h2>
+          </div>
+        </div>
+        <p class="manager-note">Select a DSH home and profile before managing plugins. Work never treats a plugin as global.</p>
+        <div class="profile-create-controls">
+          <label>New profile name<input id="manager-new-profile" type="text" placeholder="coding" autocomplete="off" /></label>
+          <label>Initial plugin package<input id="manager-new-profile-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+          <button class="button button-secondary" id="manager-create-profile" type="button">Create profile</button>
+        </div>
+        <div class="plugin-controls">
+          <label>Plugin package<input id="manager-plugin-package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+          <button class="button button-primary" id="manager-plugin-install" type="button">Install in profile</button>
+          <button class="button button-secondary" id="manager-plugin-remove" type="button">Remove from profile</button>
+        </div>
+        <div id="manager-profiles" class="manager-list"></div>
+      </section>
+
+      <section class="manager-card" aria-labelledby="runtimes-title">
+        <div class="section-heading">
+          <div>
+            <p class="card-label">Runtime catalog</p>
+            <h2 id="runtimes-title">Installed DSH versions</h2>
+          </div>
+        </div>
+        <div class="runtime-install-controls">
+          <label>Install DSH version<input id="manager-runtime-version" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
+          <button class="button button-primary" id="manager-runtime-install" type="button">Install runtime</button>
+        </div>
+        <div id="manager-runtimes" class="manager-list"></div>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -14,8 +14,8 @@ Deliver:
 - minimum lifecycle and error value types;
 - narrow Host command and event projection;
 - `dsh-work` runtime-manager Interface for a Launch selection (exact runtime,
-  DSH home and profile) plus profile-scoped plugin operations, with CLI
-  implementation staged before multi-runtime support;
+  DSH home and profile) plus profile-scoped plugin operations, with the initial
+  CLI/catalog implementation;
 - test-only Worker fake for deterministic shell-state tests.
 
 Exit gate: clean Windows, macOS and Linux checkouts build the trusted shell; the current development platform launches it, and CI runs deterministic minimum lifecycle tests.
@@ -26,8 +26,9 @@ Deliver:
 
 - explicitly selected runtime discovery and pinned compatibility for the initial
   DSH baseline;
-- `dsh-work` CLI path for managing installed DSH runtimes and profiles, with
-  plugin operations delegated to DSH per selected profile;
+- `dsh-work` CLI path for registering/installing catalog runtimes and homes,
+  selecting profiles, and delegating plugin operations to DSH per selected
+  profile;
 - first concrete DSH and Windows process Adapters behind the planned Seams;
 - explicit loopback port and active readiness validation;
 - embedded trusted-origin navigation to the selected external DSH workspace;

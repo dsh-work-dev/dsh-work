@@ -27,6 +27,21 @@ export enum ErrorCode {
     ErrorProcessCleanupFailed = "PROCESS_CLEANUP_FAILED",
     ErrorProcessStopFailed = "PROCESS_STOP_FAILED",
     ErrorCancelled = "CANCELLED",
+    ErrorProfileRequired = "PROFILE_REQUIRED",
+    ErrorProfileNotFound = "PROFILE_NOT_FOUND",
+    ErrorProfileInvalid = "PROFILE_INVALID",
+    ErrorProfileInUse = "PROFILE_IN_USE",
+    ErrorRuntimeInUse = "RUNTIME_IN_USE",
+    ErrorRuntimeProfileIncompatible = "RUNTIME_PROFILE_INCOMPATIBLE",
+    ErrorManagerOperationBusy = "MANAGER_OPERATION_BUSY",
+    ErrorManagerStateInvalid = "MANAGER_STATE_INVALID",
+    ErrorRestartRequired = "RESTART_REQUIRED",
+    ErrorPluginSpecInvalid = "PLUGIN_SPEC_INVALID",
+    ErrorPluginCommandUnavailable = "PLUGIN_COMMAND_UNAVAILABLE",
+    ErrorPluginCommandFailed = "PLUGIN_COMMAND_FAILED",
+    ErrorRuntimeInstallUnavailable = "RUNTIME_INSTALL_UNAVAILABLE",
+    ErrorRuntimeInstallFailed = "RUNTIME_INSTALL_FAILED",
+    ErrorTrustedSurfaceRequired = "TRUSTED_SURFACE_REQUIRED",
 };
 
 /**

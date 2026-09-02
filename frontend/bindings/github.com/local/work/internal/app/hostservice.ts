@@ -26,6 +26,10 @@ export function Quit(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(336297499);
 }
 
+export function Restart(): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(3788146135);
+}
+
 export function Start(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(265946144);
 }

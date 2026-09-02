@@ -38,22 +38,37 @@ const (
 type ErrorCode string
 
 const (
-	ErrorInvalidTransition     ErrorCode = "INVALID_LIFECYCLE_TRANSITION"
-	ErrorPlatformUnsupported   ErrorCode = "PLATFORM_UNSUPPORTED"
-	ErrorDSHRuntimeNotFound    ErrorCode = "DSH_RUNTIME_NOT_FOUND"
-	ErrorDSHVersionCheckFailed ErrorCode = "DSH_VERSION_CHECK_FAILED"
-	ErrorDSHUnsupportedVersion ErrorCode = "DSH_UNSUPPORTED_VERSION"
-	ErrorDSHStartFailed        ErrorCode = "DSH_START_FAILED"
-	ErrorDSHEarlyExit          ErrorCode = "DSH_EARLY_EXIT"
-	ErrorDSHReadinessTimeout   ErrorCode = "DSH_READINESS_TIMEOUT"
-	ErrorDSHInvalidReadiness   ErrorCode = "DSH_INVALID_READINESS"
-	ErrorGatewayUnavailable    ErrorCode = "WORKER_GATEWAY_UNAVAILABLE"
-	ErrorGatewayStartFailed    ErrorCode = "WORKER_GATEWAY_START_FAILED"
-	ErrorGatewayCloseFailed    ErrorCode = "WORKER_GATEWAY_CLOSE_FAILED"
-	ErrorProcessStartFailed    ErrorCode = "PROCESS_START_FAILED"
-	ErrorProcessCleanupFailed  ErrorCode = "PROCESS_CLEANUP_FAILED"
-	ErrorProcessStopFailed     ErrorCode = "PROCESS_STOP_FAILED"
-	ErrorCancelled             ErrorCode = "CANCELLED"
+	ErrorInvalidTransition          ErrorCode = "INVALID_LIFECYCLE_TRANSITION"
+	ErrorPlatformUnsupported        ErrorCode = "PLATFORM_UNSUPPORTED"
+	ErrorDSHRuntimeNotFound         ErrorCode = "DSH_RUNTIME_NOT_FOUND"
+	ErrorDSHVersionCheckFailed      ErrorCode = "DSH_VERSION_CHECK_FAILED"
+	ErrorDSHUnsupportedVersion      ErrorCode = "DSH_UNSUPPORTED_VERSION"
+	ErrorDSHStartFailed             ErrorCode = "DSH_START_FAILED"
+	ErrorDSHEarlyExit               ErrorCode = "DSH_EARLY_EXIT"
+	ErrorDSHReadinessTimeout        ErrorCode = "DSH_READINESS_TIMEOUT"
+	ErrorDSHInvalidReadiness        ErrorCode = "DSH_INVALID_READINESS"
+	ErrorGatewayUnavailable         ErrorCode = "WORKER_GATEWAY_UNAVAILABLE"
+	ErrorGatewayStartFailed         ErrorCode = "WORKER_GATEWAY_START_FAILED"
+	ErrorGatewayCloseFailed         ErrorCode = "WORKER_GATEWAY_CLOSE_FAILED"
+	ErrorProcessStartFailed         ErrorCode = "PROCESS_START_FAILED"
+	ErrorProcessCleanupFailed       ErrorCode = "PROCESS_CLEANUP_FAILED"
+	ErrorProcessStopFailed          ErrorCode = "PROCESS_STOP_FAILED"
+	ErrorCancelled                  ErrorCode = "CANCELLED"
+	ErrorProfileRequired            ErrorCode = "PROFILE_REQUIRED"
+	ErrorProfileNotFound            ErrorCode = "PROFILE_NOT_FOUND"
+	ErrorProfileInvalid             ErrorCode = "PROFILE_INVALID"
+	ErrorProfileInUse               ErrorCode = "PROFILE_IN_USE"
+	ErrorRuntimeInUse               ErrorCode = "RUNTIME_IN_USE"
+	ErrorRuntimeProfileIncompatible ErrorCode = "RUNTIME_PROFILE_INCOMPATIBLE"
+	ErrorManagerOperationBusy       ErrorCode = "MANAGER_OPERATION_BUSY"
+	ErrorManagerStateInvalid        ErrorCode = "MANAGER_STATE_INVALID"
+	ErrorRestartRequired            ErrorCode = "RESTART_REQUIRED"
+	ErrorPluginSpecInvalid          ErrorCode = "PLUGIN_SPEC_INVALID"
+	ErrorPluginCommandUnavailable   ErrorCode = "PLUGIN_COMMAND_UNAVAILABLE"
+	ErrorPluginCommandFailed        ErrorCode = "PLUGIN_COMMAND_FAILED"
+	ErrorRuntimeInstallUnavailable  ErrorCode = "RUNTIME_INSTALL_UNAVAILABLE"
+	ErrorRuntimeInstallFailed       ErrorCode = "RUNTIME_INSTALL_FAILED"
+	ErrorTrustedSurfaceRequired     ErrorCode = "TRUSTED_SURFACE_REQUIRED"
 )
 
 // Failure is safe to project to the trusted UI. Detail is bounded diagnostic
@@ -106,6 +121,13 @@ func newGenerationID() string {
 		return hex.EncodeToString(random[:])
 	}
 	return fmt.Sprintf("local-%d", generationSequence.Add(1))
+}
+
+// NewCorrelationID gives non-lifecycle operations the same opaque diagnostic
+// identifier contract as a Host generation. It carries no user or process
+// data and is safe to project with a manager failure.
+func NewCorrelationID() string {
+	return newGenerationID()
 }
 
 // Machine serializes all lifecycle transitions. Callers hold no platform or

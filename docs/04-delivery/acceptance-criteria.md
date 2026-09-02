@@ -28,6 +28,22 @@ Given a Worker fixture that creates descendants, when Work quits normally or its
 
 Given fixtures for missing runtime, unsupported version, bind failure, readiness timeout and early exit, when each launches, then Work remains responsive and shows the corresponding stable code and safe action.
 
+### AC-029 — External selected DSH runtime
+
+Given a catalog containing more than one registered DSH runtime, home and profile, when the user selects one complete launch tuple, then Work verifies that runtime and launches its external DSH Web UI with the exact home, profile and workspace after readiness. Normal startup performs no package installation or profile reconciliation.
+
+### AC-030 — Separate Manager surface and native Work menu
+
+Given the DSH Workspace window is open, when the user chooses a Work management command, then Work opens or focuses a separate Manager window without injecting management markup into the DSH document; the native menu also offers restart and quit commands.
+
+### AC-031 — Profile-owned plugin management
+
+Given two DSH homes or profiles with independent plugin state, when the user lists, installs or removes a plugin, then the operation requires the exact DSH home and profile, delegates composition to DSH's supported CLI and changes only that profile's association. An operation against the active profile reports whether a restart is required.
+
+### AC-032 — DSH home and runtime data safety
+
+Given a user-owned DSH home that does not exist locally, Work refuses to launch or register it and does not create the directory. Given a selected or active runtime/home, Work refuses removal; catalog removal explicitly states that managed runtime files are retained until a future data-management action.
+
 ### AC-007 — Bounded retry
 
 Given a repeatedly crashing Worker, when automatic recovery is attempted, then retries stop at the configured policy boundary and Work offers diagnostics and safe mode instead of looping.
@@ -132,6 +148,10 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | FR-SUP-005 | AC-006, AC-019 |
 | FR-SUP-006, FR-SUP-007, FR-SUP-010 | AC-003, AC-005 |
 | FR-SUP-008, FR-SUP-009 | AC-006, AC-007 |
+| FR-MGR-001, FR-MGR-002, FR-MGR-003 | AC-002, AC-029 |
+| FR-MGR-004 | AC-031 |
+| FR-MGR-005 | AC-030 |
+| FR-MGR-006, FR-MGR-007 | AC-032, AC-025 |
 | FR-WEB-001, FR-WEB-002, FR-WEB-005 | AC-004 |
 | FR-WEB-003 | AC-006 |
 | FR-WEB-004 | AC-008, AC-015 |

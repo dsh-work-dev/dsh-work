@@ -15,6 +15,7 @@ import (
 
 	workapp "github.com/local/work/internal/app"
 	"github.com/local/work/internal/dshadapter"
+	"github.com/local/work/internal/dshmanager"
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/platform"
 	"github.com/local/work/internal/workergateway"
@@ -51,9 +52,24 @@ func main() {
 
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetWorkspaceRoot(root)
+	runtimeHint := dsh.RuntimeHint()
+	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath:        filepath.Join(root, ".task", "dsh-smoke-manager.json"),
+		WorkspaceRoot:    root,
+		PluginCommands:   dshadapter.NewPluginCommands(),
+		RuntimeVerifier:  dsh,
+		ProfileCatalog:   dsh,
+		Homes:            []dshmanager.HomeInfo{{ID: "work", Name: "Smoke DSH home", Path: config.DSHHome, Ownership: dshmanager.HomeOwnershipWork}},
+		Runtimes:         []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
+		DefaultSelection: dshmanager.LaunchSelection{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{HomeID: "work", Name: "web"}, Workspace: root},
+	})
+	if err != nil {
+		fatalf("create smoke launch manager: %v", err)
+	}
 	gateway := workergateway.New()
 	host := workapp.NewHost(workapp.Dependencies{
 		DSH:        dsh,
+		Manager:    manager,
 		Supervisor: dependencies.Supervisor,
 		Gateway:    gateway,
 	}, config)

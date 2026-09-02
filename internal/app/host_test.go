@@ -7,12 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/local/work/internal/dshadapter"
+	"github.com/local/work/internal/dshmanager"
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/supervisor"
 	"github.com/local/work/internal/workergateway"
@@ -69,6 +73,15 @@ func (d *testDSH) BuildLaunchPlan(_ dshadapter.Runtime, generationID, workspace,
 	}, nil
 }
 
+func (d *testDSH) BuildLaunchPlanForProfile(runtime dshadapter.Runtime, generationID, workspace, dshHome, profile string, port int) (supervisor.LaunchPlan, error) {
+	plan, err := d.BuildLaunchPlan(runtime, generationID, workspace, dshHome, port)
+	if err != nil {
+		return supervisor.LaunchPlan{}, err
+	}
+	plan.Args = []string{"--profile", profile}
+	return plan, nil
+}
+
 func (d *testDSH) ParseReadyAnnouncement(text string) (dshadapter.ReadyAnnouncement, bool) {
 	if text == "ready" {
 		return dshadapter.ReadyAnnouncement{URL: d.announcedURL}, true
@@ -111,10 +124,12 @@ func (*testDSH) RequestShutdown(ctx context.Context, worker supervisor.Worker) e
 type testSupervisor struct {
 	worker *testWorker
 	starts int
+	plan   supervisor.LaunchPlan
 }
 
-func (s *testSupervisor) Start(_ context.Context, _ supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
+func (s *testSupervisor) Start(_ context.Context, plan supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
 	s.starts++
+	s.plan = plan
 	s.worker = newTestWorker()
 	if rawHandler != nil {
 		rawHandler(supervisor.StreamStdout, "ready")
@@ -199,6 +214,120 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	}
 	if supervisorAdapter.worker == nil {
 		t.Fatal("supervisor did not receive a worker start")
+	}
+}
+
+func TestHostUsesManagerLaunchSelectionAndClearsActiveState(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	runtimePath := filepath.Join(root, "test-dsh")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "coding"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath:     filepath.Join(root, "manager.json"),
+		WorkspaceRoot: filepath.Join(root, "workspace"),
+		Homes: []dshmanager.HomeInfo{{
+			ID: "work", Name: "Work", Path: homePath, Ownership: dshmanager.HomeOwnershipWork,
+		}},
+		Runtimes: []dshmanager.RuntimeInfo{{
+			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+		}},
+		DefaultSelection: dshmanager.LaunchSelection{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{HomeID: "work", Name: "coding"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisorAdapter := &testSupervisor{}
+	host := NewHost(Dependencies{
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+	}, Config{
+		WorkspaceRoot:    filepath.Join(root, "workspace"),
+		ReadinessTimeout: time.Second,
+		ProbeTimeout:     time.Second,
+		EmptyTimeout:     time.Second,
+	})
+	statuses := make(chan lifecycle.Status, 16)
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	host.Start()
+	waitForStatus(t, statuses, lifecycle.StateReady)
+	if got := strings.Join(supervisorAdapter.plan.Args, " "); got != "--profile coding" {
+		t.Fatalf("launch args = %q, want explicit coding profile", got)
+	}
+	if supervisorAdapter.plan.Env["DSH_HOME"] != homePath {
+		t.Fatalf("DSH_HOME = %q, want %q", supervisorAdapter.plan.Env["DSH_HOME"], homePath)
+	}
+	active, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.Active == nil || active.Active.Profile.Name != "coding" {
+		t.Fatalf("active selection = %#v, want coding", active.Active)
+	}
+	host.Cancel()
+	waitForStatus(t, statuses, lifecycle.StateStopped)
+	cleared, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Active != nil {
+		t.Fatalf("active selection after cleanup = %#v, want nil", cleared.Active)
+	}
+}
+
+func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	root := t.TempDir()
+	missingHome := filepath.Join(root, "user-dsh-home")
+	runtimePath := filepath.Join(root, "test-dsh")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath:     filepath.Join(root, "manager.json"),
+		WorkspaceRoot: filepath.Join(root, "workspace"),
+		Homes: []dshmanager.HomeInfo{{
+			ID: "personal", Name: "Personal DSH", Path: missingHome, Ownership: dshmanager.HomeOwnershipUser,
+		}},
+		Runtimes: []dshmanager.RuntimeInfo{{
+			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+		}},
+		DefaultSelection: dshmanager.LaunchSelection{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{HomeID: "personal", Name: "web"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := make(chan lifecycle.Status, 8)
+	supervisorAdapter := &testSupervisor{}
+	host := NewHost(Dependencies{
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+	}, Config{
+		WorkspaceRoot:    filepath.Join(root, "workspace"),
+		ReadinessTimeout: time.Second,
+		ProbeTimeout:     time.Second,
+		EmptyTimeout:     time.Second,
+	})
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	host.Start()
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	if failed.Error == nil || failed.Error.Code != lifecycle.ErrorProfileNotFound {
+		t.Fatalf("unexpected missing-user-home status: %+v", failed)
+	}
+	if _, statErr := os.Stat(missingHome); !os.IsNotExist(statErr) {
+		t.Fatalf("missing user DSH home was created or returned another error: %v", statErr)
+	}
+	if supervisorAdapter.starts != 0 {
+		t.Fatalf("worker started for missing user DSH home: %d", supervisorAdapter.starts)
 	}
 }
 

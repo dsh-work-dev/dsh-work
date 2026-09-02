@@ -5,6 +5,7 @@ package windows
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -25,6 +26,9 @@ func NewCommandExecutor() dshadapter.CommandExecutor {
 }
 
 func (CommandExecutor) Run(ctx context.Context, executable string, args []string, env map[string]string, dir string) (dshadapter.CommandResult, error) {
+	if err := validateBatchInvocation(executable, args); err != nil {
+		return dshadapter.CommandResult{}, err
+	}
 	command, commandArgs := commandFor(executable, args)
 	cmd := exec.CommandContext(ctx, command, commandArgs...)
 	cmd.Dir = dir
@@ -46,8 +50,7 @@ func (CommandExecutor) Run(ctx context.Context, executable string, args []string
 }
 
 func commandFor(executable string, args []string) (string, []string) {
-	lower := strings.ToLower(executable)
-	if strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
+	if isBatchFile(executable) {
 		comspec := os.Getenv("ComSpec")
 		if comspec == "" {
 			comspec = "cmd.exe"
@@ -58,6 +61,33 @@ func commandFor(executable string, args []string) (string, []string) {
 		return comspec, commandArgs
 	}
 	return executable, append([]string(nil), args...)
+}
+
+func isBatchFile(executable string) bool {
+	lower := strings.ToLower(executable)
+	return strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat")
+}
+
+// Batch files require cmd.exe, whose metacharacter rules are separate from
+// normal argv parsing. Rejecting those characters at this native seam keeps
+// user-controlled plugin specs and catalog paths from becoming shell syntax.
+func validateBatchInvocation(executable string, args []string) error {
+	if !isBatchFile(executable) {
+		return nil
+	}
+	if containsBatchMeta(executable) {
+		return fmt.Errorf("batch executable path contains shell metacharacters")
+	}
+	for _, arg := range args {
+		if containsBatchMeta(arg) {
+			return fmt.Errorf("batch argument contains shell metacharacters")
+		}
+	}
+	return nil
+}
+
+func containsBatchMeta(value string) bool {
+	return strings.ContainsAny(value, "&|<>()^%!\"\r\n")
 }
 
 func mergedEnvironment(overrides map[string]string) []string {

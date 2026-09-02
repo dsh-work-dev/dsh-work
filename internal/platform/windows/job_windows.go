@@ -38,6 +38,9 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, raw
 	if err := plan.Validate(); err != nil {
 		return nil, fmt.Errorf("validate launch plan: %w", err)
 	}
+	if err := validateBatchInvocation(plan.Executable, plan.Args); err != nil {
+		return nil, fmt.Errorf("validate batch launch: %w", err)
+	}
 
 	job, err := win.CreateJobObject(nil, nil)
 	if err != nil {
@@ -200,7 +203,7 @@ func createNullInput() (win.Handle, error) {
 }
 
 func processCommand(executable string, args []string) (string, []string) {
-	if lower := strings.ToLower(executable); strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat") {
+	if isBatchFile(executable) {
 		comspec := os.Getenv("ComSpec")
 		if comspec == "" {
 			comspec = "cmd.exe"

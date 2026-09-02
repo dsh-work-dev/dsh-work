@@ -19,8 +19,9 @@ The current development target is Windows 10/11 `amd64`. macOS and Linux are
 validation targets for shared Go contracts and frontend checks in CI. Their
 native Supervisor Adapters are planned work; this repository does not claim a
 successful macOS or Linux process implementation yet. The DSH entry below is
-the exact F3 compatibility fixture; the planned `dsh-work` runtime manager will
-own multiple installed DSH versions and profiles.
+the exact F3 compatibility fixture. The initial `dsh-work` runtime manager now
+owns a versioned catalog and explicit selection; additional DSH versions remain
+launchable only after their adapter contract is registered and verified.
 
 ## DSH runtime setup
 
@@ -42,6 +43,10 @@ The Host does not edit a user-owned DSH home during this foundation slice.
 On Windows the locked local install is invoked through the checked-in
 `tools/dsh/run-dsh.cmd` launcher, which calls the installed DSH entry module
 directly and avoids package-manager shim behavior at runtime.
+
+The Manager window and `dsh-work` CLI share the same catalog. Plugin changes
+are delegated to `dsh plugin --profile <name> ...` with an explicit DSH home
+identity; Work does not configure or relocate npm/pnpm stores.
 
 ## Verification inventory
 

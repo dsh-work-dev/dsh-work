@@ -74,6 +74,14 @@ func (a *Adapter) SetWorkspaceRoot(path string) {
 	a.workspaceRoot = path
 }
 
+// RuntimeHint exposes the configured executable/version pair to a catalog
+// owner without claiming that the executable exists. The manager can show the
+// candidate immediately, while DiscoverPath remains the authoritative check
+// before a Worker starts.
+func (a *Adapter) RuntimeHint() Runtime {
+	return Runtime{Path: a.executableHint(), Version: a.expectedVersion}
+}
+
 func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
 	if a.executor == nil {
 		return Runtime{}, lifecycle.Failure{
@@ -89,6 +97,21 @@ func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
 			Summary:   "A compatible local DSH runtime was not found.",
 			Retryable: false,
 			Detail:    "Set WORK_DSH_EXECUTABLE or run task setup:dsh.",
+		}
+	}
+	return a.DiscoverPath(ctx, path)
+}
+
+// DiscoverPath verifies one catalog-selected executable. Runtime management
+// may expose several paths, but every selected path still crosses this DSH
+// adapter so version compatibility is checked by the pinned DSH contract.
+func (a *Adapter) DiscoverPath(ctx context.Context, path string) (Runtime, error) {
+	path, err := existingExecutable(path)
+	if err != nil {
+		return Runtime{}, lifecycle.Failure{
+			Code:      lifecycle.ErrorDSHRuntimeNotFound,
+			Summary:   "The selected DSH runtime was not found.",
+			Retryable: false,
 		}
 	}
 	result, err := a.executor.Run(ctx, path, []string{"--version"}, nil, "")
@@ -111,9 +134,38 @@ func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
 	return Runtime{Path: path, Version: version}, nil
 }
 
+// Verify checks a catalog-selected executable against the DSH adapter
+// contract. It intentionally returns the adapter's stable lifecycle failure
+// so the manager can project it without knowing DSH CLI details.
+func (a *Adapter) Verify(ctx context.Context, path, expectedVersion string) error {
+	runtime, err := a.DiscoverPath(ctx, path)
+	if err != nil {
+		return err
+	}
+	if expectedVersion != "" && runtime.Version != expectedVersion {
+		return lifecycle.Failure{
+			Code:    lifecycle.ErrorDSHUnsupportedVersion,
+			Summary: "The selected DSH runtime does not match the catalog version.",
+			Detail:  "Expected " + expectedVersion,
+		}
+	}
+	return nil
+}
+
 func (a *Adapter) BuildLaunchPlan(runtime Runtime, generationID, workspace, dshHome string, port int) (supervisor.LaunchPlan, error) {
+	return a.BuildLaunchPlanForProfile(runtime, generationID, workspace, dshHome, "web", port)
+}
+
+// BuildLaunchPlanForProfile is the profile-aware launch seam used by the
+// runtime manager. The old BuildLaunchPlan method remains a compatibility
+// convenience for the foundation tests and always means the built-in web
+// profile; new callers must supply the selected profile explicitly.
+func (a *Adapter) BuildLaunchPlanForProfile(runtime Runtime, generationID, workspace, dshHome, profile string, port int) (supervisor.LaunchPlan, error) {
 	if runtime.Path == "" || runtime.Version != a.expectedVersion {
 		return supervisor.LaunchPlan{}, fmt.Errorf("runtime is not the pinned DSH version")
+	}
+	if !validProfileName(profile) {
+		return supervisor.LaunchPlan{}, fmt.Errorf("invalid DSH profile name")
 	}
 	workspace, err := filepath.Abs(workspace)
 	if err != nil {
@@ -127,7 +179,7 @@ func (a *Adapter) BuildLaunchPlan(runtime Runtime, generationID, workspace, dshH
 	plan := supervisor.LaunchPlan{
 		GenerationID:     generationID,
 		Executable:       runtime.Path,
-		Args:             []string{"--profile", "web", "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"},
+		Args:             []string{"--profile", profile, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"},
 		Env:              map[string]string{"DSH_HOME": dshHome},
 		WorkingDirectory: workspace,
 		ExpectedOrigin:   origin,
@@ -138,6 +190,11 @@ func (a *Adapter) BuildLaunchPlan(runtime Runtime, generationID, workspace, dshH
 		return supervisor.LaunchPlan{}, err
 	}
 	return plan, nil
+}
+
+func validProfileName(profile string) bool {
+	return profile != "" && profile != "." && profile != ".." &&
+		filepath.Base(profile) == profile && !strings.ContainsAny(profile, `/\\`) && !strings.ContainsRune(profile, '\x00')
 }
 
 func (a *Adapter) ParseReadyAnnouncement(text string) (ReadyAnnouncement, bool) {
@@ -278,6 +335,20 @@ func (a *Adapter) locateExecutable() (string, error) {
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+func (a *Adapter) executableHint() string {
+	if override := strings.TrimSpace(a.executableOverride); override != "" {
+		return override
+	}
+	if override := strings.TrimSpace(os.Getenv("WORK_DSH_EXECUTABLE")); override != "" {
+		return override
+	}
+	root := a.workspaceRoot
+	if root == "" {
+		root, _ = os.Getwd()
+	}
+	return filepath.Join(root, "tools", "dsh", "run-dsh.cmd")
 }
 
 func existingExecutable(path string) (string, error) {

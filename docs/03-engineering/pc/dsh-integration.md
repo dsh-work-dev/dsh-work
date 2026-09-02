@@ -36,6 +36,11 @@ source of truth for profile composition. Plugin operations delegate to DSH's
 supported `dsh plugin --profile` seam; they are not reimplemented by the Host
 or DSH Adapter.
 
+On Windows, the native command Adapter is the only boundary that invokes a
+`.cmd` or `.bat` launcher. It rejects shell metacharacters in batch paths and
+arguments before entering `cmd.exe`; shared profile and plugin contracts do
+not carry Windows shell rules.
+
 No other package builds a DSH command or parses DSH log text.
 
 ## Launch preparation
@@ -101,6 +106,14 @@ URL. The Manager window never receives a DSH URL and remains a trusted Host
 surface. A native Work menu may be attached to the Workspace window, but its
 handlers execute in the Host and do not modify the DSH document.
 
+Wails may inject its runtime core after an external navigation. Therefore
+surface isolation is enforced at the binding boundary as well as by asset
+ownership: Manager methods accept only calls carrying the `manager` window
+context, while Host controls accept only the `workspace` context while the
+trusted recovery shell is active. Once the Workspace window is handed to the
+DSH gateway, its Host binding gate is closed until recovery restores the
+embedded shell.
+
 ## Profile ownership
 
 The ownership and relationship model is:
@@ -138,6 +151,14 @@ Worker generation = selected runtime + selected DSH home/profile
 The runtime manager must validate runtime/profile compatibility before launch.
 A profile is not automatically copied, migrated or made version-scoped when a
 different runtime is selected.
+
+The first implementation persists the catalog and desired launch selection in
+Work application data. The Windows runtime installer is explicit and uses npm
+only when the user requests `runtime install`; its native adapter returns a
+catalog entry only after the expected DSH launcher is present. The pinned
+`0.1.2-alpha.3` adapter remains the only verified launch contract in this
+foundation slice, so an unregistered version is rejected rather than treated
+as compatible.
 
 ## Compatibility policy
 
