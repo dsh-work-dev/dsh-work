@@ -33,6 +33,8 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - Native platform WebView for the application window.
 - TypeScript frontend with framework choice isolated from Host contracts.
 - DSH launched as an out-of-process Worker.
+- `dsh-work` CLI and runtime manager resolve an installed DSH version/profile;
+  Work does not embed the DSH Web UI or mutate profiles during GUI startup.
 - Work-owned DSH plugin injected through a supported profile or patch seam.
 - Private Host–plugin IPC; loopback HTTP only for the embedded DSH Web UI.
 - Browser adapters for Chrome personal-browser auto-connect, signed extension／native messaging compatibility and managed-profile fallback.
@@ -47,6 +49,7 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 | `lifecycle` | Host state machine and commands | UI toolkit, operating-system calls |
 | `supervisor` | process ownership, readiness, restart, cleanup | DSH plugin internals, approval UI |
 | `dshadapter` | supported versions, command construction, readiness parsing | tray, browser driver details |
+| `dshmanager` | explicit DSH runtime/profile selection and CLI-backed management | Wails, lifecycle state, process handles |
 | `workergateway` | trusted-origin HTTP／WebSocket access to the Worker | DSH command grammar, approval policy |
 | `toolbridge` | typed Host–DSH request/result protocol | visual UI components |
 | `browserpolicy` | DSH Tool classification plus Host hard-deny revalidation | UI layout and raw browser transport |
@@ -71,7 +74,7 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 ## Primary runtime sequence
 
 1. The Host obtains the single-instance lock and opens trusted UI.
-2. Runtime locator resolves a compatible local DSH installation without network access.
+2. The runtime manager resolves the selected compatible local DSH installation and profile without network access.
 3. Supervisor prepares a Work-owned profile overlay, private IPC endpoint and loopback port candidate.
 4. The selected platform adapter creates the Worker inside its managed process boundary.
 5. DSH adapter reads structured process events, validates the announced origin, then performs an active readiness probe.
@@ -103,10 +106,12 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 
 ```text
 cmd/work/
+cmd/dsh-work/
 internal/app/
 internal/lifecycle/
 internal/supervisor/
 internal/dshadapter/
+internal/dshmanager/
 internal/workergateway/
 internal/toolbridge/
 internal/browserpolicy/

@@ -13,6 +13,8 @@ Deliver:
 - automated formatting, unit test, build and documentation checks;
 - minimum lifecycle and error value types;
 - narrow Host command and event projection;
+- `dsh-work` runtime-manager Interface for explicit DSH version/profile
+  selection, with CLI implementation staged before multi-runtime support;
 - test-only Worker fake for deterministic shell-state tests.
 
 Exit gate: clean Windows, macOS and Linux checkouts build the trusted shell; the current development platform launches it, and CI runs deterministic minimum lifecycle tests.
@@ -21,14 +23,19 @@ Exit gate: clean Windows, macOS and Linux checkouts build the trusted shell; the
 
 Deliver:
 
-- explicitly configured runtime discovery and pinned DSH compatibility;
+- explicitly selected runtime discovery and pinned compatibility for the initial
+  DSH baseline;
+- `dsh-work` CLI path for managing installed DSH versions, profiles and plugins;
 - first concrete DSH and Windows process Adapters behind the planned Seams;
 - explicit loopback port and active readiness validation;
 - embedded trusted-origin DSH navigation;
 - graceful stop and initial child cleanup;
 - stable missing-runtime, incompatible-version, early-exit and timeout failures.
 
-Exit gate: on the primary Windows development environment, Work launches the real pinned DSH Web profile, displays it only after readiness, exits without manual process or port cleanup, and repeats the path reliably.
+Exit gate: on the primary Windows development environment, Work launches the
+selected initial DSH Web profile, displays the external DSH page only after
+readiness, exits without manual process or port cleanup, and repeats the path
+reliably. The selection seam does not require the Host to embed or install DSH.
 
 ## M2 — Windows desktop lifecycle and foundation UI
 

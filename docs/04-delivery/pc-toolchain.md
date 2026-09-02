@@ -18,22 +18,24 @@ verification scripts can consume one machine-readable manifest.
 The current development target is Windows 10/11 `amd64`. macOS and Linux are
 validation targets for shared Go contracts and frontend checks in CI. Their
 native Supervisor Adapters are planned work; this repository does not claim a
-successful macOS or Linux process implementation yet.
+successful macOS or Linux process implementation yet. The DSH entry below is
+the exact F3 compatibility fixture; the planned `dsh-work` runtime manager will
+own multiple installed DSH versions and profiles.
 
 ## DSH runtime setup
 
-The repository declares the DSH dependency in `tools/dsh/package.json`.
-Install it explicitly during development:
+The repository declares the initial DSH compatibility fixture in
+`tools/dsh/package.json`. Install it explicitly during development:
 
 ```text
 npm install --prefix tools/dsh
 ```
 
 This creates a local, ignored `tools/dsh/node_modules` tree. Work startup never
-runs npm, pnpm, npx or another package runner. The Host accepts
-`WORK_DSH_EXECUTABLE` as an explicit override and otherwise checks the local
-locked install at `tools/dsh/node_modules/.bin/dsh` (with the Windows `.cmd`
-launcher selected by the Windows Adapter).
+runs npm, pnpm, npx or another package runner. Until the runtime-manager slice
+lands, the Host accepts `WORK_DSH_EXECUTABLE` as an explicit override and
+otherwise checks the local locked install at `tools/dsh/node_modules/.bin/dsh`
+(with the Windows `.cmd` launcher selected by the Windows Adapter).
 
 `DSH_HOME` is set to a Work-owned application-data directory for each launch.
 The Host does not edit a user-owned DSH home during this foundation slice.

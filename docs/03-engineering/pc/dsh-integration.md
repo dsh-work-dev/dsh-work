@@ -4,6 +4,13 @@
 
 Work treats DSH as a versioned external runtime. The adapter uses public DSH launcher, profile and patch behaviour and does not modify DSH source code. DSH is currently a fast-moving developer-preview dependency, so Work pins and tests an explicit supported version range.
 
+The `dsh-work` runtime manager may keep multiple installed DSH runtimes. One
+immutable launch selection chooses an exact runtime version and profile for a
+Worker generation. The Host consumes the resolved executable, DSH home and
+profile; it does not install packages or edit profile composition during GUI
+startup. The initial F3 exact version remains the baseline fixture while each
+additional supported version earns its own adapter contract tests.
+
 Official references:
 
 - [DeepSeek Harness repository](https://github.com/deepseek-ai/deepseek-harness)
@@ -20,6 +27,11 @@ The DSH adapter owns:
 - readiness-event parsing and health probing;
 - graceful-shutdown request when supported;
 - classification of exit and protocol failures.
+
+The runtime manager owns installation, local catalog state, selection and
+explicit profile/plugin management commands. Plugin operations delegate to
+DSH's supported `dsh plugin --profile` seam; they are not reimplemented by the
+Host or DSH Adapter.
 
 No other package builds a DSH command or parses DSH log text.
 

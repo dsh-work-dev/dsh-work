@@ -3,7 +3,14 @@
 | Term | Meaning in Work |
 |---|---|
 | Work | The desktop host application described by this repository. |
+| Host shell | The embedded trusted Work startup, status and recovery UI; it is not the DSH Web UI. |
 | DSH | DeepSeek Harness, the agent runtime hosted and supervised by Work. |
+| DSH runtime | One installed, versioned DSH distribution and its launch entry point. |
+| DSH profile | A DSH_HOME profile whose ordered bundle and user patch layers define one DSH configuration. |
+| DSH plugin | A package or bundle managed through DSH's supported profile plugin seam. |
+| DSH workspace | The Web UI served by the out-of-process DSH Worker after readiness validation. |
+| dsh-work CLI | The explicit operator tool that installs and selects DSH runtimes and manages profile/plugin operations. |
+| Runtime selection | The immutable DSH runtime version and profile chosen for one Work launch. |
 | Host | The Work desktop process and its trusted backend services. |
 | Worker | A DSH process started and supervised by the Host. |
 | Supervisor | Host module responsible for the Worker lifecycle and health. |
