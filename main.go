@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -25,6 +26,18 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+//go:embed frontend/public/branding/work-appicon.png
+var workAppIcon []byte
+
+//go:embed frontend/public/branding/work-tray.png
+var workTrayIcon []byte
+
+//go:embed frontend/public/branding/work-tray-dark.png
+var workTrayDarkIcon []byte
+
+//go:embed frontend/public/branding/work-tray-template.png
+var workTrayTemplateIcon []byte
 
 func main() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
@@ -133,6 +146,7 @@ func main() {
 	desktop := application.New(application.Options{
 		Name:        "Work",
 		Description: "A local desktop shell for DSH workspaces.",
+		Icon:        workAppIcon,
 		Services: []application.Service{
 			application.NewService(hostService),
 			application.NewService(managerService),
@@ -181,6 +195,11 @@ func main() {
 	})
 
 	tray := desktop.SystemTray.New()
+	if runtime.GOOS == "darwin" {
+		tray.SetTemplateIcon(workTrayTemplateIcon)
+	} else {
+		tray.SetIcon(workTrayIcon).SetDarkModeIcon(workTrayDarkIcon)
+	}
 	initialNative := nativeLocaleCopyFor(localePreference)
 	tray.SetTooltip(initialNative.trayTooltip)
 	trayMenu := desktop.NewMenu()
@@ -272,7 +291,7 @@ func main() {
 
 	workspaceWindow = desktop.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:               "workspace",
-		Title:              "dsh-work",
+		Title:              "Work",
 		Width:              1180,
 		Height:             760,
 		MinWidth:           720,

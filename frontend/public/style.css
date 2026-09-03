@@ -150,9 +150,21 @@ h2 {
 .brand-lockup,
 .shell-status {
   display: flex;
-  align-items: baseline;
   gap: var(--space-3);
 }
+
+.brand-lockup { align-items: center; }
+
+.brand-mark {
+  width: 28px;
+  height: 24px;
+  flex: 0 0 auto;
+  display: block;
+  object-fit: contain;
+  filter: invert(1);
+}
+
+:root[data-theme="light"] .brand-mark { filter: none; }
 
 .brand-name {
   color: var(--text);
@@ -495,7 +507,9 @@ select:focus-visible {
 }
 
 .manager-brand {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: 0 8px 22px;
 }
 
@@ -1188,7 +1202,7 @@ select:focus-visible {
     gap: 12px;
   }
 
-  .brand-lockup { align-items: baseline; }
+  .brand-lockup { align-items: center; }
 
   .actions {
     align-items: stretch;

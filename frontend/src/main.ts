@@ -10,7 +10,7 @@ const surface = new URLSearchParams(window.location.search).get("surface");
 
 applyLocale(defaultLocale);
 mountLocale();
-document.title = surface === "settings" ? "设置" : "dsh-work";
+document.title = surface === "settings" ? "设置" : "Work";
 
 if (surface === "settings") {
   document.getElementById("host-surface")?.setAttribute("hidden", "true");
