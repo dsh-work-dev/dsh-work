@@ -13,8 +13,7 @@ import (
 func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {
 	root := t.TempDir()
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: root,
+		StatePath: filepath.Join(root, "manager.json"),
 	})
 	if err != nil {
 		t.Fatal(err)

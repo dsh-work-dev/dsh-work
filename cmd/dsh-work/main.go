@@ -36,8 +36,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "runtime":
 		return runRuntime(manager, args[1:], stdout)
-	case "home":
-		return runHome(manager, args[1:], stdout)
+	case "data-directory":
+		return runDataDirectory(manager, args[1:], stdout)
 	case "profile":
 		return runProfile(manager, args[1:], stdout)
 	case "use":
@@ -50,38 +50,36 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 func newManager() (*dshmanager.Manager, error) {
-	workspace, err := os.Getwd()
+	discoveryRoot, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("resolve workspace: %w", err)
+		return nil, fmt.Errorf("resolve DSH discovery root: %w", err)
 	}
-	config := workapp.DefaultConfig(workspace)
+	config := workapp.DefaultConfig(discoveryRoot)
 	dependencies := platform.New()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
-	dsh.SetWorkspaceRoot(config.WorkspaceRoot)
+	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
 	hint := dsh.RuntimeHint()
 	var runner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
 	}
-	runtimeStore := filepath.Join(filepath.Dir(config.DSHHome), "dsh-work", "runtimes")
+	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "dsh-work", "runtimes")
 	return dshmanager.New(dshmanager.Config{
-		WorkspaceRoot:    workspace,
 		CommandRunner:    runner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
 		RuntimeVerifier:  dsh,
 		ProfileCatalog:   dsh,
-		Homes: []dshmanager.HomeInfo{{
-			ID: "work", Name: "Work DSH home", Path: config.DSHHome, Ownership: dshmanager.HomeOwnershipWork,
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "work", Name: "Work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-" + hint.Version, Version: hint.Version, Path: hint.Path,
 			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(hint.Path),
 		}},
-		DefaultSelection: dshmanager.LaunchSelection{
+		DefaultTarget: dshmanager.LaunchTarget{
 			RuntimeID: "dsh-" + hint.Version,
-			Profile:   dshmanager.ProfileRef{HomeID: "work", Name: "web"},
-			Workspace: workspace,
+			Profile:   dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	})
 }
@@ -182,7 +180,7 @@ func runRuntime(manager *dshmanager.Manager, args []string, stdout io.Writer) er
 	}
 }
 
-func runHome(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runDataDirectory(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		listArgs := args
 		if len(args) > 0 && args[0] == "list" {
@@ -190,52 +188,52 @@ func runHome(manager *dshmanager.Manager, args []string, stdout io.Writer) error
 		}
 		jsonOutput, remaining, err := jsonFlag(listArgs)
 		if err != nil || len(remaining) != 0 {
-			return flagError("home list", err, remaining)
+			return flagError("data-directory list", err, remaining)
 		}
 		snapshot, err := manager.Snapshot(context.Background())
 		if err != nil {
 			return err
 		}
-		return printValue(stdout, jsonOutput, snapshot.Homes, func() {
-			for _, home := range snapshot.Homes {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", home.ID, home.Name, home.Ownership, home.Path)
+		return printValue(stdout, jsonOutput, snapshot.DataDirectories, func() {
+			for _, dataDirectory := range snapshot.DataDirectories {
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", dataDirectory.ID, dataDirectory.Name, dataDirectory.Ownership, dataDirectory.Path)
 			}
 		})
 	}
 	switch args[0] {
 	case "add":
-		set := flag.NewFlagSet("home add", flag.ContinueOnError)
+		set := flag.NewFlagSet("data-directory add", flag.ContinueOnError)
 		set.SetOutput(io.Discard)
-		id := set.String("id", "", "home id")
+		id := set.String("id", "", "data-directory id")
 		name := set.String("name", "", "display name")
-		path := set.String("path", "", "DSH_HOME path")
-		ownership := set.String("ownership", string(dshmanager.HomeOwnershipUser), "home ownership: work or user")
+		path := set.String("path", "", "DSH data-directory path")
+		ownership := set.String("ownership", string(dshmanager.DataDirectoryOwnershipUser), "data-directory ownership: work or user")
 		if err := set.Parse(args[1:]); err != nil {
 			return err
 		}
 		if *id == "" || *name == "" || *path == "" {
-			return errorsForUsage("home add requires --id, --name and --path")
+			return errorsForUsage("data-directory add requires --id, --name and --path")
 		}
-		_, err := manager.RegisterHome(context.Background(), dshmanager.HomeInfo{ID: *id, Name: *name, Path: *path, Ownership: dshmanager.HomeOwnership(*ownership)})
+		_, err := manager.RegisterDataDirectory(context.Background(), dshmanager.DataDirectoryInfo{ID: *id, Name: *name, Path: *path, Ownership: dshmanager.DataDirectoryOwnership(*ownership)})
 		return err
 	case "remove":
-		set := flag.NewFlagSet("home remove", flag.ContinueOnError)
+		set := flag.NewFlagSet("data-directory remove", flag.ContinueOnError)
 		set.SetOutput(io.Discard)
-		id := set.String("id", "", "home id")
+		id := set.String("id", "", "data-directory id")
 		if err := set.Parse(args[1:]); err != nil {
 			return err
 		}
 		if *id == "" {
-			return errorsForUsage("home remove requires --id")
+			return errorsForUsage("data-directory remove requires --id")
 		}
-		_, err := manager.RemoveHome(context.Background(), *id)
+		_, err := manager.RemoveDataDirectory(context.Background(), *id)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "unregistered DSH home %s from the catalog; home files are retained\n", *id)
+		fmt.Fprintf(stdout, "unregistered DSH data directory %s from the catalog; files are retained\n", *id)
 		return nil
 	default:
-		return fmt.Errorf("unknown home command %q", args[0])
+		return fmt.Errorf("unknown data-directory command %q", args[0])
 	}
 }
 
@@ -255,7 +253,7 @@ func runProfile(manager *dshmanager.Manager, args []string, stdout io.Writer) er
 		}
 		return printValue(stdout, jsonOutput, snapshot.Profiles, func() {
 			for _, profile := range snapshot.Profiles {
-				fmt.Fprintf(stdout, "%s\t%s\t%s\t%d plugins\n", profile.Ref.HomeID, profile.Ref.Name, profile.Kind, profile.PluginCount)
+				fmt.Fprintf(stdout, "%s\t%s\t%s\t%d plugins\n", profile.Ref.DataDirectoryID, profile.Ref.Name, profile.Kind, profile.PluginCount)
 			}
 		})
 	}
@@ -266,24 +264,22 @@ func runUse(manager *dshmanager.Manager, args []string, stdout io.Writer) error 
 	set := flag.NewFlagSet("use", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	runtimeID := set.String("runtime", "", "runtime id")
-	homeID := set.String("home", "", "DSH home id")
+	dataDirectoryID := set.String("data-directory", "", "DSH data-directory id")
 	profileName := set.String("profile", "", "profile name")
-	workspace := set.String("workspace", "", "workspace path")
 	if err := set.Parse(args); err != nil {
 		return err
 	}
-	if *runtimeID == "" || *homeID == "" || *profileName == "" {
-		return errorsForUsage("use requires --runtime, --home and --profile")
+	if *runtimeID == "" || *dataDirectoryID == "" || *profileName == "" {
+		return errorsForUsage("use requires --runtime, --data-directory and --profile")
 	}
-	snapshot, err := manager.SetDesired(context.Background(), dshmanager.LaunchSelection{
+	snapshot, err := manager.SetDesired(context.Background(), dshmanager.LaunchTarget{
 		RuntimeID: *runtimeID,
-		Profile:   dshmanager.ProfileRef{HomeID: *homeID, Name: *profileName},
-		Workspace: *workspace,
+		Profile:   dshmanager.ProfileRef{DataDirectoryID: *dataDirectoryID, Name: *profileName},
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "selected %s / %s:%s\n", *runtimeID, *homeID, *profileName)
+	fmt.Fprintf(stdout, "selected %s / %s:%s\n", *runtimeID, *dataDirectoryID, *profileName)
 	return printSnapshotHint(stdout, snapshot)
 }
 
@@ -294,16 +290,16 @@ func runPlugin(manager *dshmanager.Manager, args []string, stdout io.Writer) err
 	set := flag.NewFlagSet("plugin "+args[0], flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	runtimeID := set.String("runtime", "", "runtime id; defaults to the selected runtime")
-	homeID := set.String("home", "", "DSH home id")
+	dataDirectoryID := set.String("data-directory", "", "DSH data-directory id")
 	profileName := set.String("profile", "", "profile name")
 	jsonOutput := set.Bool("json", false, "print JSON")
 	if err := set.Parse(args[1:]); err != nil {
 		return err
 	}
-	if *homeID == "" || *profileName == "" {
-		return errorsForUsage("plugin commands require --home and --profile")
+	if *dataDirectoryID == "" || *profileName == "" {
+		return errorsForUsage("plugin commands require --data-directory and --profile")
 	}
-	target := dshmanager.PluginTarget{RuntimeID: *runtimeID, Profile: dshmanager.ProfileRef{HomeID: *homeID, Name: *profileName}}
+	target := dshmanager.PluginTarget{RuntimeID: *runtimeID, Profile: dshmanager.ProfileRef{DataDirectoryID: *dataDirectoryID, Name: *profileName}}
 	switch args[0] {
 	case "list":
 		plugins, err := manager.ListPlugins(context.Background(), dshmanager.PluginListRequest{Target: target})
@@ -370,7 +366,7 @@ func printSnapshotHint(stdout io.Writer, snapshot dshmanager.Snapshot) error {
 	if snapshot.Desired == nil {
 		return nil
 	}
-	fmt.Fprintf(stdout, "desired: %s / %s:%s\n", snapshot.Desired.RuntimeID, snapshot.Desired.Profile.HomeID, snapshot.Desired.Profile.Name)
+	fmt.Fprintf(stdout, "desired: %s / %s:%s\n", snapshot.Desired.RuntimeID, snapshot.Desired.Profile.DataDirectoryID, snapshot.Desired.Profile.Name)
 	return nil
 }
 
@@ -395,15 +391,15 @@ func executableExists(path string) bool {
 }
 
 func printUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "dsh-work manages explicit DSH runtimes, homes, profiles and profile-scoped plugins.")
+	fmt.Fprintln(stdout, "dsh-work manages explicit DSH runtimes, data directories, profiles and profile-scoped plugins.")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work runtime install --version VERSION")
 	fmt.Fprintln(stdout, "  dsh-work runtime add --id ID --version VERSION --path PATH")
 	fmt.Fprintln(stdout, "  dsh-work runtime remove --id ID    # unregisters catalog entry; retains files")
-	fmt.Fprintln(stdout, "  dsh-work home list|add|remove ...  # home removal retains files")
+	fmt.Fprintln(stdout, "  dsh-work data-directory list|add|remove ...  # removal retains files")
 	fmt.Fprintln(stdout, "  dsh-work profile list [--json]")
-	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --home ID --profile NAME [--workspace PATH]")
-	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --home ID --profile NAME [--runtime ID] ...")
+	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")
+	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME [--runtime ID] ...")
 }

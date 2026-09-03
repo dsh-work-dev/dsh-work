@@ -10,7 +10,7 @@ import (
 )
 
 // ManagerService is the trusted Settings-window binding for the nested DSH
-// manager. It exposes catalog, selection, runtime/home and profile-plugin
+// manager. It exposes catalog, launch-target, runtime/data-directory and profile-plugin
 // operations; profile composition and plugin mutation still go through DSH's
 // public CLI seam, never direct file edits.
 type ManagerService struct {
@@ -35,7 +35,7 @@ func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, 
 	return s.manager.Snapshot(ctx)
 }
 
-// GetTheme reads the selected DSH home's appearance preference. Settings uses
+// GetTheme reads the selected DSH data directory's appearance preference. Settings uses
 // it while both trusted windows are open so its surface follows changes made
 // by DSH.
 func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
@@ -51,7 +51,7 @@ func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreferenc
 	return theme
 }
 
-func (s *ManagerService) SetDesiredSelection(ctx context.Context, selection dshmanager.LaunchSelection) (dshmanager.Snapshot, error) {
+func (s *ManagerService) SetDesiredTarget(ctx context.Context, target dshmanager.LaunchTarget) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -60,7 +60,7 @@ func (s *ManagerService) SetDesiredSelection(ctx context.Context, selection dshm
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	return s.manager.SetDesired(ctx, selection)
+	return s.manager.SetDesired(ctx, target)
 }
 
 func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (dshmanager.Snapshot, error) {
@@ -87,7 +87,7 @@ func (s *ManagerService) RemoveRuntime(ctx context.Context, id string) (dshmanag
 	return s.manager.RemoveRuntime(ctx, id)
 }
 
-func (s *ManagerService) RegisterHome(ctx context.Context, home dshmanager.HomeInfo) (dshmanager.Snapshot, error) {
+func (s *ManagerService) RegisterDataDirectory(ctx context.Context, dataDirectory dshmanager.DataDirectoryInfo) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -96,10 +96,10 @@ func (s *ManagerService) RegisterHome(ctx context.Context, home dshmanager.HomeI
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	return s.manager.RegisterHome(ctx, home)
+	return s.manager.RegisterDataDirectory(ctx, dataDirectory)
 }
 
-func (s *ManagerService) RemoveHome(ctx context.Context, id string) (dshmanager.Snapshot, error) {
+func (s *ManagerService) RemoveDataDirectory(ctx context.Context, id string) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -108,7 +108,7 @@ func (s *ManagerService) RemoveHome(ctx context.Context, id string) (dshmanager.
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	return s.manager.RemoveHome(ctx, id)
+	return s.manager.RemoveDataDirectory(ctx, id)
 }
 
 func (s *ManagerService) ResolveLaunch(ctx context.Context, request dshmanager.LaunchRequest) (dshmanager.ResolvedLaunch, error) {

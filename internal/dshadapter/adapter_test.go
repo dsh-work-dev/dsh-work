@@ -14,6 +14,7 @@ import (
 
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/supervisor"
+	"github.com/local/work/internal/workspacecontext"
 )
 
 type fakeExecutor struct {
@@ -90,22 +91,26 @@ func TestParseAndValidateReadyAnnouncement(t *testing.T) {
 	}
 }
 
-func TestBuildLaunchPlanUsesExplicitLoopbackPortAndHome(t *testing.T) {
+func TestBuildLaunchPlanUsesExplicitLoopbackPortAndDataDirectory(t *testing.T) {
 	adapter := New(nil, SupportedVersion)
-	plan, err := adapter.BuildLaunchPlan(
-		Runtime{Path: "C:\\tools\\dsh.cmd", Version: SupportedVersion},
-		"generation",
-		t.TempDir(),
-		filepath.Join(t.TempDir(), "dsh-home"),
-		4567,
-	)
+	bootstrapDirectory := t.TempDir()
+	dataDirectory := filepath.Join(t.TempDir(), "dsh-data")
+	plan, err := adapter.BuildLaunchPlan(LaunchContext{
+		GenerationID:       "generation",
+		Runtime:            Runtime{Path: "C:\\tools\\dsh.cmd", Version: SupportedVersion},
+		BootstrapDirectory: bootstrapDirectory,
+		DataDirectory:      dataDirectory,
+		Profile:            "web",
+		Workspace:          workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
+		Port:               4567,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(plan.Args, " ") != "--profile web --host 127.0.0.1 --port 4567 --no-open" {
 		t.Fatalf("unexpected DSH args: %#v", plan.Args)
 	}
-	if plan.Env["DSH_HOME"] == "" || plan.ExpectedOrigin != "http://127.0.0.1:4567" {
+	if plan.Env["DSH_HOME"] == "" || plan.Env["DSH_HOME"] != dataDirectory || plan.WorkingDirectory != bootstrapDirectory || plan.ExpectedOrigin != "http://127.0.0.1:4567" {
 		t.Fatalf("unexpected launch plan: %+v", plan)
 	}
 }

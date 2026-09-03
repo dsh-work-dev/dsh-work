@@ -10,11 +10,20 @@ export interface LifecycleFailure {
   detail?: string;
 }
 
+export interface WorkspaceContext {
+  generationId: string;
+  state: "selected" | "selection-required";
+  id?: string;
+  path?: string;
+  title?: string;
+}
+
 export interface LifecycleStatus {
   state: LifecycleState;
   phase: LifecyclePhase;
   generationId?: string;
   workspaceUrl?: string;
+  workspace?: WorkspaceContext;
   error?: LifecycleFailure;
   canRetry: boolean;
   canCancel: boolean;

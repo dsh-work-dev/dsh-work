@@ -3,7 +3,7 @@
 
 /**
  * ManagerService is the trusted Settings-window binding for the nested DSH
- * manager. It exposes catalog, selection, runtime/home and profile-plugin
+ * manager. It exposes catalog, launch-target, runtime/data-directory and profile-plugin
  * operations; profile composition and plugin mutation still go through DSH's
  * public CLI seam, never direct file edits.
  * @module
@@ -22,7 +22,7 @@ export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
 }
 
 /**
- * GetTheme reads the selected DSH home's appearance preference. Settings uses
+ * GetTheme reads the selected DSH data directory's appearance preference. Settings uses
  * it while both trusted windows are open so its surface follows changes made
  * by DSH.
  */
@@ -42,12 +42,12 @@ export function ListPlugins(request: dshmanager$0.PluginListRequest): $Cancellab
     return $Call.ByID(2864409457, request);
 }
 
-export function RegisterHome(home: dshmanager$0.HomeInfo): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(2936117313, home);
+export function RegisterDataDirectory(dataDirectory: dshmanager$0.DataDirectoryInfo): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(4210621493, dataDirectory);
 }
 
-export function RemoveHome(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3573879260, id);
+export function RemoveDataDirectory(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(1955812790, id);
 }
 
 export function RemovePlugin(request: dshmanager$0.PluginRemoveRequest): $CancellablePromise<dshmanager$0.PluginResult> {
@@ -66,6 +66,6 @@ export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $Cancellable
     return $Call.ByID(1105056358, request);
 }
 
-export function SetDesiredSelection(selection: dshmanager$0.LaunchSelection): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(1044943993, selection);
+export function SetDesiredTarget(target: dshmanager$0.LaunchTarget): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(1240049364, target);
 }

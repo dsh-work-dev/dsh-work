@@ -32,33 +32,31 @@ func main() {
 	application.RegisterEvent[bool]("notification-failure")
 
 	dependencies := platform.New()
-	config := workapp.DefaultConfig(currentWorkspace())
+	config := workapp.DefaultConfig(currentDiscoveryRoot())
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
-	dsh.SetWorkspaceRoot(config.WorkspaceRoot)
+	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
 	runtimeHint := dsh.RuntimeHint()
 	var managerRunner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
 	}
-	runtimeStore := filepath.Join(filepath.Dir(config.DSHHome), "dsh-work", "runtimes")
+	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "dsh-work", "runtimes")
 	manager, managerErr := dshmanager.New(dshmanager.Config{
-		WorkspaceRoot:    config.WorkspaceRoot,
 		CommandRunner:    managerRunner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
 		RuntimeVerifier:  dsh,
 		ProfileCatalog:   dsh,
-		Homes: []dshmanager.HomeInfo{{
-			ID: "work", Name: "Work DSH home", Path: config.DSHHome, Ownership: dshmanager.HomeOwnershipWork,
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "work", Name: "Work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path,
 			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(runtimeHint.Path),
 		}},
-		DefaultSelection: dshmanager.LaunchSelection{
+		DefaultTarget: dshmanager.LaunchTarget{
 			RuntimeID: "dsh-" + runtimeHint.Version,
-			Profile:   dshmanager.ProfileRef{HomeID: "work", Name: "web"},
-			Workspace: config.WorkspaceRoot,
+			Profile:   dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	})
 	if managerErr != nil {
@@ -424,7 +422,7 @@ func settingsURL(manager *dshmanager.Manager, section string) string {
 				selection = snapshot.Desired
 			}
 			if selection != nil {
-				values.Set("home", selection.Profile.HomeID)
+				values.Set("data-directory", selection.Profile.DataDirectoryID)
 				values.Set("profile", selection.Profile.Name)
 			}
 		}
@@ -432,10 +430,10 @@ func settingsURL(manager *dshmanager.Manager, section string) string {
 	return "/?" + values.Encode()
 }
 
-func currentWorkspace() string {
-	workspace, err := os.Getwd()
+func currentDiscoveryRoot() string {
+	root, err := os.Getwd()
 	if err != nil {
 		return "."
 	}
-	return workspace
+	return root
 }

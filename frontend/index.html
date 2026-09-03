@@ -99,7 +99,7 @@
           <button class="manager-nav-item" data-manager-section="notifications" data-i18n="manager.notifications" type="button">Notifications</button>
           <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles</button>
           <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
-          <button class="manager-nav-item" data-manager-section="homes" data-i18n="manager.homes" type="button">DSH homes</button>
+          <button class="manager-nav-item" data-manager-section="data-directories" data-i18n="manager.dataDirectories" type="button">DSH data directories</button>
         </nav>
       </aside>
 
@@ -124,9 +124,9 @@
               </div>
               <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.currentDshContext" aria-label="Current DSH session">
                 <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.home">Home</dt><dd id="manager-current-home" data-i18n="value.noHome">No home selected</dd></div>
+                <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-current-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
                 <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-current-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
+                <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-current-workspace" data-i18n="value.noWorkspace">No workspace selected</dd></div>
               </dl>
             </section>
             <section id="manager-next-launch" class="overview-context" aria-labelledby="overview-next-title" hidden>
@@ -136,9 +136,8 @@
               </div>
               <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.nextLaunch" aria-label="Next launch">
                 <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-next-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.home">Home</dt><dd id="manager-next-home" data-i18n="value.noHome">No home selected</dd></div>
+                <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-next-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
                 <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-next-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-next-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
               </dl>
             </section>
           </div>
@@ -150,7 +149,7 @@
               <div id="manager-profiles" class="manager-list"></div>
               <div class="create-profile-block">
                 <div class="subheading"><strong data-i18n="profiles.create">New profile</strong></div>
-                <label><span data-i18n="field.home">Home</span><select id="manager-new-profile-home"></select></label>
+                <label><span data-i18n="field.dataDirectory">Data directory</span><select id="manager-new-profile-data-directory"></select></label>
                 <label><span data-i18n="field.name">Name</span><input id="manager-new-profile" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
                 <label><span data-i18n="profiles.firstPlugin">First plugin</span><input id="manager-new-profile-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
                 <button class="button button-secondary" id="manager-create-profile" data-i18n="action.create" type="button">Create</button>
@@ -199,21 +198,21 @@
           <div id="manager-runtimes" class="manager-list"></div>
         </section>
 
-        <section id="manager-section-homes" class="manager-section" data-manager-panel="homes" aria-labelledby="homes-title" hidden>
+        <section id="manager-section-data-directories" class="manager-section" data-manager-panel="data-directories" aria-labelledby="data-directories-title" hidden>
           <div class="panel-heading">
             <div>
-              <h2 id="homes-title" data-i18n="homes.registeredHomes">Registered homes</h2>
+              <h2 id="data-directories-title" data-i18n="dataDirectories.registered">Registered data directories</h2>
             </div>
           </div>
-          <div class="home-register-card">
-            <div class="home-register-grid">
-              <label class="wide-field"><span data-i18n="field.path">Path</span><input id="manager-new-home-path" data-i18n-placeholder="placeholder.homePath" type="text" placeholder="C:\\Users\\you\\.dsh" autocomplete="off" /></label>
-              <label><span data-i18n="field.id">ID</span><input id="manager-new-home-id" data-i18n-placeholder="placeholder.homeId" type="text" placeholder="personal" autocomplete="off" /></label>
-              <label><span data-i18n="field.name">Name</span><input id="manager-new-home-name" data-i18n-placeholder="placeholder.homeName" type="text" placeholder="Personal DSH home" autocomplete="off" /></label>
-              <button class="button button-secondary" id="manager-register-home" data-i18n="action.register" type="button">Register</button>
+          <div class="data-directory-register-card">
+            <div class="data-directory-register-grid">
+              <label class="wide-field"><span data-i18n="field.path">Path</span><input id="manager-new-data-directory-path" data-i18n-placeholder="placeholder.dataDirectoryPath" type="text" placeholder="C:\\Users\\you\\.dsh" autocomplete="off" /></label>
+              <label><span data-i18n="field.id">ID</span><input id="manager-new-data-directory-id" data-i18n-placeholder="placeholder.dataDirectoryId" type="text" placeholder="personal" autocomplete="off" /></label>
+              <label><span data-i18n="field.name">Name</span><input id="manager-new-data-directory-name" data-i18n-placeholder="placeholder.dataDirectoryName" type="text" placeholder="Personal DSH data directory" autocomplete="off" /></label>
+              <button class="button button-secondary" id="manager-register-data-directory" data-i18n="action.register" type="button">Register</button>
             </div>
           </div>
-          <div id="manager-homes" class="manager-list"></div>
+          <div id="manager-data-directories" class="manager-list"></div>
         </section>
 
         <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="settings-title" hidden>
@@ -225,9 +224,8 @@
           <div class="settings-block launch-settings">
             <div class="manager-grid">
               <label><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
-              <label><span data-i18n="field.home">Home</span><select id="manager-home"></select></label>
+              <label><span data-i18n="field.dataDirectory">Data directory</span><select id="manager-data-directory"></select></label>
               <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
-              <label class="wide-field"><span data-i18n="field.workspace">Workspace</span><input id="manager-workspace" type="text" autocomplete="off" /></label>
             </div>
             <div class="panel-footer">
               <button class="button button-primary" id="manager-save" data-i18n="general.save" type="button">Save</button>

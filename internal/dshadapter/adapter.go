@@ -18,6 +18,7 @@ import (
 
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/supervisor"
+	"github.com/local/work/internal/workspacecontext"
 )
 
 const SupportedVersion = "0.1.2-alpha.3"
@@ -42,11 +43,25 @@ type ReadyAnnouncement struct {
 	URL string
 }
 
+// LaunchContext is the immutable input for one Worker generation. Runtime,
+// data-directory and profile come from the global launch target; Workspace is
+// resolved separately for this generation and is never persisted by the
+// manager.
+type LaunchContext struct {
+	GenerationID       string
+	Runtime            Runtime
+	BootstrapDirectory string
+	DataDirectory      string
+	Profile            string
+	Workspace          workspacecontext.Context
+	Port               int
+}
+
 type Adapter struct {
 	executor           CommandExecutor
 	expectedVersion    string
 	executableOverride string
-	workspaceRoot      string
+	discoveryRoot      string
 	client             *http.Client
 }
 
@@ -70,8 +85,10 @@ func (a *Adapter) SetExecutableOverride(path string) {
 	a.executableOverride = path
 }
 
-func (a *Adapter) SetWorkspaceRoot(path string) {
-	a.workspaceRoot = path
+// SetDiscoveryRoot configures the repository/install root used only to find a
+// DSH executable. It is never used as a DSH Workspace or launch context.
+func (a *Adapter) SetDiscoveryRoot(path string) {
+	a.discoveryRoot = path
 }
 
 // RuntimeHint exposes the configured executable/version pair to a catalog
@@ -152,39 +169,49 @@ func (a *Adapter) Verify(ctx context.Context, path, expectedVersion string) erro
 	return nil
 }
 
-func (a *Adapter) BuildLaunchPlan(runtime Runtime, generationID, workspace, dshHome string, port int) (supervisor.LaunchPlan, error) {
-	return a.BuildLaunchPlanForProfile(runtime, generationID, workspace, dshHome, "web", port)
-}
-
-// BuildLaunchPlanForProfile is the profile-aware launch seam used by the
-// runtime manager. The old BuildLaunchPlan method remains a compatibility
-// convenience for the foundation tests and always means the built-in web
-// profile; new callers must supply the selected profile explicitly.
-func (a *Adapter) BuildLaunchPlanForProfile(runtime Runtime, generationID, workspace, dshHome, profile string, port int) (supervisor.LaunchPlan, error) {
-	if runtime.Path == "" || runtime.Version != a.expectedVersion {
+// BuildLaunchPlan constructs one generation's DSH process plan. The bootstrap
+// directory is an explicit Work application-data directory used only while
+// DSH's Workspace surface is selecting a Workspace. A selected Workspace is
+// passed as the explicit process context; the DSH data directory remains the
+// value exported through DSH_HOME.
+func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, error) {
+	if launch.Runtime.Path == "" || launch.Runtime.Version != a.expectedVersion {
 		return supervisor.LaunchPlan{}, fmt.Errorf("runtime is not the pinned DSH version")
 	}
-	if !validProfileName(profile) {
+	if !validProfileName(launch.Profile) {
 		return supervisor.LaunchPlan{}, fmt.Errorf("invalid DSH profile name")
 	}
-	workspace, err := filepath.Abs(workspace)
-	if err != nil {
-		return supervisor.LaunchPlan{}, fmt.Errorf("resolve workspace: %w", err)
+	if strings.TrimSpace(launch.BootstrapDirectory) == "" {
+		return supervisor.LaunchPlan{}, fmt.Errorf("bootstrap directory is required")
 	}
-	dshHome, err = filepath.Abs(dshHome)
-	if err != nil {
-		return supervisor.LaunchPlan{}, fmt.Errorf("resolve DSH home: %w", err)
+	if strings.TrimSpace(launch.DataDirectory) == "" {
+		return supervisor.LaunchPlan{}, fmt.Errorf("DSH data directory is required")
 	}
-	origin := "http://127.0.0.1:" + strconv.Itoa(port)
+	if err := launch.Workspace.ValidateForGeneration(launch.GenerationID); err != nil {
+		return supervisor.LaunchPlan{}, fmt.Errorf("workspace context is invalid: %w", err)
+	}
+	bootstrapDirectory, err := filepath.Abs(launch.BootstrapDirectory)
+	if err != nil {
+		return supervisor.LaunchPlan{}, fmt.Errorf("resolve bootstrap directory: %w", err)
+	}
+	dataDirectory, err := filepath.Abs(launch.DataDirectory)
+	if err != nil {
+		return supervisor.LaunchPlan{}, fmt.Errorf("resolve DSH data directory: %w", err)
+	}
+	workingDirectory := filepath.Clean(bootstrapDirectory)
+	if launch.Workspace.State == workspacecontext.StateSelected {
+		workingDirectory = launch.Workspace.Path
+	}
+	origin := "http://127.0.0.1:" + strconv.Itoa(launch.Port)
 	plan := supervisor.LaunchPlan{
-		GenerationID:     generationID,
-		Executable:       runtime.Path,
-		Args:             []string{"--profile", profile, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"},
-		Env:              map[string]string{"DSH_HOME": dshHome},
-		WorkingDirectory: workspace,
+		GenerationID:     launch.GenerationID,
+		Executable:       launch.Runtime.Path,
+		Args:             []string{"--profile", launch.Profile, "--host", "127.0.0.1", "--port", strconv.Itoa(launch.Port), "--no-open"},
+		Env:              map[string]string{"DSH_HOME": dataDirectory},
+		WorkingDirectory: workingDirectory,
 		ExpectedOrigin:   origin,
 		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     port,
+		ExpectedPort:     launch.Port,
 	}
 	if err := plan.Validate(); err != nil {
 		return supervisor.LaunchPlan{}, err
@@ -314,7 +341,7 @@ func (a *Adapter) locateExecutable() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("WORK_DSH_EXECUTABLE")); override != "" {
 		return existingExecutable(override)
 	}
-	root := a.workspaceRoot
+	root := a.discoveryRoot
 	if root == "" {
 		root, _ = os.Getwd()
 	}
@@ -344,7 +371,7 @@ func (a *Adapter) executableHint() string {
 	if override := strings.TrimSpace(os.Getenv("WORK_DSH_EXECUTABLE")); override != "" {
 		return override
 	}
-	root := a.workspaceRoot
+	root := a.discoveryRoot
 	if root == "" {
 		root, _ = os.Getwd()
 	}

@@ -1,31 +1,33 @@
 import {Events} from "@wailsio/runtime";
 
-import {ManagerService} from "../bindings/github.com/local/work/internal/app";
-import {HomeOwnership, type HomeInfo, type LaunchSelection, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import {HostService, ManagerService} from "../bindings/github.com/local/work/internal/app";
+import {DataDirectoryOwnership, type DataDirectoryInfo, type LaunchTarget, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
 import {mountNotifications, mountSettings} from "./settings";
 import {buildOverviewModel, type OverviewLane} from "./overview";
 import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
+import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/work/internal/lifecycle/models";
 
 export type ManagerProfileRef = ProfileRef;
-export type ManagerLaunchSelection = LaunchSelection;
+export type ManagerLaunchTarget = LaunchTarget;
 export type ManagerPlugin = PluginInfo;
 export type ManagerProfile = ProfileInfo;
 export type ManagerRuntime = RuntimeInfo;
-export type ManagerHome = HomeInfo;
+export type ManagerDataDirectory = DataDirectoryInfo;
 export type ManagerSnapshot = Snapshot;
 export type ManagerPluginResult = PluginResult;
 
 const getSnapshot = ManagerService.GetSnapshot;
 const getTheme = ManagerService.GetTheme;
-const setDesiredSelection = ManagerService.SetDesiredSelection;
+const getHostStatus = HostService.GetWorkspaceStatus;
+const setDesiredTarget = ManagerService.SetDesiredTarget;
 const installPlugin = ManagerService.InstallPlugin;
 const removePlugin = ManagerService.RemovePlugin;
 const renameProfile = ManagerService.RenameProfile;
 const installRuntime = ManagerService.InstallRuntime;
 const removeRuntime = ManagerService.RemoveRuntime;
-const registerHome = ManagerService.RegisterHome;
-const removeHome = ManagerService.RemoveHome;
+const registerDataDirectory = ManagerService.RegisterDataDirectory;
+const removeDataDirectory = ManagerService.RemoveDataDirectory;
 
 function managerErrorMessage(error: unknown, fallbackKey: string): string {
   let message = "";
@@ -40,11 +42,11 @@ function managerErrorMessage(error: unknown, fallbackKey: string): string {
   return message.length > 0 && message.length <= 240 ? message : t(fallbackKey);
 }
 
-function homeOwnershipLabel(value: HomeOwnership): string {
-  if (value === HomeOwnership.HomeOwnershipWork) {
+function dataDirectoryOwnershipLabel(value: DataDirectoryOwnership): string {
+  if (value === DataDirectoryOwnership.DataDirectoryOwnershipWork) {
     return "Work";
   }
-  if (value === HomeOwnership.HomeOwnershipUser) {
+  if (value === DataDirectoryOwnership.DataDirectoryOwnershipUser) {
     return t("value.user");
   }
   return t("value.other");
@@ -73,13 +75,13 @@ function runtimeSourceLabel(value: string): string {
   return t("value.other");
 }
 
-type ManagerSection = "overview" | "profiles" | "runtimes" | "homes" | "settings" | "notifications";
+type ManagerSection = "overview" | "profiles" | "runtimes" | "data-directories" | "settings" | "notifications";
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "plugins") {
     return "profiles";
   }
-  if (value === "overview" || value === "profiles" || value === "runtimes" || value === "homes" || value === "settings" || value === "notifications") {
+  if (value === "overview" || value === "profiles" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications") {
     return value;
   }
   return "overview";
@@ -87,17 +89,16 @@ function sectionName(value: string | null): ManagerSection {
 
 export function mountManager() {
   const runtime = document.getElementById("manager-runtime") as HTMLSelectElement;
-  const home = document.getElementById("manager-home") as HTMLSelectElement;
+  const dataDirectory = document.getElementById("manager-data-directory") as HTMLSelectElement;
   const profile = document.getElementById("manager-profile") as HTMLSelectElement;
-  const workspace = document.getElementById("manager-workspace") as HTMLInputElement;
   const save = document.getElementById("manager-save") as HTMLButtonElement;
   const packageInput = document.getElementById("manager-plugin-package") as HTMLInputElement;
   const install = document.getElementById("manager-plugin-install") as HTMLButtonElement;
-  const newHomePath = document.getElementById("manager-new-home-path") as HTMLInputElement;
-  const newHomeId = document.getElementById("manager-new-home-id") as HTMLInputElement;
-  const newHomeName = document.getElementById("manager-new-home-name") as HTMLInputElement;
-  const registerHomeButton = document.getElementById("manager-register-home") as HTMLButtonElement;
-  const newProfileHome = document.getElementById("manager-new-profile-home") as HTMLSelectElement;
+  const newDataDirectoryPath = document.getElementById("manager-new-data-directory-path") as HTMLInputElement;
+  const newDataDirectoryId = document.getElementById("manager-new-data-directory-id") as HTMLInputElement;
+  const newDataDirectoryName = document.getElementById("manager-new-data-directory-name") as HTMLInputElement;
+  const registerDataDirectoryButton = document.getElementById("manager-register-data-directory") as HTMLButtonElement;
+  const newProfileDataDirectory = document.getElementById("manager-new-profile-data-directory") as HTMLSelectElement;
   const newProfile = document.getElementById("manager-new-profile") as HTMLInputElement;
   const newProfilePackage = document.getElementById("manager-new-profile-package") as HTMLInputElement;
   const createProfile = document.getElementById("manager-create-profile") as HTMLButtonElement;
@@ -106,15 +107,14 @@ export function mountManager() {
   const feedback = document.getElementById("manager-feedback") as HTMLParagraphElement;
   const managerTitle = document.getElementById("manager-title") as HTMLHeadingElement;
   const currentRuntime = document.getElementById("manager-current-runtime") as HTMLElement;
-  const currentHome = document.getElementById("manager-current-home") as HTMLElement;
+  const currentDataDirectory = document.getElementById("manager-current-data-directory") as HTMLElement;
   const currentProfile = document.getElementById("manager-current-profile") as HTMLElement;
   const currentWorkspace = document.getElementById("manager-current-workspace") as HTMLElement;
   const currentState = document.getElementById("manager-current-state") as HTMLElement;
   const nextLaunch = document.getElementById("manager-next-launch") as HTMLElement;
   const nextRuntime = document.getElementById("manager-next-runtime") as HTMLElement;
-  const nextHome = document.getElementById("manager-next-home") as HTMLElement;
+  const nextDataDirectory = document.getElementById("manager-next-data-directory") as HTMLElement;
   const nextProfile = document.getElementById("manager-next-profile") as HTMLElement;
-  const nextWorkspace = document.getElementById("manager-next-workspace") as HTMLElement;
   const selectedProfileLabel = document.getElementById("manager-selected-profile") as HTMLElement;
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
   const profileEmpty = document.getElementById("manager-profile-empty") as HTMLElement;
@@ -124,16 +124,17 @@ export function mountManager() {
   const profilePlugins = document.getElementById("manager-profile-plugins") as HTMLDivElement;
   const profileList = document.getElementById("manager-profiles") as HTMLDivElement;
   const runtimeList = document.getElementById("manager-runtimes") as HTMLDivElement;
-  const homeList = document.getElementById("manager-homes") as HTMLDivElement;
+  const dataDirectoryList = document.getElementById("manager-data-directories") as HTMLDivElement;
   const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-manager-section]"));
   const panels = Array.from(document.querySelectorAll<HTMLElement>("[data-manager-panel]"));
   const query = new URLSearchParams(window.location.search);
-  const initialHome = query.get("home")?.trim();
+  const initialDataDirectory = query.get("data-directory")?.trim();
   const initialProfile = query.get("profile")?.trim();
   let currentSection = sectionName(query.get("section"));
   let snapshot: ManagerSnapshot | undefined;
-  let managedProfile: ManagerProfileRef | undefined = initialHome && initialProfile
-    ? {homeId: initialHome, name: initialProfile}
+  let hostStatus: HostLifecycleStatus | undefined;
+  let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
+    ? {dataDirectoryId: initialDataDirectory, name: initialProfile}
     : undefined;
   let themeSyncTimer: number | undefined;
   let themeSyncAvailable = false;
@@ -143,7 +144,7 @@ export function mountManager() {
     settings: {title: "manager.general"},
     profiles: {title: "manager.profiles"},
     runtimes: {title: "manager.runtimes"},
-    homes: {title: "manager.homes"},
+    "data-directories": {title: "manager.dataDirectories"},
     notifications: {title: "manager.notifications"}
   };
 
@@ -192,7 +193,7 @@ export function mountManager() {
   }
 
   function sameProfileRef(left: ManagerProfileRef | undefined, right: ManagerProfileRef | undefined): boolean {
-    return !!left && !!right && left.homeId === right.homeId && left.name === right.name;
+    return !!left && !!right && left.dataDirectoryId === right.dataDirectoryId && left.name === right.name;
   }
 
   function managedProfileItem(): ManagerProfile | undefined {
@@ -202,17 +203,16 @@ export function mountManager() {
     return (snapshot?.profiles ?? []).find((item) => sameProfileRef(item.ref, managedProfile));
   }
 
-  function homeLabel(homeId: string): string {
-    return (snapshot?.homes ?? []).find((item) => item.id === homeId)?.name ?? homeId;
+  function dataDirectoryLabel(dataDirectoryId: string): string {
+    return (snapshot?.dataDirectories ?? []).find((item) => item.id === dataDirectoryId)?.name ?? dataDirectoryId;
   }
 
-  function renderOverviewLane(lane: OverviewLane, fields: {runtime: HTMLElement; home: HTMLElement; profile: HTMLElement; workspace: HTMLElement}) {
+  function renderOverviewLane(lane: OverviewLane, fields: {runtime: HTMLElement; dataDirectory: HTMLElement; profile: HTMLElement}) {
     fields.runtime.textContent = lane.runtime
       ? `${lane.runtime.version} · ${t(lane.runtime.installed ? "value.verified" : "value.unverified")}`
-      : lane.selection?.runtimeId || t("value.noRuntime");
-    fields.home.textContent = lane.home?.name ?? lane.selection?.profile.homeId ?? t("value.noHome");
-    fields.profile.textContent = lane.selection?.profile.name ?? t("value.noProfile");
-    fields.workspace.textContent = lane.selection?.workspace || t("value.noWorkspace");
+      : lane.target?.runtimeId || t("value.noRuntime");
+    fields.dataDirectory.textContent = lane.dataDirectory?.name ?? lane.target?.profile.dataDirectoryId ?? t("value.noDataDirectory");
+    fields.profile.textContent = lane.target?.profile.name ?? t("value.noProfile");
   }
 
   function renderOverview() {
@@ -222,10 +222,24 @@ export function mountManager() {
     const model = buildOverviewModel(snapshot);
     renderOverviewLane(model.current, {
       runtime: currentRuntime,
-      home: currentHome,
-      profile: currentProfile,
-      workspace: currentWorkspace
+      dataDirectory: currentDataDirectory,
+      profile: currentProfile
     });
+    const workspace = hostStatus?.workspace;
+    if (workspace?.state === "selected" && workspace.path) {
+      const workspaceTitle = workspace.title || workspace.path;
+      currentWorkspace.textContent = workspaceTitle;
+      currentWorkspace.title = workspace.path;
+      currentWorkspace.setAttribute("aria-label", `${workspaceTitle}: ${workspace.path}`);
+    } else if (workspace?.state === "selection-required") {
+      currentWorkspace.textContent = t("value.chooseWorkspaceInDsh");
+      currentWorkspace.removeAttribute("title");
+      currentWorkspace.setAttribute("aria-label", t("value.chooseWorkspaceInDsh"));
+    } else {
+      currentWorkspace.textContent = t("value.noWorkspace");
+      currentWorkspace.removeAttribute("title");
+      currentWorkspace.setAttribute("aria-label", t("value.noWorkspace"));
+    }
     currentState.textContent = t({
       active: "value.active",
       "restart-required": "value.restartRequired",
@@ -236,9 +250,8 @@ export function mountManager() {
     if (model.next) {
       renderOverviewLane(model.next, {
         runtime: nextRuntime,
-        home: nextHome,
-        profile: nextProfile,
-        workspace: nextWorkspace
+        dataDirectory: nextDataDirectory,
+        profile: nextProfile
       });
     }
   }
@@ -295,8 +308,8 @@ export function mountManager() {
     }
     selectedProfileLabel.textContent = item.ref.name;
     const profileState = item.renamable
-      ? `${homeLabel(item.ref.homeId)} · ${profileKindLabel(item.kind)}`
-      : `${homeLabel(item.ref.homeId)} · ${profileKindLabel(item.kind)} · ${t("profiles.fixedName")}`;
+      ? `${dataDirectoryLabel(item.ref.dataDirectoryId)} · ${profileKindLabel(item.kind)}`
+      : `${dataDirectoryLabel(item.ref.dataDirectoryId)} · ${profileKindLabel(item.kind)} · ${t("profiles.fixedName")}`;
     profileScopeNote.textContent = profileState;
     profileName.value = item.ref.name;
     profileName.disabled = !item.renamable;
@@ -306,11 +319,11 @@ export function mountManager() {
 
   function fillProfiles(preferred?: ManagerProfileRef) {
     profile.replaceChildren();
-    const profiles = (snapshot?.profiles ?? []).filter((item) => item.ref.homeId === home.value);
+    const profiles = (snapshot?.profiles ?? []).filter((item) => item.ref.dataDirectoryId === dataDirectory.value);
     if (profiles.length === 0) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = t("profiles.noInHome");
+      option.textContent = t("profiles.noInDataDirectory");
       option.disabled = true;
       option.selected = true;
       profile.append(option);
@@ -323,7 +336,7 @@ export function mountManager() {
       option.disabled = !item.launchable;
       profile.append(option);
     }
-    if (preferred && preferred.homeId === home.value && profiles.some((item) => item.ref.name === preferred.name)) {
+    if (preferred && preferred.dataDirectoryId === dataDirectory.value && profiles.some((item) => item.ref.name === preferred.name)) {
       profile.value = preferred.name;
     } else if (!profiles.some((item) => item.ref.name === profile.value)) {
       profile.value = profiles[0].ref.name;
@@ -339,38 +352,37 @@ export function mountManager() {
       option.textContent = `${item.version}${item.installed ? "" : ` · ${t("value.unverified")}`}`;
       runtime.append(option);
     }
-    home.replaceChildren();
-    for (const item of snapshot?.homes ?? []) {
+    dataDirectory.replaceChildren();
+    for (const item of snapshot?.dataDirectories ?? []) {
       const option = document.createElement("option");
       option.value = item.id;
       option.textContent = item.name;
-      home.append(option);
+      dataDirectory.append(option);
     }
     if (desired) {
       runtime.value = desired.runtimeId;
-      home.value = desired.profile.homeId;
-      workspace.value = desired.workspace;
+      dataDirectory.value = desired.profile.dataDirectoryId;
     }
     if (!runtime.value && runtime.options.length > 0) {
       runtime.selectedIndex = 0;
     }
-    if (!home.value && home.options.length > 0) {
-      home.selectedIndex = 0;
+    if (!dataDirectory.value && dataDirectory.options.length > 0) {
+      dataDirectory.selectedIndex = 0;
     }
     fillProfiles(desired?.profile);
-    newProfileHome.replaceChildren();
-    for (const item of snapshot?.homes ?? []) {
+    newProfileDataDirectory.replaceChildren();
+    for (const item of snapshot?.dataDirectories ?? []) {
       const option = document.createElement("option");
       option.value = item.id;
       option.textContent = item.name;
-      newProfileHome.append(option);
+      newProfileDataDirectory.append(option);
     }
-    if (desired?.profile.homeId && (snapshot?.homes ?? []).some((item) => item.id === desired.profile.homeId)) {
-      newProfileHome.value = desired.profile.homeId;
-    } else if (home.value) {
-      newProfileHome.value = home.value;
-    } else if (newProfileHome.options.length > 0) {
-      newProfileHome.selectedIndex = 0;
+    if (desired?.profile.dataDirectoryId && (snapshot?.dataDirectories ?? []).some((item) => item.id === desired.profile.dataDirectoryId)) {
+      newProfileDataDirectory.value = desired.profile.dataDirectoryId;
+    } else if (dataDirectory.value) {
+      newProfileDataDirectory.value = dataDirectory.value;
+    } else if (newProfileDataDirectory.options.length > 0) {
+      newProfileDataDirectory.selectedIndex = 0;
     }
   }
 
@@ -403,7 +415,7 @@ export function mountManager() {
       name.textContent = item.ref.name;
       const detail = document.createElement("span");
       detail.textContent = t("profiles.pluginDetail", {
-        home: homeLabel(item.ref.homeId),
+        dataDirectory: dataDirectoryLabel(item.ref.dataDirectoryId),
         kind: profileKindLabel(item.kind),
         count: item.pluginCount,
         plural: item.pluginCount === 1 ? "" : "s"
@@ -455,7 +467,7 @@ export function mountManager() {
             renderSelection();
             renderProfiles();
             renderRuntimes();
-            renderHomes();
+            renderDataDirectories();
           } catch (error) {
             setFeedback(managerErrorMessage(error, "error.removeRuntime"), "error");
             console.error("Could not remove DSH runtime", error);
@@ -469,28 +481,31 @@ export function mountManager() {
     }
   }
 
-  function renderHomes() {
-    homeList.replaceChildren();
-    const homes = snapshot?.homes ?? [];
-    if (homes.length === 0) {
+  function renderDataDirectories() {
+    dataDirectoryList.replaceChildren();
+    const dataDirectories = snapshot?.dataDirectories ?? [];
+    if (dataDirectories.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
-      empty.textContent = t("homes.noHomes");
-      homeList.append(empty);
+      empty.textContent = t("dataDirectories.noDirectories");
+      dataDirectoryList.append(empty);
       return;
     }
-    for (const item of homes) {
-      const selected = item.id === snapshot?.desired?.profile.homeId;
+    for (const item of dataDirectories) {
+      const selected = item.id === snapshot?.desired?.profile.dataDirectoryId;
       const row = document.createElement("div");
       row.className = `manager-list-item${selected ? " is-selected" : ""}`;
       const text = document.createElement("div");
       const name = document.createElement("strong");
       name.textContent = `${item.name}${selected ? ` · ${t("action.selected")}` : ""}`;
       const detail = document.createElement("span");
-      detail.textContent = `${homeOwnershipLabel(item.ownership)} · ${item.path}`;
+      detail.className = "manager-data-directory-detail";
+      detail.textContent = `${dataDirectoryOwnershipLabel(item.ownership)} · ${item.path}`;
+      detail.title = item.path;
+      detail.setAttribute("aria-label", `${dataDirectoryOwnershipLabel(item.ownership)}: ${item.path}`);
       text.append(name, detail);
       row.append(text);
-      if (item.ownership === HomeOwnership.HomeOwnershipUser) {
+      if (item.ownership === DataDirectoryOwnership.DataDirectoryOwnershipUser) {
         const removeButton = document.createElement("button");
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
@@ -498,36 +513,36 @@ export function mountManager() {
         removeButton.addEventListener("click", () => void (async () => {
           removeButton.disabled = true;
           try {
-            snapshot = await removeHome(item.id);
-            setFeedback(t("feedback.unregisteredHome", {name: item.name}), "success");
+            snapshot = await removeDataDirectory(item.id);
+            setFeedback(t("feedback.unregisteredDataDirectory", {name: item.name}), "success");
             renderSelection();
             renderProfiles();
             renderRuntimes();
-            renderHomes();
+            renderDataDirectories();
           } catch (error) {
-            setFeedback(managerErrorMessage(error, "error.unregisterHome"), "error");
-            console.error("Could not unregister DSH home", error);
+            setFeedback(managerErrorMessage(error, "error.unregisterDataDirectory"), "error");
+            console.error("Could not unregister DSH data directory", error);
           } finally {
             removeButton.disabled = false;
           }
         })());
         row.append(removeButton);
       }
-      homeList.append(row);
+      dataDirectoryList.append(row);
     }
   }
 
   async function refresh(preferredProfile?: ManagerProfileRef) {
     setFeedback("");
     try {
-      snapshot = await getSnapshot();
+      [snapshot, hostStatus] = await Promise.all([getSnapshot(), getHostStatus()]);
       applyTheme(snapshot.theme);
       renderSelection();
       syncManagedProfile(preferredProfile);
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderHomes();
+      renderDataDirectories();
       showSection(currentSection);
       themeSyncAvailable = true;
       startThemeSync();
@@ -549,10 +564,10 @@ export function mountManager() {
     renderOverview();
     renderProfiles();
     renderRuntimes();
-    renderHomes();
+    renderDataDirectories();
   });
 
-  home.addEventListener("change", () => {
+  dataDirectory.addEventListener("change", () => {
     fillProfiles();
   });
   window.addEventListener("focus", () => {
@@ -567,16 +582,15 @@ export function mountManager() {
   });
 
   save.addEventListener("click", () => void (async () => {
-    if (!runtime.value || !home.value || !profile.value) {
+    if (!runtime.value || !dataDirectory.value || !profile.value) {
       setFeedback(t("error.selectLaunchTarget"), "error");
       return;
     }
     save.disabled = true;
     try {
-      snapshot = await setDesiredSelection({
+      snapshot = await setDesiredTarget({
         runtimeId: runtime.value,
-        profile: {homeId: home.value, name: profile.value},
-        workspace: workspace.value
+        profile: {dataDirectoryId: dataDirectory.value, name: profile.value}
       });
       applyTheme(snapshot.theme);
       setFeedback(snapshot.active ? t("feedback.savedRestart") : t("feedback.savedNextStart"), "success");
@@ -584,10 +598,10 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderHomes();
+      renderDataDirectories();
     } catch (error) {
       setFeedback(managerErrorMessage(error, "error.saveLaunchTarget"), "error");
-      console.error("Could not save DSH launch selection", error);
+      console.error("Could not save DSH launch target", error);
     } finally {
       save.disabled = false;
     }
@@ -668,13 +682,13 @@ export function mountManager() {
     profileName.disabled = true;
     try {
       snapshot = await renameProfile({profile: item.ref, newName: nextName});
-      managedProfile = {homeId: item.ref.homeId, name: nextName};
+      managedProfile = {dataDirectoryId: item.ref.dataDirectoryId, name: nextName};
       applyTheme(snapshot.theme);
       renderSelection();
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderHomes();
+      renderDataDirectories();
       setFeedback(t("feedback.profileRenamed", {profile: nextName}), "success");
     } catch (error) {
       setFeedback(managerErrorMessage(error, "error.renameProfile"), "error");
@@ -684,52 +698,52 @@ export function mountManager() {
     }
   })());
 
-  registerHomeButton.addEventListener("click", () => void (async () => {
-    if (!newHomeId.value.trim() || !newHomeName.value.trim() || !newHomePath.value.trim()) {
-      setFeedback(t("error.completeHome"), "error");
+  registerDataDirectoryButton.addEventListener("click", () => void (async () => {
+    if (!newDataDirectoryId.value.trim() || !newDataDirectoryName.value.trim() || !newDataDirectoryPath.value.trim()) {
+      setFeedback(t("error.completeDataDirectory"), "error");
       return;
     }
-    registerHomeButton.disabled = true;
+    registerDataDirectoryButton.disabled = true;
     try {
-      snapshot = await registerHome({
-        id: newHomeId.value.trim(),
-        name: newHomeName.value.trim(),
-        path: newHomePath.value.trim(),
-        ownership: HomeOwnership.HomeOwnershipUser
+      snapshot = await registerDataDirectory({
+        id: newDataDirectoryId.value.trim(),
+        name: newDataDirectoryName.value.trim(),
+        path: newDataDirectoryPath.value.trim(),
+        ownership: DataDirectoryOwnership.DataDirectoryOwnershipUser
       });
-      setFeedback(t("feedback.registeredHome", {id: newHomeId.value.trim()}), "success");
-      newHomePath.value = "";
-      newHomeId.value = "";
-      newHomeName.value = "";
+      setFeedback(t("feedback.registeredDataDirectory", {id: newDataDirectoryId.value.trim()}), "success");
+      newDataDirectoryPath.value = "";
+      newDataDirectoryId.value = "";
+      newDataDirectoryName.value = "";
       renderSelection();
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderHomes();
+      renderDataDirectories();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "error.registerHome"), "error");
-      console.error("Could not register DSH home", error);
+      setFeedback(managerErrorMessage(error, "error.registerDataDirectory"), "error");
+      console.error("Could not register DSH data directory", error);
     } finally {
-      registerHomeButton.disabled = false;
+      registerDataDirectoryButton.disabled = false;
     }
   })());
 
   createProfile.addEventListener("click", () => void (async () => {
     const name = newProfile.value.trim();
     const packageSpec = newProfilePackage.value.trim();
-    const homeId = newProfileHome.value;
-    if (!homeId || !name || !packageSpec) {
+    const dataDirectoryId = newProfileDataDirectory.value;
+    if (!dataDirectoryId || !name || !packageSpec) {
       setFeedback(t("error.createProfileFields"), "error");
       return;
     }
     createProfile.disabled = true;
     try {
       const result = await installPlugin({
-        target: {runtimeId: pluginRuntimeId(), profile: {homeId, name}},
+        target: {runtimeId: pluginRuntimeId(), profile: {dataDirectoryId, name}},
         package: packageSpec
       });
-      await refresh({homeId, name});
-      selectProfile({homeId, name});
+      await refresh({dataDirectoryId, name});
+      selectProfile({dataDirectoryId, name});
       setFeedback(result.restartRequired
         ? t("feedback.profileCreatedRestart")
         : t("feedback.profileCreated"), "success");
@@ -758,7 +772,7 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderHomes();
+      renderDataDirectories();
     } catch (error) {
       setFeedback(managerErrorMessage(error, "error.installRuntime"), "error");
       console.error("Could not install DSH runtime", error);

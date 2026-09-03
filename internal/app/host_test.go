@@ -20,6 +20,7 @@ import (
 	"github.com/local/work/internal/lifecycle"
 	"github.com/local/work/internal/supervisor"
 	"github.com/local/work/internal/workergateway"
+	"github.com/local/work/internal/workspacecontext"
 )
 
 type testDSH struct {
@@ -57,29 +58,25 @@ func (d *testDSH) Discover(context.Context) (dshadapter.Runtime, error) {
 	return dshadapter.Runtime{Path: "test-dsh", Version: dshadapter.SupportedVersion}, nil
 }
 
-func (d *testDSH) BuildLaunchPlan(_ dshadapter.Runtime, generationID, workspace, dshHome string, _ int) (supervisor.LaunchPlan, error) {
+func (d *testDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (supervisor.LaunchPlan, error) {
 	u, err := url.Parse(d.server.URL)
 	if err != nil {
 		return supervisor.LaunchPlan{}, err
 	}
+	workingDirectory := launch.BootstrapDirectory
+	if launch.Workspace.State == workspacecontext.StateSelected {
+		workingDirectory = launch.Workspace.Path
+	}
 	return supervisor.LaunchPlan{
-		GenerationID:     generationID,
+		GenerationID:     launch.GenerationID,
 		Executable:       "test-dsh",
-		WorkingDirectory: workspace,
-		Env:              map[string]string{"DSH_HOME": dshHome},
+		Args:             []string{"--profile", launch.Profile},
+		WorkingDirectory: workingDirectory,
+		Env:              map[string]string{"DSH_HOME": launch.DataDirectory},
 		ExpectedOrigin:   d.server.URL,
 		ExpectedHost:     u.Hostname(),
 		ExpectedPort:     portFromURL(u),
 	}, nil
-}
-
-func (d *testDSH) BuildLaunchPlanForProfile(runtime dshadapter.Runtime, generationID, workspace, dshHome, profile string, port int) (supervisor.LaunchPlan, error) {
-	plan, err := d.BuildLaunchPlan(runtime, generationID, workspace, dshHome, port)
-	if err != nil {
-		return supervisor.LaunchPlan{}, err
-	}
-	plan.Args = []string{"--profile", profile}
-	return plan, nil
 }
 
 func (d *testDSH) ParseReadyAnnouncement(text string) (dshadapter.ReadyAnnouncement, bool) {
@@ -182,8 +179,8 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	defer dsh.server.Close()
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
-		WorkspaceRoot:       t.TempDir(),
-		DSHHome:             t.TempDir(),
+		BootstrapDirectory:  t.TempDir(),
+		DSHDataDirectory:    t.TempDir(),
 		ReadinessTimeout:    time.Second,
 		ProbeTimeout:        time.Second,
 		GracefulStopTimeout: time.Second,
@@ -202,6 +199,9 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	if ready.WorkspaceURL == "" || ready.Error != nil {
 		t.Fatalf("unexpected ready status: %+v", ready)
 	}
+	if ready.Workspace == nil || ready.Workspace.State != workspacecontext.StateSelectionRequired || ready.Workspace.GenerationID != ready.GenerationID {
+		t.Fatalf("workspace context was not resolved for the generation: %+v", ready.Workspace)
+	}
 	if ready.WorkspaceURL != dsh.server.URL+"/" || handoffURL != dsh.server.URL+"/__work/bootstrap?session=test-session" {
 		t.Fatalf("gateway session was projected incorrectly: status=%q handoff=%q", ready.WorkspaceURL, handoffURL)
 	}
@@ -217,11 +217,12 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	}
 }
 
-func TestHostUsesManagerLaunchSelectionAndClearsActiveState(t *testing.T) {
+func TestHostUsesManagerLaunchTargetAndClearsActiveState(t *testing.T) {
 	dsh := newTestDSH()
 	defer dsh.server.Close()
 	root := t.TempDir()
 	homePath := filepath.Join(root, "dsh-home")
+	workspacePath := filepath.Join(root, "project")
 	runtimePath := filepath.Join(root, "test-dsh")
 	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
 		t.Fatal(err)
@@ -229,17 +230,19 @@ func TestHostUsesManagerLaunchSelectionAndClearsActiveState(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "coding"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(workspacePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: filepath.Join(root, "workspace"),
-		Homes: []dshmanager.HomeInfo{{
-			ID: "work", Name: "Work", Path: homePath, Ownership: dshmanager.HomeOwnershipWork,
+		StatePath: filepath.Join(root, "manager.json"),
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "work", Name: "Work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
 		}},
-		DefaultSelection: dshmanager.LaunchSelection{
-			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{HomeID: "work", Name: "coding"},
+		DefaultTarget: dshmanager.LaunchTarget{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "coding"},
 		},
 	})
 	if err != nil {
@@ -248,11 +251,14 @@ func TestHostUsesManagerLaunchSelectionAndClearsActiveState(t *testing.T) {
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{
 		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+		WorkspaceResolver: workspacecontext.ResolverFunc(func(_ context.Context, generation string, _ workspacecontext.Request) (workspacecontext.Context, error) {
+			return workspacecontext.NewSelected(generation, "workspace-1", workspacePath, "Project")
+		}),
 	}, Config{
-		WorkspaceRoot:    filepath.Join(root, "workspace"),
-		ReadinessTimeout: time.Second,
-		ProbeTimeout:     time.Second,
-		EmptyTimeout:     time.Second,
+		BootstrapDirectory: filepath.Join(root, "bootstrap"),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+		EmptyTimeout:       time.Second,
 	})
 	statuses := make(chan lifecycle.Status, 16)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
@@ -263,6 +269,9 @@ func TestHostUsesManagerLaunchSelectionAndClearsActiveState(t *testing.T) {
 	}
 	if supervisorAdapter.plan.Env["DSH_HOME"] != homePath {
 		t.Fatalf("DSH_HOME = %q, want %q", supervisorAdapter.plan.Env["DSH_HOME"], homePath)
+	}
+	if supervisorAdapter.plan.WorkingDirectory != workspacePath {
+		t.Fatalf("working directory = %q, want explicitly selected Workspace path", supervisorAdapter.plan.WorkingDirectory)
 	}
 	active, err := manager.Snapshot(context.Background())
 	if err != nil {
@@ -292,16 +301,15 @@ func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: filepath.Join(root, "workspace"),
-		Homes: []dshmanager.HomeInfo{{
-			ID: "personal", Name: "Personal DSH", Path: missingHome, Ownership: dshmanager.HomeOwnershipUser,
+		StatePath: filepath.Join(root, "manager.json"),
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "personal", Name: "Personal DSH", Path: missingHome, Ownership: dshmanager.DataDirectoryOwnershipUser,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
 		}},
-		DefaultSelection: dshmanager.LaunchSelection{
-			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{HomeID: "personal", Name: "web"},
+		DefaultTarget: dshmanager.LaunchTarget{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "personal", Name: "web"},
 		},
 	})
 	if err != nil {
@@ -312,10 +320,10 @@ func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
 	host := NewHost(Dependencies{
 		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
 	}, Config{
-		WorkspaceRoot:    filepath.Join(root, "workspace"),
-		ReadinessTimeout: time.Second,
-		ProbeTimeout:     time.Second,
-		EmptyTimeout:     time.Second,
+		BootstrapDirectory: filepath.Join(root, "bootstrap"),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+		EmptyTimeout:       time.Second,
 	})
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
 	host.Start()
@@ -333,8 +341,8 @@ func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
 
 func TestHostReportsUnsupportedPlatformWithoutStartingAWorker(t *testing.T) {
 	host := NewHost(Dependencies{PlatformError: errors.New("darwin native adapter is intentionally not present")}, Config{
-		WorkspaceRoot: t.TempDir(),
-		DSHHome:       t.TempDir(),
+		BootstrapDirectory: t.TempDir(),
+		DSHDataDirectory:   t.TempDir(),
 	})
 	statuses := make(chan lifecycle.Status, 8)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
@@ -350,11 +358,11 @@ func TestHostRestoresRecoverySurfaceAfterReadyWorkerExit(t *testing.T) {
 	defer dsh.server.Close()
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
-		WorkspaceRoot:    t.TempDir(),
-		DSHHome:          t.TempDir(),
-		ReadinessTimeout: time.Second,
-		ProbeTimeout:     time.Second,
-		EmptyTimeout:     time.Second,
+		BootstrapDirectory: t.TempDir(),
+		DSHDataDirectory:   t.TempDir(),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+		EmptyTimeout:       time.Second,
 	})
 	statuses := make(chan lifecycle.Status, 16)
 	recovered := make(chan struct{}, 1)
@@ -379,11 +387,11 @@ func TestHostDoesNotOverlapAWorkerWhenCleanupIsUnverified(t *testing.T) {
 	defer dsh.server.Close()
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
-		WorkspaceRoot:    t.TempDir(),
-		DSHHome:          t.TempDir(),
-		ReadinessTimeout: time.Second,
-		ProbeTimeout:     time.Second,
-		EmptyTimeout:     time.Second,
+		BootstrapDirectory: t.TempDir(),
+		DSHDataDirectory:   t.TempDir(),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+		EmptyTimeout:       time.Second,
 	})
 	statuses := make(chan lifecycle.Status, 16)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })

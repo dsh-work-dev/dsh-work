@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {viewModel, type LifecycleStatus} from "../src/lifecycle";
 import {buildOverviewModel} from "../src/overview";
-import {HomeOwnership, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import {DataDirectoryOwnership, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
 
 const status = (overrides: Partial<LifecycleStatus>): LifecycleStatus => ({
   state: "Starting",
@@ -60,60 +60,56 @@ const managerSnapshot = (overrides: Partial<Snapshot>): Snapshot => ({
     installed: true,
     removable: false
   }],
-  homes: [{
+  dataDirectories: [{
     id: "work",
-    name: "Work DSH home",
-    path: "dsh-home",
-    ownership: HomeOwnership.HomeOwnershipWork
+    name: "Work DSH data directory",
+    path: "dsh-data",
+    ownership: DataDirectoryOwnership.DataDirectoryOwnershipWork
   }],
   profiles: [],
   theme: ThemePreference.ThemePreferenceSystem,
   ...overrides
 });
 
-test("overview keeps current and next launch selections separate", () => {
+test("overview keeps current and next launch targets separate", () => {
   const model = buildOverviewModel(managerSnapshot({
     active: {
       runtimeId: "dsh-current",
-      profile: {homeId: "work", name: "web"},
-      workspace: "project-a"
+      profile: {dataDirectoryId: "work", name: "web"}
     },
     desired: {
       runtimeId: "dsh-current",
-      profile: {homeId: "work", name: "coding"},
-      workspace: "project-b"
+      profile: {dataDirectoryId: "work", name: "coding"}
     }
   }));
 
-  assert.equal(model.current.selection?.profile.name, "web");
-  assert.equal(model.next?.selection?.profile.name, "coding");
+  assert.equal(model.current.target?.profile.name, "web");
+  assert.equal(model.next?.target?.profile.name, "coding");
   assert.equal(model.state, "restart-required");
 });
 
-test("overview does not duplicate an unchanged active selection", () => {
-  const selection = {
+test("overview does not duplicate an unchanged active target", () => {
+  const target = {
     runtimeId: "dsh-current",
-    profile: {homeId: "work", name: "web"},
-    workspace: "project-a"
+    profile: {dataDirectoryId: "work", name: "web"}
   };
-  const model = buildOverviewModel(managerSnapshot({active: selection, desired: selection}));
+  const model = buildOverviewModel(managerSnapshot({active: target, desired: target}));
 
   assert.equal(model.next, null);
   assert.equal(model.state, "active");
 });
 
-test("overview keeps the desired selection in next launch when DSH is stopped", () => {
+test("overview keeps the desired target in next launch when DSH is stopped", () => {
   const model = buildOverviewModel(managerSnapshot({
     desired: {
       runtimeId: "dsh-current",
-      profile: {homeId: "work", name: "coding"},
-      workspace: "project-b"
+      profile: {dataDirectoryId: "work", name: "coding"}
     }
   }));
 
-  assert.equal(model.current.selection, null);
+  assert.equal(model.current.target, null);
   assert.equal(model.next?.runtime?.id, "dsh-current");
-  assert.equal(model.next?.home?.name, "Work DSH home");
-  assert.equal(model.next?.selection?.profile.name, "coding");
+  assert.equal(model.next?.dataDirectory?.name, "Work DSH data directory");
+  assert.equal(model.next?.target?.profile.name, "coding");
   assert.equal(model.state, "not-running");
 });

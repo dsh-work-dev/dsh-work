@@ -55,7 +55,7 @@ func TestFileThemeReaderDefaultsToSystem(t *testing.T) {
 	}
 }
 
-func TestManagerThemeReReadsTheSelectedHome(t *testing.T) {
+func TestManagerThemeReReadsTheSelectedDataDirectory(t *testing.T) {
 	root := t.TempDir()
 	homePath := filepath.Join(root, "dsh-home")
 	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "web"), 0o700); err != nil {
@@ -69,13 +69,12 @@ func TestManagerThemeReReadsTheSelectedHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := New(Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: root,
-		Homes:         []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
-		Runtimes:      []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultSelection: LaunchSelection{
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+		DefaultTarget: LaunchTarget{
 			RuntimeID: "dsh-test",
-			Profile:   ProfileRef{HomeID: "work", Name: "web"},
+			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	})
 	if err != nil {

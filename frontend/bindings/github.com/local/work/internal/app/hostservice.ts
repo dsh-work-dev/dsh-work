@@ -19,6 +19,9 @@ import * as lifecycle$0 from "../lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as settings$0 from "../settings/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as workspacecontext$0 from "../workspacecontext/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -49,11 +52,20 @@ export function GetStatus(): $CancellablePromise<lifecycle$0.Status> {
 }
 
 /**
- * GetTheme projects the selected DSH home's appearance preference. DSH owns
+ * GetTheme projects the selected DSH data directory's appearance preference. DSH owns
  * the value; Work only uses it to paint its trusted startup surface.
  */
 export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
     return $Call.ByID(2409500109);
+}
+
+/**
+ * GetWorkspaceStatus projects the current per-generation Workspace context to
+ * the trusted Settings window. It is read-only and does not expose Host
+ * controls from that surface.
+ */
+export function GetWorkspaceStatus(): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(120271503);
 }
 
 export function Quit(): $CancellablePromise<lifecycle$0.Status> {
@@ -66,4 +78,13 @@ export function Restart(): $CancellablePromise<lifecycle$0.Status> {
 
 export function Start(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(265946144);
+}
+
+/**
+ * StartWithWorkspace is the explicit session action for a DSH Workspace
+ * surface. The request is resolved for one Worker generation and is not
+ * persisted with the global launch target.
+ */
+export function StartWithWorkspace(request: workspacecontext$0.Request): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(380825541, request);
 }

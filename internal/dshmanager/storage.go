@@ -1,9 +1,11 @@
 package dshmanager
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,13 +16,13 @@ import (
 // State is the versioned manager persistence contract. Active state is
 // intentionally absent because it is only true while a Host Worker is alive.
 type State struct {
-	Version  int              `json:"version"`
-	Homes    []HomeInfo       `json:"homes,omitempty"`
-	Runtimes []RuntimeInfo    `json:"runtimes,omitempty"`
-	Desired  *LaunchSelection `json:"desired,omitempty"`
+	Version         int                 `json:"version"`
+	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
+	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
+	Desired         *LaunchTarget       `json:"desired,omitempty"`
 }
 
-// StateStore isolates persistence and migration from manager policy. A future
+// StateStore isolates persistence and version policy from manager policy. A future
 // platform or encrypted store can implement this contract without changing
 // selection or plugin behavior.
 type StateStore interface {
@@ -43,11 +45,60 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 	if err != nil {
 		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be read", "the persisted selection is unavailable")
 	}
-	var state State
-	if err := json.Unmarshal(data, &state); err != nil || state.Version != stateVersion {
+	state, err := decodeState(data)
+	if err != nil {
 		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted selection has an unsupported format")
 	}
 	return &state, nil
+}
+
+func decodeState(data []byte) (State, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var state State
+	if err := decoder.Decode(&state); err != nil {
+		return State{}, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return State{}, errors.New("manager state contains multiple documents")
+		}
+		return State{}, err
+	}
+	if err := validateState(state); err != nil {
+		return State{}, err
+	}
+	return state, nil
+}
+
+func validateState(state State) error {
+	if state.Version != stateVersion {
+		return errors.New("unsupported manager state version")
+	}
+	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))
+	for _, dataDirectory := range state.DataDirectories {
+		if err := validateDataDirectory(dataDirectory); err != nil {
+			return err
+		}
+		if _, exists := seenDataDirectories[dataDirectory.ID]; exists {
+			return errors.New("duplicate DSH data-directory identity")
+		}
+		seenDataDirectories[dataDirectory.ID] = struct{}{}
+	}
+	if state.Desired != nil {
+		if err := validateLaunchTarget(*state.Desired); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateLaunchTarget(target LaunchTarget) error {
+	if target.RuntimeID == "" {
+		return errors.New("launch target runtime identity is required")
+	}
+	return validateProfileRef(target.Profile)
 }
 
 func (FileStateStore) Save(ctx context.Context, path string, state State) error {
@@ -94,7 +145,8 @@ func (FileStateStore) Save(ctx context.Context, path string, state State) error 
 }
 
 // ProfileCatalog supplies the built-in profiles understood by one DSH
-// adapter. Custom profiles are still discovered from the selected home.
+// adapter. Custom profiles are still discovered from the selected data
+// directory.
 type ProfileCatalog interface {
 	BuiltInProfiles() []ProfileDefinition
 }

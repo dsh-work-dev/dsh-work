@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/local/work/internal/workspacecontext"
 )
 
 // State is the platform-neutral lifecycle state projected to the trusted UI.
@@ -59,6 +61,7 @@ const (
 	ErrorProfileInvalid             ErrorCode = "PROFILE_INVALID"
 	ErrorProfileInUse               ErrorCode = "PROFILE_IN_USE"
 	ErrorProfileRenameFailed        ErrorCode = "PROFILE_RENAME_FAILED"
+	ErrorWorkspaceInvalid           ErrorCode = "WORKSPACE_INVALID"
 	ErrorRuntimeInUse               ErrorCode = "RUNTIME_IN_USE"
 	ErrorRuntimeProfileIncompatible ErrorCode = "RUNTIME_PROFILE_INCOMPATIBLE"
 	ErrorManagerOperationBusy       ErrorCode = "MANAGER_OPERATION_BUSY"
@@ -95,14 +98,15 @@ func (f Failure) Error() string {
 
 // Status is the immutable read model consumed by the frontend.
 type Status struct {
-	State         State    `json:"state"`
-	Phase         Phase    `json:"phase"`
-	GenerationID  string   `json:"generationId,omitempty"`
-	WorkspaceURL  string   `json:"workspaceUrl,omitempty"`
-	Error         *Failure `json:"error,omitempty"`
-	CanRetry      bool     `json:"canRetry"`
-	CanCancel     bool     `json:"canCancel"`
-	CorrelationID string   `json:"correlationId,omitempty"`
+	State         State                     `json:"state"`
+	Phase         Phase                     `json:"phase"`
+	GenerationID  string                    `json:"generationId,omitempty"`
+	WorkspaceURL  string                    `json:"workspaceUrl,omitempty"`
+	Workspace     *workspacecontext.Context `json:"workspace,omitempty"`
+	Error         *Failure                  `json:"error,omitempty"`
+	CanRetry      bool                      `json:"canRetry"`
+	CanCancel     bool                      `json:"canCancel"`
+	CorrelationID string                    `json:"correlationId,omitempty"`
 }
 
 // TransitionError identifies an illegal state transition without exposing
@@ -236,6 +240,25 @@ func (m *Machine) MarkReady(generationID, workspaceURL string) (Status, error) {
 	return cloneStatus(m.status), nil
 }
 
+// SetWorkspaceContext records the per-generation DSH Workspace resolution
+// separately from the persisted launch target.
+func (m *Machine) SetWorkspaceContext(generationID string, workspace workspacecontext.Context) (Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.checkGeneration(generationID); err != nil {
+		return cloneStatus(m.status), err
+	}
+	if m.status.State != StateStarting {
+		return cloneStatus(m.status), &TransitionError{From: m.status.State, To: m.status.State, Why: "workspace context is only set during startup"}
+	}
+	if err := workspace.ValidateForGeneration(generationID); err != nil {
+		return cloneStatus(m.status), err
+	}
+	copy := workspace
+	m.status.Workspace = &copy
+	return cloneStatus(m.status), nil
+}
+
 // BeginStop is idempotent for the same generation so window-close, explicit
 // quit and application shutdown can converge on one cleanup owner.
 func (m *Machine) BeginStop(generationID string) (Status, error) {
@@ -281,6 +304,7 @@ func (m *Machine) CompleteStop(generationID string, failure *Failure) (Status, e
 	m.status.State = StateStopped
 	m.status.Phase = PhaseIdle
 	m.status.WorkspaceURL = ""
+	m.status.Workspace = nil
 	m.status.Error = nil
 	m.status.CanRetry = false
 	m.status.CanCancel = false
@@ -301,6 +325,7 @@ func (m *Machine) Fail(generationID string, failure Failure) (Status, error) {
 	}
 	m.status.State = StateFailed
 	m.status.Phase = PhaseFailed
+	m.status.Workspace = nil
 	m.status.Error = &failure
 	m.status.CanRetry = failure.Retryable
 	m.status.CanCancel = false
@@ -316,6 +341,10 @@ func (m *Machine) checkGeneration(generationID string) error {
 
 func cloneStatus(status Status) Status {
 	copy := status
+	if status.Workspace != nil {
+		workspace := *status.Workspace
+		copy.Workspace = &workspace
+	}
 	if status.Error != nil {
 		failure := *status.Error
 		copy.Error = &failure

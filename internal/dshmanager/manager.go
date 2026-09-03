@@ -14,17 +14,16 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-const stateVersion = 1
+const stateVersion = 2
 
-// Config supplies discovered homes and runtimes to the manager. Discovery
-// and installation are separate concerns; this first slice keeps the catalog
-// injectable so the same domain contract can be used by the GUI and CLI.
+// Config supplies discovered DSH data directories and runtimes to the
+// manager. Workspace context is intentionally absent: it belongs to DSH's
+// session surface and is resolved per Worker generation.
 type Config struct {
 	StatePath        string
-	WorkspaceRoot    string
-	Homes            []HomeInfo
+	DataDirectories  []DataDirectoryInfo
 	Runtimes         []RuntimeInfo
-	DefaultSelection LaunchSelection
+	DefaultTarget    LaunchTarget
 	CommandRunner    CommandRunner
 	PluginCommands   PluginCommandBuilder
 	RuntimeInstaller RuntimeInstaller
@@ -72,8 +71,8 @@ type PluginCommandBuilder interface {
 type Manager struct {
 	mu            sync.RWMutex
 	config        Config
-	desired       *LaunchSelection
-	active        *LaunchSelection
+	desired       *LaunchTarget
+	active        *LaunchTarget
 	operationGate chan struct{}
 	store         StateStore
 }
@@ -97,8 +96,11 @@ func New(config Config) (*Manager, error) {
 		return nil, err
 	}
 	if state != nil {
-		if len(state.Homes) > 0 {
-			normalized.Homes = mergeHomes(normalized.Homes, state.Homes)
+		if err := validateState(*state); err != nil {
+			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted launch target has an unsupported shape")
+		}
+		if len(state.DataDirectories) > 0 {
+			normalized.DataDirectories = mergeDataDirectories(normalized.DataDirectories, state.DataDirectories)
 		}
 		if len(state.Runtimes) > 0 {
 			normalized.Runtimes = mergeRuntimes(normalized.Runtimes, state.Runtimes)
@@ -110,11 +112,11 @@ func New(config Config) (*Manager, error) {
 	}
 	manager.config = normalized
 	if state != nil && state.Desired != nil {
-		selection := *state.Desired
-		manager.desired = &selection
-	} else if normalized.DefaultSelection.RuntimeID != "" {
-		selection := normalized.DefaultSelection
-		manager.desired = &selection
+		target := *state.Desired
+		manager.desired = &target
+	} else if normalized.DefaultTarget.RuntimeID != "" {
+		target := normalized.DefaultTarget
+		manager.desired = &target
 	}
 	return manager, nil
 }
@@ -237,7 +239,7 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 	return m.Snapshot(ctx)
 }
 
-func (m *Manager) RegisterHome(ctx context.Context, home HomeInfo) (Snapshot, error) {
+func (m *Manager) RegisterDataDirectory(ctx context.Context, dataDirectory DataDirectoryInfo) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -246,22 +248,22 @@ func (m *Manager) RegisterHome(ctx context.Context, home HomeInfo) (Snapshot, er
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, err
 	}
-	normalizedHome, err := normalizeHome(home)
+	normalizedDataDirectory, err := normalizeDataDirectory(dataDirectory)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	home = normalizedHome
+	dataDirectory = normalizedDataDirectory
 	m.mu.Lock()
 	updated := false
-	for i := range m.config.Homes {
-		if m.config.Homes[i].ID == home.ID {
-			m.config.Homes[i] = home
+	for i := range m.config.DataDirectories {
+		if m.config.DataDirectories[i].ID == dataDirectory.ID {
+			m.config.DataDirectories[i] = dataDirectory
 			updated = true
 			break
 		}
 	}
 	if !updated {
-		m.config.Homes = append(m.config.Homes, home)
+		m.config.DataDirectories = append(m.config.DataDirectories, dataDirectory)
 	}
 	state := m.stateLocked()
 	statePath := m.config.StatePath
@@ -272,7 +274,7 @@ func (m *Manager) RegisterHome(ctx context.Context, home HomeInfo) (Snapshot, er
 	return m.Snapshot(ctx)
 }
 
-func (m *Manager) RemoveHome(ctx context.Context, id string) (Snapshot, error) {
+func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -280,25 +282,25 @@ func (m *Manager) RemoveHome(ctx context.Context, id string) (Snapshot, error) {
 	defer release()
 	m.mu.Lock()
 	index := -1
-	for i := range m.config.Homes {
-		if m.config.Homes[i].ID == id {
+	for i := range m.config.DataDirectories {
+		if m.config.DataDirectories[i].ID == id {
 			index = i
 			break
 		}
 	}
 	if index < 0 {
 		m.mu.Unlock()
-		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "the home is not in the catalog")
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the data directory is not in the catalog")
 	}
-	if (m.desired != nil && m.desired.Profile.HomeID == id) || (m.active != nil && m.active.Profile.HomeID == id) {
+	if (m.desired != nil && m.desired.Profile.DataDirectoryID == id) || (m.active != nil && m.active.Profile.DataDirectoryID == id) {
 		m.mu.Unlock()
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH home is still selected", "choose another profile before removing it")
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH data directory is still selected", "choose another profile before removing it")
 	}
-	if m.config.Homes[index].Ownership == HomeOwnershipWork {
+	if m.config.DataDirectories[index].Ownership == DataDirectoryOwnershipWork {
 		m.mu.Unlock()
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the Work DSH home cannot be removed here", "remove the home through an explicit data-management flow")
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the Work DSH data directory cannot be removed here", "remove the data directory through an explicit data-management flow")
 	}
-	m.config.Homes = append(m.config.Homes[:index], m.config.Homes[index+1:]...)
+	m.config.DataDirectories = append(m.config.DataDirectories[:index], m.config.DataDirectories[index+1:]...)
 	state := m.stateLocked()
 	statePath := m.config.StatePath
 	m.mu.Unlock()
@@ -314,33 +316,33 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneSelection(m.desired)
-	active := cloneSelection(m.active)
+	desired := cloneTarget(m.desired)
+	active := cloneTarget(m.active)
 	m.mu.RUnlock()
 
-	profiles := discoverProfiles(ctx, config.Homes, config.ProfileCatalog, config.ProfileReader)
+	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader)
 	return Snapshot{
-		Runtimes: refreshRuntimes(config.Runtimes),
-		Homes:    cloneHomes(config.Homes),
-		Profiles: profiles,
-		Desired:  desired,
-		Active:   active,
-		Theme:    selectedTheme(ctx, config.Homes, active, desired, config.ThemeReader),
+		Runtimes:        refreshRuntimes(config.Runtimes),
+		DataDirectories: cloneDataDirectories(config.DataDirectories),
+		Profiles:        profiles,
+		Desired:         desired,
+		Active:          active,
+		Theme:           selectedTheme(ctx, config.DataDirectories, active, desired, config.ThemeReader),
 	}, nil
 }
 
-// Theme returns the selected DSH home's appearance preference without
-// discovering the runtime, home and profile catalogs.
+// Theme returns the selected DSH data directory's appearance preference
+// without discovering the runtime, data directory and profile catalogs.
 func (m *Manager) Theme(ctx context.Context) (ThemePreference, error) {
 	if err := contextError(ctx); err != nil {
 		return ThemePreferenceSystem, err
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	active := cloneSelection(m.active)
-	desired := cloneSelection(m.desired)
+	active := cloneTarget(m.active)
+	desired := cloneTarget(m.desired)
 	m.mu.RUnlock()
-	return selectedTheme(ctx, config.Homes, active, desired, config.ThemeReader), nil
+	return selectedTheme(ctx, config.DataDirectories, active, desired, config.ThemeReader), nil
 }
 
 func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([]PluginInfo, error) {
@@ -349,13 +351,13 @@ func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([
 		return nil, err
 	}
 	defer release()
-	home, _, err := m.resolvePluginTarget(ctx, request.Target, false)
+	dataDirectory, _, err := m.resolvePluginTarget(ctx, request.Target, false)
 	if err != nil {
 		return nil, err
 	}
-	profilePath := filepath.Join(home.Path, "profiles", request.Target.Profile.Name)
+	profilePath := filepath.Join(dataDirectory.Path, "profiles", request.Target.Profile.Name)
 	catalog := m.profileCatalog()
-	if !profileExists(catalog, home, request.Target.Profile.Name) {
+	if !profileExists(catalog, dataDirectory, request.Target.Profile.Name) {
 		if isBuiltInProfile(catalog, request.Target.Profile.Name) {
 			return []PluginInfo{}, nil
 		}
@@ -407,15 +409,15 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneSelection(m.desired)
-	active := cloneSelection(m.active)
+	desired := cloneTarget(m.desired)
+	active := cloneTarget(m.active)
 	m.mu.RUnlock()
-	home, ok := findHome(config.Homes, request.Profile.HomeID)
+	dataDirectory, ok := findDataDirectory(config.DataDirectories, request.Profile.DataDirectoryID)
 	if !ok {
-		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "the profile home is not in the catalog")
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the profile data directory is not in the catalog")
 	}
-	if home.Ownership == HomeOwnershipUser && !directoryExists(home.Path) {
-		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH home is unavailable", "register an existing DSH home directory")
+	if dataDirectory.Ownership == DataDirectoryOwnershipUser && !directoryExists(dataDirectory.Path) {
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH data directory is unavailable", "register an existing DSH data directory")
 	}
 	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be renamed", "choose a custom profile")
@@ -423,15 +425,15 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 	if active != nil && active.Profile == request.Profile {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the active DSH profile cannot be renamed", "stop DSH before renaming the active profile")
 	}
-	oldPath := filepath.Join(home.Path, "profiles", request.Profile.Name)
+	oldPath := filepath.Join(dataDirectory.Path, "profiles", request.Profile.Name)
 	oldInfo, err := os.Stat(oldPath)
 	if err != nil || !oldInfo.IsDir() {
 		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH profile was not found", "choose an existing custom profile")
 	}
-	if profileExists(config.ProfileCatalog, home, newName) {
+	if profileExists(config.ProfileCatalog, dataDirectory, newName) {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "a DSH profile already uses that name", "choose a different profile name")
 	}
-	newPath := filepath.Join(home.Path, "profiles", newName)
+	newPath := filepath.Join(dataDirectory.Path, "profiles", newName)
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileRenameFailed, "the DSH profile could not be renamed", "the profile directory was not changed", true, false)
 	}
@@ -440,17 +442,16 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 	if desiredChanged {
 		desired.Profile.Name = newName
 		m.mu.Lock()
-		m.desired = cloneSelection(desired)
+		m.desired = cloneTarget(desired)
 		state := m.stateLocked()
 		statePath := m.config.StatePath
 		m.mu.Unlock()
 		if err := m.store.Save(ctx, statePath, state); err != nil {
 			rollbackErr := os.Rename(newPath, oldPath)
 			m.mu.Lock()
-			m.desired = cloneSelection(&LaunchSelection{
+			m.desired = cloneTarget(&LaunchTarget{
 				RuntimeID: desired.RuntimeID,
 				Profile:   request.Profile,
-				Workspace: desired.Workspace,
 			})
 			m.mu.Unlock()
 			if rollbackErr != nil {
@@ -474,14 +475,14 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	if err := validatePluginSpec(packageSpec); err != nil {
 		return PluginResult{}, err
 	}
-	home, runtime, err := m.resolvePluginTarget(ctx, target, operation == "add")
+	dataDirectory, runtime, err := m.resolvePluginTarget(ctx, target, operation == "add")
 	if err != nil {
 		return PluginResult{}, err
 	}
 	m.mu.RLock()
 	runner := m.config.CommandRunner
 	commands := m.config.PluginCommands
-	active := cloneSelection(m.active)
+	active := cloneTarget(m.active)
 	m.mu.RUnlock()
 	if runner == nil || commands == nil {
 		return PluginResult{}, failure(lifecycle.ErrorPluginCommandUnavailable, "The DSH plugin command is unavailable", "run this operation on a platform with a native command adapter")
@@ -495,13 +496,13 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	if err != nil {
 		return PluginResult{}, failure(lifecycle.ErrorPluginSpecInvalid, "plugin package spec is invalid", "use one package name or versioned package spec")
 	}
-	if _, err = runner.Run(ctx, runtime.Path, args, map[string]string{"DSH_HOME": home.Path}, home.Path); err != nil {
+	if _, err = runner.Run(ctx, runtime.Path, args, map[string]string{"DSH_HOME": dataDirectory.Path}, dataDirectory.Path); err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
 			return PluginResult{}, cancellation
 		}
 		return PluginResult{}, failureWithMeta(lifecycle.ErrorPluginCommandFailed, "The DSH plugin operation failed", "DSH rejected the profile plugin operation", true, true)
 	}
-	plugins, err := m.profilePlugins(ctx, filepath.Join(home.Path, "profiles", target.Profile.Name))
+	plugins, err := m.profilePlugins(ctx, filepath.Join(dataDirectory.Path, "profiles", target.Profile.Name))
 	if err != nil {
 		return PluginResult{}, err
 	}
@@ -509,26 +510,17 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	return PluginResult{Profile: target.Profile, Plugins: plugins, RestartRequired: restartRequired}, nil
 }
 
-func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, allowCreate bool) (HomeInfo, RuntimeInfo, error) {
+func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, allowCreate bool) (DataDirectoryInfo, RuntimeInfo, error) {
 	if err := contextError(ctx); err != nil {
-		return HomeInfo{}, RuntimeInfo{}, err
-	}
-	if err := validateProfileRef(target.Profile); err != nil {
-		return HomeInfo{}, RuntimeInfo{}, err
+		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneSelection(m.desired)
+	desired := cloneTarget(m.desired)
 	m.mu.RUnlock()
-	home, ok := findHome(config.Homes, target.Profile.HomeID)
-	if !ok {
-		return HomeInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "the profile home is not in the catalog")
-	}
-	if home.Ownership == HomeOwnershipUser && !directoryExists(home.Path) {
-		return HomeInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH home is unavailable", "register an existing DSH home directory")
-	}
-	if !allowCreate && !profileExists(config.ProfileCatalog, home, target.Profile.Name) && !isBuiltInProfile(config.ProfileCatalog, target.Profile.Name) {
-		return HomeInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH profile was not found", "create or select an existing profile")
+	dataDirectory, err := resolveDataDirectoryProfile(config, target.Profile, allowCreate)
+	if err != nil {
+		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
 	runtimeID := target.RuntimeID
 	if runtimeID == "" && desired != nil {
@@ -536,36 +528,34 @@ func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, 
 	}
 	runtime, ok := findRuntime(config.Runtimes, runtimeID)
 	if !ok {
-		return HomeInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "select a runtime for this plugin operation")
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "select a runtime for this plugin operation")
 	}
 	if !runtimeExecutablePresent(runtime.Path) {
-		return HomeInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before changing plugins")
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before changing plugins")
 	}
 	if err := verifyRuntime(ctx, config.RuntimeVerifier, runtime); err != nil {
-		return HomeInfo{}, RuntimeInfo{}, err
+		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
 	runtime.Installed = true
-	return home, runtime, nil
+	return dataDirectory, runtime, nil
 }
 
-// Resolve validates a complete runtime + home + profile pairing. It returns a
-// normalized selection suitable for the Host launch boundary.
-func (m *Manager) Resolve(ctx context.Context, request LaunchRequest) (LaunchSelection, error) {
+// Resolve validates a complete runtime + data-directory + profile pairing. It
+// returns a launch target suitable for the Host launch boundary.
+func (m *Manager) Resolve(ctx context.Context, request LaunchRequest) (LaunchTarget, error) {
 	resolved, err := m.ResolveLaunch(ctx, request)
 	if err != nil {
-		return LaunchSelection{}, err
+		return LaunchTarget{}, err
 	}
-	return resolved.Selection, nil
+	return resolved.Target, nil
 }
 
 // ResolveLaunch validates and returns the complete immutable launch tuple.
 // Keeping the catalog records in this result prevents callers from resolving
-// a selection and then accidentally pairing it with a different home/runtime.
+// a target and then accidentally pairing it with a different data directory
+// or runtime.
 func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (ResolvedLaunch, error) {
 	if err := contextError(ctx); err != nil {
-		return ResolvedLaunch{}, err
-	}
-	if err := validateProfileRef(request.Profile); err != nil {
 		return ResolvedLaunch{}, err
 	}
 
@@ -587,49 +577,33 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 		return ResolvedLaunch{}, err
 	}
 	runtime.Installed = true
-	home, ok := findHome(config.Homes, request.Profile.HomeID)
-	if !ok {
-		return ResolvedLaunch{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "the profile home is not in the catalog")
-	}
-	if home.Ownership == HomeOwnershipUser && !directoryExists(home.Path) {
-		return ResolvedLaunch{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH home is unavailable", "register an existing DSH home directory")
-	}
-	if !profileExists(config.ProfileCatalog, home, request.Profile.Name) {
-		return ResolvedLaunch{}, failure(lifecycle.ErrorProfileNotFound, "DSH profile was not found", "create or select an existing profile")
+	dataDirectory, err := resolveDataDirectoryProfile(config, request.Profile, false)
+	if err != nil {
+		return ResolvedLaunch{}, err
 	}
 
-	workspace := request.Workspace
-	if workspace == "" {
-		workspace = config.WorkspaceRoot
-	}
-	workspace, err := filepath.Abs(workspace)
-	if err != nil {
-		return ResolvedLaunch{}, failure(lifecycle.ErrorManagerStateInvalid, "workspace path is invalid", "the workspace path could not be normalized")
-	}
 	return ResolvedLaunch{
-		Selection: LaunchSelection{
+		Target: LaunchTarget{
 			RuntimeID: request.RuntimeID,
 			Profile:   request.Profile,
-			Workspace: filepath.Clean(workspace),
 		},
-		Runtime: runtime,
-		Home:    home,
+		Runtime:       runtime,
+		DataDirectory: dataDirectory,
 	}, nil
 }
 
 // SetDesired validates and persists the next launch selection. It does not
 // start or restart DSH; applying it to a running Host is an explicit caller
 // decision and is reported separately by the lifecycle layer.
-func (m *Manager) SetDesired(ctx context.Context, selection LaunchSelection) (Snapshot, error) {
+func (m *Manager) SetDesired(ctx context.Context, target LaunchTarget) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	defer release()
 	resolved, err := m.Resolve(ctx, LaunchRequest{
-		RuntimeID: selection.RuntimeID,
-		Profile:   selection.Profile,
-		Workspace: selection.Workspace,
+		RuntimeID: target.RuntimeID,
+		Profile:   target.Profile,
 	})
 	if err != nil {
 		return Snapshot{}, err
@@ -638,7 +612,7 @@ func (m *Manager) SetDesired(ctx context.Context, selection LaunchSelection) (Sn
 	m.mu.Lock()
 	m.desired = &resolved
 	state := m.stateLocked()
-	state.Desired = cloneSelection(&resolved)
+	state.Desired = cloneTarget(&resolved)
 	statePath := m.config.StatePath
 	m.mu.Unlock()
 
@@ -651,7 +625,7 @@ func (m *Manager) SetDesired(ctx context.Context, selection LaunchSelection) (Sn
 // MarkActive records the selection that the Host actually launched. It is
 // intentionally not persisted: a process restart must never report an old
 // worker as active.
-func (m *Manager) MarkActive(ctx context.Context, selection *LaunchSelection) (Snapshot, error) {
+func (m *Manager) MarkActive(ctx context.Context, target *LaunchTarget) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -660,12 +634,11 @@ func (m *Manager) MarkActive(ctx context.Context, selection *LaunchSelection) (S
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, err
 	}
-	var active *LaunchSelection
-	if selection != nil {
+	var active *LaunchTarget
+	if target != nil {
 		resolved, err := m.Resolve(ctx, LaunchRequest{
-			RuntimeID: selection.RuntimeID,
-			Profile:   selection.Profile,
-			Workspace: selection.Workspace,
+			RuntimeID: target.RuntimeID,
+			Profile:   target.Profile,
 		})
 		if err != nil {
 			return Snapshot{}, err
@@ -688,23 +661,10 @@ func normalizeConfig(config Config) (Config, error) {
 	if config.ThemeReader == nil {
 		config.ThemeReader = FileThemeReader{}
 	}
-	if config.WorkspaceRoot == "" {
-		workspace, err := os.Getwd()
-		if err != nil {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "workspace root is unavailable", "the current directory could not be determined")
-		}
-		config.WorkspaceRoot = workspace
-	}
-	workspace, err := filepath.Abs(config.WorkspaceRoot)
-	if err != nil {
-		return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "workspace root is invalid", "the workspace root could not be normalized")
-	}
-	config.WorkspaceRoot = filepath.Clean(workspace)
-
 	if config.StatePath == "" {
 		configRoot, err := os.UserConfigDir()
 		if err != nil || configRoot == "" {
-			configRoot = config.WorkspaceRoot
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "the operating system did not provide a user application-data directory")
 		}
 		config.StatePath = filepath.Join(configRoot, "Work", "dsh-work", "manager.json")
 	}
@@ -714,27 +674,27 @@ func normalizeConfig(config Config) (Config, error) {
 	}
 	config.StatePath = filepath.Clean(statePath)
 
-	config.Homes = cloneHomes(config.Homes)
-	seenHomes := make(map[string]struct{}, len(config.Homes))
-	for i := range config.Homes {
-		home := &config.Homes[i]
-		if home.ID == "" || home.Path == "" {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH home catalog is invalid", "every home needs an id and path")
+	config.DataDirectories = cloneDataDirectories(config.DataDirectories)
+	seenDataDirectories := make(map[string]struct{}, len(config.DataDirectories))
+	for i := range config.DataDirectories {
+		dataDirectory := &config.DataDirectories[i]
+		if dataDirectory.ID == "" || dataDirectory.Path == "" {
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "every data directory needs an id and path")
 		}
-		if _, exists := seenHomes[home.ID]; exists {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH home catalog is invalid", "home ids must be unique")
+		if _, exists := seenDataDirectories[dataDirectory.ID]; exists {
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "data-directory ids must be unique")
 		}
-		seenHomes[home.ID] = struct{}{}
-		homePath, err := filepath.Abs(home.Path)
+		seenDataDirectories[dataDirectory.ID] = struct{}{}
+		dataDirectoryPath, err := filepath.Abs(dataDirectory.Path)
 		if err != nil {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH home catalog is invalid", "a home path could not be normalized")
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "a data-directory path could not be normalized")
 		}
-		home.Path = filepath.Clean(homePath)
-		if home.Ownership == "" {
-			home.Ownership = HomeOwnershipUser
+		dataDirectory.Path = filepath.Clean(dataDirectoryPath)
+		if dataDirectory.Ownership == "" {
+			dataDirectory.Ownership = DataDirectoryOwnershipUser
 		}
-		if home.Ownership != HomeOwnershipWork && home.Ownership != HomeOwnershipUser {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH home catalog is invalid", "use work or user ownership")
+		if dataDirectory.Ownership != DataDirectoryOwnershipWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "use work or user ownership")
 		}
 	}
 
@@ -756,35 +716,35 @@ func normalizeConfig(config Config) (Config, error) {
 	return config, nil
 }
 
-func validateHome(home HomeInfo) error {
-	if home.ID == "" || home.Path == "" {
-		return failure(lifecycle.ErrorManagerStateInvalid, "DSH home is invalid", "a home needs an id and path")
+func validateDataDirectory(dataDirectory DataDirectoryInfo) error {
+	if dataDirectory.ID == "" || dataDirectory.Path == "" {
+		return failure(lifecycle.ErrorManagerStateInvalid, "DSH data directory is invalid", "a data directory needs an id and path")
 	}
-	if home.Ownership != "" && home.Ownership != HomeOwnershipWork && home.Ownership != HomeOwnershipUser {
-		return failure(lifecycle.ErrorManagerStateInvalid, "DSH home ownership is invalid", "use work or user ownership")
+	if dataDirectory.Ownership != "" && dataDirectory.Ownership != DataDirectoryOwnershipWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
+		return failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory ownership is invalid", "use work or user ownership")
 	}
 	return nil
 }
 
-func normalizeHome(home HomeInfo) (HomeInfo, error) {
-	if err := validateHome(home); err != nil {
-		return HomeInfo{}, err
+func normalizeDataDirectory(dataDirectory DataDirectoryInfo) (DataDirectoryInfo, error) {
+	if err := validateDataDirectory(dataDirectory); err != nil {
+		return DataDirectoryInfo{}, err
 	}
-	path, err := filepath.Abs(home.Path)
+	path, err := filepath.Abs(dataDirectory.Path)
 	if err != nil {
-		return HomeInfo{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH home path is invalid", "the home path could not be normalized")
+		return DataDirectoryInfo{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory path is invalid", "the data-directory path could not be normalized")
 	}
-	home.Path = filepath.Clean(path)
-	if home.Ownership == "" {
-		home.Ownership = HomeOwnershipUser
+	dataDirectory.Path = filepath.Clean(path)
+	if dataDirectory.Ownership == "" {
+		dataDirectory.Ownership = DataDirectoryOwnershipUser
 	}
-	if home.Ownership == HomeOwnershipUser {
-		info, statErr := os.Stat(home.Path)
+	if dataDirectory.Ownership == DataDirectoryOwnershipUser {
+		info, statErr := os.Stat(dataDirectory.Path)
 		if statErr != nil || !info.IsDir() {
-			return HomeInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "register an existing DSH home directory")
+			return DataDirectoryInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "register an existing DSH data directory")
 		}
 	}
-	return home, nil
+	return dataDirectory, nil
 }
 
 func validateRuntime(runtime RuntimeInfo) error {
@@ -824,33 +784,33 @@ func (m *Manager) acquireOperation(ctx context.Context) (func(), error) {
 
 func (m *Manager) stateLocked() State {
 	return State{
-		Version:  stateVersion,
-		Homes:    cloneHomes(m.config.Homes),
-		Runtimes: cloneRuntimes(m.config.Runtimes),
-		Desired:  cloneSelection(m.desired),
+		Version:         stateVersion,
+		DataDirectories: cloneDataDirectories(m.config.DataDirectories),
+		Runtimes:        cloneRuntimes(m.config.Runtimes),
+		Desired:         cloneTarget(m.desired),
 	}
 }
 
 func (m *Manager) configSnapshotLocked() Config {
 	config := m.config
-	config.Homes = cloneHomes(m.config.Homes)
+	config.DataDirectories = cloneDataDirectories(m.config.DataDirectories)
 	config.Runtimes = cloneRuntimes(m.config.Runtimes)
 	return config
 }
 
-func mergeHomes(base, persisted []HomeInfo) []HomeInfo {
-	merged := cloneHomes(base)
-	for _, home := range persisted {
+func mergeDataDirectories(base, persisted []DataDirectoryInfo) []DataDirectoryInfo {
+	merged := cloneDataDirectories(base)
+	for _, dataDirectory := range persisted {
 		found := false
 		for i := range merged {
-			if merged[i].ID == home.ID {
-				merged[i] = home
+			if merged[i].ID == dataDirectory.ID {
+				merged[i] = dataDirectory
 				found = true
 				break
 			}
 		}
 		if !found {
-			merged = append(merged, home)
+			merged = append(merged, dataDirectory)
 		}
 	}
 	return merged
@@ -874,33 +834,33 @@ func mergeRuntimes(base, persisted []RuntimeInfo) []RuntimeInfo {
 	return merged
 }
 
-func discoverProfiles(ctx context.Context, homes []HomeInfo, catalog ProfileCatalog, reader ProfileReader) []ProfileInfo {
+func discoverProfiles(ctx context.Context, dataDirectories []DataDirectoryInfo, catalog ProfileCatalog, reader ProfileReader) []ProfileInfo {
 	profiles := make([]ProfileInfo, 0)
 	definitions := profileDefinitions(catalog)
-	for _, home := range homes {
-		profileRoot := filepath.Join(home.Path, "profiles")
+	for _, dataDirectory := range dataDirectories {
+		profileRoot := filepath.Join(dataDirectory.Path, "profiles")
 		entries, err := os.ReadDir(profileRoot)
 		if err == nil {
 			for _, entry := range entries {
 				if !entry.IsDir() || !validProfileName(entry.Name()) {
 					continue
 				}
-				profiles = append(profiles, profileInfo(ctx, home, entry.Name(), true, definitions, reader))
+				profiles = append(profiles, profileInfo(ctx, dataDirectory, entry.Name(), true, definitions, reader))
 			}
 		}
 		for _, definition := range definitions {
 			if !validProfileName(definition.Name) {
 				continue
 			}
-			if !containsProfile(profiles, home.ID, definition.Name) {
-				profiles = append(profiles, profileInfo(ctx, home, definition.Name, false, definitions, reader))
+			if !containsProfile(profiles, dataDirectory.ID, definition.Name) {
+				profiles = append(profiles, profileInfo(ctx, dataDirectory, definition.Name, false, definitions, reader))
 			}
 		}
 	}
 	return profiles
 }
 
-func profileInfo(ctx context.Context, home HomeInfo, name string, exists bool, definitions []ProfileDefinition, reader ProfileReader) ProfileInfo {
+func profileInfo(ctx context.Context, dataDirectory DataDirectoryInfo, name string, exists bool, definitions []ProfileDefinition, reader ProfileReader) ProfileInfo {
 	kind := ProfileKindCustom
 	autoInitialize := false
 	if definition, ok := findProfileDefinition(definitions, name); ok {
@@ -912,13 +872,13 @@ func profileInfo(ctx context.Context, home HomeInfo, name string, exists bool, d
 	}
 	plugins := []PluginInfo(nil)
 	if exists && reader != nil {
-		if projected, err := reader.Read(ctx, filepath.Join(home.Path, "profiles", name)); err == nil {
+		if projected, err := reader.Read(ctx, filepath.Join(dataDirectory.Path, "profiles", name)); err == nil {
 			plugins = projected
 		}
 	}
 	return ProfileInfo{
-		Ref:            ProfileRef{HomeID: home.ID, Name: name},
-		Path:           filepath.Join(home.Path, "profiles", name),
+		Ref:            ProfileRef{DataDirectoryID: dataDirectory.ID, Name: name},
+		Path:           filepath.Join(dataDirectory.Path, "profiles", name),
 		Exists:         exists,
 		Kind:           kind,
 		Launchable:     true,
@@ -966,11 +926,11 @@ func validatePluginSpec(spec string) error {
 	return nil
 }
 
-func profileExists(catalog ProfileCatalog, home HomeInfo, name string) bool {
+func profileExists(catalog ProfileCatalog, dataDirectory DataDirectoryInfo, name string) bool {
 	if isBuiltInProfile(catalog, name) {
 		return true
 	}
-	info, err := os.Stat(filepath.Join(home.Path, "profiles", name))
+	info, err := os.Stat(filepath.Join(dataDirectory.Path, "profiles", name))
 	return err == nil && info.IsDir()
 }
 
@@ -1007,9 +967,9 @@ func (m *Manager) profileCatalog() ProfileCatalog {
 	return m.config.ProfileCatalog
 }
 
-func containsProfile(profiles []ProfileInfo, homeID, name string) bool {
+func containsProfile(profiles []ProfileInfo, dataDirectoryID, name string) bool {
 	for _, profile := range profiles {
-		if profile.Ref.HomeID == homeID && profile.Ref.Name == name {
+		if profile.Ref.DataDirectoryID == dataDirectoryID && profile.Ref.Name == name {
 			return true
 		}
 	}
@@ -1017,8 +977,8 @@ func containsProfile(profiles []ProfileInfo, homeID, name string) bool {
 }
 
 func validateProfileRef(ref ProfileRef) error {
-	if ref.HomeID == "" || ref.Name == "" {
-		return failure(lifecycle.ErrorProfileRequired, "a DSH profile is required", "select a DSH home and profile")
+	if ref.DataDirectoryID == "" || ref.Name == "" {
+		return failure(lifecycle.ErrorProfileRequired, "a DSH profile is required", "select a DSH data directory and profile")
 	}
 	if !validProfileName(ref.Name) {
 		return failure(lifecycle.ErrorProfileInvalid, "DSH profile name is invalid", "profile names cannot contain path separators")
@@ -1033,13 +993,30 @@ func validProfileName(name string) bool {
 	return filepath.Base(name) == name && !strings.ContainsAny(name, `/\\`)
 }
 
-func findHome(homes []HomeInfo, id string) (HomeInfo, bool) {
-	for _, home := range homes {
-		if home.ID == id {
-			return home, true
+func findDataDirectory(dataDirectories []DataDirectoryInfo, id string) (DataDirectoryInfo, bool) {
+	for _, dataDirectory := range dataDirectories {
+		if dataDirectory.ID == id {
+			return dataDirectory, true
 		}
 	}
-	return HomeInfo{}, false
+	return DataDirectoryInfo{}, false
+}
+
+func resolveDataDirectoryProfile(config Config, ref ProfileRef, allowCreate bool) (DataDirectoryInfo, error) {
+	if err := validateProfileRef(ref); err != nil {
+		return DataDirectoryInfo{}, err
+	}
+	dataDirectory, ok := findDataDirectory(config.DataDirectories, ref.DataDirectoryID)
+	if !ok {
+		return DataDirectoryInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the profile data directory is not in the catalog")
+	}
+	if dataDirectory.Ownership == DataDirectoryOwnershipUser && !directoryExists(dataDirectory.Path) {
+		return DataDirectoryInfo{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH data directory is unavailable", "register an existing DSH data directory")
+	}
+	if !allowCreate && !profileExists(config.ProfileCatalog, dataDirectory, ref.Name) && !isBuiltInProfile(config.ProfileCatalog, ref.Name) {
+		return DataDirectoryInfo{}, failure(lifecycle.ErrorProfileNotFound, "DSH profile was not found", "create or select an existing profile")
+	}
+	return dataDirectory, nil
 }
 
 func findRuntime(runtimes []RuntimeInfo, id string) (RuntimeInfo, bool) {
@@ -1108,19 +1085,19 @@ func preserveFailure(err error, fallbackCode lifecycle.ErrorCode, fallbackSummar
 	return failureWithMeta(fallbackCode, fallbackSummary, fallbackDetail, retryable, effectOccurred)
 }
 
-func cloneSelection(selection *LaunchSelection) *LaunchSelection {
-	if selection == nil {
+func cloneTarget(target *LaunchTarget) *LaunchTarget {
+	if target == nil {
 		return nil
 	}
-	copy := *selection
+	copy := *target
 	return &copy
 }
 
-func cloneHomes(homes []HomeInfo) []HomeInfo {
-	if homes == nil {
+func cloneDataDirectories(dataDirectories []DataDirectoryInfo) []DataDirectoryInfo {
+	if dataDirectories == nil {
 		return nil
 	}
-	return append([]HomeInfo(nil), homes...)
+	return append([]DataDirectoryInfo(nil), dataDirectories...)
 }
 
 func cloneRuntimes(runtimes []RuntimeInfo) []RuntimeInfo {

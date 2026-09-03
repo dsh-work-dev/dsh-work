@@ -13,10 +13,10 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-func TestManagerPersistsAnExplicitLaunchSelection(t *testing.T) {
+func TestManagerPersistsAnExplicitLaunchTarget(t *testing.T) {
 	root := t.TempDir()
-	homePath := filepath.Join(root, "dsh-home")
-	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "web"), 0o700); err != nil {
+	dataDirectoryPath := filepath.Join(root, "dsh-data")
+	if err := os.MkdirAll(filepath.Join(dataDirectoryPath, "profiles", "web"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	runtimePath := filepath.Join(root, "dsh.cmd")
@@ -25,13 +25,12 @@ func TestManagerPersistsAnExplicitLaunchSelection(t *testing.T) {
 	}
 
 	config := Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: filepath.Join(root, "workspace"),
-		Homes: []HomeInfo{{
+		StatePath: filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{
 			ID:        "work",
 			Name:      "Work managed",
-			Path:      homePath,
-			Ownership: HomeOwnershipWork,
+			Path:      dataDirectoryPath,
+			Ownership: DataDirectoryOwnershipWork,
 		}},
 		Runtimes: []RuntimeInfo{{
 			ID:      "dsh-0.1.2-alpha.3",
@@ -39,9 +38,9 @@ func TestManagerPersistsAnExplicitLaunchSelection(t *testing.T) {
 			Path:    runtimePath,
 			Source:  RuntimeSourceDevelopmentFixture,
 		}},
-		DefaultSelection: LaunchSelection{
+		DefaultTarget: LaunchTarget{
 			RuntimeID: "dsh-0.1.2-alpha.3",
-			Profile:   ProfileRef{HomeID: "work", Name: "web"},
+			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	}
 
@@ -50,10 +49,9 @@ func TestManagerPersistsAnExplicitLaunchSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := LaunchSelection{
+	want := LaunchTarget{
 		RuntimeID: "dsh-0.1.2-alpha.3",
-		Profile:   ProfileRef{HomeID: "work", Name: "web"},
-		Workspace: filepath.Join(root, "project-a"),
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	}
 	if _, err := manager.SetDesired(context.Background(), want); err != nil {
 		t.Fatalf("SetDesired() error = %v", err)
@@ -68,14 +66,14 @@ func TestManagerPersistsAnExplicitLaunchSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if snapshot.Desired == nil || *snapshot.Desired != want {
-		t.Fatalf("reloaded desired selection = %#v, want %#v", snapshot.Desired, want)
+		t.Fatalf("reloaded desired target = %#v, want %#v", snapshot.Desired, want)
 	}
 }
 
-func TestManagerRequiresAProfileReferenceForSelection(t *testing.T) {
+func TestManagerRequiresAProfileReferenceForTarget(t *testing.T) {
 	manager := newTestManager(t)
 
-	_, err := manager.SetDesired(context.Background(), LaunchSelection{
+	_, err := manager.SetDesired(context.Background(), LaunchTarget{
 		RuntimeID: "dsh-test",
 	})
 	if err == nil {
@@ -89,7 +87,7 @@ func TestManagerRejectsUnknownProfileReference(t *testing.T) {
 
 	_, err := manager.Resolve(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{HomeID: "work", Name: "missing"},
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "missing"},
 	})
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want profile-not-found failure")
@@ -104,10 +102,9 @@ func TestManagerRejectsAnUnverifiedRuntimeBeforeLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := New(Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: root,
-		Homes:         []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
-		Runtimes:      []RuntimeInfo{{ID: "missing", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "missing-dsh.cmd")}},
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		Runtimes:        []RuntimeInfo{{ID: "missing", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "missing-dsh.cmd")}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +117,7 @@ func TestManagerRejectsAnUnverifiedRuntimeBeforeLaunch(t *testing.T) {
 		t.Fatalf("runtime verification projection = %#v", snapshot.Runtimes)
 	}
 	_, err = manager.Resolve(context.Background(), LaunchRequest{
-		RuntimeID: "missing", Profile: ProfileRef{HomeID: "work", Name: "web"},
+		RuntimeID: "missing", Profile: ProfileRef{DataDirectoryID: "work", Name: "web"},
 	})
 	assertFailureCode(t, err, lifecycle.ErrorDSHRuntimeNotFound)
 }
@@ -137,13 +134,12 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	}
 	verifier := &recordingRuntimeVerifier{}
 	manager, err := New(Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: root,
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
 		ProfileCatalog: testProfileCatalog{definitions: []ProfileDefinition{{
 			Name: "web", Kind: ProfileKindBuiltIn, AutoInitialize: true,
 		}}},
 		RuntimeVerifier: verifier,
-		Homes:           []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 	})
 	if err != nil {
@@ -151,13 +147,13 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	}
 	resolved, err := manager.ResolveLaunch(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{HomeID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Selection.Profile.Name != "web" {
-		t.Fatalf("resolved launch profile = %#v, want web", resolved.Selection.Profile)
+	if resolved.Target.Profile.Name != "web" {
+		t.Fatalf("resolved launch profile = %#v, want web", resolved.Target.Profile)
 	}
 	if verifier.path != runtimePath || verifier.version != "0.1.2-alpha.3" || verifier.calls != 1 {
 		t.Fatalf("runtime verifier call = path %q version %q calls %d", verifier.path, verifier.version, verifier.calls)
@@ -176,10 +172,9 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		WorkspaceRoot:   root,
 		ProfileCatalog:  testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}},
 		RuntimeVerifier: failingRuntimeVerifier{},
-		Homes:           []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 	})
 	if err != nil {
@@ -187,7 +182,7 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 	_, err = manager.ResolveLaunch(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{HomeID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	})
 	assertFailureCode(t, err, lifecycle.ErrorDSHUnsupportedVersion)
 	var failure lifecycle.Failure
@@ -196,11 +191,11 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 }
 
-func TestManagerKeepsActiveAndDesiredSelectionsSeparate(t *testing.T) {
+func TestManagerKeepsActiveAndDesiredTargetsSeparate(t *testing.T) {
 	manager := newTestManager(t)
-	desired := LaunchSelection{
+	desired := LaunchTarget{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{HomeID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	}
 	if _, err := manager.SetDesired(context.Background(), desired); err != nil {
 		t.Fatal(err)
@@ -229,7 +224,7 @@ func TestManagerKeepsActiveAndDesiredSelectionsSeparate(t *testing.T) {
 
 func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
 	manager := newTestManager(t)
-	oldPath := filepath.Join(manager.config.Homes[0].Path, "profiles", "web-clean")
+	oldPath := filepath.Join(manager.config.DataDirectories[0].Path, "profiles", "web-clean")
 	manifest := []byte(`{"name":"dsh-profile-web-clean","private":true,"dependencies":{"@example/plugin":"1.0.0"}}`)
 	patch := []byte("- id: example\n  value: true\n")
 	if err := os.WriteFile(filepath.Join(oldPath, "package.json"), manifest, 0o600); err != nil {
@@ -238,16 +233,16 @@ func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(oldPath, "cordis.patch.yml"), patch, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	selection := LaunchSelection{
+	target := LaunchTarget{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{HomeID: "work", Name: "web-clean"},
+		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web-clean"},
 	}
-	if _, err := manager.SetDesired(context.Background(), selection); err != nil {
+	if _, err := manager.SetDesired(context.Background(), target); err != nil {
 		t.Fatal(err)
 	}
 
 	snapshot, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
-		Profile: selection.Profile,
+		Profile: target.Profile,
 		NewName: "coding",
 	})
 	if err != nil {
@@ -297,17 +292,17 @@ func TestManagerDoesNotRenameBuiltInOrActiveProfile(t *testing.T) {
 	manager := newTestManager(t)
 	manager.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}}
 	_, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
-		Profile: ProfileRef{HomeID: "work", Name: "web"},
+		Profile: ProfileRef{DataDirectoryID: "work", Name: "web"},
 		NewName: "web-copy",
 	})
 	assertFailureCode(t, err, lifecycle.ErrorProfileInvalid)
 
-	selection := LaunchSelection{RuntimeID: "dsh-test", Profile: ProfileRef{HomeID: "work", Name: "web-clean"}}
-	if _, err := manager.MarkActive(context.Background(), &selection); err != nil {
+	target := LaunchTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web-clean"}}
+	if _, err := manager.MarkActive(context.Background(), &target); err != nil {
 		t.Fatal(err)
 	}
 	_, err = manager.RenameProfile(context.Background(), ProfileRenameRequest{
-		Profile: selection.Profile,
+		Profile: target.Profile,
 		NewName: "coding",
 	})
 	assertFailureCode(t, err, lifecycle.ErrorProfileInUse)
@@ -333,25 +328,24 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	}
 	runner := &recordingRunner{}
 	manager, err := New(Config{
-		StatePath:      filepath.Join(root, "manager.json"),
-		WorkspaceRoot:  filepath.Join(root, "workspace"),
-		CommandRunner:  runner,
-		PluginCommands: testPluginCommands{},
-		Homes:          []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
-		Runtimes:       []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultSelection: LaunchSelection{
-			RuntimeID: "dsh-test", Profile: ProfileRef{HomeID: "work", Name: "alpha"},
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		CommandRunner:   runner,
+		PluginCommands:  testPluginCommands{},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+		DefaultTarget: LaunchTarget{
+			RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LaunchSelection{RuntimeID: "dsh-test", Profile: ProfileRef{HomeID: "work", Name: "alpha"}}
+	want := LaunchTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
 	if _, err := manager.MarkActive(context.Background(), &want); err != nil {
 		t.Fatal(err)
 	}
 	result, err := manager.InstallPlugin(context.Background(), PluginInstallRequest{
-		Target:  PluginTarget{Profile: ProfileRef{HomeID: "work", Name: "alpha"}},
+		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}},
 		Package: "@example/new-plugin@3.0.0",
 	})
 	if err != nil {
@@ -366,11 +360,11 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	if got := strings.Join(runner.args, " "); got != "plugin --profile alpha add @example/new-plugin@3.0.0" {
 		t.Fatalf("DSH plugin args = %q", got)
 	}
-	alpha, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{HomeID: "work", Name: "alpha"}}})
+	alpha, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beta, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{HomeID: "work", Name: "beta"}}})
+	beta, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,10 +380,9 @@ func TestManagerDoesNotExposeProfileDependencyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager, err := New(Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: root,
-		Homes:         []HomeInfo{{ID: "work", Name: "Work", Path: homePath}},
-		Runtimes:      []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "dsh.cmd")}},
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "dsh.cmd")}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +403,6 @@ func TestManagerPersistsCatalogEntriesProducedByExplicitRuntimeInstall(t *testin
 	installer := &recordingInstaller{runtime: RuntimeInfo{Path: filepath.Join(root, "dsh.cmd")}}
 	config := Config{
 		StatePath:        filepath.Join(root, "manager.json"),
-		WorkspaceRoot:    root,
 		RuntimeInstaller: installer,
 	}
 	manager, err := New(config)
@@ -437,30 +429,30 @@ func TestManagerPersistsCatalogEntriesProducedByExplicitRuntimeInstall(t *testin
 	}
 }
 
-func TestManagerRegistersOnlyExistingUserDSHHomes(t *testing.T) {
+func TestManagerRegistersOnlyExistingUserDSHDataDirectories(t *testing.T) {
 	manager := newTestManager(t)
 	existing := filepath.Join(t.TempDir(), "personal-dsh")
 	if err := os.MkdirAll(existing, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := manager.RegisterHome(context.Background(), HomeInfo{
+	snapshot, err := manager.RegisterDataDirectory(context.Background(), DataDirectoryInfo{
 		ID:        "personal",
 		Name:      "Personal DSH",
 		Path:      existing,
-		Ownership: HomeOwnershipUser,
+		Ownership: DataDirectoryOwnershipUser,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Homes) != 2 || snapshot.Homes[1].ID != "personal" {
-		t.Fatalf("registered homes = %#v", snapshot.Homes)
+	if len(snapshot.DataDirectories) != 2 || snapshot.DataDirectories[1].ID != "personal" {
+		t.Fatalf("registered data directories = %#v", snapshot.DataDirectories)
 	}
 
-	_, err = manager.RegisterHome(context.Background(), HomeInfo{
+	_, err = manager.RegisterDataDirectory(context.Background(), DataDirectoryInfo{
 		ID:        "missing",
 		Name:      "Missing DSH",
 		Path:      filepath.Join(t.TempDir(), "does-not-exist"),
-		Ownership: HomeOwnershipUser,
+		Ownership: DataDirectoryOwnershipUser,
 	})
 	assertFailureCode(t, err, lifecycle.ErrorProfileNotFound)
 }
@@ -528,17 +520,16 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	}
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	manager, err := New(Config{
-		StatePath:      filepath.Join(root, "manager.json"),
-		WorkspaceRoot:  root,
-		CommandRunner:  runner,
-		PluginCommands: testPluginCommands{},
-		Homes:          []HomeInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: HomeOwnershipWork}},
-		Runtimes:       []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		CommandRunner:   runner,
+		PluginCommands:  testPluginCommands{},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := PluginTarget{RuntimeID: "dsh-test", Profile: ProfileRef{HomeID: "work", Name: "alpha"}}
+	target := PluginTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
 	firstDone := make(chan error, 1)
 	go func() {
 		_, firstErr := manager.InstallPlugin(context.Background(), PluginInstallRequest{Target: target, Package: "@example/first"})
@@ -578,13 +569,12 @@ func newTestManager(t *testing.T) *Manager {
 		t.Fatal(err)
 	}
 	manager, err := New(Config{
-		StatePath:     filepath.Join(root, "manager.json"),
-		WorkspaceRoot: filepath.Join(root, "workspace"),
-		Homes:         []HomeInfo{{ID: "work", Name: "Work managed", Path: homePath, Ownership: HomeOwnershipWork}},
-		Runtimes:      []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultSelection: LaunchSelection{
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work managed", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+		DefaultTarget: LaunchTarget{
 			RuntimeID: "dsh-test",
-			Profile:   ProfileRef{HomeID: "work", Name: "web"},
+			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	})
 	if err != nil {

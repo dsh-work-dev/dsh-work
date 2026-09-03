@@ -1,12 +1,13 @@
 package dshmanager
 
-// HomeOwnership describes who owns the DSH home. A Work-owned home is safe
-// for dsh-work to create and maintain; a user-owned home is discovered only.
-type HomeOwnership string
+// DataDirectoryOwnership describes who owns the DSH data directory. A
+// Work-owned directory is safe for dsh-work to create and maintain; a
+// user-owned directory is discovered only.
+type DataDirectoryOwnership string
 
 const (
-	HomeOwnershipWork HomeOwnership = "work"
-	HomeOwnershipUser HomeOwnership = "user"
+	DataDirectoryOwnershipWork DataDirectoryOwnership = "work"
+	DataDirectoryOwnershipUser DataDirectoryOwnership = "user"
 )
 
 // RuntimeSource identifies how a DSH runtime entered the catalog.
@@ -33,7 +34,8 @@ func (p ThemePreference) Valid() bool {
 }
 
 // RuntimeInfo is the platform-neutral read model for one immutable DSH
-// distribution. Path is the executable (or launcher) path, not a DSH home.
+// distribution. Path is the executable (or launcher) path, not a DSH data
+// directory.
 type RuntimeInfo struct {
 	ID        string        `json:"id"`
 	Version   string        `json:"version"`
@@ -43,21 +45,21 @@ type RuntimeInfo struct {
 	Removable bool          `json:"removable"`
 }
 
-// HomeInfo is a DSH_HOME identity. Profiles and their plugin state live under
-// a home and are never properties of a runtime.
-type HomeInfo struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Path      string        `json:"path"`
-	Ownership HomeOwnership `json:"ownership"`
+// DataDirectoryInfo is a DSH_HOME identity. Profiles and their plugin state
+// live under a data directory and are never properties of a runtime.
+type DataDirectoryInfo struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Path      string                 `json:"path"`
+	Ownership DataDirectoryOwnership `json:"ownership"`
 }
 
 // ProfileRef is intentionally two-dimensional. A profile name is not unique
-// across DSH homes, so every selection and plugin operation must carry both
-// the home identity and the profile name.
+// across DSH data directories, so every selection and plugin operation must
+// carry both the data-directory identity and the profile name.
 type ProfileRef struct {
-	HomeID string `json:"homeId"`
-	Name   string `json:"name"`
+	DataDirectoryID string `json:"dataDirectoryId"`
+	Name            string `json:"name"`
 }
 
 type ProfileKind string
@@ -130,37 +132,35 @@ type ProfileRenameRequest struct {
 	NewName string     `json:"newName"`
 }
 
-// LaunchSelection is the persisted desired state and the active state
-// projected to the DSH manager inside the Settings window. Workspace is
-// deliberately separate from the profile so one profile can be used for
-// multiple projects.
-type LaunchSelection struct {
+// LaunchTarget is the persisted desired state and the active state projected
+// to the DSH manager inside the Settings window. Workspace context is resolved
+// separately for each session or Worker generation.
+type LaunchTarget struct {
 	RuntimeID string     `json:"runtimeId"`
 	Profile   ProfileRef `json:"profile"`
-	Workspace string     `json:"workspace"`
 }
 
 // LaunchRequest is the validation input used by both GUI and CLI callers.
 type LaunchRequest struct {
 	RuntimeID string     `json:"runtimeId"`
 	Profile   ProfileRef `json:"profile"`
-	Workspace string     `json:"workspace"`
 }
 
 // ResolvedLaunch carries the validated catalog records alongside the
-// normalized selection. Host uses this as one immutable handoff into the DSH
-// adapter, so it does not reconstruct home/profile relationships itself.
+// normalized target. Host uses this as one immutable handoff into the DSH
+// adapter, so it does not reconstruct data-directory/profile relationships
+// itself.
 type ResolvedLaunch struct {
-	Selection LaunchSelection `json:"selection"`
-	Runtime   RuntimeInfo     `json:"runtime"`
-	Home      HomeInfo        `json:"home"`
+	Target        LaunchTarget      `json:"target"`
+	Runtime       RuntimeInfo       `json:"runtime"`
+	DataDirectory DataDirectoryInfo `json:"dataDirectory"`
 }
 
 type Snapshot struct {
-	Runtimes []RuntimeInfo    `json:"runtimes"`
-	Homes    []HomeInfo       `json:"homes"`
-	Profiles []ProfileInfo    `json:"profiles"`
-	Desired  *LaunchSelection `json:"desired,omitempty"`
-	Active   *LaunchSelection `json:"active,omitempty"`
-	Theme    ThemePreference  `json:"theme"`
+	Runtimes        []RuntimeInfo       `json:"runtimes"`
+	DataDirectories []DataDirectoryInfo `json:"dataDirectories"`
+	Profiles        []ProfileInfo       `json:"profiles"`
+	Desired         *LaunchTarget       `json:"desired,omitempty"`
+	Active          *LaunchTarget       `json:"active,omitempty"`
+	Theme           ThemePreference     `json:"theme"`
 }

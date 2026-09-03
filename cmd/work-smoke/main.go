@@ -34,12 +34,13 @@ func main() {
 		fatalf("native platform dependencies unavailable: %v", dependencies.Err)
 	}
 	config := workapp.DefaultConfig(root)
-	// Keep the smoke home under ignored generated state so a second run tests
-	// the normal persistent-home path instead of copying the preview profile
+	// Keep the smoke data directory under ignored generated state so a second run tests
+	// the normal persistent data-directory path instead of copying the preview profile
 	// tree from scratch every time. It remains Work-owned and never touches
 	// the user's default ~/.dsh.
-	config.DSHHome = filepath.Join(root, ".task", "dsh-smoke-home")
-	// A fresh Work-owned DSH home may materialise the pinned profile tree on
+	config.DSHDataDirectory = filepath.Join(root, ".task", "dsh-smoke-data")
+	config.BootstrapDirectory = filepath.Join(root, ".task", "dsh-smoke-bootstrap")
+	// A fresh Work-owned DSH data directory may materialise the pinned profile tree on
 	// first launch. Keep the smoke deadline bounded but long enough to cover
 	// that real initialization rather than turning cold-start latency into a
 	// false readiness failure.
@@ -51,17 +52,16 @@ func main() {
 	config.ShutdownTimeout = 25 * time.Second
 
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
-	dsh.SetWorkspaceRoot(root)
+	dsh.SetDiscoveryRoot(root)
 	runtimeHint := dsh.RuntimeHint()
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:        filepath.Join(root, ".task", "dsh-smoke-manager.json"),
-		WorkspaceRoot:    root,
-		PluginCommands:   dshadapter.NewPluginCommands(),
-		RuntimeVerifier:  dsh,
-		ProfileCatalog:   dsh,
-		Homes:            []dshmanager.HomeInfo{{ID: "work", Name: "Smoke DSH home", Path: config.DSHHome, Ownership: dshmanager.HomeOwnershipWork}},
-		Runtimes:         []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultSelection: dshmanager.LaunchSelection{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{HomeID: "work", Name: "web"}, Workspace: root},
+		StatePath:       filepath.Join(root, ".task", "dsh-smoke-manager.json"),
+		PluginCommands:  dshadapter.NewPluginCommands(),
+		RuntimeVerifier: dsh,
+		ProfileCatalog:  dsh,
+		DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "work", Name: "Smoke DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork}},
+		Runtimes:        []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
+		DefaultTarget:   dshmanager.LaunchTarget{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)

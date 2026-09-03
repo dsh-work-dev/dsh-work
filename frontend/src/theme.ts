@@ -14,7 +14,7 @@ function resolvedTheme(preference: Theme): "light" | "dark" {
     : preference;
 }
 
-/** Apply the appearance preference owned by the selected DSH home. */
+/** Apply the appearance preference owned by the selected DSH data directory. */
 export function applyTheme(value: unknown) {
   const preference = normalizeTheme(value);
   activePreference = preference;

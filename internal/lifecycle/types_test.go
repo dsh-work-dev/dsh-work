@@ -1,6 +1,12 @@
 package lifecycle
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/local/work/internal/workspacecontext"
+)
 
 func TestMachineLegalLifecycle(t *testing.T) {
 	machine := NewMachine()
@@ -79,6 +85,33 @@ func TestMachineRejectsOutOfOrderPhases(t *testing.T) {
 	}
 	if _, err := machine.SetPhase(generation, PhaseConfiguration); err == nil {
 		t.Fatal("expected a phase regression to be rejected")
+	}
+}
+
+func TestMachineProjectsWorkspaceContextSeparatelyFromLaunchState(t *testing.T) {
+	machine := NewMachine()
+	generation, _, err := machine.BeginStart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	workspacePath := filepath.Join(root, "project")
+	if err := os.Mkdir(workspacePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := workspacecontext.NewSelected(generation, "workspace-1", workspacePath, "Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := machine.SetWorkspaceContext(generation, workspace)
+	if err != nil {
+		t.Fatalf("SetWorkspaceContext() error = %v", err)
+	}
+	if status.Workspace == nil || status.Workspace.ID != "workspace-1" || status.Workspace.Path != workspacePath {
+		t.Fatalf("workspace context = %+v", status.Workspace)
+	}
+	if status.WorkspaceURL != "" {
+		t.Fatalf("workspace URL unexpectedly set before readiness: %q", status.WorkspaceURL)
 	}
 }
 

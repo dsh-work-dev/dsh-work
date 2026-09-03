@@ -584,7 +584,7 @@ select:focus-visible {
 .manager-grid label,
 .profile-directory label,
 .plugin-editor label,
-.home-register-grid label,
+.data-directory-register-grid label,
 .runtime-install-card label {
   color: var(--text-soft);
   font-size: 12px;
@@ -596,7 +596,7 @@ select:focus-visible {
 .profile-directory select,
 .profile-directory input,
 .plugin-editor input,
-.home-register-grid input,
+.data-directory-register-grid input,
 .runtime-install-card input {
   width: 100%;
   min-height: 38px;
@@ -614,7 +614,7 @@ select:focus-visible {
 .profile-directory select:hover,
 .profile-directory input:hover,
 .plugin-editor input:hover,
-.home-register-grid input:hover,
+.data-directory-register-grid input:hover,
 .runtime-install-card input:hover { border-color: var(--line-strong); }
 
 .wide-field { grid-column: 1 / -1; }
@@ -868,6 +868,8 @@ select:focus-visible {
   transition: background-color .15s ease;
 }
 
+.manager-list-item > div { min-width: 0; }
+
 .manager-list-item:hover { background: var(--hover); }
 
 .manager-list-item.is-selected { background: var(--selection); }
@@ -889,6 +891,13 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.manager-list-item .manager-data-directory-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .manager-list-item .button {
   min-height: 30px;
   flex: 0 0 auto;
@@ -904,7 +913,7 @@ select:focus-visible {
 }
 
 .runtime-install-card,
-.home-register-card {
+.data-directory-register-card {
   margin: 0;
   padding: 22px 0;
   background: transparent;
@@ -921,14 +930,14 @@ select:focus-visible {
 
 .manager-section > .manager-list { padding: 0; }
 
-.home-register-grid {
+.data-directory-register-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(120px, .45fr) minmax(0, .8fr) auto;
   align-items: end;
   gap: 12px;
 }
 
-.home-register-grid .button { grid-column: 4; }
+.data-directory-register-grid .button { grid-column: 4; }
 
 .settings-section { overflow: visible; }
 
@@ -1078,11 +1087,11 @@ select:focus-visible {
 
   .profile-directory { padding-right: 0; }
 
-  .home-register-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .data-directory-register-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
-  .home-register-grid .wide-field { grid-column: 1 / -1; }
+  .data-directory-register-grid .wide-field { grid-column: 1 / -1; }
 
-  .home-register-grid .button { grid-column: 2; }
+  .data-directory-register-grid .button { grid-column: 2; }
 }
 
 @media (max-width: 760px) {
@@ -1158,10 +1167,10 @@ select:focus-visible {
   .wide-field { grid-column: auto; }
 
   .runtime-install-card,
-  .home-register-grid { grid-template-columns: 1fr; }
+  .data-directory-register-grid { grid-template-columns: 1fr; }
 
-  .home-register-grid .wide-field,
-  .home-register-grid .button { grid-column: auto; }
+  .data-directory-register-grid .wide-field,
+  .data-directory-register-grid .button { grid-column: auto; }
 
   .setting-row {
     align-items: flex-start;
