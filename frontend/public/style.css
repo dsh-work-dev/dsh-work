@@ -161,10 +161,10 @@ h2 {
   flex: 0 0 auto;
   display: block;
   object-fit: contain;
-  filter: invert(1);
+  filter: none;
 }
 
-:root[data-theme="light"] .brand-mark { filter: none; }
+:root[data-theme="light"] .brand-mark { filter: invert(1); }
 
 .brand-name {
   color: var(--text);
