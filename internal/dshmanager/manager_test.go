@@ -13,7 +13,7 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-func TestManagerPersistsAnExplicitLaunchTarget(t *testing.T) {
+func TestManagerPersistsAnExplicitRunContext(t *testing.T) {
 	root := t.TempDir()
 	dataDirectoryPath := filepath.Join(root, "dsh-data")
 	if err := os.MkdirAll(filepath.Join(dataDirectoryPath, "profiles", "web"), 0o700); err != nil {
@@ -38,7 +38,7 @@ func TestManagerPersistsAnExplicitLaunchTarget(t *testing.T) {
 			Path:    runtimePath,
 			Source:  RuntimeSourceDevelopmentFixture,
 		}},
-		DefaultTarget: LaunchTarget{
+		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-0.1.2-alpha.3",
 			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
@@ -49,12 +49,12 @@ func TestManagerPersistsAnExplicitLaunchTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := LaunchTarget{
+	want := RunContext{
 		RuntimeID: "dsh-0.1.2-alpha.3",
 		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	}
-	if _, err := manager.SetDesired(context.Background(), want); err != nil {
-		t.Fatalf("SetDesired() error = %v", err)
+	if _, err := manager.SetConfigured(context.Background(), want); err != nil {
+		t.Fatalf("SetConfigured() error = %v", err)
 	}
 
 	reloaded, err := New(config)
@@ -65,19 +65,19 @@ func TestManagerPersistsAnExplicitLaunchTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Desired == nil || *snapshot.Desired != want {
-		t.Fatalf("reloaded desired target = %#v, want %#v", snapshot.Desired, want)
+	if snapshot.Configured == nil || *snapshot.Configured != want {
+		t.Fatalf("reloaded configured Run context = %#v, want %#v", snapshot.Configured, want)
 	}
 }
 
 func TestManagerRequiresAProfileReferenceForTarget(t *testing.T) {
 	manager := newTestManager(t)
 
-	_, err := manager.SetDesired(context.Background(), LaunchTarget{
+	_, err := manager.SetConfigured(context.Background(), RunContext{
 		RuntimeID: "dsh-test",
 	})
 	if err == nil {
-		t.Fatal("SetDesired() error = nil, want profile-required failure")
+		t.Fatal("SetConfigured() error = nil, want profile-required failure")
 	}
 	assertFailureCode(t, err, lifecycle.ErrorProfileRequired)
 }
@@ -155,8 +155,8 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	if resolved.Target.Profile.Name != "web" {
 		t.Fatalf("resolved launch profile = %#v, want web", resolved.Target.Profile)
 	}
-	if verifier.path != runtimePath || verifier.version != "0.1.2-alpha.3" || verifier.calls != 1 {
-		t.Fatalf("runtime verifier call = path %q version %q calls %d", verifier.path, verifier.version, verifier.calls)
+	if verifier.path != runtimePath || verifier.version != "0.1.2-alpha.3" || verifier.calls != 1 || verifier.profileCalls != 1 || verifier.profileName != "web" || verifier.profileDataDirectory != homePath {
+		t.Fatalf("runtime/profile verifier calls = runtime(%q, %q, %d) profile(%q, %q, %d)", verifier.path, verifier.version, verifier.calls, verifier.profileDataDirectory, verifier.profileName, verifier.profileCalls)
 	}
 }
 
@@ -191,38 +191,76 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 }
 
-func TestManagerKeepsActiveAndDesiredTargetsSeparate(t *testing.T) {
+func TestManagerKeepsConfiguredCurrentAndKnownGoodContextsSeparate(t *testing.T) {
 	manager := newTestManager(t)
-	desired := LaunchTarget{
+	configured := RunContext{
 		RuntimeID: "dsh-test",
 		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 	}
-	if _, err := manager.SetDesired(context.Background(), desired); err != nil {
+	if _, err := manager.SetConfigured(context.Background(), configured); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := manager.MarkActive(context.Background(), &desired); err != nil {
+	if _, err := manager.CommitCurrent(context.Background(), &configured); err != nil {
 		t.Fatal(err)
 	}
 
-	changed := desired
+	changed := configured
 	changed.Profile.Name = "web-clean"
-	if _, err := manager.SetDesired(context.Background(), changed); err != nil {
-		t.Fatal(err)
+	if _, err := manager.SetConfigured(context.Background(), changed); err == nil {
+		t.Fatal("SetConfigured() error = nil, want active-context guard")
+	} else {
+		assertFailureCode(t, err, lifecycle.ErrorManagerOperationBusy)
 	}
 
 	snapshot, err := manager.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Desired == nil || snapshot.Desired.Profile.Name != "web-clean" {
-		t.Fatalf("desired = %#v, want web-clean", snapshot.Desired)
+	if snapshot.Configured == nil || snapshot.Configured.Profile.Name != "web" {
+		t.Fatalf("configured = %#v, want web", snapshot.Configured)
 	}
-	if snapshot.Active == nil || snapshot.Active.Profile.Name != "web" {
-		t.Fatalf("active = %#v, want web", snapshot.Active)
+	if snapshot.Current == nil || snapshot.Current.Profile.Name != "web" {
+		t.Fatalf("current = %#v, want web", snapshot.Current)
+	}
+	if snapshot.KnownGood == nil || snapshot.KnownGood.Profile.Name != "web" {
+		t.Fatalf("known-good = %#v, want web", snapshot.KnownGood)
 	}
 }
 
-func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
+func TestManagerCommitKeepsCurrentAfterCallerCancellationDuringSnapshot(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitContext, cancel := context.WithCancel(context.Background())
+	manager, err := New(Config{
+		StatePath:       filepath.Join(root, "manager.json"),
+		StateStore:      cancelAfterSaveStore{cancel: cancel},
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web"}}
+	if _, err := manager.CommitCurrent(commitContext, &target); err != nil {
+		t.Fatalf("CommitCurrent() error = %v, want committed snapshot despite post-save cancellation", err)
+	}
+	snapshot, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Current == nil || *snapshot.Current != target {
+		t.Fatalf("current after canceled commit = %#v, want %#v", snapshot.Current, target)
+	}
+}
+
+func TestManagerRenamesCustomProfileAndUpdatesConfiguredContext(t *testing.T) {
 	manager := newTestManager(t)
 	oldPath := filepath.Join(manager.config.DataDirectories[0].Path, "profiles", "web-clean")
 	manifest := []byte(`{"name":"dsh-profile-web-clean","private":true,"dependencies":{"@example/plugin":"1.0.0"}}`)
@@ -233,11 +271,11 @@ func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(oldPath, "cordis.patch.yml"), patch, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	target := LaunchTarget{
+	target := RunContext{
 		RuntimeID: "dsh-test",
 		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web-clean"},
 	}
-	if _, err := manager.SetDesired(context.Background(), target); err != nil {
+	if _, err := manager.SetConfigured(context.Background(), target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,8 +286,8 @@ func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenameProfile() error = %v", err)
 	}
-	if snapshot.Desired == nil || snapshot.Desired.Profile.Name != "coding" {
-		t.Fatalf("desired after rename = %#v, want coding", snapshot.Desired)
+	if snapshot.Configured == nil || snapshot.Configured.Profile.Name != "coding" {
+		t.Fatalf("configured after rename = %#v, want coding", snapshot.Configured)
 	}
 
 	profiles := make(map[string]ProfileInfo, len(snapshot.Profiles))
@@ -283,12 +321,12 @@ func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloadedSnapshot.Desired == nil || reloadedSnapshot.Desired.Profile.Name != "coding" {
-		t.Fatalf("reloaded desired after rename = %#v, want coding", reloadedSnapshot.Desired)
+	if reloadedSnapshot.Configured == nil || reloadedSnapshot.Configured.Profile.Name != "coding" {
+		t.Fatalf("reloaded configured after rename = %#v, want coding", reloadedSnapshot.Configured)
 	}
 }
 
-func TestManagerDoesNotRenameBuiltInOrActiveProfile(t *testing.T) {
+func TestManagerDoesNotRenameBuiltInOrCurrentProfile(t *testing.T) {
 	manager := newTestManager(t)
 	manager.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}}
 	_, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
@@ -297,8 +335,8 @@ func TestManagerDoesNotRenameBuiltInOrActiveProfile(t *testing.T) {
 	})
 	assertFailureCode(t, err, lifecycle.ErrorProfileInvalid)
 
-	target := LaunchTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web-clean"}}
-	if _, err := manager.MarkActive(context.Background(), &target); err != nil {
+	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web-clean"}}
+	if _, err := manager.CommitCurrent(context.Background(), &target); err != nil {
 		t.Fatal(err)
 	}
 	_, err = manager.RenameProfile(context.Background(), ProfileRenameRequest{
@@ -333,15 +371,15 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 		CommandRunner:   runner,
 		PluginCommands:  testPluginCommands{},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultTarget: LaunchTarget{
+		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := LaunchTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
-	if _, err := manager.MarkActive(context.Background(), &want); err != nil {
+	want := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	if _, err := manager.CommitCurrent(context.Background(), &want); err != nil {
 		t.Fatal(err)
 	}
 	result, err := manager.InstallPlugin(context.Background(), PluginInstallRequest{
@@ -396,6 +434,65 @@ func TestManagerDoesNotExposeProfileDependencyDirectory(t *testing.T) {
 			t.Fatal("dependency directory was exposed as a DSH profile")
 		}
 	}
+}
+
+func TestManagerRejectsPluginMutationForNonCurrentProfile(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	for _, profile := range []string{"alpha", "beta"} {
+		if err := os.MkdirAll(filepath.Join(homePath, "profiles", profile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingRunner{}
+	manager, err := New(Config{
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		CommandRunner:   runner,
+		PluginCommands:  testPluginCommands{},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	if _, err := manager.CommitCurrent(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.InstallPlugin(context.Background(), PluginInstallRequest{
+		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}},
+		Package: "@example/not-allowed",
+	})
+	assertFailureCode(t, err, lifecycle.ErrorManagerOperationBusy)
+	if runner.path != "" || len(runner.args) != 0 {
+		t.Fatalf("non-current mutation reached command runner: %#v", runner)
+	}
+	if _, err := manager.ListPlugins(context.Background(), PluginListRequest{
+		Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}},
+	}); err != nil {
+		t.Fatalf("non-current profile inspection error = %v", err)
+	}
+}
+
+func TestManagerBlocksMutationsDuringRunContextSwitch(t *testing.T) {
+	manager := newTestManager(t)
+	if err := manager.BeginRunContextSwitch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := manager.EndRunContextSwitch(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	_, err := manager.RegisterRuntime(context.Background(), RuntimeInfo{
+		ID: "dsh-other", Version: "0.1.2-alpha.3", Path: filepath.Join(t.TempDir(), "dsh.cmd"),
+	})
+	assertFailureCode(t, err, lifecycle.ErrorManagerOperationBusy)
 }
 
 func TestManagerPersistsCatalogEntriesProducedByExplicitRuntimeInstall(t *testing.T) {
@@ -529,7 +626,11 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := PluginTarget{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	if _, err := manager.CommitCurrent(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
+	target := PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
 	firstDone := make(chan error, 1)
 	go func() {
 		_, firstErr := manager.InstallPlugin(context.Background(), PluginInstallRequest{Target: target, Package: "@example/first"})
@@ -572,7 +673,7 @@ func newTestManager(t *testing.T) *Manager {
 		StatePath:       filepath.Join(root, "manager.json"),
 		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work managed", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultTarget: LaunchTarget{
+		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-test",
 			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
@@ -603,15 +704,25 @@ func (c testProfileCatalog) BuiltInProfiles() []ProfileDefinition {
 }
 
 type recordingRuntimeVerifier struct {
-	path    string
-	version string
-	calls   int
+	path                 string
+	version              string
+	calls                int
+	profileDataDirectory string
+	profileName          string
+	profileCalls         int
 }
 
 func (v *recordingRuntimeVerifier) Verify(_ context.Context, path, version string) error {
 	v.path = path
 	v.version = version
 	v.calls++
+	return nil
+}
+
+func (v *recordingRuntimeVerifier) VerifyProfile(_ context.Context, _, _ string, dataDirectoryPath, profileName string) error {
+	v.profileDataDirectory = dataDirectoryPath
+	v.profileName = profileName
+	v.profileCalls++
 	return nil
 }
 
@@ -622,4 +733,20 @@ func (failingRuntimeVerifier) Verify(context.Context, string, string) error {
 		Code:    lifecycle.ErrorDSHUnsupportedVersion,
 		Summary: "the test adapter rejected this runtime",
 	}
+}
+
+type cancelAfterSaveStore struct {
+	cancel context.CancelFunc
+}
+
+func (s cancelAfterSaveStore) Load(ctx context.Context, path string) (*State, error) {
+	return (FileStateStore{}).Load(ctx, path)
+}
+
+func (s cancelAfterSaveStore) Save(ctx context.Context, path string, state State) error {
+	err := (FileStateStore{}).Save(ctx, path, state)
+	if err == nil && s.cancel != nil {
+		s.cancel()
+	}
+	return err
 }

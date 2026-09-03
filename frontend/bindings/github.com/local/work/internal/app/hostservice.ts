@@ -83,7 +83,7 @@ export function Start(): $CancellablePromise<lifecycle$0.Status> {
 /**
  * StartWithWorkspace is the explicit session action for a DSH Workspace
  * surface. The request is resolved for one Worker generation and is not
- * persisted with the global launch target.
+ * persisted with the global Run context.
  */
 export function StartWithWorkspace(request: workspacecontext$0.Request): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(380825541, request);

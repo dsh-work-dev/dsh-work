@@ -37,7 +37,7 @@
           <ol class="startup-steps" data-i18n-aria-label="host.startupSteps" aria-label="Workspace startup steps">
             <li data-startup-step="configuration">
               <span class="step-index">01</span>
-              <span><strong data-i18n="host.checkConfiguration">Check configuration</strong><small data-i18n="host.confirmConfiguration">Confirm the selected launch target.</small></span>
+              <span><strong data-i18n="host.checkConfiguration">Check configuration</strong><small data-i18n="host.confirmConfiguration">Confirm the selected Run context.</small></span>
             </li>
             <li data-startup-step="runtime">
               <span class="step-index">02</span>
@@ -117,7 +117,7 @@
         <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
           <div class="panel-heading">
             <div>
-              <h2 id="selection-title" data-i18n="manager.launchContext">DSH session</h2>
+              <h2 id="selection-title" data-i18n="manager.launchContext">Run context</h2>
             </div>
           </div>
           <div class="overview-context-grid">
@@ -133,15 +133,26 @@
                 <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-current-workspace" data-i18n="value.noWorkspace">No workspace selected</dd></div>
               </dl>
             </section>
-            <section id="manager-next-launch" class="overview-context" aria-labelledby="overview-next-title" hidden>
+            <section id="manager-configured-context" class="overview-context" aria-labelledby="overview-configured-title" hidden>
               <div class="overview-context-heading">
-                <h3 id="overview-next-title" data-i18n="manager.nextLaunch">Next launch</h3>
-                <span class="overview-state" data-i18n="value.readyNextStart">Ready for next start</span>
+                <h3 id="overview-configured-title" data-i18n="manager.configuredContext">Configured context</h3>
+                <span class="overview-state" data-i18n="value.configured">Configured</span>
               </div>
-              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.nextLaunch" aria-label="Next launch">
-                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-next-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-next-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
-                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-next-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.configuredContext" aria-label="Configured context">
+                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-configured-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-configured-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
+                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+              </dl>
+            </section>
+            <section id="manager-known-good-context" class="overview-context" aria-labelledby="overview-known-good-title" hidden>
+              <div class="overview-context-heading">
+                <h3 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h3>
+                <span class="overview-state" data-i18n="value.knownGood">Known good</span>
+              </div>
+              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
+                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-known-good-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
+                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
               </dl>
             </section>
           </div>
@@ -151,13 +162,6 @@
           <div class="profiles-layout">
             <div class="profile-directory">
               <div id="manager-profiles" class="manager-list"></div>
-              <div class="create-profile-block">
-                <div class="subheading"><strong data-i18n="profiles.create">New profile</strong></div>
-                <label><span data-i18n="field.dataDirectory">Data directory</span><select id="manager-new-profile-data-directory"></select></label>
-                <label><span data-i18n="field.name">Name</span><input id="manager-new-profile" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
-                <label><span data-i18n="profiles.firstPlugin">First plugin</span><input id="manager-new-profile-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-                <button class="button button-secondary" id="manager-create-profile" data-i18n="action.create" type="button">Create</button>
-              </div>
             </div>
             <div class="plugin-editor">
               <div id="manager-profile-empty" class="profile-empty">
@@ -222,7 +226,7 @@
         <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="settings-title" hidden>
           <div class="panel-heading">
             <div>
-              <h2 id="settings-title" data-i18n="general.launchTarget">Launch target</h2>
+              <h2 id="settings-title" data-i18n="general.runContext">Run context</h2>
             </div>
           </div>
           <div class="settings-block launch-settings">
@@ -231,9 +235,7 @@
               <label><span data-i18n="field.dataDirectory">Data directory</span><select id="manager-data-directory"></select></label>
               <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
             </div>
-            <div class="panel-footer">
-              <button class="button button-primary" id="manager-save" data-i18n="general.save" type="button">Save</button>
-            </div>
+            <p class="manager-note" data-i18n="general.runContextImmediate">Changes restart DSH immediately.</p>
           </div>
           <div class="settings-list">
             <div class="setting-row">

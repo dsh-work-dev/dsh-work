@@ -1,20 +1,21 @@
-import type {DataDirectoryInfo, LaunchTarget, RuntimeInfo, Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import type {DataDirectoryInfo, RunContext, RuntimeInfo, Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
 
 export type OverviewLane = {
-  target: LaunchTarget | null;
+  target: RunContext | null;
   runtime: RuntimeInfo | null;
   dataDirectory: DataDirectoryInfo | null;
 };
 
-export type OverviewState = "active" | "restart-required" | "not-running" | "no-target";
+export type OverviewState = "active" | "not-running" | "no-context";
 
 export type OverviewModel = {
   current: OverviewLane;
-  next: OverviewLane | null;
+  configured: OverviewLane | null;
+  knownGood: OverviewLane | null;
   state: OverviewState;
 };
 
-export function sameLaunchTarget(left: LaunchTarget | null | undefined, right: LaunchTarget | null | undefined): boolean {
+export function sameRunContext(left: RunContext | null | undefined, right: RunContext | null | undefined): boolean {
   if (!left || !right) {
     return left === right;
   }
@@ -24,24 +25,20 @@ export function sameLaunchTarget(left: LaunchTarget | null | undefined, right: L
 }
 
 export function buildOverviewModel(snapshot: Snapshot): OverviewModel {
-  const active = snapshot.active ?? null;
-  const desired = snapshot.desired ?? null;
-  const current = laneFor(snapshot, active);
-  const next = desired && (!active || !sameLaunchTarget(active, desired))
-    ? laneFor(snapshot, desired)
-    : null;
+  const current = snapshot.current ?? null;
+  const configured = snapshot.configured ?? null;
+  const knownGood = snapshot.knownGood ?? null;
+  const state: OverviewState = current ? "active" : configured ? "not-running" : "no-context";
 
-  let state: OverviewState = "no-target";
-  if (active) {
-    state = next ? "restart-required" : "active";
-  } else if (desired) {
-    state = "not-running";
-  }
-
-  return {current, next, state};
+  return {
+    current: laneFor(snapshot, current),
+    configured: configured ? laneFor(snapshot, configured) : null,
+    knownGood: knownGood ? laneFor(snapshot, knownGood) : null,
+    state
+  };
 }
 
-function laneFor(snapshot: Snapshot, target: LaunchTarget | null): OverviewLane {
+function laneFor(snapshot: Snapshot, target: RunContext | null): OverviewLane {
   if (!target) {
     return {target: null, runtime: null, dataDirectory: null};
   }

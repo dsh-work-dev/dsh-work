@@ -11,7 +11,6 @@ export {
 export type {
     DataDirectoryInfo,
     LaunchRequest,
-    LaunchTarget,
     PluginInfo,
     PluginInstallRequest,
     PluginListRequest,
@@ -22,6 +21,7 @@ export type {
     ProfileRef,
     ProfileRenameRequest,
     ResolvedLaunch,
+    RunContext,
     RuntimeInfo,
     Snapshot
 } from "./models.js";

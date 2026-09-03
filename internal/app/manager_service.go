@@ -10,17 +10,22 @@ import (
 )
 
 // ManagerService is the trusted Settings-window binding for the nested DSH
-// manager. It exposes catalog, launch-target, runtime/data-directory and profile-plugin
-// operations; profile composition and plugin mutation still go through DSH's
-// public CLI seam, never direct file edits.
+// manager. It exposes catalog, Run-context, runtime/data-directory and
+// profile-plugin operations; profile composition and plugin mutation still go
+// through DSH's public CLI seam, never direct file edits.
 type ManagerService struct {
 	manager *dshmanager.Manager
+	host    *Host
 }
 
 const managerOperationTimeout = 2 * time.Minute
 
-func NewManagerService(manager *dshmanager.Manager) *ManagerService {
-	return &ManagerService{manager: manager}
+func NewManagerService(manager *dshmanager.Manager, host ...*Host) *ManagerService {
+	service := &ManagerService{manager: manager}
+	if len(host) > 0 {
+		service.host = host[0]
+	}
+	return service
 }
 
 func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, error) {
@@ -51,7 +56,7 @@ func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreferenc
 	return theme
 }
 
-func (s *ManagerService) SetDesiredTarget(ctx context.Context, target dshmanager.LaunchTarget) (dshmanager.Snapshot, error) {
+func (s *ManagerService) SetRunContext(ctx context.Context, target dshmanager.RunContext) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -60,7 +65,10 @@ func (s *ManagerService) SetDesiredTarget(ctx context.Context, target dshmanager
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	return s.manager.SetDesired(ctx, target)
+	if s.host != nil {
+		return s.host.SwitchRunContext(ctx, target)
+	}
+	return s.manager.SetConfigured(ctx, target)
 }
 
 func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (dshmanager.Snapshot, error) {
@@ -144,6 +152,9 @@ func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.P
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	if s.host != nil {
+		return s.host.InstallPlugin(ctx, request)
+	}
 	return s.manager.InstallPlugin(ctx, request)
 }
 
@@ -156,6 +167,9 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	if s.host != nil {
+		return s.host.RemovePlugin(ctx, request)
+	}
 	return s.manager.RemovePlugin(ctx, request)
 }
 

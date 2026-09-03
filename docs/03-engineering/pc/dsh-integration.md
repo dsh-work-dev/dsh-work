@@ -238,6 +238,10 @@ Worker generation = Run context + per-generation Workspace context
   General Run-context form. It shows plugin names inside the selected profile
   detail. Non-current details are read-only; only the current profile exposes
   mutation actions. No current `Ready` profile means no mutation action.
+- The desktop Host holds a kernel-owned manager lock in Work application data.
+  The standalone `dsh-work` CLI acquires the same lock for offline catalog
+  operations and rejects commands while Work is running; live Run-context and
+  plugin changes go through the Settings Host transaction.
 - A package manager may deduplicate physical package artifacts. Work must not
   configure or relocate that store, and physical deduplication does not make a
   plugin global or runtime-owned.

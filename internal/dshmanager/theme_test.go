@@ -72,7 +72,7 @@ func TestManagerThemeReReadsTheSelectedDataDirectory(t *testing.T) {
 		StatePath:       filepath.Join(root, "manager.json"),
 		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
-		DefaultTarget: LaunchTarget{
+		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-test",
 			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},

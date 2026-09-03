@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"log"
 	"net/url"
 	"os"
@@ -46,6 +47,20 @@ func main() {
 
 	dependencies := platform.New()
 	config := workapp.DefaultConfig(currentDiscoveryRoot())
+	managerLock, lockErr := workapp.AcquireManagerProcessLock(config.SettingsPath)
+	if lockErr != nil {
+		var failure lifecycle.Failure
+		if errors.As(lockErr, &failure) && failure.Code == lifecycle.ErrorManagerOperationBusy {
+			log.Printf("Work is already running: %v", lockErr)
+			os.Exit(1)
+		}
+		log.Fatalf("Work could not acquire its manager process lock: %v", lockErr)
+	}
+	defer func() {
+		if err := managerLock.Close(); err != nil {
+			log.Printf("Work manager process lock release: %v", err)
+		}
+	}()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
 	runtimeHint := dsh.RuntimeHint()
@@ -67,7 +82,7 @@ func main() {
 			ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path,
 			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(runtimeHint.Path),
 		}},
-		DefaultTarget: dshmanager.LaunchTarget{
+		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-" + runtimeHint.Version,
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
@@ -80,6 +95,7 @@ func main() {
 	host := workapp.NewHost(workapp.Dependencies{
 		DSH:           dsh,
 		Manager:       manager,
+		ManagerError:  managerErr,
 		Supervisor:    dependencies.Supervisor,
 		Gateway:       gateway,
 		PlatformError: dependencies.Err,
@@ -132,7 +148,7 @@ func main() {
 		}
 		return values.Locale
 	})
-	managerService := workapp.NewManagerService(manager)
+	managerService := workapp.NewManagerService(manager, host)
 	var publishLocale func(worksettings.Locale)
 	settingsService := workapp.NewSettingsService(
 		settingsManager,
@@ -337,6 +353,10 @@ func main() {
 	host.SetPublish(func(status lifecycle.Status) {
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeTrayStatus(loadNativeLocale(&activeLocale), status.State))
+		if status.State == lifecycle.StateStopping && workspaceWindow != nil {
+			workspaceTrusted.Store(true)
+			workspaceWindow.SetURL("/")
+		}
 		eventID := status.CorrelationID
 		if eventID == "" {
 			eventID = status.GenerationID
@@ -484,9 +504,9 @@ func settingsURL(manager *dshmanager.Manager, section string) string {
 	}
 	if manager != nil {
 		if snapshot, err := manager.Snapshot(context.Background()); err == nil {
-			selection := snapshot.Active
+			selection := snapshot.Current
 			if selection == nil {
-				selection = snapshot.Desired
+				selection = snapshot.Configured
 			}
 			if selection != nil {
 				values.Set("data-directory", selection.Profile.DataDirectoryID)

@@ -66,13 +66,13 @@ func readThemeSettings(dataDirectoryPath string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-func selectedTheme(ctx context.Context, dataDirectories []DataDirectoryInfo, active, desired *LaunchTarget, reader ThemeReader) ThemePreference {
+func selectedTheme(ctx context.Context, dataDirectories []DataDirectoryInfo, current, configured *RunContext, reader ThemeReader) ThemePreference {
 	if err := contextError(ctx); err != nil || reader == nil {
 		return ThemePreferenceSystem
 	}
-	selection := active
+	selection := current
 	if selection == nil {
-		selection = desired
+		selection = configured
 	}
 	if selection == nil {
 		return ThemePreferenceSystem

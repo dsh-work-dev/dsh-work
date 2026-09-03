@@ -101,8 +101,9 @@ type PluginInfo struct {
 }
 
 type PluginTarget struct {
-	RuntimeID string     `json:"runtimeId"`
-	Profile   ProfileRef `json:"profile"`
+	// Plugin state is scoped only by the DSH data directory and profile. The
+	// manager resolves the current runtime at the mutation boundary.
+	Profile ProfileRef `json:"profile"`
 }
 
 type PluginInstallRequest struct {
@@ -132,10 +133,10 @@ type ProfileRenameRequest struct {
 	NewName string     `json:"newName"`
 }
 
-// LaunchTarget is the persisted desired state and the active state projected
-// to the DSH manager inside the Settings window. Workspace context is resolved
-// separately for each session or Worker generation.
-type LaunchTarget struct {
+// RunContext is the complete Work selection that defines one DSH Worker
+// generation. Runtime, DSH data directory and profile are one unit and cannot
+// be persisted or switched independently.
+type RunContext struct {
 	RuntimeID string     `json:"runtimeId"`
 	Profile   ProfileRef `json:"profile"`
 }
@@ -151,7 +152,7 @@ type LaunchRequest struct {
 // adapter, so it does not reconstruct data-directory/profile relationships
 // itself.
 type ResolvedLaunch struct {
-	Target        LaunchTarget      `json:"target"`
+	Target        RunContext        `json:"target"`
 	Runtime       RuntimeInfo       `json:"runtime"`
 	DataDirectory DataDirectoryInfo `json:"dataDirectory"`
 }
@@ -160,7 +161,8 @@ type Snapshot struct {
 	Runtimes        []RuntimeInfo       `json:"runtimes"`
 	DataDirectories []DataDirectoryInfo `json:"dataDirectories"`
 	Profiles        []ProfileInfo       `json:"profiles"`
-	Desired         *LaunchTarget       `json:"desired,omitempty"`
-	Active          *LaunchTarget       `json:"active,omitempty"`
+	Configured      *RunContext         `json:"configured,omitempty"`
+	Current         *RunContext         `json:"current,omitempty"`
+	KnownGood       *RunContext         `json:"knownGood,omitempty"`
 	Theme           ThemePreference     `json:"theme"`
 }

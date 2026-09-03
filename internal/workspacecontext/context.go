@@ -29,7 +29,7 @@ type Request struct {
 }
 
 // Context is intentionally per-generation. It is never part of the durable
-// Work launch target or the global manager state.
+// Work Run context or the global manager state.
 type Context struct {
 	GenerationID string `json:"generationId"`
 	State        State  `json:"state"`

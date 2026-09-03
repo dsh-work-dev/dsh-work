@@ -115,6 +115,25 @@ func TestBuildLaunchPlanUsesExplicitLoopbackPortAndDataDirectory(t *testing.T) {
 	}
 }
 
+func TestVerifyProfileValidatesTheRuntimeProfilePair(t *testing.T) {
+	runtimePath := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := New(nil, SupportedVersion)
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "web"); err != nil {
+		t.Fatalf("VerifyProfile() error = %v", err)
+	}
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "../web"); err == nil {
+		t.Fatal("VerifyProfile() accepted a path-shaped profile name")
+	} else {
+		var failure lifecycle.Failure
+		if !asFailure(err, &failure) || failure.Code != lifecycle.ErrorRuntimeProfileIncompatible {
+			t.Fatalf("VerifyProfile() error = %v, want runtime-profile-incompatible", err)
+		}
+	}
+}
+
 func TestProbeRequiresHTMLAtTheExpectedOrigin(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

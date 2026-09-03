@@ -14,24 +14,24 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-const stateVersion = 2
+const stateVersion = 3
 
 // Config supplies discovered DSH data directories and runtimes to the
 // manager. Workspace context is intentionally absent: it belongs to DSH's
 // session surface and is resolved per Worker generation.
 type Config struct {
-	StatePath        string
-	DataDirectories  []DataDirectoryInfo
-	Runtimes         []RuntimeInfo
-	DefaultTarget    LaunchTarget
-	CommandRunner    CommandRunner
-	PluginCommands   PluginCommandBuilder
-	RuntimeInstaller RuntimeInstaller
-	RuntimeVerifier  RuntimeVerifier
-	StateStore       StateStore
-	ProfileCatalog   ProfileCatalog
-	ProfileReader    ProfileReader
-	ThemeReader      ThemeReader
+	StatePath         string
+	DataDirectories   []DataDirectoryInfo
+	Runtimes          []RuntimeInfo
+	DefaultRunContext RunContext
+	CommandRunner     CommandRunner
+	PluginCommands    PluginCommandBuilder
+	RuntimeInstaller  RuntimeInstaller
+	RuntimeVerifier   RuntimeVerifier
+	StateStore        StateStore
+	ProfileCatalog    ProfileCatalog
+	ProfileReader     ProfileReader
+	ThemeReader       ThemeReader
 }
 
 // CommandRunner is the narrow seam for invoking the selected DSH public CLI.
@@ -58,6 +58,14 @@ type RuntimeVerifier interface {
 	Verify(context.Context, string, string) error
 }
 
+// RuntimeProfileVerifier is an optional DSH-adapter seam for compatibility
+// checks that depend on both the selected runtime and profile. The manager
+// still validates the catalog identities itself; the adapter owns any
+// version-specific pair rules.
+type RuntimeProfileVerifier interface {
+	VerifyProfile(context.Context, string, string, string, string) error
+}
+
 // PluginCommandBuilder keeps DSH CLI grammar behind the DSH adapter. The
 // manager supplies an explicit ProfileRef and operation intent, but does not
 // construct version-specific command lines itself.
@@ -66,20 +74,23 @@ type PluginCommandBuilder interface {
 	Remove(string, string) ([]string, error)
 }
 
-// Manager owns desired/active selection state and performs cross-platform
-// validation. It has no Wails or operating-system-specific process logic.
+// Manager owns the configured/current Run context state and performs
+// cross-platform validation. It has no Wails or operating-system-specific
+// process logic.
 type Manager struct {
 	mu            sync.RWMutex
 	config        Config
-	desired       *LaunchTarget
-	active        *LaunchTarget
+	configured    *RunContext
+	current       *RunContext
+	knownGood     *RunContext
+	switching     bool
 	operationGate chan struct{}
 	store         StateStore
 }
 
 // New creates a manager from the current catalog and restores only the
-// persisted desired selection. Active state is necessarily process-local and
-// is never restored as if a DSH worker were still alive.
+// persisted configured Run context. Current and known-good state are
+// process-local and are never restored as if a DSH Worker were still alive.
 func New(config Config) (*Manager, error) {
 	normalized, err := normalizeConfig(config)
 	if err != nil {
@@ -97,7 +108,7 @@ func New(config Config) (*Manager, error) {
 	}
 	if state != nil {
 		if err := validateState(*state); err != nil {
-			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted launch target has an unsupported shape")
+			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted Run context has an unsupported shape")
 		}
 		if len(state.DataDirectories) > 0 {
 			normalized.DataDirectories = mergeDataDirectories(normalized.DataDirectories, state.DataDirectories)
@@ -111,12 +122,12 @@ func New(config Config) (*Manager, error) {
 		}
 	}
 	manager.config = normalized
-	if state != nil && state.Desired != nil {
-		target := *state.Desired
-		manager.desired = &target
-	} else if normalized.DefaultTarget.RuntimeID != "" {
-		target := normalized.DefaultTarget
-		manager.desired = &target
+	if state != nil && state.Configured != nil {
+		configured := *state.Configured
+		manager.configured = &configured
+	} else if normalized.DefaultRunContext.RuntimeID != "" {
+		configured := normalized.DefaultRunContext
+		manager.configured = &configured
 	}
 	return manager, nil
 }
@@ -127,6 +138,9 @@ func (m *Manager) RegisterRuntime(ctx context.Context, runtime RuntimeInfo) (Sna
 		return Snapshot{}, err
 	}
 	defer release()
+	if err := m.ensureMutationAllowed(); err != nil {
+		return Snapshot{}, err
+	}
 	return m.registerRuntime(ctx, runtime)
 }
 
@@ -173,6 +187,9 @@ func (m *Manager) InstallRuntime(ctx context.Context, version string) (Snapshot,
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, err
 	}
+	if err := m.ensureMutationAllowed(); err != nil {
+		return Snapshot{}, err
+	}
 	if !validRuntimeVersion(version) {
 		return Snapshot{}, failure(lifecycle.ErrorRuntimeInstallFailed, "DSH runtime version is invalid", "use a semantic version such as 0.1.2-alpha.3")
 	}
@@ -209,6 +226,9 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 		return Snapshot{}, err
 	}
 	defer release()
+	if err := m.ensureMutationAllowed(); err != nil {
+		return Snapshot{}, err
+	}
 	m.mu.Lock()
 	index := -1
 	for i := range m.config.Runtimes {
@@ -221,7 +241,7 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 		m.mu.Unlock()
 		return Snapshot{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "the runtime is not in the catalog")
 	}
-	if (m.desired != nil && m.desired.RuntimeID == id) || (m.active != nil && m.active.RuntimeID == id) {
+	if (m.configured != nil && m.configured.RuntimeID == id) || (m.current != nil && m.current.RuntimeID == id) || (m.knownGood != nil && m.knownGood.RuntimeID == id) {
 		m.mu.Unlock()
 		return Snapshot{}, failure(lifecycle.ErrorRuntimeInUse, "DSH runtime is still selected", "choose another runtime before removing it")
 	}
@@ -246,6 +266,9 @@ func (m *Manager) RegisterDataDirectory(ctx context.Context, dataDirectory DataD
 	}
 	defer release()
 	if err := contextError(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	if err := m.ensureMutationAllowed(); err != nil {
 		return Snapshot{}, err
 	}
 	normalizedDataDirectory, err := normalizeDataDirectory(dataDirectory)
@@ -280,6 +303,9 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 		return Snapshot{}, err
 	}
 	defer release()
+	if err := m.ensureMutationAllowed(); err != nil {
+		return Snapshot{}, err
+	}
 	m.mu.Lock()
 	index := -1
 	for i := range m.config.DataDirectories {
@@ -292,7 +318,7 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 		m.mu.Unlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the data directory is not in the catalog")
 	}
-	if (m.desired != nil && m.desired.Profile.DataDirectoryID == id) || (m.active != nil && m.active.Profile.DataDirectoryID == id) {
+	if (m.configured != nil && m.configured.Profile.DataDirectoryID == id) || (m.current != nil && m.current.Profile.DataDirectoryID == id) || (m.knownGood != nil && m.knownGood.Profile.DataDirectoryID == id) {
 		m.mu.Unlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH data directory is still selected", "choose another profile before removing it")
 	}
@@ -316,8 +342,9 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneTarget(m.desired)
-	active := cloneTarget(m.active)
+	configured := cloneRunContext(m.configured)
+	current := cloneRunContext(m.current)
+	knownGood := cloneRunContext(m.knownGood)
 	m.mu.RUnlock()
 
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader)
@@ -325,9 +352,10 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 		Runtimes:        refreshRuntimes(config.Runtimes),
 		DataDirectories: cloneDataDirectories(config.DataDirectories),
 		Profiles:        profiles,
-		Desired:         desired,
-		Active:          active,
-		Theme:           selectedTheme(ctx, config.DataDirectories, active, desired, config.ThemeReader),
+		Configured:      configured,
+		Current:         current,
+		KnownGood:       knownGood,
+		Theme:           selectedTheme(ctx, config.DataDirectories, current, configured, config.ThemeReader),
 	}, nil
 }
 
@@ -339,10 +367,10 @@ func (m *Manager) Theme(ctx context.Context) (ThemePreference, error) {
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	active := cloneTarget(m.active)
-	desired := cloneTarget(m.desired)
+	current := cloneRunContext(m.current)
+	configured := cloneRunContext(m.configured)
 	m.mu.RUnlock()
-	return selectedTheme(ctx, config.DataDirectories, active, desired, config.ThemeReader), nil
+	return selectedTheme(ctx, config.DataDirectories, current, configured, config.ThemeReader), nil
 }
 
 func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([]PluginInfo, error) {
@@ -351,7 +379,7 @@ func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([
 		return nil, err
 	}
 	defer release()
-	dataDirectory, _, err := m.resolvePluginTarget(ctx, request.Target, false)
+	dataDirectory, _, err := m.resolvePluginTarget(ctx, request.Target, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +414,7 @@ func (m *Manager) RemovePlugin(ctx context.Context, request PluginRemoveRequest)
 // public contract resolves profiles directly from $DSH_HOME/profiles/<name>.
 // The manager therefore keeps this narrow filesystem operation at the
 // identity boundary: it never rewrites package.json, dsh.profile or patch
-// layers, and it refuses built-in or active profiles.
+// layers, and it refuses built-in or current profiles.
 func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameRequest) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
@@ -409,9 +437,14 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneTarget(m.desired)
-	active := cloneTarget(m.active)
+	configured := cloneRunContext(m.configured)
+	current := cloneRunContext(m.current)
+	knownGood := cloneRunContext(m.knownGood)
+	switching := m.switching
 	m.mu.RUnlock()
+	if switching {
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is switching", "wait for the current context switch to finish")
+	}
 	dataDirectory, ok := findDataDirectory(config.DataDirectories, request.Profile.DataDirectoryID)
 	if !ok {
 		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the profile data directory is not in the catalog")
@@ -422,8 +455,8 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be renamed", "choose a custom profile")
 	}
-	if active != nil && active.Profile == request.Profile {
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the active DSH profile cannot be renamed", "stop DSH before renaming the active profile")
+	if current != nil && current.Profile == request.Profile {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the current DSH profile cannot be renamed", "switch to another Run context before renaming the current profile")
 	}
 	oldPath := filepath.Join(dataDirectory.Path, "profiles", request.Profile.Name)
 	oldInfo, err := os.Stat(oldPath)
@@ -438,19 +471,20 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 		return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileRenameFailed, "the DSH profile could not be renamed", "the profile directory was not changed", true, false)
 	}
 
-	desiredChanged := desired != nil && desired.Profile == request.Profile
-	if desiredChanged {
-		desired.Profile.Name = newName
+	configuredChanged := configured != nil && configured.Profile == request.Profile
+	knownGoodChanged := knownGood != nil && knownGood.Profile == request.Profile
+	if configuredChanged {
+		configured.Profile.Name = newName
 		m.mu.Lock()
-		m.desired = cloneTarget(desired)
+		m.configured = cloneRunContext(configured)
 		state := m.stateLocked()
 		statePath := m.config.StatePath
 		m.mu.Unlock()
 		if err := m.store.Save(ctx, statePath, state); err != nil {
 			rollbackErr := os.Rename(newPath, oldPath)
 			m.mu.Lock()
-			m.desired = cloneTarget(&LaunchTarget{
-				RuntimeID: desired.RuntimeID,
+			m.configured = cloneRunContext(&RunContext{
+				RuntimeID: configured.RuntimeID,
 				Profile:   request.Profile,
 			})
 			m.mu.Unlock()
@@ -459,6 +493,12 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 			}
 			return Snapshot{}, err
 		}
+	}
+	if knownGoodChanged {
+		knownGood.Profile.Name = newName
+		m.mu.Lock()
+		m.knownGood = cloneRunContext(knownGood)
+		m.mu.Unlock()
 	}
 	return m.Snapshot(ctx)
 }
@@ -475,14 +515,14 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	if err := validatePluginSpec(packageSpec); err != nil {
 		return PluginResult{}, err
 	}
-	dataDirectory, runtime, err := m.resolvePluginTarget(ctx, target, operation == "add")
+	dataDirectory, runtime, err := m.resolvePluginTarget(ctx, target, operation == "add", true)
 	if err != nil {
 		return PluginResult{}, err
 	}
 	m.mu.RLock()
 	runner := m.config.CommandRunner
 	commands := m.config.PluginCommands
-	active := cloneTarget(m.active)
+	current := cloneRunContext(m.current)
 	m.mu.RUnlock()
 	if runner == nil || commands == nil {
 		return PluginResult{}, failure(lifecycle.ErrorPluginCommandUnavailable, "The DSH plugin command is unavailable", "run this operation on a platform with a native command adapter")
@@ -506,34 +546,43 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	if err != nil {
 		return PluginResult{}, err
 	}
-	restartRequired := active != nil && active.Profile == target.Profile
+	restartRequired := current != nil && current.Profile == target.Profile
 	return PluginResult{Profile: target.Profile, Plugins: plugins, RestartRequired: restartRequired}, nil
 }
 
-func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, allowCreate bool) (DataDirectoryInfo, RuntimeInfo, error) {
+func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, allowCreate, mutation bool) (DataDirectoryInfo, RuntimeInfo, error) {
 	if err := contextError(ctx); err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
-	desired := cloneTarget(m.desired)
+	current := cloneRunContext(m.current)
+	switching := m.switching
 	m.mu.RUnlock()
 	dataDirectory, err := resolveDataDirectoryProfile(config, target.Profile, allowCreate)
 	if err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
-	runtimeID := target.RuntimeID
-	if runtimeID == "" && desired != nil {
-		runtimeID = desired.RuntimeID
+	if !mutation {
+		return dataDirectory, RuntimeInfo{}, nil
 	}
-	runtime, ok := findRuntime(config.Runtimes, runtimeID)
+	if switching || current == nil {
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorManagerOperationBusy, "profile changes require a current Ready Run context", "start or restore a Run context before changing profile plugins")
+	}
+	if current.Profile != target.Profile {
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorManagerOperationBusy, "only the current profile can be changed", "switch the Run context to this profile before changing its plugins")
+	}
+	runtime, ok := findRuntime(config.Runtimes, current.RuntimeID)
 	if !ok {
-		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "select a runtime for this plugin operation")
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "the current DSH runtime was not found", "restore a valid Run context before changing profile plugins")
 	}
 	if !runtimeExecutablePresent(runtime.Path) {
-		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before changing plugins")
+		return DataDirectoryInfo{}, RuntimeInfo{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "the current DSH runtime is not available", "restore a valid Run context before changing profile plugins")
 	}
 	if err := verifyRuntime(ctx, config.RuntimeVerifier, runtime); err != nil {
+		return DataDirectoryInfo{}, RuntimeInfo{}, err
+	}
+	if err := verifyRuntimeProfile(ctx, config.RuntimeVerifier, runtime, dataDirectory, current.Profile); err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, err
 	}
 	runtime.Installed = true
@@ -541,11 +590,11 @@ func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, 
 }
 
 // Resolve validates a complete runtime + data-directory + profile pairing. It
-// returns a launch target suitable for the Host launch boundary.
-func (m *Manager) Resolve(ctx context.Context, request LaunchRequest) (LaunchTarget, error) {
+// returns one immutable Run context suitable for the Host launch boundary.
+func (m *Manager) Resolve(ctx context.Context, request LaunchRequest) (RunContext, error) {
 	resolved, err := m.ResolveLaunch(ctx, request)
 	if err != nil {
-		return LaunchTarget{}, err
+		return RunContext{}, err
 	}
 	return resolved.Target, nil
 }
@@ -581,9 +630,12 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 	if err != nil {
 		return ResolvedLaunch{}, err
 	}
+	if err := verifyRuntimeProfile(ctx, config.RuntimeVerifier, runtime, dataDirectory, request.Profile); err != nil {
+		return ResolvedLaunch{}, err
+	}
 
 	return ResolvedLaunch{
-		Target: LaunchTarget{
+		Target: RunContext{
 			RuntimeID: request.RuntimeID,
 			Profile:   request.Profile,
 		},
@@ -592,16 +644,22 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 	}, nil
 }
 
-// SetDesired validates and persists the next launch selection. It does not
-// start or restart DSH; applying it to a running Host is an explicit caller
-// decision and is reported separately by the lifecycle layer.
-func (m *Manager) SetDesired(ctx context.Context, target LaunchTarget) (Snapshot, error) {
+// SetConfigured validates and persists the configured Run context. A running
+// Host must use its serialized switch boundary instead; changing this value
+// directly while a Worker is alive would create a deferred selection.
+func (m *Manager) SetConfigured(ctx context.Context, target RunContext) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	defer release()
-	resolved, err := m.Resolve(ctx, LaunchRequest{
+	m.mu.RLock()
+	busy := m.switching || m.current != nil
+	m.mu.RUnlock()
+	if busy {
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is already active", "use the managed context switch while Work is running")
+	}
+	resolved, err := m.ResolveLaunch(ctx, LaunchRequest{
 		RuntimeID: target.RuntimeID,
 		Profile:   target.Profile,
 	})
@@ -609,23 +667,26 @@ func (m *Manager) SetDesired(ctx context.Context, target LaunchTarget) (Snapshot
 		return Snapshot{}, err
 	}
 
+	runContext := resolved.Target
 	m.mu.Lock()
-	m.desired = &resolved
 	state := m.stateLocked()
-	state.Desired = cloneTarget(&resolved)
+	state.Configured = cloneRunContext(&runContext)
 	statePath := m.config.StatePath
 	m.mu.Unlock()
 
 	if err := m.store.Save(ctx, statePath, state); err != nil {
 		return Snapshot{}, err
 	}
+	m.mu.Lock()
+	m.configured = cloneRunContext(&runContext)
+	m.mu.Unlock()
 	return m.Snapshot(ctx)
 }
 
-// MarkActive records the selection that the Host actually launched. It is
-// intentionally not persisted: a process restart must never report an old
-// worker as active.
-func (m *Manager) MarkActive(ctx context.Context, target *LaunchTarget) (Snapshot, error) {
+// CommitCurrent publishes a Run context only after its Worker has reached
+// readiness. The configured value is persisted in the same operation, so a
+// failed candidate can never become the configured Run context.
+func (m *Manager) CommitCurrent(ctx context.Context, target *RunContext) (Snapshot, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -634,21 +695,102 @@ func (m *Manager) MarkActive(ctx context.Context, target *LaunchTarget) (Snapsho
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, err
 	}
-	var active *LaunchTarget
-	if target != nil {
-		resolved, err := m.Resolve(ctx, LaunchRequest{
-			RuntimeID: target.RuntimeID,
-			Profile:   target.Profile,
-		})
-		if err != nil {
-			return Snapshot{}, err
-		}
-		active = &resolved
+	if target == nil {
+		return Snapshot{}, failure(lifecycle.ErrorProfileRequired, "a Ready Run context is required", "start a complete runtime, data directory and profile context")
+	}
+	resolved, err := m.ResolveLaunch(ctx, LaunchRequest{
+		RuntimeID: target.RuntimeID,
+		Profile:   target.Profile,
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	runContext := resolved.Target
+	m.mu.Lock()
+	if m.current != nil && *m.current != runContext {
+		m.mu.Unlock()
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "another Run context is current", "stop the current Worker before committing a different context")
+	}
+	state := m.stateLocked()
+	state.Configured = cloneRunContext(&runContext)
+	statePath := m.config.StatePath
+	m.mu.Unlock()
+	if err := m.store.Save(ctx, statePath, state); err != nil {
+		return Snapshot{}, err
 	}
 	m.mu.Lock()
-	m.active = active
+	m.configured = cloneRunContext(&runContext)
+	m.current = cloneRunContext(&runContext)
+	m.knownGood = cloneRunContext(&runContext)
+	m.mu.Unlock()
+	// The durable/current commit above is the linearization point. Do not let
+	// cancellation after that point turn a successful Ready commit into an
+	// error that prevents the Host from marking the generation manager-live.
+	return m.Snapshot(context.Background())
+}
+
+// ClearCurrent removes the process-local current context after a Worker
+// generation enters its stop boundary. The configured and known-good context
+// remain available for restart or rollback.
+func (m *Manager) ClearCurrent(ctx context.Context) (Snapshot, error) {
+	release, err := m.acquireOperation(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer release()
+	if err := contextError(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	m.mu.Lock()
+	m.current = nil
 	m.mu.Unlock()
 	return m.Snapshot(ctx)
+}
+
+// BeginRunContextSwitch blocks profile and configuration mutations while the
+// Host performs its stop/candidate/rollback transaction.
+func (m *Manager) BeginRunContextSwitch(ctx context.Context) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if m.switching {
+		m.mu.Unlock()
+		return failure(lifecycle.ErrorManagerOperationBusy, "a Run context switch is already in progress", "wait for the current context switch to finish")
+	}
+	m.switching = true
+	m.mu.Unlock()
+	release, err := m.acquireOperation(ctx)
+	if err != nil {
+		m.mu.Lock()
+		m.switching = false
+		m.mu.Unlock()
+		return err
+	}
+	release()
+	return nil
+}
+
+// EndRunContextSwitch releases the mutation guard after a successful switch,
+// a rollback, or a terminal recovery failure.
+func (m *Manager) EndRunContextSwitch(ctx context.Context) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.switching = false
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *Manager) ensureMutationAllowed() error {
+	m.mu.RLock()
+	switching := m.switching
+	m.mu.RUnlock()
+	if switching {
+		return failure(lifecycle.ErrorManagerOperationBusy, "the Run context is switching", "wait for the current context switch to finish")
+	}
+	return nil
 }
 
 func normalizeConfig(config Config) (Config, error) {
@@ -787,7 +929,7 @@ func (m *Manager) stateLocked() State {
 		Version:         stateVersion,
 		DataDirectories: cloneDataDirectories(m.config.DataDirectories),
 		Runtimes:        cloneRuntimes(m.config.Runtimes),
-		Desired:         cloneTarget(m.desired),
+		Configured:      cloneRunContext(m.configured),
 	}
 }
 
@@ -1066,6 +1208,20 @@ func verifyRuntime(ctx context.Context, verifier RuntimeVerifier, runtime Runtim
 	return nil
 }
 
+func verifyRuntimeProfile(ctx context.Context, verifier RuntimeVerifier, runtime RuntimeInfo, dataDirectory DataDirectoryInfo, profile ProfileRef) error {
+	pairVerifier, ok := verifier.(RuntimeProfileVerifier)
+	if !ok {
+		return nil
+	}
+	if err := pairVerifier.VerifyProfile(ctx, runtime.Path, runtime.Version, dataDirectory.Path, profile.Name); err != nil {
+		if cancellation := contextError(ctx); cancellation != nil {
+			return cancellation
+		}
+		return preserveFailure(err, lifecycle.ErrorRuntimeProfileIncompatible, "The selected DSH runtime and profile are incompatible.", "the DSH adapter rejected this Run context pairing", false, false)
+	}
+	return nil
+}
+
 func preserveFailure(err error, fallbackCode lifecycle.ErrorCode, fallbackSummary, fallbackDetail string, retryable, effectOccurred bool) error {
 	var failureValue lifecycle.Failure
 	if errors.As(err, &failureValue) {
@@ -1085,7 +1241,7 @@ func preserveFailure(err error, fallbackCode lifecycle.ErrorCode, fallbackSummar
 	return failureWithMeta(fallbackCode, fallbackSummary, fallbackDetail, retryable, effectOccurred)
 }
 
-func cloneTarget(target *LaunchTarget) *LaunchTarget {
+func cloneRunContext(target *RunContext) *RunContext {
 	if target == nil {
 		return nil
 	}

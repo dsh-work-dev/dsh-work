@@ -13,13 +13,24 @@ import (
 	"github.com/local/work/internal/lifecycle"
 )
 
-// State is the versioned manager persistence contract. Active state is
-// intentionally absent because it is only true while a Host Worker is alive.
+// State is the versioned manager persistence contract. Current and known-good
+// state are intentionally absent because they are only true while a Host
+// Worker is alive. Configured is the single persisted Run context.
 type State struct {
 	Version         int                 `json:"version"`
 	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
 	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
-	Desired         *LaunchTarget       `json:"desired,omitempty"`
+	Configured      *RunContext         `json:"configured,omitempty"`
+	migratedFrom    int
+}
+
+const legacyStateVersion = 2
+
+type legacyStateV2 struct {
+	Version         int                 `json:"version"`
+	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
+	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
+	Desired         *RunContext         `json:"desired,omitempty"`
 }
 
 // StateStore isolates persistence and version policy from manager policy. A future
@@ -49,27 +60,68 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 	if err != nil {
 		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted selection has an unsupported format")
 	}
+	if state.migratedFrom != 0 {
+		if err := (FileStateStore{}).Save(ctx, path, state); err != nil {
+			return nil, err
+		}
+		state.migratedFrom = 0
+	}
 	return &state, nil
 }
 
 func decodeState(data []byte) (State, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var state State
-	if err := decoder.Decode(&state); err != nil {
+	var envelope struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		return State{}, err
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return State{}, errors.New("manager state contains multiple documents")
-		}
+	if envelope.Version == legacyStateVersion {
+		return migrateLegacyState(data)
+	}
+
+	var state State
+	if err := decodeStrict(data, &state); err != nil {
 		return State{}, err
 	}
 	if err := validateState(state); err != nil {
 		return State{}, err
 	}
 	return state, nil
+}
+
+func migrateLegacyState(data []byte) (State, error) {
+	var legacy legacyStateV2
+	if err := decodeStrict(data, &legacy); err != nil {
+		return State{}, err
+	}
+	state := State{
+		Version:         stateVersion,
+		DataDirectories: legacy.DataDirectories,
+		Runtimes:        legacy.Runtimes,
+		Configured:      cloneRunContext(legacy.Desired),
+		migratedFrom:    legacyStateVersion,
+	}
+	if err := validateState(state); err != nil {
+		return State{}, err
+	}
+	return state, nil
+}
+
+func decodeStrict(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("manager state contains multiple documents")
+		}
+		return err
+	}
+	return nil
 }
 
 func validateState(state State) error {
@@ -86,17 +138,17 @@ func validateState(state State) error {
 		}
 		seenDataDirectories[dataDirectory.ID] = struct{}{}
 	}
-	if state.Desired != nil {
-		if err := validateLaunchTarget(*state.Desired); err != nil {
+	if state.Configured != nil {
+		if err := validateRunContext(*state.Configured); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateLaunchTarget(target LaunchTarget) error {
+func validateRunContext(target RunContext) error {
 	if target.RuntimeID == "" {
-		return errors.New("launch target runtime identity is required")
+		return errors.New("Run context runtime identity is required")
 	}
 	return validateProfileRef(target.Profile)
 }
@@ -107,15 +159,15 @@ func (FileStateStore) Save(ctx context.Context, path string, state State) error 
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be encoded", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be encoded", "the configured Run context could not be persisted")
 	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state directory could not be created", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state directory could not be created", "the configured Run context could not be persisted")
 	}
 	temporary, err := os.CreateTemp(directory, ".manager-state-*.tmp")
 	if err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be written", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be written", "the configured Run context could not be persisted")
 	}
 	temporaryPath := temporary.Name()
 	keepTemporary := false
@@ -126,19 +178,19 @@ func (FileStateStore) Save(ctx context.Context, path string, state State) error 
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be secured", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be secured", "the configured Run context could not be persisted")
 	}
 	if _, err := temporary.Write(data); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be written", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be written", "the configured Run context could not be persisted")
 	}
 	if err := temporary.Sync(); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be flushed", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be flushed", "the configured Run context could not be persisted")
 	}
 	if err := temporary.Close(); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be closed", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be closed", "the configured Run context could not be persisted")
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
-		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be replaced", "the desired selection could not be persisted")
+		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be replaced", "the configured Run context could not be persisted")
 	}
 	keepTemporary = true
 	return nil

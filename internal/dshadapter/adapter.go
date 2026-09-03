@@ -44,7 +44,7 @@ type ReadyAnnouncement struct {
 }
 
 // LaunchContext is the immutable input for one Worker generation. Runtime,
-// data-directory and profile come from the global launch target; Workspace is
+// data-directory and profile come from the global Run context; Workspace is
 // resolved separately for this generation and is never persisted by the
 // manager.
 type LaunchContext struct {
@@ -164,6 +164,36 @@ func (a *Adapter) Verify(ctx context.Context, path, expectedVersion string) erro
 			Code:    lifecycle.ErrorDSHUnsupportedVersion,
 			Summary: "The selected DSH runtime does not match the catalog version.",
 			Detail:  "Expected " + expectedVersion,
+		}
+	}
+	return nil
+}
+
+// VerifyProfile validates the runtime/profile pairing at the adapter
+// boundary. The pinned DSH contract currently accepts every valid profile
+// name for its supported runtime; keeping this check here gives future DSH
+// versions a single place to reject incompatible profile composition before
+// the Host stops a known-good Worker.
+func (a *Adapter) VerifyProfile(ctx context.Context, runtimePath, runtimeVersion, dataDirectoryPath, profileName string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if runtimeVersion != a.expectedVersion {
+		return lifecycle.Failure{
+			Code:    lifecycle.ErrorDSHUnsupportedVersion,
+			Summary: "The selected DSH runtime is not supported by this adapter.",
+		}
+	}
+	if _, err := existingExecutable(runtimePath); err != nil {
+		return lifecycle.Failure{
+			Code:    lifecycle.ErrorDSHRuntimeNotFound,
+			Summary: "The selected DSH runtime was not found.",
+		}
+	}
+	if strings.TrimSpace(dataDirectoryPath) == "" || !validProfileName(profileName) {
+		return lifecycle.Failure{
+			Code:    lifecycle.ErrorRuntimeProfileIncompatible,
+			Summary: "The selected DSH runtime and profile are incompatible.",
 		}
 	}
 	return nil

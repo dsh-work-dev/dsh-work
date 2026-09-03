@@ -25,14 +25,15 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
-	manager, err := newManager()
-	if err != nil {
-		return err
-	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printUsage(stdout)
 		return nil
 	}
+	manager, managerLock, err := newManager()
+	if err != nil {
+		return err
+	}
+	defer managerLock.Close()
 	switch args[0] {
 	case "runtime":
 		return runRuntime(manager, args[1:], stdout)
@@ -49,12 +50,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func newManager() (*dshmanager.Manager, error) {
+func newManager() (*dshmanager.Manager, *workapp.ProcessLock, error) {
 	discoveryRoot, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("resolve DSH discovery root: %w", err)
+		return nil, nil, fmt.Errorf("resolve DSH discovery root: %w", err)
 	}
 	config := workapp.DefaultConfig(discoveryRoot)
+	managerLock, err := workapp.AcquireManagerProcessLock(config.SettingsPath)
+	if err != nil {
+		return nil, nil, err
+	}
 	dependencies := platform.New()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
@@ -64,7 +69,7 @@ func newManager() (*dshmanager.Manager, error) {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "dsh-work", "runtimes")
-	return dshmanager.New(dshmanager.Config{
+	manager, err := dshmanager.New(dshmanager.Config{
 		CommandRunner:    runner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
@@ -77,11 +82,16 @@ func newManager() (*dshmanager.Manager, error) {
 			ID: "dsh-" + hint.Version, Version: hint.Version, Path: hint.Path,
 			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(hint.Path),
 		}},
-		DefaultTarget: dshmanager.LaunchTarget{
+		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-" + hint.Version,
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"},
 		},
 	})
+	if err != nil {
+		_ = managerLock.Close()
+		return nil, nil, err
+	}
+	return manager, managerLock, nil
 }
 
 type commandRunner struct {
@@ -272,14 +282,14 @@ func runUse(manager *dshmanager.Manager, args []string, stdout io.Writer) error 
 	if *runtimeID == "" || *dataDirectoryID == "" || *profileName == "" {
 		return errorsForUsage("use requires --runtime, --data-directory and --profile")
 	}
-	snapshot, err := manager.SetDesired(context.Background(), dshmanager.LaunchTarget{
+	snapshot, err := manager.SetConfigured(context.Background(), dshmanager.RunContext{
 		RuntimeID: *runtimeID,
 		Profile:   dshmanager.ProfileRef{DataDirectoryID: *dataDirectoryID, Name: *profileName},
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "selected %s / %s:%s\n", *runtimeID, *dataDirectoryID, *profileName)
+	fmt.Fprintf(stdout, "configured Run context %s / %s:%s\n", *runtimeID, *dataDirectoryID, *profileName)
 	return printSnapshotHint(stdout, snapshot)
 }
 
@@ -289,7 +299,6 @@ func runPlugin(manager *dshmanager.Manager, args []string, stdout io.Writer) err
 	}
 	set := flag.NewFlagSet("plugin "+args[0], flag.ContinueOnError)
 	set.SetOutput(io.Discard)
-	runtimeID := set.String("runtime", "", "runtime id; defaults to the selected runtime")
 	dataDirectoryID := set.String("data-directory", "", "DSH data-directory id")
 	profileName := set.String("profile", "", "profile name")
 	jsonOutput := set.Bool("json", false, "print JSON")
@@ -299,7 +308,7 @@ func runPlugin(manager *dshmanager.Manager, args []string, stdout io.Writer) err
 	if *dataDirectoryID == "" || *profileName == "" {
 		return errorsForUsage("plugin commands require --data-directory and --profile")
 	}
-	target := dshmanager.PluginTarget{RuntimeID: *runtimeID, Profile: dshmanager.ProfileRef{DataDirectoryID: *dataDirectoryID, Name: *profileName}}
+	target := dshmanager.PluginTarget{Profile: dshmanager.ProfileRef{DataDirectoryID: *dataDirectoryID, Name: *profileName}}
 	switch args[0] {
 	case "list":
 		plugins, err := manager.ListPlugins(context.Background(), dshmanager.PluginListRequest{Target: target})
@@ -363,10 +372,10 @@ func printValue[T any](stdout io.Writer, jsonOutput bool, value T, table func())
 }
 
 func printSnapshotHint(stdout io.Writer, snapshot dshmanager.Snapshot) error {
-	if snapshot.Desired == nil {
+	if snapshot.Configured == nil {
 		return nil
 	}
-	fmt.Fprintf(stdout, "desired: %s / %s:%s\n", snapshot.Desired.RuntimeID, snapshot.Desired.Profile.DataDirectoryID, snapshot.Desired.Profile.Name)
+	fmt.Fprintf(stdout, "configured: %s / %s:%s\n", snapshot.Configured.RuntimeID, snapshot.Configured.Profile.DataDirectoryID, snapshot.Configured.Profile.Name)
 	return nil
 }
 
@@ -391,7 +400,8 @@ func executableExists(path string) bool {
 }
 
 func printUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "dsh-work manages explicit DSH runtimes, data directories, profiles and profile-scoped plugins.")
+	fmt.Fprintln(stdout, "dsh-work manages DSH runtimes, data directories and profiles while Work is stopped.")
+	fmt.Fprintln(stdout, "Use the running Work Settings window for Run context and profile plugin changes.")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")
@@ -401,5 +411,5 @@ func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  dsh-work data-directory list|add|remove ...  # removal retains files")
 	fmt.Fprintln(stdout, "  dsh-work profile list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")
-	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME [--runtime ID] ...")
+	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME ...")
 }

@@ -25,6 +25,10 @@ profiles are read-only until a successful context switch makes one current.
   lifecycle and cannot leave a failed candidate active.
 - The manager must serialize switching and plugin mutations and must reject
   overlapping Worker generations.
+- The desktop Host and standalone CLI share a kernel-owned lock in Work
+  application data. The CLI is an offline manager surface and rejects commands
+  while the desktop process is running, so it cannot create a second
+  configured/current view without a Host transaction.
 - The Settings UI needs separate inspection and switch affordances for
   profiles, plus read-only presentation for non-current plugin state.
 - A stopped Work process has no current `Ready` profile, so profile mutations

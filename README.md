@@ -56,6 +56,11 @@ bin\dsh-work.exe use --runtime dsh-0.1.2-alpha.3 --data-directory work --profile
 bin\dsh-work.exe plugin list --data-directory work --profile web
 ```
 
+The standalone CLI is an offline manager surface: it acquires the Work
+application-data manager lock for each command and reports a busy error while
+the desktop process is running. Use the running Work Settings window for live
+Run context and profile-plugin changes.
+
 `runtime install --version VERSION` is an explicit Windows operation. It
 installs into Work's application-data runtime store through the native command
 adapter; normal Work startup never invokes npm, pnpm, npx or a download.

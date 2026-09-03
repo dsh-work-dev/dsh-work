@@ -71,45 +71,50 @@ const managerSnapshot = (overrides: Partial<Snapshot>): Snapshot => ({
   ...overrides
 });
 
-test("overview keeps current and next launch targets separate", () => {
+test("overview keeps current, configured and known-good contexts separate", () => {
   const model = buildOverviewModel(managerSnapshot({
-    active: {
+    current: {
       runtimeId: "dsh-current",
       profile: {dataDirectoryId: "work", name: "web"}
     },
-    desired: {
+    configured: {
       runtimeId: "dsh-current",
       profile: {dataDirectoryId: "work", name: "coding"}
+    },
+    knownGood: {
+      runtimeId: "dsh-current",
+      profile: {dataDirectoryId: "work", name: "web"}
     }
   }));
 
   assert.equal(model.current.target?.profile.name, "web");
-  assert.equal(model.next?.target?.profile.name, "coding");
-  assert.equal(model.state, "restart-required");
+  assert.equal(model.configured?.target?.profile.name, "coding");
+  assert.equal(model.knownGood?.target?.profile.name, "web");
+  assert.equal(model.state, "active");
 });
 
-test("overview does not duplicate an unchanged active target", () => {
+test("overview shows the same context in each applicable state lane", () => {
   const target = {
     runtimeId: "dsh-current",
     profile: {dataDirectoryId: "work", name: "web"}
   };
-  const model = buildOverviewModel(managerSnapshot({active: target, desired: target}));
+  const model = buildOverviewModel(managerSnapshot({current: target, configured: target, knownGood: target}));
 
-  assert.equal(model.next, null);
+  assert.equal(model.configured?.target?.profile.name, "web");
   assert.equal(model.state, "active");
 });
 
-test("overview keeps the desired target in next launch when DSH is stopped", () => {
+test("overview shows the configured context when DSH is stopped", () => {
   const model = buildOverviewModel(managerSnapshot({
-    desired: {
+    configured: {
       runtimeId: "dsh-current",
       profile: {dataDirectoryId: "work", name: "coding"}
     }
   }));
 
   assert.equal(model.current.target, null);
-  assert.equal(model.next?.runtime?.id, "dsh-current");
-  assert.equal(model.next?.dataDirectory?.name, "Work DSH data directory");
-  assert.equal(model.next?.target?.profile.name, "coding");
+  assert.equal(model.configured?.runtime?.id, "dsh-current");
+  assert.equal(model.configured?.dataDirectory?.name, "Work DSH data directory");
+  assert.equal(model.configured?.target?.profile.name, "coding");
   assert.equal(model.state, "not-running");
 });

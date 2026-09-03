@@ -3,9 +3,9 @@
 
 /**
  * ManagerService is the trusted Settings-window binding for the nested DSH
- * manager. It exposes catalog, launch-target, runtime/data-directory and profile-plugin
- * operations; profile composition and plugin mutation still go through DSH's
- * public CLI seam, never direct file edits.
+ * manager. It exposes catalog, Run-context, runtime/data-directory and
+ * profile-plugin operations; profile composition and plugin mutation still go
+ * through DSH's public CLI seam, never direct file edits.
  * @module
  */
 
@@ -66,6 +66,6 @@ export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $Cancellable
     return $Call.ByID(1105056358, request);
 }
 
-export function SetDesiredTarget(target: dshmanager$0.LaunchTarget): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(1240049364, target);
+export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3523733425, target);
 }

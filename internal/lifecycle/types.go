@@ -241,7 +241,7 @@ func (m *Machine) MarkReady(generationID, workspaceURL string) (Status, error) {
 }
 
 // SetWorkspaceContext records the per-generation DSH Workspace resolution
-// separately from the persisted launch target.
+// separately from the persisted Run context.
 func (m *Machine) SetWorkspaceContext(generationID string, workspace workspacecontext.Context) (Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -326,6 +326,28 @@ func (m *Machine) Fail(generationID string, failure Failure) (Status, error) {
 	m.status.State = StateFailed
 	m.status.Phase = PhaseFailed
 	m.status.Workspace = nil
+	m.status.Error = &failure
+	m.status.CanRetry = failure.Retryable
+	m.status.CanCancel = false
+	return cloneStatus(m.status), nil
+}
+
+// ReplaceFailure keeps a terminal generation in Failed while replacing its
+// public recovery result with a later failure, such as rollback failure.
+// Recovery orchestration uses this to avoid publishing the failed candidate
+// as current while still exposing the reason recovery itself could not finish.
+func (m *Machine) ReplaceFailure(generationID string, failure Failure) (Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.checkGeneration(generationID); err != nil {
+		return cloneStatus(m.status), err
+	}
+	if m.status.State != StateFailed {
+		return cloneStatus(m.status), &TransitionError{From: m.status.State, To: StateFailed, Why: "only a terminal failure can be replaced"}
+	}
+	if failure.CorrelationID == "" {
+		failure.CorrelationID = m.status.CorrelationID
+	}
 	m.status.Error = &failure
 	m.status.CanRetry = failure.Retryable
 	m.status.CanCancel = false

@@ -55,13 +55,13 @@ func main() {
 	dsh.SetDiscoveryRoot(root)
 	runtimeHint := dsh.RuntimeHint()
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:       filepath.Join(root, ".task", "dsh-smoke-manager.json"),
-		PluginCommands:  dshadapter.NewPluginCommands(),
-		RuntimeVerifier: dsh,
-		ProfileCatalog:  dsh,
-		DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "work", Name: "Smoke DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork}},
-		Runtimes:        []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultTarget:   dshmanager.LaunchTarget{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"}},
+		StatePath:         filepath.Join(root, ".task", "dsh-smoke-manager.json"),
+		PluginCommands:    dshadapter.NewPluginCommands(),
+		RuntimeVerifier:   dsh,
+		ProfileCatalog:    dsh,
+		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "work", Name: "Smoke DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork}},
+		Runtimes:          []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
+		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)

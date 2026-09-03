@@ -35,16 +35,6 @@ export interface LaunchRequest {
     "profile": ProfileRef;
 }
 
-/**
- * LaunchTarget is the persisted desired state and the active state projected
- * to the DSH manager inside the Settings window. Workspace context is resolved
- * separately for each session or Worker generation.
- */
-export interface LaunchTarget {
-    "runtimeId": string;
-    "profile": ProfileRef;
-}
-
 export interface PluginInfo {
     "name": string;
     "version"?: string;
@@ -74,7 +64,10 @@ export interface PluginResult {
 }
 
 export interface PluginTarget {
-    "runtimeId": string;
+    /**
+     * Plugin state is scoped only by the DSH data directory and profile. The
+     * manager resolves the current runtime at the mutation boundary.
+     */
     "profile": ProfileRef;
 }
 
@@ -130,9 +123,19 @@ export interface ProfileRenameRequest {
  * itself.
  */
 export interface ResolvedLaunch {
-    "target": LaunchTarget;
+    "target": RunContext;
     "runtime": RuntimeInfo;
     "dataDirectory": DataDirectoryInfo;
+}
+
+/**
+ * RunContext is the complete Work selection that defines one DSH Worker
+ * generation. Runtime, DSH data directory and profile are one unit and cannot
+ * be persisted or switched independently.
+ */
+export interface RunContext {
+    "runtimeId": string;
+    "profile": ProfileRef;
 }
 
 /**
@@ -167,8 +170,9 @@ export interface Snapshot {
     "runtimes": RuntimeInfo[] | null;
     "dataDirectories": DataDirectoryInfo[] | null;
     "profiles": ProfileInfo[] | null;
-    "desired"?: LaunchTarget | null;
-    "active"?: LaunchTarget | null;
+    "configured"?: RunContext | null;
+    "current"?: RunContext | null;
+    "knownGood"?: RunContext | null;
     "theme": ThemePreference;
 }
 
