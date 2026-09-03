@@ -1,11 +1,12 @@
 # ADR-0003: External DSH workspace and dsh-work runtime manager
 
-- Status: Superseded by ADR-0007 for the launch model; retained as a historical record of the initial manager/runtime decision
+- Status: Superseded by ADR-0007 and ADR-0008 for the launch, switch and plugin policy; retained as a historical record of the initial manager/runtime decision
 - Date: 2026-09-02
 
-> Historical note: the launch model in this ADR is replaced by ADR-0007.
-> The runtime/profile ownership details remain useful background, but this ADR
-> is not the current product contract.
+> Historical note: the launch model in this ADR is replaced by ADR-0007, and
+> its switch/plugin policy is replaced by ADR-0008. The runtime/profile
+> ownership details remain useful background, but this ADR is not the current
+> product contract.
 
 ## Context
 

@@ -7,7 +7,8 @@ Work treats DSH as a versioned external runtime. The adapter uses public DSH lau
 The `dsh-work` runtime manager may keep multiple installed DSH runtimes. A
 runtime is an immutable installed distribution; a profile is named data under
 a DSH data directory (DSH's upstream/internal `DSH home` term) and owns its
-own bundle, plugin and patch composition. One immutable launch target pairs an
+own bundle, plugin and patch composition. The DSH data directory is the scope
+that groups profiles and their plugin associations. One Run context pairs an
 exact runtime with a DSH data directory and profile. A separately resolved
 Workspace context is attached only to the launch/session request for one
 Worker generation. The Host consumes that resolved launch context; it does not
@@ -34,12 +35,16 @@ The DSH adapter owns:
 - graceful-shutdown request when supported;
 - classification of exit and protocol failures.
 
-The runtime manager owns runtime installation, local catalog state, the global
-launch target and explicit profile/plugin management commands. It does not own
-Workspace selection or persist a Workspace path in the global target. DSH remains the
-source of truth for profile composition. Plugin operations delegate to DSH's
-supported `dsh plugin --profile` seam; they are not reimplemented by the Host
-or DSH Adapter.
+The runtime manager owns runtime installation, local catalog state, the
+Configured Run context and explicit profile/plugin management commands. It
+does not own Workspace selection or persist a Workspace path in that context.
+DSH remains the source of truth for profile composition. Plugin inspection
+accepts an explicit `ProfileRef`; mutation commands additionally require that
+the reference equal the current Run context's profile. Non-current profiles
+are read-only, including when a request bypasses the Settings UI. Accepted
+mutations delegate to the current DSH runtime's supported
+`dsh plugin --profile` seam; they are not reimplemented by the Host or DSH
+Adapter.
 
 On Windows, the native command Adapter is the only boundary that invokes a
 `.cmd` or `.bat` launcher. It rejects shell metacharacters in batch paths and
@@ -48,9 +53,9 @@ not carry Windows shell rules.
 
 No other package builds a DSH command or parses DSH log text.
 
-## Launch target and Workspace context
+## Run context and Workspace context
 
-The persisted Work launch target is deliberately small:
+The persisted Configured Run context is deliberately small:
 
 ```text
 runtime_id
@@ -58,7 +63,7 @@ dsh_data_directory_id
 profile_name
 ```
 
-The target has no Workspace path or Workspace identifier. DSH owns the
+The context has no Workspace path or Workspace identifier. DSH owns the
 Workspace registry and its session semantics. Work obtains a Workspace through
 the DSH Workspace surface or an explicit launch/session action, then carries
 the resolved context only for that active session or Worker generation.
@@ -75,6 +80,7 @@ Inputs to one launch are immutable:
 
 ```text
 generation_id
+Run context (runtime identity, DSH data-directory identity, profile name)
 executable and resolved version
 Workspace context (resolved for this request)
 Work-owned DSH data directory or explicitly selected user data directory
@@ -88,6 +94,30 @@ safe_mode flag
 The normal implementation launches the Web profile without opening the system browser, passes an explicit loopback port, and injects the Work tool plugin through a generated overlay. Exact arguments live in the version-specific adapter and are covered by command-construction tests.
 
 Work must not invoke a package runner that performs an implicit network download during ordinary startup.
+
+## Immediate Run-context switch
+
+Changing any member of the Run context is a lifecycle replacement, not a
+deferred configuration edit:
+
+1. The manager resolves and validates the complete candidate runtime,
+   data-directory and profile tuple.
+2. The Host serialises the switch, records the current known-good tuple and
+   prevents plugin mutations while the switch is in progress.
+3. The current Worker and its gateway are stopped and their managed boundary
+   is verified before the candidate starts.
+4. The candidate receives a new generation ID and a separately resolved
+   Workspace context.
+5. Only after readiness and gateway validation does Work persist and publish
+   the candidate as current.
+6. If any compatibility, startup or readiness check fails, the candidate is
+   discarded and the known-good tuple is started again automatically. A
+   failed candidate is never used as the current profile/runtime, and no
+   overlapping Worker is allowed.
+
+There is no “next startup” state. If rollback also fails, the manager exposes
+one terminal failure with a retryable recovery path and retains the known-good
+tuple as the rollback source.
 
 ## Readiness contract
 
@@ -193,24 +223,26 @@ DSH data directory / DSH home (data root)
         ├── profile patch layers (`cordis.patch.yml`)
         └── profile data
 
-launch target = selected runtime + selected DSH data directory/profile
-Worker generation = launch target + per-generation Workspace context
+Run context = selected runtime + selected DSH data directory/profile
+Worker generation = Run context + per-generation Workspace context
 ```
 
 - The profile is the logical owner and enablement scope of its plugins. The
   same plugin in another profile is a separate association.
-- Plugin management always carries a `ProfileRef` (DSH data-directory identity plus
-  profile name); an active profile is only a default UI context, never an
-  implicit backend target.
-- The profile resource page keeps profile selection separate from the General
-  launch form. It shows plugin names only inside the selected profile detail,
-  where each displayed plugin has a removal action; no selected profile means
-  no plugin management detail.
+- Plugin inspection always carries a `ProfileRef` (DSH data-directory identity
+  plus profile name). Plugin installation, removal and other composition
+  mutations require that reference to equal the profile in the current `Ready`
+  Run context; a profile selected only for inspection is never an implicit
+  backend mutation target.
+- The profile resource page keeps inspection selection separate from the
+  General Run-context form. It shows plugin names inside the selected profile
+  detail. Non-current details are read-only; only the current profile exposes
+  mutation actions. No current `Ready` profile means no mutation action.
 - A package manager may deduplicate physical package artifacts. Work must not
   configure or relocate that store, and physical deduplication does not make a
   plugin global or runtime-owned.
 - Work-owned overlays live in Work application data, are attached to the
-  selected profile for one Worker generation and may be recreated from their
+  current profile for one Worker generation and may be recreated from their
   schema.
 - User-owned DSH data is never edited in place without an explicit migration.
 - A user-selected existing DSH data directory is mounted through an adapter and backed up before a migration.
@@ -221,9 +253,9 @@ The runtime manager must validate runtime/profile compatibility before launch.
 A profile is not automatically copied, migrated or made version-scoped when a
 different runtime is selected.
 
-The first implementation persists the catalog and desired launch target in
+The first implementation persists the catalog and Configured Run context in
 Work application data. Workspace context is resolved separately for each
-session and is not part of that persisted target. The Windows runtime installer is explicit and uses npm
+session and is not part of that persisted context. The Windows runtime installer is explicit and uses npm
 only when the user requests `runtime install`; its native adapter returns a
 catalog entry only after the expected DSH launcher is present. The pinned
 `0.1.2-alpha.3` adapter remains the only verified launch contract in this

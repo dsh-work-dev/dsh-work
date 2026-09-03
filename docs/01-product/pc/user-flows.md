@@ -3,7 +3,7 @@
 ## UF-01 — First launch
 
 1. User starts Work.
-2. Work loads its global launch target—DSH runtime, DSH data directory and
+2. Work loads its Configured Run context—DSH runtime, DSH data directory and
    profile—and checks runtime compatibility. It does not obtain a Workspace
    from the global settings document.
 3. The window shows `Starting` with the current step, bounded DSH output and a cancel action.
@@ -34,12 +34,42 @@ process directory into a Workspace.
 2. Work opens the separate trusted Settings window on its flat top-level
    `General` route; `Overview` is read-only and DSH workspace markup is not
    changed.
-3. User changes the DSH runtime, DSH data directory or profile launch target,
-   or changes the close-to-tray preference. The launch target uses an explicit
-   save action; close-to-tray persists immediately. Workspace selection is not
-   part of this page.
-4. The next window close applies the selected policy; explicit `Quit DSH Work`
-   remains a full shutdown in either mode.
+3. User changes the DSH runtime, DSH data directory or profile in the Run
+   context. After a complete valid context is selected, Work immediately
+   starts the managed context-switch flow; there is no pending target or
+   next-launch save step. Workspace selection is not part of this page.
+4. User changes the close-to-tray preference; it persists immediately. Explicit
+   `Quit DSH Work` remains a full shutdown in either mode.
+
+## UF-02E — Switch Run context and recover
+
+1. Work shows the current Run context and its `Ready`, `Starting`, `Stopping`
+   or `Failed` state.
+2. User explicitly switches to a different runtime, DSH data directory or
+   profile. Browsing another profile for inspection does not switch it.
+3. Work validates the complete candidate triple, enters `Stopping`, blocks
+   context and plugin mutations, and stops the current Worker generation.
+4. Work verifies cleanup, starts the candidate as a new generation and keeps
+   the previous context as the known-good rollback context.
+5. Only after the candidate reaches `Ready` does Work commit it as the current
+   and Configured Run context and open the DSH Workspace surface for that
+   generation.
+6. If the candidate fails, Work discards it and automatically restarts the
+   known-good context. The failed candidate is never presented as current and
+   no overlapping Worker is allowed.
+7. If rollback also fails, Work enters a terminal `Failed` state with retryable
+   recovery actions and preserves the known-good context for the next attempt.
+
+## UF-02F — Manage current-profile plugins
+
+1. User opens `Profiles` and may inspect any explicit data-directory/profile
+   reference.
+2. The profile that is not current is shown as read-only; install, remove and
+   other plugin-composition actions are unavailable.
+3. For the profile in the current `Ready` Run context, Work enables plugin
+   management and sends the exact profile reference to the current DSH runtime.
+4. A request that names a non-current profile is rejected by the manager even
+   if it bypasses the Settings UI.
 
 ## UF-02D — Select or create a DSH Workspace
 
@@ -48,7 +78,7 @@ process directory into a Workspace.
    create a Workspace for an existing directory.
 3. DSH validates and canonicalizes the directory before using it.
 4. Work attaches the selected Workspace context to the active session without
-   changing the global runtime, DSH data directory or profile launch target.
+   changing the current or Configured Run context.
 5. Settings `Overview` may report the current Workspace as read-only; `General`
    does not expose it as an editable global setting.
 6. Removing a Workspace registration leaves the directory, user files and

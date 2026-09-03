@@ -23,7 +23,7 @@ from a shortcut, installer or shell integration.
 1. The user-facing label is `DSH data directory`. `DSH home` and `DSH_HOME`
    remain DSH's external technical terms. Work application data, installed
    runtime files and DSH data-directory contents remain distinct.
-2. The persisted Work launch target contains only:
+2. The persisted Work Configured Run context contains only:
 
    ```text
    DSH runtime identity
@@ -32,7 +32,7 @@ from a shortcut, installer or shell integration.
    ```
 
    The `dshmanager` Module and its public Interface do not persist a Workspace
-   path or Workspace identifier in that target.
+   path or Workspace identifier in that context.
 3. Workspace selection and creation belong to DSH's Workspace surface or to an
    explicit launch/session action. The `workspacecontext` Module resolves the
    DSH-owned Workspace record and exposes a `Workspace context` for one active
@@ -44,9 +44,9 @@ from a shortcut, installer or shell integration.
    or relocate its directory, files, sessions or logs. Work never derives a
    Workspace from its process directory, install directory, operating-system
    home or DSH data directory.
-5. `General` exposes the runtime, DSH data directory and profile launch target;
+5. `General` exposes the runtime, DSH data directory and profile Run context;
    it has no Workspace picker or editable Workspace path. `Overview` may show
-   the active Workspace context read-only. The DSH Workspace surface remains
+   the current Workspace context read-only. The DSH Workspace surface remains
    the place where a user selects or creates a Workspace.
 6. If a supported DSH Adapter needs a directory before its Workspace surface
    can open, its Implementation uses an explicit Work bootstrap directory in
@@ -59,8 +59,11 @@ launch-target shape; no legacy field alias, compatibility reader or migration
 path is required.
 
 This keeps the deep ownership and locality of each concept: the manager owns
-the durable global launch target, DSH owns Workspace identity and session
+the durable Configured Run context, DSH owns Workspace identity and session
 semantics, and the Adapter seam carries only the context needed for one run.
+
+The immediate switch, readiness commit and automatic rollback rules are
+defined by [ADR-0008](0008-atomic-run-context-switching-and-current-profile-plugin-scope.md).
 
 ## Consequences
 
@@ -82,7 +85,7 @@ Costs and risks:
 
 ## Rejected alternatives
 
-- **Keep Workspace in the global launch target:** couples a session choice to
+- **Keep Workspace in the global Configured Run context:** couples a session choice to
   runtime/profile settings and makes multiple Workspaces awkward to switch.
 - **Use the process current directory as the default Workspace:** produces
   launch-location-dependent state and can accidentally expose an installer,

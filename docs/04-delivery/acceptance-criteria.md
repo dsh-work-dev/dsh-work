@@ -40,14 +40,14 @@ Given a Worker fixture that creates descendants, when Work quits normally or its
 
 Given fixtures for missing runtime, unsupported version, bind failure, readiness timeout and early exit, when each launches, then Work remains responsive and shows the corresponding stable code and safe action.
 
-### AC-029 — External selected DSH runtime
+### AC-029 — External selected DSH runtime and Run context
 
 Given a catalog containing more than one registered DSH runtime, DSH data
-directory and profile, when the user selects one launch target and a separate
-Workspace context, then Work verifies the runtime and launches its external
-DSH Web UI with the exact data directory and profile while passing the
-Workspace only to that session or Worker generation. Normal startup performs
-no package installation or profile reconciliation.
+directory and profile, when the user selects one complete Run context and a
+separate Workspace context, then Work verifies the runtime and launches its
+external DSH Web UI with the exact data directory and profile while passing
+the Workspace only to that session or Worker generation. Normal startup
+performs no package installation or profile reconciliation.
 
 ### AC-030 — Separate Settings surface with nested DSH manager
 
@@ -56,8 +56,8 @@ command or Settings, then Work opens or focuses the separate trusted Settings
 window without injecting management markup into the DSH document; its rail
 starts with a read-only Overview, has one top-level General page, and exposes
 top-level Notifications plus shallow DSH resource pages for runtimes and DSH
-data directories. `General` contains the runtime, data directory and profile
-launch target but no Workspace selector. The application menu exposes Settings and Help;
+data directories. `General` shows the current/configured Run context but no
+Workspace selector. The application menu exposes Settings and Help;
 Help contains Check for Updates and About Work.
 
 ### AC-034 — DSH-owned appearance
@@ -138,10 +138,13 @@ the setting does not alter the DSH data directory or profile data.
 ### AC-031 — Profile-owned plugin management
 
 Given two DSH data directories or profiles with independent plugin state,
-when the user lists, installs or removes a plugin, then the operation requires
-the exact data directory and profile, delegates composition to DSH's supported
-CLI and changes only that profile's association. An operation against the
-active profile reports whether a restart is required.
+when the user inspects either profile, then Work uses the exact data directory
+and profile reference. The non-current profile is read-only. When the user
+installs or removes a plugin, Work accepts the operation only for the profile
+in the current `Ready` Run context, delegates composition to the current DSH
+runtime's supported CLI and changes only that profile's association. A
+non-current request, including a request that bypasses the Settings UI, is
+rejected.
 
 ### AC-032 — DSH data directory and runtime data safety
 
@@ -156,17 +159,44 @@ future data-management action.
 Given an existing custom DSH profile, when the user changes its name from the
 profile detail, then Work renames only the profile directory, preserves the
 profile manifest and patch layers, keeps the selected data-directory identity, and
-updates the pending launch target when it references that profile. Built-in
-or active profiles cannot be renamed.
+updates the Configured Run context when it references that profile. Built-in
+or current profiles cannot be renamed while running.
 
-### AC-044 — Workspace context is independent of the launch target
+### AC-044 — Workspace context is independent of the Run context
 
 Given one DSH data directory serves two valid DSH Workspaces, when the user
 selects or creates a Workspace in the DSH Workspace surface, then Work attaches
-that Workspace context to the active session without changing the persisted
-runtime, data-directory or profile launch target. `General` does not offer an
-editable Workspace path, and removing a Workspace registration leaves its
-directory, files and sessions intact.
+that Workspace context to the active session without changing the current or
+Configured Run context. `General` does not offer an editable Workspace path,
+and removing a Workspace registration leaves its directory, files and sessions
+intact.
+
+### AC-045 — Immediate Run-context switch
+
+Given a `Ready` Worker running Run context A, when the user explicitly
+switches the runtime, DSH data directory or profile to a valid Run context B,
+then Work immediately enters `Stopping`, blocks new context/plugin mutations,
+stops and verifies generation A, starts B as a new generation and opens the
+DSH Workspace only after B reaches `Ready`. The complete triple changes as one
+unit; no pending next-launch state or manual second launch is required.
+
+### AC-046 — Failed switch automatically rolls back
+
+Given a known-good Run context A, when candidate Run context B fails
+compatibility, startup or readiness, then Work discards B and automatically
+restarts A. B is never reported as current, the switch returns one terminal
+actionable failure result, and no overlapping Worker is created. If rollback
+also fails, Work enters `Failed`, retains A as the rollback source and offers
+retryable recovery without silently selecting B.
+
+### AC-047 — Only the current profile can mutate plugins
+
+Given current profile A and inspectable non-current profile B, when the user
+opens either profile, then B's plugin associations and mutation controls are
+read-only while A exposes the supported install/remove actions. A manager or
+CLI request naming B is rejected at the backend boundary. After a successful
+Run-context switch makes B current, B becomes the only profile with mutation
+authority and A becomes read-only.
 
 ### AC-007 — Bounded retry
 
@@ -272,14 +302,15 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | FR-SUP-005 | AC-006, AC-019 |
 | FR-SUP-006, FR-SUP-007, FR-SUP-010 | AC-003, AC-005 |
 | FR-SUP-008, FR-SUP-009 | AC-006, AC-007 |
-| FR-MGR-001, FR-MGR-002, FR-MGR-003 | AC-002, AC-029, AC-044 |
-| FR-MGR-004 | AC-031 |
+| FR-MGR-001, FR-MGR-002, FR-MGR-003 | AC-002, AC-029, AC-044–AC-046 |
+| FR-MGR-004, FR-MGR-015 | AC-031, AC-047 |
 | FR-MGR-005 | AC-030 |
 | FR-MGR-006, FR-MGR-007 | AC-032, AC-025 |
 | FR-MGR-008 | AC-034 |
 | FR-MGR-009 | AC-035 |
 | FR-MGR-010 | AC-043 |
 | FR-MGR-011, FR-MGR-012 | AC-044 |
+| FR-MGR-013, FR-MGR-014 | AC-045–AC-046 |
 | FR-NOT-001, FR-NOT-002, FR-NOT-003 | AC-036 |
 | FR-NOT-004 | AC-037 |
 | FR-NOT-005 | AC-038 |

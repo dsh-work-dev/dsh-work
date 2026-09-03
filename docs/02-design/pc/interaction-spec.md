@@ -4,7 +4,7 @@
 
 Work uses two native WebView windows. The separate Settings window contains a
 flat, shallow rail and no HTML application menu: `Overview` first and read-only, one top-level `General`
-page for launch target and close-to-tray behaviour, one top-level `Notifications`
+page for the Run context and close-to-tray behaviour, one top-level `Notifications`
 page for Work desktop-notification preferences, then DSH resource pages for
 profiles, runtimes and DSH data directories. The Workspace window contains the
 external DSH Web UI. Work's native application menu and system tray remain
@@ -13,7 +13,7 @@ and recovery actions remain available even if Worker content is loading or
 failed.
 
 The native settings command and window title are `设置`; the Workspace window
-title is `dsh-work`.
+title is `Work`.
 
 Work does not own an appearance setting. It reads the selected DSH data
 directory's
@@ -28,28 +28,49 @@ Simplified Chinese, and the DSH workspace remains the owner of its own content
 and language.
 
 The `Profiles` page uses the profile as its primary entity. The profile list
-selects one explicit data-directory/profile reference for the detail pane; it does not
-reuse the launch selectors in `General`. With no selected profile, the plugin
-list and plugin actions are absent. Whenever a plugin is displayed, its
-selected-profile detail contains its management action, including removal.
-The active Workspace profile may be the initial selection, but it is not an
-implicit backend target.
+can inspect one explicit data-directory/profile reference at a time; inspection
+does not change the current Run context. `Switch to this profile` is an explicit
+context-switch action and takes effect immediately. With no selected profile,
+the plugin list and plugin actions are absent. A non-current profile shows its
+plugin associations read-only. Only the profile in the current `Ready` Run
+context exposes install, removal and other composition actions, and every
+mutation carries its exact data-directory/profile reference to the manager.
 
 The profile detail also edits custom profile names. Built-in names are fixed.
 Because DSH 0.1.2 has no public rename command, Work changes only the custom
 profile directory identity, preserves its manifest and patch layers, blocks
-renaming the active profile, and updates the pending launch target when
+renaming the current profile, and updates the Configured Run context when
 needed.
 
-`General` edits only the persisted launch target: DSH runtime, DSH data
-directory and profile. It never presents a Workspace selector or editable
-Workspace path. Workspace selection and creation stay in DSH's Workspace
-surface or an explicit start/session action. `Overview` may show the current
-Workspace context read-only, separately from the pending launch target.
+`General` shows and changes the Configured Run context: DSH runtime, DSH data
+directory and profile. Completing a different valid selection immediately
+starts a managed context switch; there is no Save-for-next-launch state. It
+never presents a Workspace selector or editable Workspace path. Workspace
+selection and creation stay in DSH's Workspace surface or an explicit
+start/session action. `Overview` shows the current and known-good Run context
+read-only, separately from the current Workspace context.
 
-Overview distinguishes the active session from the pending next-launch target.
-It never presents the pending target as if it were the running
-session.
+Overview distinguishes the current `Ready` Run context from a context-switch
+candidate or failed candidate. It never presents an uncommitted candidate as
+the running session.
+
+### Run-context switching and rollback
+
+Changing the runtime, DSH data directory or profile is one atomic user action
+at the Run-context boundary:
+
+1. Work validates the complete candidate triple.
+2. Work enters `Stopping`, blocks new context/plugin mutations and stops the
+   current Worker generation.
+3. Work verifies cleanup before starting the candidate generation.
+4. Work commits the candidate only after its Worker reaches `Ready`.
+5. If startup or readiness fails, Work automatically restores the last
+   known-good Run context. The failed candidate is never shown as current and
+   two Worker generations never overlap.
+
+The Workspace context is resolved again for the successful generation. A
+switch failure ends in a terminal, actionable state if recovery also fails;
+there is no deferred “next startup” operation.
 
 ### Window close and quit
 

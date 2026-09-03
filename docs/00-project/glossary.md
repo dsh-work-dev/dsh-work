@@ -6,12 +6,12 @@
 | Host shell | The embedded trusted Work startup, status and recovery UI; it is not the DSH Web UI. |
 | DSH | DeepSeek Harness, the agent runtime hosted and supervised by Work. |
 | DSH runtime | One immutable, installed and versioned DSH distribution: its executable, launcher and built-in bundles. It does not own profile-specific plugin state. |
-| DSH data directory | The user-facing name for the DSH data root containing named profiles and related DSH runtime data. It may be Work-managed or an explicitly selected existing user directory; it is distinct from Work application data and an installed DSH runtime. |
+| DSH data directory | The user-facing name for the DSH data root that scopes named profiles, their plugin associations and related DSH runtime data. It may be Work-managed or an explicitly selected existing user directory; it is distinct from Work application data and an installed DSH runtime. |
 | DSH home | DSH's external technical name for a DSH data directory, including the `DSH_HOME` environment-variable term. Work's domain term is `DSH data directory`. |
 | DSH profile | A named configuration under a DSH data directory. It owns ordered bundle references, plugin dependency state, profile patch layers and profile data; it is not owned by a DSH runtime. |
 | DSH plugin | A package or bundle associated with one DSH profile through DSH's supported profile plugin seam. The same package in another profile is a separate association. |
 | DSH Workspace | A DSH-owned persistent record for a canonical directory, stable identity/title and associated sessions. The Work Workspace window displays its DSH Web UI; it is not the DSH data directory, profile store or Host shell. |
-| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. It is resolved separately from Work's global launch target and may be carried by one launch/session request. |
+| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. It is resolved separately from Work's Run context and may be carried by one launch/session request. |
 | Notification event | A meaningful Work or DSH occurrence that may need delivery outside its source surface; raw process output is not a notification event. |
 | Desktop notification | A notification delivered through the operating system by Work. |
 | In-page notice | Contextual feedback rendered by DSH inside its own Web UI, such as a conversation or composer notice. |
@@ -20,12 +20,17 @@
 | Notification bridge | A versioned boundary that carries structured DSH events to Work without parsing DSH presentation markup. |
 | dsh-work CLI | The explicit operator tool that installs and selects DSH runtimes and manages profile/plugin operations. |
 | Runtime/profile compatibility | The result of validating one DSH runtime against one profile's bundle, plugin and patch composition. |
-| Runtime selection | The exact DSH runtime selected for one launch; it is paired with, but does not own, a profile. |
-| Launch target | The immutable DSH runtime, DSH data-directory identity and profile reference persisted by Work for future launches. It does not contain a Workspace. |
-| Launch context | The resolved launch target plus a separately resolved Workspace context for one Work Worker generation. |
+| Runtime selection | The exact DSH runtime selected for one Run context; it is paired with, but does not own, a profile. |
+| Run context | The exact triple of DSH runtime identity, DSH data-directory identity and profile name that defines one DSH execution environment. The data directory scopes the profile and its plugin associations; the runtime is an immutable executable distribution. |
+| Configured Run context | The Run context persisted by Work as the user's selected context. Changing any member while Work is running starts an immediate managed context switch; it is not a deferred next-launch setting and contains no Workspace. |
+| Known-good Run context | The last Run context whose Worker reached `Ready`. It is the automatic rollback destination when a context switch fails. |
+| Context switch | The managed stop/start operation that replaces one Run context with another. Work commits the candidate only after readiness and restores the known-good context on failure; overlapping Workers are not allowed. |
+| Launch target | The serialized/internal name for a Configured Run context in existing interfaces. It does not mean a target that waits for a future launch. |
+| Launch context | The resolved Run context plus a separately resolved Workspace context for one Work Worker generation. |
 | Profile reference | The stable pair of DSH data-directory identity and profile name required by profile-scoped operations; a profile name alone is not sufficient. |
+| Current profile | The profile reference in the current `Ready` Run context. Plugin installation, removal and other profile mutations are allowed only for this profile; a non-current profile is read-only. |
 | Settings window | A separate trusted Work WebView window for Work-global settings and the nested DSH manager. It never loads the DSH Web UI or shares a document with the Workspace window. |
-| DSH manager | The runtime, DSH data-directory, profile and profile-scoped plugin management area inside the Settings window; it delegates profile composition to DSH and does not own Workspace selection. |
+| DSH manager | The runtime catalog, Run context and profile/plugin management area inside the Settings window; it delegates profile composition to DSH, enforces current-profile mutation scope and does not own Workspace selection. |
 | Workspace window | The Work WebView window that displays the external DSH workspace. Work's application menu and system tray remain Host-owned without modifying DSH page content. |
 | Host | The Work desktop process and its trusted backend services. |
 | Worker | A DSH process started and supervised by the Host. |

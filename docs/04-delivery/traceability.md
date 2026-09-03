@@ -7,7 +7,7 @@ This index connects public project contracts only. Product rationale outside the
 | Host lifecycle | FR-LIFE-* | `states-and-errors.md` | `architecture.md` | AC-001–AC-003, AC-023 |
 | Worker supervision | FR-SUP-* | `states-and-errors.md` | `dsh-integration.md`, three platform adapters in `process-supervision.md` | AC-002–AC-007 |
 | Embedded navigation | FR-WEB-* | `information-architecture.md` | `architecture.md`, `storage-and-security.md` | AC-004, AC-006, AC-015 |
-| DSH launch target and Workspace context | FR-MGR-001–FR-MGR-012 | `information-architecture.md`, `interaction-spec.md` | `architecture.md`, `dsh-integration.md`, ADR-0007 | AC-029, AC-031, AC-032, AC-043–AC-044 |
+| DSH Run context, profile ownership and Workspace context | FR-MGR-001–FR-MGR-015 | `information-architecture.md`, `interaction-spec.md` | `architecture.md`, `dsh-integration.md`, ADR-0007, ADR-0008 | AC-029, AC-031, AC-032, AC-043–AC-047 |
 | Browser tasks | FR-BRW-* | `interaction-spec.md` | `browser-automation.md` | AC-009–AC-015 |
 | Permission and audit | FR-SEC-* | `permissions-and-safety.md` | `storage-and-security.md` | AC-008, AC-011–AC-016, AC-019 |
 | Notifications | FR-NOT-* | `notifications.md` | `notifications.md`, `dsh-integration.md`, ADR-0006 | AC-036–AC-042 |

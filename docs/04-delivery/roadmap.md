@@ -13,9 +13,9 @@ Deliver:
 - automated formatting, unit test, build and documentation checks;
 - minimum lifecycle and error value types;
 - narrow Host command and event projection;
-- `dsh-work` runtime-manager Interface for a Launch target (exact runtime, DSH
-  data directory and profile) plus profile-scoped plugin operations, with the
-  initial CLI/catalog implementation;
+- `dsh-work` runtime-manager Interface for a Run context (exact runtime, DSH
+  data directory and profile) plus current-profile-only plugin operations, with
+  the initial CLI/catalog implementation;
 - test-only Worker fake for deterministic shell-state tests.
 
 Exit gate: clean Windows, macOS and Linux checkouts build the trusted shell; the current development platform launches it, and CI runs deterministic minimum lifecycle tests.
@@ -27,16 +27,18 @@ Deliver:
 - explicitly selected runtime discovery and pinned compatibility for the initial
   DSH baseline;
 - `dsh-work` CLI path for registering/installing catalog runtimes and DSH data
-  directories, selecting profiles, and delegating plugin operations to DSH per selected
-  profile;
+  directories, inspecting profiles, switching the Run context immediately and
+  delegating plugin operations to DSH only for the current profile;
 - first concrete DSH and Windows process Adapters behind the planned Seams;
 - explicit loopback port and active readiness validation;
 - embedded trusted-origin navigation to the selected external DSH workspace;
 - graceful stop and initial child cleanup;
+- immediate runtime/data-directory/profile switching with automatic rollback to
+  the last known-good Run context;
 - stable missing-runtime, incompatible-version, early-exit and timeout failures.
 
 Exit gate: on the primary Windows development environment, Work launches the
-selected runtime/profile pair, displays the external DSH page only after
+configured runtime/profile Run context, displays the external DSH page only after
 readiness, exits without manual process or port cleanup, and repeats the path
 reliably. The selection seam does not require the Host to embed or install DSH.
 
@@ -67,7 +69,7 @@ Exit gate: on Windows, Work starts the pinned DSH Web profile from a clean envir
 
 Deliver:
 
-- Work-owned DSH plugin attached to the selected profile;
+- Work-owned DSH plugin attached to the current profile;
 - private authenticated IPC handshake;
 - versioned request and result schemas;
 - exhaustive Work Tool `allow`／`ask`／`deny` classifier;

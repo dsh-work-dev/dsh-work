@@ -85,16 +85,24 @@ The fixture matrix includes clean and signed-in Chrome／Edge／Chromium profile
 - graceful shutdown and forced tree cleanup;
 - process and handle leak repetition test.
 
-### Launch target and Workspace context
+### Run context and Workspace context
 
-- persisted launch target contains only runtime, DSH data directory and
-  profile identity;
+- persisted Configured Run context contains only runtime, DSH data directory
+  and profile identity;
 - Workspace selection and creation remain outside the General settings form;
 - current, explicit and missing Workspace contexts resolve deterministically;
 - process-directory, install-directory, operating-system-home and DSH
   data-directory fallbacks are rejected;
 - a per-generation Workspace context is passed to the DSH Adapter without
-  changing the persisted launch target;
+-  changing the persisted Configured Run context;
+- changing any runtime, data-directory or profile member starts one immediate
+  serialised context switch rather than creating a pending next-launch state;
+- a candidate is committed only after `Ready`, and compatibility/startup/
+  readiness failure automatically restores the last known-good Run context;
+- failed switches and rollbacks never leave overlapping Worker generations;
+- non-current profile plugin install/remove/composition requests are rejected
+  by both the trusted UI boundary and the manager/CLI boundary, while the
+  current profile remains mutable;
 - Workspace unregistration retains user-owned directory contents and session
   data.
 

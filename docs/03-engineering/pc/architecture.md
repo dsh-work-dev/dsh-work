@@ -40,9 +40,9 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - TypeScript frontend with framework choice isolated from Host contracts.
 - DSH launched as an out-of-process Worker.
 - `dsh-work` CLI and runtime manager resolve an installed DSH runtime plus a
-  DSH data-directory/profile target; Work does not embed the DSH Web UI or
-  mutate profiles during GUI startup. `DSH home` remains the upstream/internal
-  name for the same data directory.
+  DSH data-directory/profile Run context; Work does not embed the DSH Web UI
+  or mutate profiles during GUI startup. `DSH home` remains the
+  upstream/internal name for the same data directory.
 - The Settings window is Host-owned and contains a flat, shallow rail: a
   read-only Overview, top-level General and Notifications pages, a profile
   resource page with selected-profile plugin actions, and resource pages for
@@ -65,8 +65,8 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - Host startup output is served through a bounded, redacted projection of the
   supervisor diagnostics. The frontend may display and copy it, but it never
   receives an unbounded process stream or raw process metadata.
-- Work-owned DSH plugin attached to the selected profile through a supported
-  profile or patch seam.
+- Work-owned DSH plugin attached to the current profile through a supported
+  profile or patch seam; non-current profile plugin state is read-only.
 - Private Host–plugin IPC; loopback HTTP only for the embedded DSH Web UI.
 - Browser adapters for Chrome personal-browser auto-connect, signed extension／native messaging compatibility and managed-profile fallback.
 
@@ -84,7 +84,7 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 | `platform notification adapters` | native desktop notification delivery | product event classification |
 | `supervisor` | process ownership, readiness, restart, cleanup | DSH plugin internals, approval UI |
 | `dshadapter` | supported versions, command construction, readiness parsing | tray, browser driver details |
-| `dshmanager` | explicit DSH runtime catalog, DSH data-directory/profile selection and CLI-backed management; delegates profile/plugin semantics to DSH | Wails, lifecycle state, process handles, Workspace selection |
+| `dshmanager` | explicit DSH runtime catalog, Run context selection, current-profile mutation guard and CLI-backed management; delegates profile/plugin semantics to DSH | Wails, process handles, Workspace selection |
 | `workspacecontext` | resolves or resumes a DSH-owned Workspace for an explicit session and exposes its current context | runtime catalog, profile/plugin composition, Wails window handles |
 | `workergateway` | trusted-origin HTTP／WebSocket access to the Worker | DSH command grammar, approval policy |
 | `toolbridge` | typed Host–DSH request/result protocol | visual UI components |
@@ -107,27 +107,30 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 5. Storage implementations own migration; callers use versioned repositories.
 6. Logging is an observer, never the source of lifecycle truth.
 
-## Launch target and Workspace context
+## Run context and Workspace context
 
-The persisted Work launch target is the smallest stable selection needed by
-the manager:
+The Run context is the smallest stable selection needed to define one DSH
+execution environment:
 
 ```text
 DSH runtime identity + DSH data-directory identity + profile name
 ```
 
-It does not contain a Workspace path or identifier. The `workspacecontext`
-Module consumes DSH's Workspace Seam or an explicit session action and keeps
-the resulting Workspace context in the per-generation Launch context. A DSH
-Adapter Implementation may pass that context to the Worker, but it must not
-write it back into the global launch target. If no Workspace is selected, the
-session presents DSH's selection/creation surface rather than falling back to
-the process current directory.
+The Configured Run context is the versioned triple persisted by Work. The
+current Run context is the triple used by the current `Ready` Worker
+generation. The last context that reached `Ready` is the known-good Run
+context. None of these contain a Workspace path or identifier. The
+`workspacecontext` Module consumes DSH's Workspace Seam or an explicit session
+action and keeps the resulting Workspace context in the per-generation Launch
+context. A DSH Adapter Implementation may pass that context to the Worker,
+but it must not write it into the Configured Run context. If no Workspace is
+selected, the session presents DSH's selection/creation surface rather than
+falling back to the process current directory.
 
 ## Primary runtime sequence
 
 1. The Host obtains the single-instance lock and opens trusted UI.
-2. The runtime manager resolves the selected compatible local DSH runtime, DSH data directory and profile without network access; the settings module loads the versioned Work close policy, locale and notification preferences with tray-safe, language and notification defaults.
+2. The runtime manager resolves the Configured Run context's compatible local DSH runtime, DSH data directory and profile without network access; the settings module loads the versioned Work close policy, locale and notification preferences with tray-safe, language and notification defaults.
 3. The Workspace context Module obtains a current or explicitly requested DSH Workspace through the DSH Workspace seam. If none is available, the session enters Workspace selection instead of inferring one from a process directory.
 4. Supervisor prepares a Work-owned profile overlay, private IPC endpoint and loopback port candidate, carrying the Workspace context only in the per-generation launch context when the DSH adapter requires it.
 5. The selected platform adapter creates the Worker inside its managed process boundary.
@@ -142,6 +145,28 @@ the process current directory.
 14. Result, DSH call ID and redacted Host execution event share a correlation ID.
 15. Quit cancels operations, detaches browser control, requests Worker shutdown and verifies the process tree is gone.
 
+## Atomic Run-context switching
+
+The lifecycle owner treats the runtime, DSH data-directory identity and profile
+reference as one replacement unit:
+
+1. Resolve and validate the complete candidate Run context.
+2. Capture the current known-good context and enter `Stopping`; reject new
+   context and plugin mutations for the duration of the operation.
+3. Stop the current Worker generation and verify its managed process boundary
+   is clean before starting a new generation.
+4. Launch the candidate with a fresh generation ID and resolve its Workspace
+   context independently.
+5. Commit the candidate as current and persist it as Configured only after the
+   Worker and gateway reach `Ready`.
+6. On compatibility, startup or readiness failure, discard the candidate and
+   repeat the same bounded sequence for the known-good context. The candidate
+   never becomes current, and two Worker generations never run concurrently.
+
+The rollback context is retained until the replacement generation is ready.
+If rollback also fails, Work publishes one terminal failure with retryable
+recovery actions and does not silently select the failed candidate.
+
 Window close is a separate composition-edge policy: the shared WindowLedger
 tracks visible Work windows and decides between hide-to-tray and full quit. The
 Wails SystemTray API realizes that decision on each supported desktop platform;
@@ -154,6 +179,9 @@ there are no fake macOS or Linux production tray adapters.
 - Each browser task owns a cancellable context, explicit tab assignment and exactly one terminal result.
 - DSH owns one-shot approval ordering; the Host revalidates after approval and before browser action.
 - Notification deduplication is bounded to the Work session and keyed by a structured event identity; reconnects cannot replay a desktop delivery.
+- Run-context switches are serialised; a candidate is not current until
+  `Ready`, and plugin mutations are accepted only for the current Run
+  context's profile.
 - Unbounded goroutines, channels, log buffers and retry loops are prohibited.
 
 ## Failure containment
@@ -164,6 +192,8 @@ there are no fake macOS or Linux production tray adapters.
 - Audit write failure blocks high-risk action and reports a diagnostic event.
 - Native notification delivery failure does not change the source event outcome; it produces a bounded diagnostic result.
 - Invalid Worker or page data is rejected at the edge before entering domain state.
+- A failed Run-context switch restores the last known-good context or exposes a
+  terminal recovery state without leaving an uncommitted candidate active.
 
 ## Planned repository layout
 

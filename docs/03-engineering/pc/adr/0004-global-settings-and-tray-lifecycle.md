@@ -52,7 +52,7 @@ therefore required for the Windows slice.
    Settings and Help; Help contains update-check and About commands.
 6. Expose Work Settings and nested DSH manager controls only through the
    trusted Settings window. Its Overview is read-only and its single General
-   page contains launch target and close policy. Saving the close preference
+   page contains the Run context and close policy. Saving the close preference
    updates the shared ledger immediately; it does not restart DSH or mutate DSH
    data.
 7. Realize explicit quit as a pre-exit `QuitFlow`: mark the window ledger as

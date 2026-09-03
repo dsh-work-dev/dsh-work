@@ -12,7 +12,7 @@ Work stores Host-owned data under the operating system's per-user application-da
 | Diagnostic logs | Work | bounded rotating files | redacted before write |
 | Runtime packages | Work or user | versioned cache | integrity checked before execution |
 | Generated DSH overlay | Work | reproducible | schema and generation marker |
-| DSH user data | DSH / user | governed by DSH | never silently rewritten by Work |
+| DSH data directory, profiles and plugin associations | DSH / user | governed by DSH | data-directory scope is preserved; never silently rewritten by Work |
 | DSH Workspace registry and session records | DSH / user | governed by DSH | registration changes do not delete the Workspace directory or files |
 | Browser connection metadata | Work | until disconnected | browser／extension identity only; no cookies or passwords |
 | Tab assignment | Work | task lifetime | IDs, origin and generation; no unrelated-tab inventory |
@@ -26,9 +26,17 @@ Work stores Host-owned data under the operating system's per-user application-da
 - A recoverable backup is kept until the new version starts successfully.
 - Unknown fields are preserved only when the schema explicitly supports forward compatibility.
 - Configuration paths are canonicalised and checked before file access.
-- The persisted Work launch target contains only DSH runtime, DSH data-directory
-  and profile identity; a Workspace context is resolved separately per session
-  or Worker generation.
+- The persisted Configured Run context contains only DSH runtime,
+  DSH data-directory and profile identity; the data directory scopes the
+  profile and its plugin associations. A Workspace context is resolved
+  separately per session or Worker generation.
+- A context-switch candidate is not current and is not committed to the
+  Configured Run context until its Worker reaches `Ready`. Work retains the
+  last known-good Run context as the automatic rollback source; a failed
+  candidate must not replace it.
+- Plugin mutations are authorised only for the profile in the current `Ready`
+  Run context. Non-current profile/plugin data may be read for inspection but
+  must be rejected for mutation at the manager boundary.
 - Work does not change global environment variables or package-manager configuration.
 
 ## Local endpoints
