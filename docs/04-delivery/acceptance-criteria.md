@@ -21,6 +21,13 @@ when the last visible Work window is closed, then Work enters `Stopping`,
 cancels active work and exits after cleanup. In either mode, choosing `Quit
 DSH Work` performs the full managed shutdown.
 
+During an explicit managed shutdown, Work hides all Work-owned windows before
+waiting for Worker cleanup and exits only after the managed process boundary is
+verified. If cleanup fails, Work remains available from the tray, preserves the
+cleanup owner and opens a trusted recovery surface so cleanup can be retried.
+An active DSH conversation, question or approval is cancelled by the Worker
+boundary; Work never approves, resumes or reconstructs DSH conversation state.
+
 ### AC-004 — Loopback and trusted navigation
 
 Given a Worker launch, then its service is reachable only through the selected loopback endpoint; when an unrelated web origin attempts HTTP or WebSocket access, it cannot read data or invoke state-changing Worker behaviour; when embedded content attempts top-level external navigation, Work blocks it and offers the system browser.

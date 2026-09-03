@@ -108,8 +108,11 @@ func main() {
 	var workspaceWindow application.Window
 	var settingsWindow application.Window
 	var settingsWindowMu sync.Mutex
+	var windowActionsMu sync.Mutex
 	var showWorkspace func()
 	var openSettings func(string)
+	var quitFlow lifecycle.QuitFlow
+	var applicationShuttingDown atomic.Bool
 	nativeNotification := wailsnotifications.New()
 	nativeNotificationHost := &nativeNotificationService{service: nativeNotification}
 	notificationRouter := worknotifications.NewRouter(
@@ -169,19 +172,39 @@ func main() {
 		if windowLedger.IsQuitting() {
 			return
 		}
+		windowActionsMu.Lock()
 		decision := windowLedger.RequestClose(name)
+		if decision.Action != lifecycle.WindowCloseQuit {
+			window.Hide()
+		}
+		windowActionsMu.Unlock()
 		if decision.Action == lifecycle.WindowCloseQuit {
 			host.Quit()
 			return
 		}
-		window.Hide()
 		event.Cancel()
 	}
+	hideWorkWindows := func() {
+		windowActionsMu.Lock()
+		defer windowActionsMu.Unlock()
+		windowLedger.SetVisible("workspace", false)
+		if workspaceWindow != nil {
+			workspaceWindow.Hide()
+		}
+		settingsWindowMu.Lock()
+		window := settingsWindow
+		settingsWindowMu.Unlock()
+		windowLedger.SetVisible("settings", false)
+		if window != nil {
+			window.Hide()
+		}
+	}
 	showWorkspace = func() {
-		if windowLedger.IsQuitting() || workspaceWindow == nil {
+		windowActionsMu.Lock()
+		defer windowActionsMu.Unlock()
+		if workspaceWindow == nil || !windowLedger.TryShow("workspace") {
 			return
 		}
-		windowLedger.SetVisible("workspace", true)
 		workspaceWindow.Show().Focus()
 	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
@@ -212,6 +235,9 @@ func main() {
 	})
 	trayMenu.AddSeparator()
 	trayRestartDSH := trayMenu.Add(initialNative.restartDSH).OnClick(func(*application.Context) {
+		if quitFlow.InProgress() || windowLedger.IsQuitting() {
+			return
+		}
 		host.Restart()
 	})
 	trayQuit := trayMenu.Add(initialNative.quit).OnClick(func(*application.Context) {
@@ -259,6 +285,11 @@ func main() {
 	}
 
 	openSettings = func(section string) {
+		windowActionsMu.Lock()
+		defer windowActionsMu.Unlock()
+		if !windowLedger.TryShow("settings") {
+			return
+		}
 		settingsWindowMu.Lock()
 		window := settingsWindow
 		if window == nil {
@@ -282,10 +313,6 @@ func main() {
 			settingsWindow = window
 		}
 		settingsWindowMu.Unlock()
-		if windowLedger.IsQuitting() {
-			return
-		}
-		windowLedger.SetVisible("settings", true)
 		window.SetURL(settingsURL(manager, section)).Show().Focus()
 	}
 
@@ -359,9 +386,30 @@ func main() {
 	})
 	host.SetQuitHandler(func() {
 		windowLedger.BeginQuit()
-		desktop.Quit()
+		quitFlow.Begin(
+			hideWorkWindows,
+			host.ShutdownForApp,
+			func() {
+				if !applicationShuttingDown.Load() {
+					desktop.Quit()
+				}
+			},
+			func(err error) {
+				log.Printf("Work host shutdown: %v", err)
+				if applicationShuttingDown.Load() {
+					return
+				}
+				windowLedger.CancelQuit()
+				if openSettings != nil {
+					openSettings("overview")
+				}
+			},
+		)
 	})
 	desktop.OnShutdown(func() {
+		applicationShuttingDown.Store(true)
+		windowLedger.BeginQuit()
+		hideWorkWindows()
 		if err := host.ShutdownForApp(); err != nil {
 			log.Printf("Work host shutdown: %v", err)
 		}

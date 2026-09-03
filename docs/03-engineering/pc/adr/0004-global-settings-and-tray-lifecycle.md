@@ -55,6 +55,13 @@ therefore required for the Windows slice.
    page contains launch target and close policy. Saving the close preference
    updates the shared ledger immediately; it does not restart DSH or mutate DSH
    data.
+7. Realize explicit quit as a pre-exit `QuitFlow`: mark the window ledger as
+   quitting, hide every existing Work window synchronously, run bounded Host
+   cleanup in the background, and call the native application quit only after
+   cleanup succeeds. A cleanup failure clears the quit gate, leaves the tray
+   available and opens the trusted Settings overview for retry. The Wails
+   `OnShutdown` hook still marks the ledger before its final fallback cleanup so
+   native window destruction cannot be mistaken for a tray close.
 
 ## Consequences
 
@@ -64,6 +71,8 @@ Positive:
 - The default tray behaviour keeps the managed DSH session available without
   keeping a window on screen.
 - Full quit remains an unambiguous cleanup command.
+- A slow or active DSH shutdown no longer leaves a visible WebView looking
+  frozen, and cleanup failures remain recoverable without a second Host.
 - Shared tests cover the decision without importing Wails or Windows handles.
 - Wails owns native tray realization for Windows, macOS and Linux; Work does
   not create placeholder platform implementations.

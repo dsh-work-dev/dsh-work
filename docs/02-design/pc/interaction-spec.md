@@ -58,8 +58,26 @@ session.
 - If the user disables the close-to-tray setting, closing the last visible Work
   window initiates managed shutdown instead of hiding it.
 - `Quit DSH Work` is always distinct from close and initiates managed shutdown.
-- During shutdown, the tray and window show `Stopping`; duplicate quit actions are ignored.
+- During shutdown, the tray reports `Stopping`; Work-owned windows hide immediately
+  and cannot be reopened; duplicate quit actions are ignored.
 - If a task is active, quit explains that it will cancel the task and detach browser control; it does not close the user's browser.
+
+Managed quit is a two-stage boundary:
+
+1. Work enters `Stopping`, blocks new lifecycle actions and immediately hides
+   every Work-owned window so a slow Worker cleanup does not look like a frozen
+   desktop surface.
+2. Work cancels its own active operations, lets DSH handle the current
+   conversation/session shutdown, closes the per-generation gateway and
+   verifies the managed Worker boundary. Only a successful verification exits
+   the Host.
+
+If cleanup fails, Work stays in the tray, reopens the trusted Settings overview
+and keeps the cleanup owner so the user can retry. Work does not answer,
+approve, save or reconstruct DSH conversation state; DSH remains the source of
+truth for that state. Closing an active DSH conversation therefore cannot grant
+an approval or continue a partially completed action, and it never closes the
+user's external browser.
 
 ## Startup surface
 

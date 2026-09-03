@@ -254,6 +254,11 @@ export function mountManager() {
         profile: nextProfile
       });
     }
+    if (hostStatus?.state === "Failed" && hostStatus.error) {
+      const failure = hostStatus.error;
+      const detail = failure.detail ? ` · ${failure.detail}` : "";
+      setFeedback(`${failure.summary} (${failure.code})${detail}`, "error");
+    }
   }
 
   function syncManagedProfile(preferred?: ManagerProfileRef) {

@@ -42,10 +42,23 @@ func (l *WindowLedger) SetCloseToTray(enabled bool) {
 
 func (l *WindowLedger) SetVisible(id string, visible bool) {
 	l.mu.Lock()
-	if !l.quitting {
+	if !visible || !l.quitting {
 		l.visible[id] = visible
 	}
 	l.mu.Unlock()
+}
+
+// TryShow records a window as visible only when the application is not in a
+// managed quit. Keeping the guard and the ledger update atomic prevents a
+// tray action racing with quit from bringing a window back on screen.
+func (l *WindowLedger) TryShow(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.quitting {
+		return false
+	}
+	l.visible[id] = true
+	return true
 }
 
 func (l *WindowLedger) RequestClose(id string) WindowCloseDecision {
@@ -66,6 +79,17 @@ func (l *WindowLedger) RequestClose(id string) WindowCloseDecision {
 func (l *WindowLedger) BeginQuit() {
 	l.mu.Lock()
 	l.quitting = true
+	for id := range l.visible {
+		l.visible[id] = false
+	}
+	l.mu.Unlock()
+}
+
+// CancelQuit reopens the lifecycle boundary after a pre-exit cleanup failure.
+// Windows remain logically hidden until a caller explicitly shows one again.
+func (l *WindowLedger) CancelQuit() {
+	l.mu.Lock()
+	l.quitting = false
 	l.mu.Unlock()
 }
 
