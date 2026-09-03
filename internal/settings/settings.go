@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/local/work/internal/lifecycle"
+	"github.com/local/work/internal/notifications"
 )
 
 const stateVersion = 1
@@ -33,13 +34,19 @@ func (l Locale) Valid() bool {
 // CloseToTray is true by default so closing the last window keeps Work and
 // its managed DSH worker available from the notification area.
 type Values struct {
-	Version     int    `json:"version"`
-	CloseToTray bool   `json:"closeToTray"`
-	Locale      Locale `json:"locale"`
+	Version       int                       `json:"version"`
+	CloseToTray   bool                      `json:"closeToTray"`
+	Locale        Locale                    `json:"locale"`
+	Notifications notifications.Preferences `json:"notifications"`
 }
 
 func DefaultValues() Values {
-	return Values{Version: stateVersion, CloseToTray: true, Locale: DefaultLocale}
+	return Values{
+		Version:       stateVersion,
+		CloseToTray:   true,
+		Locale:        DefaultLocale,
+		Notifications: notifications.DefaultPreferences(),
+	}
 }
 
 // Store owns persistence mechanics. Settings policy remains independent of
@@ -141,6 +148,26 @@ func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) 
 	return next, nil
 }
 
+func (m *Manager) SetNotificationPreference(ctx context.Context, key notifications.PreferenceKey, enabled bool) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nextPreferences, ok := m.values.Notifications.Set(key, enabled)
+	if !ok {
+		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Notification preference is invalid", "choose a supported notification setting")
+	}
+	next := m.values
+	next.Notifications = nextPreferences
+	next.Version = stateVersion
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		return Values{}, err
+	}
+	m.values = next
+	return next, nil
+}
+
 type FileStore struct {
 	Replacer FileReplacer
 }
@@ -157,9 +184,10 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "Work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
-		Version     int     `json:"version"`
-		CloseToTray *bool   `json:"closeToTray"`
-		Locale      *Locale `json:"locale"`
+		Version       int             `json:"version"`
+		CloseToTray   *bool           `json:"closeToTray"`
+		Locale        *Locale         `json:"locale"`
+		Notifications json.RawMessage `json:"notifications"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || raw.Version != stateVersion {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "Work settings are invalid", "the persisted settings use an unsupported format")
@@ -171,6 +199,34 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	}
 	if raw.Locale != nil && raw.Locale.Valid() {
 		values.Locale = *raw.Locale
+	}
+	if len(raw.Notifications) > 0 && string(raw.Notifications) != "null" {
+		var candidate struct {
+			Enabled             *bool `json:"enabled"`
+			Completed           *bool `json:"completed"`
+			InteractionRequired *bool `json:"interactionRequired"`
+			Errors              *bool `json:"errors"`
+			Lifecycle           *bool `json:"lifecycle"`
+		}
+		if err := json.Unmarshal(raw.Notifications, &candidate); err == nil {
+			preferences := notifications.DefaultPreferences()
+			if candidate.Enabled != nil {
+				preferences.Enabled = *candidate.Enabled
+			}
+			if candidate.Completed != nil {
+				preferences.Completed = *candidate.Completed
+			}
+			if candidate.InteractionRequired != nil {
+				preferences.InteractionRequired = *candidate.InteractionRequired
+			}
+			if candidate.Errors != nil {
+				preferences.Errors = *candidate.Errors
+			}
+			if candidate.Lifecycle != nil {
+				preferences.Lifecycle = *candidate.Lifecycle
+			}
+			values.Notifications = preferences
+		}
 	}
 	return &values, nil
 }

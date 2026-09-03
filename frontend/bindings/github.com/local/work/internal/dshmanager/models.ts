@@ -90,6 +90,7 @@ export interface ProfileInfo {
     "exists": boolean;
     "kind": ProfileKind;
     "launchable": boolean;
+    "renamable": boolean;
     "autoInitialize": boolean;
     "pluginCount": number;
     "plugins"?: PluginInfo[] | null;
@@ -113,6 +114,15 @@ export enum ProfileKind {
 export interface ProfileRef {
     "homeId": string;
     "name": string;
+}
+
+/**
+ * ProfileRenameRequest changes the directory-backed identity of a custom DSH
+ * profile. Built-in profile names belong to the DSH adapter and are immutable.
+ */
+export interface ProfileRenameRequest {
+    "profile": ProfileRef;
+    "newName": string;
 }
 
 /**

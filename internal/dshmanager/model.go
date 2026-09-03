@@ -84,6 +84,7 @@ type ProfileInfo struct {
 	Exists         bool         `json:"exists"`
 	Kind           ProfileKind  `json:"kind"`
 	Launchable     bool         `json:"launchable"`
+	Renamable      bool         `json:"renamable"`
 	AutoInitialize bool         `json:"autoInitialize"`
 	PluginCount    int          `json:"pluginCount"`
 	Plugins        []PluginInfo `json:"plugins,omitempty"`
@@ -120,6 +121,13 @@ type PluginResult struct {
 	Profile         ProfileRef   `json:"profile"`
 	Plugins         []PluginInfo `json:"plugins"`
 	RestartRequired bool         `json:"restartRequired"`
+}
+
+// ProfileRenameRequest changes the directory-backed identity of a custom DSH
+// profile. Built-in profile names belong to the DSH adapter and are immutable.
+type ProfileRenameRequest struct {
+	Profile ProfileRef `json:"profile"`
+	NewName string     `json:"newName"`
 }
 
 // LaunchSelection is the persisted desired state and the active state

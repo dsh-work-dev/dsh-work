@@ -20,6 +20,7 @@ export type {
     PluginTarget,
     ProfileInfo,
     ProfileRef,
+    ProfileRenameRequest,
     ResolvedLaunch,
     RuntimeInfo,
     Snapshot

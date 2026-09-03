@@ -159,6 +159,18 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	return s.manager.RemovePlugin(ctx, request)
 }
 
+func (s *ManagerService) RenameProfile(ctx context.Context, request dshmanager.ProfileRenameRequest) (dshmanager.Snapshot, error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.Snapshot{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.RenameProfile(ctx, request)
+}
+
 func managerContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
 		parent = context.Background()

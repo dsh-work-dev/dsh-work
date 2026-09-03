@@ -58,6 +58,10 @@ export function RemoveRuntime(id: string): $CancellablePromise<dshmanager$0.Snap
     return $Call.ByID(3251481673, id);
 }
 
+export function RenameProfile(request: dshmanager$0.ProfileRenameRequest): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(2306798674, request);
+}
+
 export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $CancellablePromise<dshmanager$0.ResolvedLaunch> {
     return $Call.ByID(1105056358, request);
 }

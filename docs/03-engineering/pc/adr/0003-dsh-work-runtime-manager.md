@@ -72,8 +72,10 @@ Work must not duplicate those profile or plugin semantics.
    profiles.
 9. Runtime, DSH home, profile and plugin management is presented in a flat,
    shallow rail inside a second trusted Settings window. `Overview` is first
-   and read-only; one top-level `General` page owns launch target and close
-   policy; resource pages own profiles/plugins, runtimes and homes. The DSH
+   and read-only; it distinguishes the active session from the pending next
+   launch. One top-level `General` page owns launch target and close policy;
+   the `Profiles` resource page owns profiles and their child plugin actions,
+   while separate pages own runtimes and homes. The DSH
    Workspace window only loads the external DSH Web UI through the Worker
    gateway. The two windows share the Host process and manager state, but never
    share a WebView document or inject Host management markup into DSH content.
@@ -82,13 +84,20 @@ Work must not duplicate those profile or plugin semantics.
     in the system tray. These commands are handled by the Host and are not
     JavaScript inserted into the DSH page.
 11. Every plugin management command requires an explicit `ProfileRef`
-    consisting of a DSH home identity and profile name. The menu may prefill
-    the active profile, but the backend never infers a profile from a missing
-    command field. Plugin commands are serialized with catalog persistence and
+    consisting of a DSH home identity and profile name. The Profiles page
+    selects that reference independently from General's launch form; the
+    backend never infers a profile from a missing command field. A plugin is
+    shown only within its selected profile detail, where its management action
+    is available. Plugin commands are serialized with catalog persistence and
     report `restartRequired` when they target the active profile; the running
     Worker is not hot-reloaded and the user must explicitly restart it before
     the changed profile composition is used.
-12. The Settings window is created lazily and reused as one application-level
+12. Custom profile names may be changed by renaming the profile directory,
+    because DSH 0.1.2 has no public rename command and defines profile identity
+    by `$DSH_HOME/profiles/<name>`. Work never rewrites the profile manifest or
+    patch layers, refuses built-in and active profiles, and updates the
+    persisted desired selection when it references the renamed profile.
+13. The Settings window is created lazily and reused as one application-level
     settings and DSH management surface. Closing it hides the window without
     stopping DSH; application quit still cancels management operations and
     cleans the DSH Worker before the Host exits.

@@ -1,6 +1,9 @@
+import {Events} from "@wailsio/runtime";
+
 import {ManagerService} from "../bindings/github.com/local/work/internal/app";
 import {HomeOwnership, type HomeInfo, type LaunchSelection, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
-import {mountSettings} from "./settings";
+import {mountNotifications, mountSettings} from "./settings";
+import {buildOverviewModel, type OverviewLane} from "./overview";
 import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
 
@@ -18,6 +21,7 @@ const getTheme = ManagerService.GetTheme;
 const setDesiredSelection = ManagerService.SetDesiredSelection;
 const installPlugin = ManagerService.InstallPlugin;
 const removePlugin = ManagerService.RemovePlugin;
+const renameProfile = ManagerService.RenameProfile;
 const installRuntime = ManagerService.InstallRuntime;
 const removeRuntime = ManagerService.RemoveRuntime;
 const registerHome = ManagerService.RegisterHome;
@@ -69,13 +73,13 @@ function runtimeSourceLabel(value: string): string {
   return t("value.other");
 }
 
-type ManagerSection = "overview" | "profiles" | "runtimes" | "homes" | "settings";
+type ManagerSection = "overview" | "profiles" | "runtimes" | "homes" | "settings" | "notifications";
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "plugins") {
     return "profiles";
   }
-  if (value === "overview" || value === "profiles" || value === "runtimes" || value === "homes" || value === "settings") {
+  if (value === "overview" || value === "profiles" || value === "runtimes" || value === "homes" || value === "settings" || value === "notifications") {
     return value;
   }
   return "overview";
@@ -89,11 +93,11 @@ export function mountManager() {
   const save = document.getElementById("manager-save") as HTMLButtonElement;
   const packageInput = document.getElementById("manager-plugin-package") as HTMLInputElement;
   const install = document.getElementById("manager-plugin-install") as HTMLButtonElement;
-  const remove = document.getElementById("manager-plugin-remove") as HTMLButtonElement;
   const newHomePath = document.getElementById("manager-new-home-path") as HTMLInputElement;
   const newHomeId = document.getElementById("manager-new-home-id") as HTMLInputElement;
   const newHomeName = document.getElementById("manager-new-home-name") as HTMLInputElement;
   const registerHomeButton = document.getElementById("manager-register-home") as HTMLButtonElement;
+  const newProfileHome = document.getElementById("manager-new-profile-home") as HTMLSelectElement;
   const newProfile = document.getElementById("manager-new-profile") as HTMLInputElement;
   const newProfilePackage = document.getElementById("manager-new-profile-package") as HTMLInputElement;
   const createProfile = document.getElementById("manager-create-profile") as HTMLButtonElement;
@@ -101,20 +105,36 @@ export function mountManager() {
   const installRuntimeButton = document.getElementById("manager-runtime-install") as HTMLButtonElement;
   const feedback = document.getElementById("manager-feedback") as HTMLParagraphElement;
   const managerTitle = document.getElementById("manager-title") as HTMLHeadingElement;
-  const selectionRuntime = document.getElementById("manager-selection-runtime") as HTMLElement;
-  const selectionHome = document.getElementById("manager-selection-home") as HTMLElement;
-  const selectionProfile = document.getElementById("manager-selection-profile") as HTMLElement;
-  const selectionWorkspace = document.getElementById("manager-selection-workspace") as HTMLElement;
-  const selectionState = document.getElementById("manager-selection-state") as HTMLElement;
+  const currentRuntime = document.getElementById("manager-current-runtime") as HTMLElement;
+  const currentHome = document.getElementById("manager-current-home") as HTMLElement;
+  const currentProfile = document.getElementById("manager-current-profile") as HTMLElement;
+  const currentWorkspace = document.getElementById("manager-current-workspace") as HTMLElement;
+  const currentState = document.getElementById("manager-current-state") as HTMLElement;
+  const nextLaunch = document.getElementById("manager-next-launch") as HTMLElement;
+  const nextRuntime = document.getElementById("manager-next-runtime") as HTMLElement;
+  const nextHome = document.getElementById("manager-next-home") as HTMLElement;
+  const nextProfile = document.getElementById("manager-next-profile") as HTMLElement;
+  const nextWorkspace = document.getElementById("manager-next-workspace") as HTMLElement;
   const selectedProfileLabel = document.getElementById("manager-selected-profile") as HTMLElement;
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
+  const profileEmpty = document.getElementById("manager-profile-empty") as HTMLElement;
+  const profileDetail = document.getElementById("manager-profile-detail") as HTMLElement;
+  const profileName = document.getElementById("manager-profile-name") as HTMLInputElement;
+  const profileRename = document.getElementById("manager-profile-rename") as HTMLButtonElement;
+  const profilePlugins = document.getElementById("manager-profile-plugins") as HTMLDivElement;
   const profileList = document.getElementById("manager-profiles") as HTMLDivElement;
   const runtimeList = document.getElementById("manager-runtimes") as HTMLDivElement;
   const homeList = document.getElementById("manager-homes") as HTMLDivElement;
   const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-manager-section]"));
   const panels = Array.from(document.querySelectorAll<HTMLElement>("[data-manager-panel]"));
-  let currentSection = sectionName(new URLSearchParams(window.location.search).get("section"));
+  const query = new URLSearchParams(window.location.search);
+  const initialHome = query.get("home")?.trim();
+  const initialProfile = query.get("profile")?.trim();
+  let currentSection = sectionName(query.get("section"));
   let snapshot: ManagerSnapshot | undefined;
+  let managedProfile: ManagerProfileRef | undefined = initialHome && initialProfile
+    ? {homeId: initialHome, name: initialProfile}
+    : undefined;
   let themeSyncTimer: number | undefined;
   let themeSyncAvailable = false;
 
@@ -123,7 +143,8 @@ export function mountManager() {
     settings: {title: "manager.general"},
     profiles: {title: "manager.profiles"},
     runtimes: {title: "manager.runtimes"},
-    homes: {title: "manager.homes"}
+    homes: {title: "manager.homes"},
+    notifications: {title: "manager.notifications"}
   };
 
   function setFeedback(message: string, tone: "neutral" | "success" | "error" = "neutral") {
@@ -133,6 +154,7 @@ export function mountManager() {
   }
 
   const settings = mountSettings(setFeedback);
+  const notifications = mountNotifications(setFeedback);
 
   async function syncTheme() {
     if (!themeSyncAvailable) {
@@ -169,34 +191,117 @@ export function mountManager() {
     }
   }
 
-  function selectedProfile(): ManagerProfile | undefined {
-    return (snapshot?.profiles ?? []).find((item) => item.ref.homeId === home.value && item.ref.name === profile.value);
+  function sameProfileRef(left: ManagerProfileRef | undefined, right: ManagerProfileRef | undefined): boolean {
+    return !!left && !!right && left.homeId === right.homeId && left.name === right.name;
   }
 
-  function renderSelectionSummary() {
-    const selectedRuntime = (snapshot?.runtimes ?? []).find((item) => item.id === runtime.value);
-    const selectedHome = (snapshot?.homes ?? []).find((item) => item.id === home.value);
-    selectionRuntime.textContent = selectedRuntime
-      ? `${selectedRuntime.version} · ${t(selectedRuntime.installed ? "value.verified" : "value.unverified")}`
-      : t("value.noRuntime");
-    selectionHome.textContent = selectedHome?.name ?? t("value.noHome");
-    selectionProfile.textContent = profile.value ? `${home.value} / ${profile.value}` : t("value.noProfile");
-    selectionWorkspace.textContent = workspace.value || t("value.noWorkspace");
+  function managedProfileItem(): ManagerProfile | undefined {
+    if (!managedProfile) {
+      return undefined;
+    }
+    return (snapshot?.profiles ?? []).find((item) => sameProfileRef(item.ref, managedProfile));
   }
 
-  function renderProfileSelection() {
-    const item = selectedProfile();
-    if (!item) {
-      selectedProfileLabel.textContent = t("value.noProfile");
-      profileScopeNote.textContent = t("profiles.choose");
-      renderSelectionSummary();
+  function homeLabel(homeId: string): string {
+    return (snapshot?.homes ?? []).find((item) => item.id === homeId)?.name ?? homeId;
+  }
+
+  function renderOverviewLane(lane: OverviewLane, fields: {runtime: HTMLElement; home: HTMLElement; profile: HTMLElement; workspace: HTMLElement}) {
+    fields.runtime.textContent = lane.runtime
+      ? `${lane.runtime.version} · ${t(lane.runtime.installed ? "value.verified" : "value.unverified")}`
+      : lane.selection?.runtimeId || t("value.noRuntime");
+    fields.home.textContent = lane.home?.name ?? lane.selection?.profile.homeId ?? t("value.noHome");
+    fields.profile.textContent = lane.selection?.profile.name ?? t("value.noProfile");
+    fields.workspace.textContent = lane.selection?.workspace || t("value.noWorkspace");
+  }
+
+  function renderOverview() {
+    if (!snapshot) {
       return;
     }
-    selectedProfileLabel.textContent = `${item.ref.homeId} / ${item.ref.name}`;
-    profileScopeNote.textContent = item.exists
-      ? t("value.ready")
-      : t("value.notInitialized");
-    renderSelectionSummary();
+    const model = buildOverviewModel(snapshot);
+    renderOverviewLane(model.current, {
+      runtime: currentRuntime,
+      home: currentHome,
+      profile: currentProfile,
+      workspace: currentWorkspace
+    });
+    currentState.textContent = t({
+      active: "value.active",
+      "restart-required": "value.restartRequired",
+      "not-running": "value.notRunning",
+      "no-target": "value.noLaunchTarget"
+    }[model.state]);
+    nextLaunch.hidden = !model.next;
+    if (model.next) {
+      renderOverviewLane(model.next, {
+        runtime: nextRuntime,
+        home: nextHome,
+        profile: nextProfile,
+        workspace: nextWorkspace
+      });
+    }
+  }
+
+  function syncManagedProfile(preferred?: ManagerProfileRef) {
+    const profiles = snapshot?.profiles ?? [];
+    const candidate = preferred ?? managedProfile;
+    const match = candidate && profiles.find((item) => sameProfileRef(item.ref, candidate));
+    if (match) {
+      managedProfile = {...match.ref};
+      return;
+    }
+    managedProfile = undefined;
+  }
+
+  function renderPluginList(item: ManagerProfile) {
+    profilePlugins.replaceChildren();
+    const plugins = item.plugins ?? [];
+    if (plugins.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "manager-empty";
+      empty.textContent = item.exists ? t("profiles.noPlugins") : t("value.notInitialized");
+      profilePlugins.append(empty);
+      return;
+    }
+    for (const plugin of plugins) {
+      const row = document.createElement("div");
+      row.className = "plugin-list-item";
+      const text = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = plugin.name;
+      const detail = document.createElement("span");
+      detail.textContent = plugin.spec || plugin.version || t("value.installed");
+      text.append(name, detail);
+      const removeButton = document.createElement("button");
+      removeButton.className = "button button-secondary";
+      removeButton.type = "button";
+      removeButton.textContent = t("action.remove");
+      removeButton.dataset.pluginRemove = "true";
+      removeButton.addEventListener("click", () => void mutatePlugin("remove", plugin.package || plugin.name, removeButton));
+      row.append(text, removeButton);
+      profilePlugins.append(row);
+    }
+  }
+
+  function renderProfileDetail() {
+    const item = managedProfileItem();
+    profileEmpty.hidden = !!item;
+    profileDetail.hidden = !item;
+    if (!item) {
+      profileName.value = "";
+      profilePlugins.replaceChildren();
+      return;
+    }
+    selectedProfileLabel.textContent = item.ref.name;
+    const profileState = item.renamable
+      ? `${homeLabel(item.ref.homeId)} · ${profileKindLabel(item.kind)}`
+      : `${homeLabel(item.ref.homeId)} · ${profileKindLabel(item.kind)} · ${t("profiles.fixedName")}`;
+    profileScopeNote.textContent = profileState;
+    profileName.value = item.ref.name;
+    profileName.disabled = !item.renamable;
+    profileRename.disabled = !item.renamable;
+    renderPluginList(item);
   }
 
   function fillProfiles(preferred?: ManagerProfileRef) {
@@ -209,7 +314,6 @@ export function mountManager() {
       option.disabled = true;
       option.selected = true;
       profile.append(option);
-      renderProfileSelection();
       return;
     }
     for (const item of profiles) {
@@ -224,7 +328,6 @@ export function mountManager() {
     } else if (!profiles.some((item) => item.ref.name === profile.value)) {
       profile.value = profiles[0].ref.name;
     }
-    renderProfileSelection();
   }
 
   function renderSelection() {
@@ -255,47 +358,55 @@ export function mountManager() {
       home.selectedIndex = 0;
     }
     fillProfiles(desired?.profile);
-    if (snapshot?.active) {
-      selectionState.textContent = t("value.activeRestart");
-    } else {
-      selectionState.textContent = t("value.saved");
+    newProfileHome.replaceChildren();
+    for (const item of snapshot?.homes ?? []) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.name;
+      newProfileHome.append(option);
     }
-    renderSelectionSummary();
+    if (desired?.profile.homeId && (snapshot?.homes ?? []).some((item) => item.id === desired.profile.homeId)) {
+      newProfileHome.value = desired.profile.homeId;
+    } else if (home.value) {
+      newProfileHome.value = home.value;
+    } else if (newProfileHome.options.length > 0) {
+      newProfileHome.selectedIndex = 0;
+    }
   }
 
   function selectProfile(ref: ManagerProfileRef) {
-    home.value = ref.homeId;
-    fillProfiles(ref);
-    profile.value = ref.name;
-    renderProfileSelection();
+    managedProfile = {...ref};
+    renderProfiles();
     showSection("profiles");
   }
 
   function renderProfiles() {
     profileList.replaceChildren();
     const profiles = snapshot?.profiles ?? [];
+    if (!managedProfileItem()) {
+      syncManagedProfile();
+    }
     if (profiles.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
       empty.textContent = t("profiles.noProfiles");
       profileList.append(empty);
+      renderProfileDetail();
       return;
     }
     for (const item of profiles) {
-      const selected = item.ref.homeId === home.value && item.ref.name === profile.value;
+      const selected = sameProfileRef(item.ref, managedProfile);
       const row = document.createElement("div");
       row.className = `manager-list-item${selected ? " is-selected" : ""}`;
       const text = document.createElement("div");
       const name = document.createElement("strong");
-      name.textContent = `${item.ref.homeId} / ${item.ref.name}`;
+      name.textContent = item.ref.name;
       const detail = document.createElement("span");
-      const pluginNames = (item.plugins ?? []).map((plugin) => plugin.name).join(", ");
       detail.textContent = t("profiles.pluginDetail", {
+        home: homeLabel(item.ref.homeId),
         kind: profileKindLabel(item.kind),
         count: item.pluginCount,
-        plural: item.pluginCount === 1 ? "" : "s",
-        plugins: pluginNames ? ` · ${pluginNames}` : "",
-        state: item.exists ? "" : ` · ${t("value.new")}`
+        plural: item.pluginCount === 1 ? "" : "s"
       });
       text.append(name, detail);
       const choose = document.createElement("button");
@@ -307,6 +418,7 @@ export function mountManager() {
       row.append(text, choose);
       profileList.append(row);
     }
+    renderProfileDetail();
   }
 
   function renderRuntimes() {
@@ -405,12 +517,14 @@ export function mountManager() {
     }
   }
 
-  async function refresh() {
+  async function refresh(preferredProfile?: ManagerProfileRef) {
     setFeedback("");
     try {
       snapshot = await getSnapshot();
       applyTheme(snapshot.theme);
       renderSelection();
+      syncManagedProfile(preferredProfile);
+      renderOverview();
       renderProfiles();
       renderRuntimes();
       renderHomes();
@@ -421,16 +535,18 @@ export function mountManager() {
       setFeedback(managerErrorMessage(error, "error.loadDshData"), "error");
       console.error("Could not read DSH manager snapshot", error);
     }
-    await settings.refresh();
+    await Promise.all([settings.refresh(), notifications.refresh()]);
   }
 
   for (const item of navItems) {
     item.addEventListener("click", () => showSection(sectionName(item.dataset.managerSection ?? null)));
   }
+  Events.On("lifecycle", () => void refresh());
   showSection(currentSection);
   subscribeLocale(() => {
     showSection(currentSection);
     renderSelection();
+    renderOverview();
     renderProfiles();
     renderRuntimes();
     renderHomes();
@@ -438,18 +554,15 @@ export function mountManager() {
 
   home.addEventListener("change", () => {
     fillProfiles();
-    renderProfiles();
   });
-  runtime.addEventListener("change", renderSelectionSummary);
-  profile.addEventListener("change", () => {
-    renderProfileSelection();
-    renderProfiles();
+  window.addEventListener("focus", () => {
+    void syncTheme();
+    void refresh();
   });
-  workspace.addEventListener("input", renderSelectionSummary);
-  window.addEventListener("focus", () => void syncTheme());
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       void syncTheme();
+      void refresh();
     }
   });
 
@@ -468,6 +581,7 @@ export function mountManager() {
       applyTheme(snapshot.theme);
       setFeedback(snapshot.active ? t("feedback.savedRestart") : t("feedback.savedNextStart"), "success");
       renderSelection();
+      renderOverview();
       renderProfiles();
       renderRuntimes();
       renderHomes();
@@ -479,28 +593,53 @@ export function mountManager() {
     }
   })());
 
-  function explicitPluginTarget() {
-    if (!runtime.value || !home.value || !profile.value) {
-      throw new Error(t("error.selectPluginTarget"));
-    }
-    return {runtimeId: runtime.value, profile: {homeId: home.value, name: profile.value}};
+  function pluginRuntimeId(): string {
+    // Profile/plugin management has its own profile context. Use the
+    // persisted launch runtime (or the active one) rather than an unsaved
+    // General-form draft so changing launch settings cannot retarget a
+    // profile operation by accident.
+    const preferred = snapshot?.desired?.runtimeId || snapshot?.active?.runtimeId || "";
+    const selected = (snapshot?.runtimes ?? []).find((item) => item.id === preferred && item.installed);
+    return selected?.id ??
+      (snapshot?.runtimes ?? []).find((item) => item.installed)?.id ??
+      preferred;
   }
 
-  async function mutatePlugin(operation: "install" | "remove") {
-    const packageSpec = packageInput.value.trim();
+  function explicitPluginTarget() {
+    if (!managedProfile) {
+      throw new Error(t("error.selectPluginTarget"));
+    }
+    return {runtimeId: pluginRuntimeId(), profile: {...managedProfile}};
+  }
+
+  function setPluginControlsDisabled(disabled: boolean) {
+    install.disabled = disabled;
+    profileName.disabled = disabled || !managedProfileItem()?.renamable;
+    profileRename.disabled = disabled || !managedProfileItem()?.renamable;
+    for (const button of Array.from(profilePlugins.querySelectorAll<HTMLButtonElement>("[data-plugin-remove]"))) {
+      button.disabled = disabled;
+    }
+  }
+
+  async function mutatePlugin(operation: "install" | "remove", packageOverride?: string, sourceButton?: HTMLButtonElement) {
+    const packageSpec = (packageOverride ?? packageInput.value).trim();
     if (!packageSpec) {
       setFeedback(t("error.enterPackage"), "error");
-      packageInput.focus();
+      if (operation === "install") {
+        packageInput.focus();
+      }
       return;
     }
-    install.disabled = true;
-    remove.disabled = true;
     try {
       const target = explicitPluginTarget();
+      setPluginControlsDisabled(true);
+      if (sourceButton) {
+        sourceButton.disabled = true;
+      }
       const result = operation === "install"
         ? await installPlugin({target, package: packageSpec})
         : await removePlugin({target, package: packageSpec});
-      await refresh();
+      await refresh(target.profile);
       setFeedback(result.restartRequired
         ? t("feedback.pluginChangedRestart")
         : t(operation === "install" ? "feedback.pluginInstalled" : "feedback.pluginRemoved", {profile: result.profile.name}), "success");
@@ -508,13 +647,42 @@ export function mountManager() {
       setFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
       console.error("Could not change profile plugin", error);
     } finally {
-      install.disabled = false;
-      remove.disabled = false;
+      setPluginControlsDisabled(false);
     }
   }
 
   install.addEventListener("click", () => void mutatePlugin("install"));
-  remove.addEventListener("click", () => void mutatePlugin("remove"));
+
+  profileRename.addEventListener("click", () => void (async () => {
+    const item = managedProfileItem();
+    if (!item || !item.renamable) {
+      return;
+    }
+    const nextName = profileName.value.trim();
+    if (!nextName) {
+      setFeedback(t("error.profileNameRequired"), "error");
+      profileName.focus();
+      return;
+    }
+    profileRename.disabled = true;
+    profileName.disabled = true;
+    try {
+      snapshot = await renameProfile({profile: item.ref, newName: nextName});
+      managedProfile = {homeId: item.ref.homeId, name: nextName};
+      applyTheme(snapshot.theme);
+      renderSelection();
+      renderOverview();
+      renderProfiles();
+      renderRuntimes();
+      renderHomes();
+      setFeedback(t("feedback.profileRenamed", {profile: nextName}), "success");
+    } catch (error) {
+      setFeedback(managerErrorMessage(error, "error.renameProfile"), "error");
+      console.error("Could not rename DSH profile", error);
+    } finally {
+      renderProfileDetail();
+    }
+  })());
 
   registerHomeButton.addEventListener("click", () => void (async () => {
     if (!newHomeId.value.trim() || !newHomeName.value.trim() || !newHomePath.value.trim()) {
@@ -534,6 +702,7 @@ export function mountManager() {
       newHomeId.value = "";
       newHomeName.value = "";
       renderSelection();
+      renderOverview();
       renderProfiles();
       renderRuntimes();
       renderHomes();
@@ -548,18 +717,19 @@ export function mountManager() {
   createProfile.addEventListener("click", () => void (async () => {
     const name = newProfile.value.trim();
     const packageSpec = newProfilePackage.value.trim();
-    if (!runtime.value || !home.value || !name || !packageSpec) {
+    const homeId = newProfileHome.value;
+    if (!homeId || !name || !packageSpec) {
       setFeedback(t("error.createProfileFields"), "error");
       return;
     }
     createProfile.disabled = true;
     try {
       const result = await installPlugin({
-        target: {runtimeId: runtime.value, profile: {homeId: home.value, name}},
+        target: {runtimeId: pluginRuntimeId(), profile: {homeId, name}},
         package: packageSpec
       });
-      await refresh();
-      selectProfile({homeId: home.value, name});
+      await refresh({homeId, name});
+      selectProfile({homeId, name});
       setFeedback(result.restartRequired
         ? t("feedback.profileCreatedRestart")
         : t("feedback.profileCreated"), "success");
@@ -585,6 +755,7 @@ export function mountManager() {
       setFeedback(t("feedback.installedRuntime", {version}), "success");
       runtimeVersion.value = "";
       renderSelection();
+      renderOverview();
       renderProfiles();
       renderRuntimes();
       renderHomes();
@@ -596,5 +767,5 @@ export function mountManager() {
     }
   })());
 
-  void refresh();
+  void refresh(managedProfile);
 }

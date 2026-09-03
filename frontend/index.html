@@ -96,7 +96,8 @@
         <nav class="manager-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
           <button class="manager-nav-item is-active" data-manager-section="overview" data-i18n="manager.overview" type="button">Overview</button>
           <button class="manager-nav-item" data-manager-section="settings" data-i18n="manager.general" type="button">General</button>
-          <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles &amp; plugins</button>
+          <button class="manager-nav-item" data-manager-section="notifications" data-i18n="manager.notifications" type="button">Notifications</button>
+          <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles</button>
           <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
           <button class="manager-nav-item" data-manager-section="homes" data-i18n="manager.homes" type="button">DSH homes</button>
         </nav>
@@ -112,40 +113,74 @@
         <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
           <div class="panel-heading">
             <div>
-              <h2 id="selection-title" data-i18n="manager.launchContext">Launch context</h2>
+              <h2 id="selection-title" data-i18n="manager.launchContext">DSH session</h2>
             </div>
           </div>
-          <div class="overview-facts-layout">
-            <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.currentDshContext" aria-label="Current DSH context">
-              <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-selection-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-              <div><dt data-i18n="field.home">Home</dt><dd id="manager-selection-home" data-i18n="value.noHome">No home selected</dd></div>
-              <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-selection-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-              <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-selection-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
-              <div><dt data-i18n="field.launchState">Launch state</dt><dd id="manager-selection-state" data-i18n="value.saved">Saved</dd></div>
-            </dl>
+          <div class="overview-context-grid">
+            <section class="overview-context" aria-labelledby="overview-current-title">
+              <div class="overview-context-heading">
+                <h3 id="overview-current-title" data-i18n="manager.currentSession">Current session</h3>
+                <span id="manager-current-state" class="overview-state" data-i18n="value.notRunning">Not running</span>
+              </div>
+              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.currentDshContext" aria-label="Current DSH session">
+                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                <div><dt data-i18n="field.home">Home</dt><dd id="manager-current-home" data-i18n="value.noHome">No home selected</dd></div>
+                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-current-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
+              </dl>
+            </section>
+            <section id="manager-next-launch" class="overview-context" aria-labelledby="overview-next-title" hidden>
+              <div class="overview-context-heading">
+                <h3 id="overview-next-title" data-i18n="manager.nextLaunch">Next launch</h3>
+                <span class="overview-state" data-i18n="value.readyNextStart">Ready for next start</span>
+              </div>
+              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.nextLaunch" aria-label="Next launch">
+                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-next-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                <div><dt data-i18n="field.home">Home</dt><dd id="manager-next-home" data-i18n="value.noHome">No home selected</dd></div>
+                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-next-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                <div><dt data-i18n="field.workspace">Workspace</dt><dd id="manager-next-workspace" data-i18n="value.noWorkspace">No workspace</dd></div>
+              </dl>
+            </section>
           </div>
         </section>
 
         <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
           <div class="profiles-layout">
             <div class="profile-directory">
-              <div class="subheading"><strong data-i18n="profiles.title">Profiles</strong></div>
               <div id="manager-profiles" class="manager-list"></div>
+              <div class="create-profile-block">
+                <div class="subheading"><strong data-i18n="profiles.create">New profile</strong></div>
+                <label><span data-i18n="field.home">Home</span><select id="manager-new-profile-home"></select></label>
+                <label><span data-i18n="field.name">Name</span><input id="manager-new-profile" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
+                <label><span data-i18n="profiles.firstPlugin">First plugin</span><input id="manager-new-profile-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+                <button class="button button-secondary" id="manager-create-profile" data-i18n="action.create" type="button">Create</button>
+              </div>
             </div>
             <div class="plugin-editor">
-              <p class="card-label" data-i18n="field.profile">Profile</p>
-              <strong id="manager-selected-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</strong>
-              <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile.</p>
-              <label><span data-i18n="profiles.package">Package</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-              <div class="button-row">
-                <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
-                <button class="button button-secondary" id="manager-plugin-remove" data-i18n="action.remove" type="button">Remove</button>
+              <div id="manager-profile-empty" class="profile-empty">
+                <p class="card-label" data-i18n="field.profile">Profile</p>
+                <p class="manager-empty" data-i18n="profiles.choose">Choose a profile to manage its plugins.</p>
               </div>
-              <div class="create-profile-block">
-                <div class="subheading"><strong data-i18n="profiles.create">Create profile</strong></div>
-                <label><span data-i18n="field.name">Name</span><input id="manager-new-profile" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
-                <label><span data-i18n="profiles.package">Package</span><input id="manager-new-profile-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-                <button class="button button-secondary" id="manager-create-profile" data-i18n="action.create" type="button">Create</button>
+              <div id="manager-profile-detail" hidden>
+                <div class="profile-detail-heading">
+                  <div>
+                    <p class="card-label" data-i18n="field.profile">Profile</p>
+                    <h2 id="manager-selected-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</h2>
+                    <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile to manage its plugins.</p>
+                  </div>
+                </div>
+                <div class="profile-rename-row">
+                  <label><span data-i18n="profiles.name">Profile name</span><input id="manager-profile-name" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
+                  <button class="button button-secondary" id="manager-profile-rename" data-i18n="action.rename" type="button">Rename</button>
+                </div>
+                <div class="plugin-management">
+                  <div class="subheading"><strong data-i18n="profiles.plugins">Plugins</strong></div>
+                  <div id="manager-profile-plugins" class="plugin-list"></div>
+                  <div class="plugin-install-row">
+                    <label><span data-i18n="profiles.addPlugin">Add plugin</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+                    <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -228,6 +263,72 @@
             </div>
           </div>
           <p id="settings-close-to-tray-status" class="sr-only" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="manager-section-notifications" class="manager-section settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>
+          <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong id="notifications-desktop-label" data-i18n="notifications.desktop">Desktop notifications</strong>
+                <span id="notifications-desktop-detail" class="setting-detail" data-i18n="notifications.desktopDetail">Show selected DSH and Work events when the workspace is hidden.</span>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-notifications-enabled">
+                  <input id="settings-notifications-enabled" type="checkbox" role="switch" aria-labelledby="notifications-desktop-label" aria-describedby="notifications-desktop-detail settings-notifications-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong id="notifications-completed-label" data-i18n="notifications.completed">Task completed</strong>
+                <span id="notifications-completed-detail" class="setting-detail" data-i18n="notifications.completedDetail">A DSH task finishes successfully or with an error.</span>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-notifications-completed">
+                  <input id="settings-notifications-completed" type="checkbox" role="switch" aria-labelledby="notifications-completed-label" aria-describedby="notifications-completed-detail settings-notifications-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong id="notifications-interaction-required-label" data-i18n="notifications.interactionRequired">Needs attention</strong>
+                <span id="notifications-interaction-required-detail" class="setting-detail" data-i18n="notifications.interactionRequiredDetail">DSH asks a question or waits for an approval.</span>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-notifications-interaction-required">
+                  <input id="settings-notifications-interaction-required" type="checkbox" role="switch" aria-labelledby="notifications-interaction-required-label" aria-describedby="notifications-interaction-required-detail settings-notifications-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong id="notifications-errors-label" data-i18n="notifications.errors">Errors</strong>
+                <span id="notifications-errors-detail" class="setting-detail" data-i18n="notifications.errorsDetail">Startup fails or DSH cannot reach the runtime or workspace.</span>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-notifications-errors">
+                  <input id="settings-notifications-errors" type="checkbox" role="switch" aria-labelledby="notifications-errors-label" aria-describedby="notifications-errors-detail settings-notifications-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <strong id="notifications-lifecycle-label" data-i18n="notifications.lifecycle">DSH status</strong>
+                <span id="notifications-lifecycle-detail" class="setting-detail" data-i18n="notifications.lifecycleDetail">DSH starts, becomes ready, or stops.</span>
+              </div>
+              <div class="setting-control">
+                <label class="switch" for="settings-notifications-lifecycle">
+                  <input id="settings-notifications-lifecycle" type="checkbox" role="switch" aria-labelledby="notifications-lifecycle-label" aria-describedby="notifications-lifecycle-detail settings-notifications-status" />
+                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <p id="settings-notifications-status" class="sr-only" role="status" aria-live="polite"></p>
         </section>
       </div>
     </main>

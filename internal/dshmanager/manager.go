@@ -379,6 +379,89 @@ func (m *Manager) RemovePlugin(ctx context.Context, request PluginRemoveRequest)
 	return m.runPluginCommand(ctx, request.Target, request.Package, "remove")
 }
 
+// RenameProfile changes the directory name that DSH uses as a custom
+// profile's identity. DSH 0.1.2 exposes no profile-rename CLI command; its
+// public contract resolves profiles directly from $DSH_HOME/profiles/<name>.
+// The manager therefore keeps this narrow filesystem operation at the
+// identity boundary: it never rewrites package.json, dsh.profile or patch
+// layers, and it refuses built-in or active profiles.
+func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameRequest) (Snapshot, error) {
+	release, err := m.acquireOperation(ctx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer release()
+	if err := contextError(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	if err := validateProfileRef(request.Profile); err != nil {
+		return Snapshot{}, err
+	}
+	newName := strings.TrimSpace(request.NewName)
+	if !validProfileName(newName) {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "new DSH profile name is invalid", "profile names cannot contain path separators")
+	}
+	if newName == request.Profile.Name {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "the DSH profile name is unchanged", "enter a different profile name")
+	}
+
+	m.mu.RLock()
+	config := m.configSnapshotLocked()
+	desired := cloneSelection(m.desired)
+	active := cloneSelection(m.active)
+	m.mu.RUnlock()
+	home, ok := findHome(config.Homes, request.Profile.HomeID)
+	if !ok {
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH home was not found", "the profile home is not in the catalog")
+	}
+	if home.Ownership == HomeOwnershipUser && !directoryExists(home.Path) {
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH home is unavailable", "register an existing DSH home directory")
+	}
+	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be renamed", "choose a custom profile")
+	}
+	if active != nil && active.Profile == request.Profile {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the active DSH profile cannot be renamed", "stop DSH before renaming the active profile")
+	}
+	oldPath := filepath.Join(home.Path, "profiles", request.Profile.Name)
+	oldInfo, err := os.Stat(oldPath)
+	if err != nil || !oldInfo.IsDir() {
+		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH profile was not found", "choose an existing custom profile")
+	}
+	if profileExists(config.ProfileCatalog, home, newName) {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "a DSH profile already uses that name", "choose a different profile name")
+	}
+	newPath := filepath.Join(home.Path, "profiles", newName)
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileRenameFailed, "the DSH profile could not be renamed", "the profile directory was not changed", true, false)
+	}
+
+	desiredChanged := desired != nil && desired.Profile == request.Profile
+	if desiredChanged {
+		desired.Profile.Name = newName
+		m.mu.Lock()
+		m.desired = cloneSelection(desired)
+		state := m.stateLocked()
+		statePath := m.config.StatePath
+		m.mu.Unlock()
+		if err := m.store.Save(ctx, statePath, state); err != nil {
+			rollbackErr := os.Rename(newPath, oldPath)
+			m.mu.Lock()
+			m.desired = cloneSelection(&LaunchSelection{
+				RuntimeID: desired.RuntimeID,
+				Profile:   request.Profile,
+				Workspace: desired.Workspace,
+			})
+			m.mu.Unlock()
+			if rollbackErr != nil {
+				return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileRenameFailed, "the DSH profile rename is only partially complete", "the profile directory changed but the launch selection could not be saved", true, true)
+			}
+			return Snapshot{}, err
+		}
+	}
+	return m.Snapshot(ctx)
+}
+
 func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, packageSpec, operation string) (PluginResult, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
@@ -839,6 +922,7 @@ func profileInfo(ctx context.Context, home HomeInfo, name string, exists bool, d
 		Exists:         exists,
 		Kind:           kind,
 		Launchable:     true,
+		Renamable:      exists && kind == ProfileKindCustom,
 		AutoInitialize: autoInitialize,
 		PluginCount:    len(plugins),
 		Plugins:        plugins,

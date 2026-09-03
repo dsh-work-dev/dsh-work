@@ -1,3 +1,5 @@
+import {Events} from "@wailsio/runtime";
+
 import {SettingsService} from "../bindings/github.com/local/work/internal/app";
 import type {Values} from "../bindings/github.com/local/work/internal/settings";
 import {applyLocale, normalizeLocale, subscribeLocale, t} from "./i18n";
@@ -24,11 +26,11 @@ export function mountSettings(setFeedback: Feedback) {
   const status = document.getElementById("settings-close-to-tray-status") as HTMLParagraphElement;
   let savedLocale = normalizeLocale(localeSelect.value);
 
-  function render(values: Values, announce = false) {
+  function render(values: Values) {
     toggle.checked = values.closeToTray;
     localeSelect.value = normalizeLocale(values.locale);
     savedLocale = normalizeLocale(values.locale);
-    status.textContent = announce ? t("feedback.saved") : "";
+    status.textContent = "";
   }
 
   subscribeLocale((locale) => {
@@ -54,7 +56,7 @@ export function mountSettings(setFeedback: Feedback) {
     const previous = !toggle.checked;
     toggle.disabled = true;
     try {
-      render(await SettingsService.SetCloseToTray(toggle.checked), true);
+      render(await SettingsService.SetCloseToTray(toggle.checked));
       setFeedback("");
     } catch (error) {
       toggle.checked = previous;
@@ -72,7 +74,7 @@ export function mountSettings(setFeedback: Feedback) {
     try {
       const values = await SettingsService.SetLocale(normalizeLocale(localeSelect.value));
       applyLocale(values.locale);
-      render(values, true);
+      render(values);
       setFeedback("");
     } catch (error) {
       localeSelect.value = previous;
@@ -82,6 +84,76 @@ export function mountSettings(setFeedback: Feedback) {
       localeSelect.disabled = false;
     }
   })());
+
+  return {refresh};
+}
+
+type NotificationPreferenceKey = "enabled" | "completed" | "interactionRequired" | "errors" | "lifecycle";
+
+const notificationPreferenceIds: Record<NotificationPreferenceKey, string> = {
+  enabled: "settings-notifications-enabled",
+  completed: "settings-notifications-completed",
+  interactionRequired: "settings-notifications-interaction-required",
+  errors: "settings-notifications-errors",
+  lifecycle: "settings-notifications-lifecycle"
+};
+
+export function mountNotifications(setFeedback: Feedback) {
+  const status = document.getElementById("settings-notifications-status") as HTMLParagraphElement;
+  const toggles = Object.fromEntries(
+    (Object.entries(notificationPreferenceIds) as Array<[NotificationPreferenceKey, string]>).map(([key, id]) => [
+      key,
+      document.getElementById(id) as HTMLInputElement
+    ])
+  ) as Record<NotificationPreferenceKey, HTMLInputElement>;
+
+  function render(values: Values) {
+    const preferences = values.notifications;
+    toggles.enabled.checked = preferences.enabled;
+    toggles.completed.checked = preferences.completed;
+    toggles.interactionRequired.checked = preferences.interactionRequired;
+    toggles.errors.checked = preferences.errors;
+    toggles.lifecycle.checked = preferences.lifecycle;
+    status.textContent = "";
+  }
+
+  Events.On("notification-failure", () => {
+    const message = t("error.notificationsUnavailable");
+    status.textContent = message;
+    setFeedback(message, "error");
+  });
+
+  async function refresh(): Promise<boolean> {
+    try {
+      render(await SettingsService.GetSettings());
+      return true;
+    } catch (error) {
+      const message = settingsErrorMessage(error, t("error.loadSettings"));
+      status.textContent = message;
+      setFeedback(message, "error");
+      console.error("Could not read Work notification settings", error);
+      return false;
+    }
+  }
+
+  for (const [key, toggle] of Object.entries(toggles) as Array<[NotificationPreferenceKey, HTMLInputElement]>) {
+    toggle.addEventListener("change", () => void (async () => {
+      const previous = !toggle.checked;
+      toggle.disabled = true;
+      try {
+        render(await SettingsService.SetNotificationPreference(key, toggle.checked));
+        setFeedback("");
+      } catch (error) {
+        toggle.checked = previous;
+        const message = settingsErrorMessage(error, t("error.saveSettings"));
+        status.textContent = message;
+        setFeedback(message, "error");
+        console.error("Could not update Work notification settings", error);
+      } finally {
+        toggle.disabled = false;
+      }
+    })());
+  }
 
   return {refresh};
 }

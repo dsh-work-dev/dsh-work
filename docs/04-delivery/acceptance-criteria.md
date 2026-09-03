@@ -129,6 +129,14 @@ Given two DSH homes or profiles with independent plugin state, when the user lis
 
 Given a user-owned DSH home that does not exist locally, Work refuses to launch or register it and does not create the directory. Given a selected or active runtime/home, Work refuses removal; catalog removal explicitly states that managed runtime files are retained until a future data-management action.
 
+### AC-036 — Custom profile identity editing
+
+Given an existing custom DSH profile, when the user changes its name from the
+profile detail, then Work renames only the profile directory, preserves the
+profile manifest and patch layers, keeps the selected home identity, and
+updates the pending launch selection when it references that profile. Built-in
+or active profiles cannot be renamed.
+
 ### AC-007 — Bounded retry
 
 Given a repeatedly crashing Worker, when automatic recovery is attempted, then retries stop at the configured policy boundary and Work offers diagnostics and safe mode instead of looping.

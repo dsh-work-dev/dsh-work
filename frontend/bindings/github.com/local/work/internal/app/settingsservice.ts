@@ -28,3 +28,7 @@ export function SetCloseToTray(enabled: boolean): $CancellablePromise<settings$0
 export function SetLocale(locale: string): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(2263426239, locale);
 }
+
+export function SetNotificationPreference(key: string, enabled: boolean): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(4030491503, key, enabled);
+}

@@ -227,6 +227,92 @@ func TestManagerKeepsActiveAndDesiredSelectionsSeparate(t *testing.T) {
 	}
 }
 
+func TestManagerRenamesCustomProfileAndUpdatesDesiredSelection(t *testing.T) {
+	manager := newTestManager(t)
+	oldPath := filepath.Join(manager.config.Homes[0].Path, "profiles", "web-clean")
+	manifest := []byte(`{"name":"dsh-profile-web-clean","private":true,"dependencies":{"@example/plugin":"1.0.0"}}`)
+	patch := []byte("- id: example\n  value: true\n")
+	if err := os.WriteFile(filepath.Join(oldPath, "package.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldPath, "cordis.patch.yml"), patch, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selection := LaunchSelection{
+		RuntimeID: "dsh-test",
+		Profile:   ProfileRef{HomeID: "work", Name: "web-clean"},
+	}
+	if _, err := manager.SetDesired(context.Background(), selection); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
+		Profile: selection.Profile,
+		NewName: "coding",
+	})
+	if err != nil {
+		t.Fatalf("RenameProfile() error = %v", err)
+	}
+	if snapshot.Desired == nil || snapshot.Desired.Profile.Name != "coding" {
+		t.Fatalf("desired after rename = %#v, want coding", snapshot.Desired)
+	}
+
+	profiles := make(map[string]ProfileInfo, len(snapshot.Profiles))
+	for _, profile := range snapshot.Profiles {
+		profiles[profile.Ref.Name] = profile
+	}
+	if _, ok := profiles["web-clean"]; ok {
+		t.Fatal("old custom profile name is still present")
+	}
+	if profile, ok := profiles["coding"]; !ok || !profile.Renamable {
+		t.Fatalf("renamed profile = %#v, want a renamable coding profile", profile)
+	} else {
+		if _, err := os.Stat(profile.Path); err != nil {
+			t.Fatalf("renamed profile path %q is unavailable: %v", profile.Path, err)
+		}
+		if got, err := os.ReadFile(filepath.Join(profile.Path, "package.json")); err != nil || string(got) != string(manifest) {
+			t.Fatalf("renamed manifest = %q, error = %v, want original manifest", got, err)
+		}
+		if got, err := os.ReadFile(filepath.Join(profile.Path, "cordis.patch.yml")); err != nil || string(got) != string(patch) {
+			t.Fatalf("renamed patch = %q, error = %v, want original patch", got, err)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(profile.Path), "web-clean")); !os.IsNotExist(err) {
+			t.Fatalf("old profile path still exists, stat error = %v", err)
+		}
+	}
+	reloaded, err := New(manager.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedSnapshot, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloadedSnapshot.Desired == nil || reloadedSnapshot.Desired.Profile.Name != "coding" {
+		t.Fatalf("reloaded desired after rename = %#v, want coding", reloadedSnapshot.Desired)
+	}
+}
+
+func TestManagerDoesNotRenameBuiltInOrActiveProfile(t *testing.T) {
+	manager := newTestManager(t)
+	manager.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}}
+	_, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
+		Profile: ProfileRef{HomeID: "work", Name: "web"},
+		NewName: "web-copy",
+	})
+	assertFailureCode(t, err, lifecycle.ErrorProfileInvalid)
+
+	selection := LaunchSelection{RuntimeID: "dsh-test", Profile: ProfileRef{HomeID: "work", Name: "web-clean"}}
+	if _, err := manager.MarkActive(context.Background(), &selection); err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.RenameProfile(context.Background(), ProfileRenameRequest{
+		Profile: selection.Profile,
+		NewName: "coding",
+	})
+	assertFailureCode(t, err, lifecycle.ErrorProfileInUse)
+}
+
 func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	root := t.TempDir()
 	homePath := filepath.Join(root, "dsh-home")

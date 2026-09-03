@@ -43,8 +43,9 @@ The Host is the authority boundary. The Worker may request a capability but cann
   DSH home/profile; Work does not embed the DSH Web UI or mutate profiles
   during GUI startup.
 - The Settings window is Host-owned and contains a flat, shallow rail: a
-  read-only Overview, top-level General and Notifications pages, and DSH resource pages
-  for profiles/plugins, runtimes and homes. The application menu exposes only
+  read-only Overview, top-level General and Notifications pages, a profile
+  resource page with selected-profile plugin actions, and resource pages for
+  runtimes and homes. The application menu exposes only
   Settings and Help (with update check and About commands). The Workspace
   window is DSH-owned and receives no injected Host markup; application menu
   and tray handlers remain at the Host composition edge.

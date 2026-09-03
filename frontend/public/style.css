@@ -582,6 +582,7 @@ select:focus-visible {
 }
 
 .manager-grid label,
+.profile-directory label,
 .plugin-editor label,
 .home-register-grid label,
 .runtime-install-card label {
@@ -592,6 +593,8 @@ select:focus-visible {
 
 .manager-grid select,
 .manager-grid input,
+.profile-directory select,
+.profile-directory input,
 .plugin-editor input,
 .home-register-grid input,
 .runtime-install-card input {
@@ -608,6 +611,8 @@ select:focus-visible {
 
 .manager-grid select:hover,
 .manager-grid input:hover,
+.profile-directory select:hover,
+.profile-directory input:hover,
 .plugin-editor input:hover,
 .home-register-grid input:hover,
 .runtime-install-card input:hover { border-color: var(--line-strong); }
@@ -619,9 +624,43 @@ select:focus-visible {
   padding: 4px 0 24px;
 }
 
+.overview-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 32px;
+  padding: 4px 0 32px;
+}
+
+.overview-context {
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.overview-context-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.overview-context-heading h3 {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.overview-state {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .overview-facts {
   max-width: 720px;
-  margin-top: 0;
+  margin-top: 12px;
 }
 
 .overview-facts div {
@@ -653,14 +692,13 @@ select:focus-visible {
 
 .profiles-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, .95fr);
-  gap: 0;
+  grid-template-columns: minmax(260px, .85fr) minmax(360px, 1.15fr);
+  gap: 48px;
   padding: 24px 0 32px;
 }
 
 .profile-directory {
   min-width: 0;
-  padding-right: 32px;
 }
 
 .subheading {
@@ -684,7 +722,6 @@ select:focus-visible {
 
 .plugin-editor {
   min-width: 0;
-  padding-left: 32px;
 }
 
 .selected-profile {
@@ -700,6 +737,102 @@ select:focus-visible {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.profile-empty {
+  padding-top: 24px;
+}
+
+.profile-detail-heading {
+  padding-top: 20px;
+}
+
+.profile-rename-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.profile-rename-row label,
+.plugin-install-row label {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.profile-rename-row input,
+.plugin-install-row input {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--surface-soft);
+  font-size: 13px;
+}
+
+.profile-rename-row .button,
+.plugin-install-row .button {
+  margin-bottom: 0;
+}
+
+.plugin-management {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.plugin-list {
+  display: grid;
+  border-top: 1px solid var(--line);
+}
+
+.plugin-list-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.plugin-list-item strong,
+.plugin-list-item span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.plugin-list-item strong {
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.plugin-list-item span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.plugin-list-item .button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.plugin-install-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 .button-row {
@@ -821,6 +954,16 @@ select:focus-visible {
   line-height: 1.45;
 }
 
+.setting-detail {
+  display: block;
+  max-width: 560px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
 .setting-control {
   display: grid;
   justify-items: end;
@@ -931,7 +1074,6 @@ select:focus-visible {
   .plugin-editor {
     margin-top: 24px;
     padding: 24px 0 0;
-    border-top: 1px solid var(--line);
   }
 
   .profile-directory { padding-right: 0; }
@@ -1007,6 +1149,11 @@ select:focus-visible {
   }
 
   .manager-grid { grid-template-columns: 1fr; }
+
+  .overview-context-grid { grid-template-columns: 1fr; }
+
+  .profile-rename-row,
+  .plugin-install-row { grid-template-columns: 1fr; }
 
   .wide-field { grid-column: auto; }
 

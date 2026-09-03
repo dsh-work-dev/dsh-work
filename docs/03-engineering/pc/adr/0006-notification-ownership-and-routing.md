@@ -43,7 +43,7 @@ to both trusted Work windows and the native desktop delivery path.
    lifecycle notifications are suppressed when the Workspace is the active
    surface. DSH contextual feedback remains available regardless of Work
    desktop preferences.
-6. The domain exposes a narrow `Notifier` interface. The Wails notification
+6. The domain exposes a narrow delivery interface. The Wails notification
    service in the pinned Wails dependency is used only by a platform/composition
    adapter; domain packages do not import Wails or native notification types.
    Direct per-platform notification code and a required third-party DSH
@@ -52,7 +52,8 @@ to both trusted Work windows and the native desktop delivery path.
 7. The first implementation does not add a notification history store or a
    separate notification menu. The bounded event identity used for deduplication
    is retained only for the active Work session until a history use case is
-   specified.
+   specified. The fixed-capacity identity set fails closed when full; it does not
+   evict old IDs and risk a replayed delivery.
 
 ## Consequences
 

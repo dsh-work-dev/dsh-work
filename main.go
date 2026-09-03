@@ -14,11 +14,13 @@ import (
 	"github.com/local/work/internal/dshadapter"
 	"github.com/local/work/internal/dshmanager"
 	"github.com/local/work/internal/lifecycle"
+	worknotifications "github.com/local/work/internal/notifications"
 	"github.com/local/work/internal/platform"
 	worksettings "github.com/local/work/internal/settings"
 	"github.com/local/work/internal/workergateway"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	wailsnotifications "github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 //go:embed all:frontend/dist
@@ -27,6 +29,7 @@ var assets embed.FS
 func main() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
 	application.RegisterEvent[worksettings.Locale]("locale")
+	application.RegisterEvent[bool]("notification-failure")
 
 	dependencies := platform.New()
 	config := workapp.DefaultConfig(currentWorkspace())
@@ -78,6 +81,7 @@ func main() {
 	})
 	closeToTray := true
 	localePreference := worksettings.DefaultLocale
+	notificationPreference := worknotifications.DefaultPreferences()
 	if settingsErr != nil {
 		log.Printf("Work settings unavailable: %v", settingsErr)
 	} else if values, err := settingsManager.Snapshot(context.Background()); err != nil {
@@ -85,7 +89,25 @@ func main() {
 	} else {
 		closeToTray = values.CloseToTray
 		localePreference = values.Locale
+		notificationPreference = values.Notifications
 	}
+	var activeLocale atomic.Value
+	activeLocale.Store(string(localePreference))
+	windowLedger := lifecycle.NewWindowLedger(closeToTray, "workspace", "settings")
+	var workspaceWindow application.Window
+	var settingsWindow application.Window
+	var settingsWindowMu sync.Mutex
+	var showWorkspace func()
+	var openSettings func(string)
+	nativeNotification := wailsnotifications.New()
+	nativeNotificationHost := &nativeNotificationService{service: nativeNotification}
+	notificationRouter := worknotifications.NewRouter(
+		nativeNotificationDelivery{service: nativeNotification, host: nativeNotificationHost},
+		func() bool {
+			return workspaceWindow != nil && workspaceWindow.IsFocused()
+		},
+	)
+	notificationRouter.SetPreferences(notificationPreference)
 	hostService := workapp.NewHostService(host, workspaceTrusted.Load, func() worksettings.Locale {
 		if settingsManager == nil {
 			return localePreference
@@ -97,15 +119,17 @@ func main() {
 		return values.Locale
 	})
 	managerService := workapp.NewManagerService(manager)
-	windowLedger := lifecycle.NewWindowLedger(closeToTray, "workspace", "settings")
 	var publishLocale func(worksettings.Locale)
-	settingsService := workapp.NewSettingsService(settingsManager, windowLedger.SetCloseToTray, func(locale worksettings.Locale) {
-		if publishLocale != nil {
-			publishLocale(locale)
-		}
-	})
-	var activeLocale atomic.Value
-	activeLocale.Store(string(localePreference))
+	settingsService := workapp.NewSettingsService(
+		settingsManager,
+		windowLedger.SetCloseToTray,
+		func(locale worksettings.Locale) {
+			if publishLocale != nil {
+				publishLocale(locale)
+			}
+		},
+		notificationRouter.SetPreferences,
+	)
 	nativeTheme := dshWindowTheme(manager)
 
 	desktop := application.New(application.Options{
@@ -115,6 +139,7 @@ func main() {
 			application.NewService(hostService),
 			application.NewService(managerService),
 			application.NewService(settingsService),
+			application.NewService(nativeNotificationHost),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -124,12 +149,10 @@ func main() {
 		},
 	})
 	gateway.SetOpenExternal(desktop.Browser.OpenURL)
+	notificationRouter.SetDeliveryFailureHandler(func(worknotifications.Event) {
+		desktop.Event.Emit("notification-failure", true)
+	})
 
-	var workspaceWindow application.Window
-	var settingsWindow application.Window
-	var settingsWindowMu sync.Mutex
-	var showWorkspace func()
-	var openSettings func(string)
 	handleWindowClosing := func(name string, window application.Window, event *application.WindowEvent) {
 		if windowLedger.IsQuitting() {
 			return
@@ -149,6 +172,15 @@ func main() {
 		windowLedger.SetVisible("workspace", true)
 		workspaceWindow.Show().Focus()
 	}
+	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
+		if result.Error != nil {
+			log.Printf("desktop notification response: %v", result.Error)
+			return
+		}
+		if result.Response.ID != "" && showWorkspace != nil {
+			showWorkspace()
+		}
+	})
 
 	tray := desktop.SystemTray.New()
 	initialNative := nativeLocaleCopyFor(localePreference)
@@ -261,6 +293,44 @@ func main() {
 	host.SetPublish(func(status lifecycle.Status) {
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeTrayStatus(loadNativeLocale(&activeLocale), status.State))
+		eventID := status.CorrelationID
+		if eventID == "" {
+			eventID = status.GenerationID
+		}
+		if eventID == "" {
+			return
+		}
+		locale := loadNativeLocale(&activeLocale)
+		var notification worknotifications.Event
+		switch status.State {
+		case lifecycle.StateFailed:
+			if status.Error == nil {
+				return
+			}
+			copy := nativeNotificationCopyFor(locale)
+			notification = worknotifications.Event{
+				ID:     "work-host-failure:" + eventID,
+				Class:  worknotifications.ClassError,
+				Title:  copy.title,
+				Body:   copy.body,
+				Target: "workspace",
+			}
+		default:
+			copy := nativeLifecycleNotificationCopyFor(locale, status.State)
+			if copy.title == "" || copy.body == "" {
+				return
+			}
+			notification = worknotifications.Event{
+				ID:     "work-host-lifecycle:" + eventID + ":" + string(status.State),
+				Class:  worknotifications.ClassLifecycle,
+				Title:  copy.title,
+				Body:   copy.body,
+				Target: "workspace",
+			}
+		}
+		if err := notificationRouter.Publish(context.Background(), notification); err != nil {
+			log.Printf("desktop notification delivery: %v", err)
+		}
 	})
 	host.SetReadyHandler(func(workspaceURL string) {
 		workspaceTrusted.Store(false)
@@ -280,6 +350,9 @@ func main() {
 		}
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		if nativeNotificationHost.startupFailed.Load() {
+			desktop.Event.Emit("notification-failure", true)
+		}
 		host.Start()
 	})
 

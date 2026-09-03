@@ -139,7 +139,8 @@ The gateway is not a general reverse proxy. It rejects unknown upstream targets,
 The Workspace window is the only Work WebView that navigates to the gateway
 URL. The Settings window never receives a DSH URL and remains a trusted Host
 surface with a flat rail: read-only Overview, top-level General and
-Notifications pages and shallow DSH resource pages. The application menu exposes Settings and Help;
+Notifications pages, a profile resource page with selected-profile plugin
+actions, and shallow runtime/home resource pages. The application menu exposes Settings and Help;
 Help contains update-check and About commands. Native menu handlers execute in
 the Host and do not modify the DSH document.
 
@@ -174,6 +175,10 @@ Worker generation = selected runtime + selected DSH home/profile
 - Plugin management always carries a `ProfileRef` (DSH home identity plus
   profile name); an active profile is only a default UI context, never an
   implicit backend target.
+- The profile resource page keeps profile selection separate from the General
+  launch form. It shows plugin names only inside the selected profile detail,
+  where each displayed plugin has a removal action; no selected profile means
+  no plugin management detail.
 - A package manager may deduplicate physical package artifacts. Work must not
   configure or relocate that store, and physical deduplication does not make a
   plugin global or runtime-owned.

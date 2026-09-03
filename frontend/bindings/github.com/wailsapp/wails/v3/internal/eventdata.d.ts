@@ -17,6 +17,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "lifecycle": lifecycle$0.Status;
             "locale": settings$0.Locale;
+            "notification-failure": boolean;
         }
     }
 }

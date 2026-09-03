@@ -6,7 +6,7 @@ Work uses two native WebView windows. The separate Settings window contains a
 flat, shallow rail and no HTML application menu: `Overview` first and read-only, one top-level `General`
 page for launch target and close-to-tray behaviour, one top-level `Notifications`
 page for Work desktop-notification preferences, then DSH resource pages for
-profiles/plugins, runtimes and homes. The Workspace window contains the
+profiles, runtimes and homes. The Workspace window contains the
 external DSH Web UI. Work's native application menu and system tray remain
 Host-owned; no Work HTML or JavaScript is injected into the DSH document. Host state
 and recovery actions remain available even if Worker content is loading or
@@ -26,9 +26,23 @@ and the native menu/tray through the same locale event. The default locale is
 Simplified Chinese, and the DSH workspace remains the owner of its own content
 and language.
 
-The plugin management entry always carries an explicit DSH home and profile
-reference. The active Workspace profile may be used as a prefilled context,
-but it is not an implicit backend target.
+The `Profiles` page uses the profile as its primary entity. The profile list
+selects one explicit home/profile reference for the detail pane; it does not
+reuse the launch selectors in `General`. With no selected profile, the plugin
+list and plugin actions are absent. Whenever a plugin is displayed, its
+selected-profile detail contains its management action, including removal.
+The active Workspace profile may be the initial selection, but it is not an
+implicit backend target.
+
+The profile detail also edits custom profile names. Built-in names are fixed.
+Because DSH 0.1.2 has no public rename command, Work changes only the custom
+profile directory identity, preserves its manifest and patch layers, blocks
+renaming the active profile, and updates the pending launch selection when
+needed.
+
+Overview distinguishes the active session from the pending next-launch
+selection. It never presents the pending selection as if it were the running
+session.
 
 ### Window close and quit
 
