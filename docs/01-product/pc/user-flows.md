@@ -3,14 +3,21 @@
 ## UF-01 — First launch
 
 1. User starts Work.
-2. Work checks its own configuration and DSH runtime compatibility.
+2. Work loads its global launch target—DSH runtime, DSH data directory and
+   profile—and checks runtime compatibility. It does not obtain a Workspace
+   from the global settings document.
 3. The window shows `Starting` with the current step, bounded DSH output and a cancel action.
 4. User can copy the redacted output when startup needs support.
 5. Work starts the Worker and waits for a validated readiness signal.
-6. On success, Work navigates the embedded view to the loopback Worker URL and enters `Ready`.
+6. On success, Work navigates the embedded view to the DSH Workspace surface
+   through the loopback Worker URL. DSH resumes the current Workspace or asks
+   the user to select or create one; Work then enters `Ready` for that
+   Workspace context.
 7. On failure, Work shows a stable error code, plain-language cause and safe next actions.
 
-The user never needs to choose a port or inspect a terminal.
+The user never needs to choose a port, inspect a terminal or configure a
+Workspace path in Work's global settings. Work never silently turns its
+process directory into a Workspace.
 
 ## UF-02 — Return from tray
 
@@ -27,10 +34,25 @@ The user never needs to choose a port or inspect a terminal.
 2. Work opens the separate trusted Settings window on its flat top-level
    `General` route; `Overview` is read-only and DSH workspace markup is not
    changed.
-3. User changes the launch target or close-to-tray preference. The launch
-   target uses an explicit save action; close-to-tray persists immediately.
+3. User changes the DSH runtime, DSH data directory or profile launch target,
+   or changes the close-to-tray preference. The launch target uses an explicit
+   save action; close-to-tray persists immediately. Workspace selection is not
+   part of this page.
 4. The next window close applies the selected policy; explicit `Quit DSH Work`
    remains a full shutdown in either mode.
+
+## UF-02D — Select or create a DSH Workspace
+
+1. User opens the DSH Workspace surface or chooses its start/select action.
+2. DSH shows registered Workspaces and their directory identity, or offers to
+   create a Workspace for an existing directory.
+3. DSH validates and canonicalizes the directory before using it.
+4. Work attaches the selected Workspace context to the active session without
+   changing the global runtime, DSH data directory or profile launch target.
+5. Settings `Overview` may report the current Workspace as read-only; `General`
+   does not expose it as an editable global setting.
+6. Removing a Workspace registration leaves the directory, user files and
+   session data in place.
 
 ## UF-02B — Manage desktop notifications
 

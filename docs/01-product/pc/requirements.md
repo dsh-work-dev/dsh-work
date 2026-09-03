@@ -27,20 +27,22 @@ Status: normative specification for the first PC release.
 | FR-SUP-009 | Work MUST distinguish configuration, compatibility, port, timeout, crash and permission failures with stable error codes. |
 | FR-SUP-010 | Windows, macOS and Linux MUST implement the same Supervisor contract through separate platform adapters and pass the same hostile-child fixture suite. |
 
-## DSH runtime, home and profile management
+## DSH runtime, data directory and profile management
 
 | ID | Requirement |
 |---|---|
 | FR-MGR-001 | Work MUST load the external DSH Web UI from the selected out-of-process DSH Worker after readiness; the Work binary MUST NOT embed a second DSH Web UI. |
 | FR-MGR-002 | `dsh-work` and the Manager service MUST maintain a versioned catalog that can contain multiple DSH runtimes, while normal Work startup MUST NOT download or reconcile runtime packages. |
-| FR-MGR-003 | Every launch selection MUST identify exactly one DSH runtime, DSH home, profile and workspace; a profile name without its home identity MUST be rejected. |
+| FR-MGR-003 | Every persisted Work launch target MUST identify exactly one DSH runtime, DSH data directory and profile; a profile name without its data-directory identity MUST be rejected. Each Worker generation MUST receive a separately resolved Workspace context; Workspace MUST NOT be persisted as part of the global launch target. |
 | FR-MGR-004 | A DSH profile MUST own its plugin associations. Plugin list, install and removal operations MUST require an explicit profile reference and MUST delegate composition to the selected DSH runtime's supported CLI. A plugin MUST be shown only inside its selected profile context, where its removal action is available. |
-| FR-MGR-005 | Runtime, DSH home, profile and plugin management MUST live inside a separate trusted Work Settings window. Its rail MUST be flat and shallow, with `Overview` first and read-only, one top-level `General` page for Work preferences, one top-level `Notifications` page for desktop-notification preferences, a profile resource page that owns its child plugin actions, and separate resource pages for runtimes and homes. The application menu MUST expose `Settings` and `Help`; `Help` MUST contain `Check for Updates…` and `About Work`. |
-| FR-MGR-006 | Work-owned DSH homes may be created by Work; user-owned DSH homes MUST be registered from an existing directory and MUST NOT be silently created, relocated or deleted by Work. |
-| FR-MGR-007 | Runtime or home removal MUST be rejected while selected or active, and the Manager UI/CLI MUST state whether removal unregisters catalog metadata or removes files; user-owned DSH data MUST never be silently deleted. |
-| FR-MGR-008 | Work appearance MUST read the selected DSH home's `ui-theme.preference`; `light`, `dark` and `system` MUST resolve consistently across trusted Work surfaces, including when the preference changes while both windows are open. Work MUST NOT expose or persist a second appearance preference. |
+| FR-MGR-005 | Runtime, DSH data-directory, profile and plugin management MUST live inside a separate trusted Work Settings window. Its rail MUST be flat and shallow, with `Overview` first and read-only, one top-level `General` page for Work preferences, one top-level `Notifications` page for desktop-notification preferences, a profile resource page that owns its child plugin actions, and separate resource pages for runtimes and DSH data directories. `General` MUST NOT contain a Workspace selector or editable Workspace path. The application menu MUST expose `Settings` and `Help`; `Help` MUST contain `Check for Updates…` and `About Work`. |
+| FR-MGR-006 | Work-owned DSH data directories may be created by Work; user-owned DSH data directories MUST be registered from an existing directory and MUST NOT be silently created, relocated or deleted by Work. |
+| FR-MGR-007 | Runtime or DSH data-directory removal MUST be rejected while selected or active, and the Manager UI/CLI MUST state whether removal unregisters catalog metadata or removes files; user-owned DSH data MUST never be silently deleted. |
+| FR-MGR-008 | Work appearance MUST read the selected DSH data directory's `ui-theme.preference`; `light`, `dark` and `system` MUST resolve consistently across trusted Work surfaces, including when the preference changes while both windows are open. Work MUST NOT expose or persist a second appearance preference. |
 | FR-MGR-009 | Work MUST provide English, Simplified Chinese and Japanese UI copy through one persisted language preference. Changing the preference in Settings MUST update the trusted Work surfaces, native menu and tray without restarting DSH. |
-| FR-MGR-010 | Custom profile names MUST be editable from profile detail. Built-in profile names MUST remain fixed. A custom rename MUST preserve the DSH profile manifest and patch layers and MUST update the pending launch selection when it references that profile. |
+| FR-MGR-010 | Custom profile names MUST be editable from profile detail. Built-in profile names MUST remain fixed. A custom rename MUST preserve the DSH profile manifest and patch layers and MUST update the pending launch target when it references that profile. |
+| FR-MGR-011 | Workspace selection and creation MUST be performed through DSH's Workspace surface or an explicit launch/session action. Work MUST display the current Workspace context separately from the global launch target and MUST NOT infer a Workspace from its process directory, install directory, operating-system home or DSH data directory. |
+| FR-MGR-012 | Workspace resolution MUST use DSH's Workspace contract, including canonical directory identity and existing-directory validation. Removing a Workspace registration MUST NOT delete or relocate its directory, user files, sessions or logs. |
 
 ## Notifications
 

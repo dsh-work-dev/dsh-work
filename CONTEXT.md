@@ -8,8 +8,10 @@ in the documents linked from `docs/README.md`.
 
 - **Work host** owns the desktop lifecycle, global preferences and desktop
   delivery of notifications.
-- **DSH workspace** owns the agent-facing web experience and feedback that is
-  meaningful only inside a conversation or DSH surface.
+- **Work launch context** owns the global runtime, DSH data-directory and
+  profile target used to prepare a run; it does not own DSH Workspace records.
+- **DSH workspace** owns the agent-facing web experience, Workspace registry
+  and feedback that is meaningful only inside a conversation or DSH surface.
 - **DSH runtime** owns the runtime protocol and the events emitted by its
   sessions. Work may consume those events but does not redefine DSH session
   semantics.
@@ -31,6 +33,12 @@ in the documents linked from `docs/README.md`.
 | Lifecycle event | A Work or DSH state transition such as startup, unexpected exit or restart. | A successful preference save. |
 | Notification delivery | One attempt to present an accepted event through a selected surface. | The event itself; one event may be eligible for more than one surface. |
 | Notification deduplication | The rule that prevents one logical event from producing repeated desktop deliveries. | Dismissing or handling the source event. |
+| DSH data directory | The user-facing name for the DSH data root that contains profiles and related DSH runtime data. | Work application data, an installed runtime, or a Workspace directory. |
+| DSH home | DSH's external technical name for a DSH data directory. Work's domain term is DSH data directory. | A Work-global launch target or a Workspace. |
+| DSH Workspace | A DSH-owned persistent record for a canonical directory, its identity/title and associated sessions. | The DSH data directory, a profile, or a Work setting. |
+| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. | A field in Work's global launch target. |
+| Launch target | The persisted Work selection of exactly one DSH runtime, data directory and profile. | A Workspace context or a complete session request. |
+| Launch context | The resolved facts for one run: launch target plus the separately resolved Workspace context and generation state. | The durable global configuration document. |
 
 ## Ownership rules
 

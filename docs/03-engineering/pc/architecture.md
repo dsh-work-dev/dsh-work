@@ -40,16 +40,17 @@ The Host is the authority boundary. The Worker may request a capability but cann
 - TypeScript frontend with framework choice isolated from Host contracts.
 - DSH launched as an out-of-process Worker.
 - `dsh-work` CLI and runtime manager resolve an installed DSH runtime plus a
-  DSH home/profile; Work does not embed the DSH Web UI or mutate profiles
-  during GUI startup.
+  DSH data-directory/profile target; Work does not embed the DSH Web UI or
+  mutate profiles during GUI startup. `DSH home` remains the upstream/internal
+  name for the same data directory.
 - The Settings window is Host-owned and contains a flat, shallow rail: a
   read-only Overview, top-level General and Notifications pages, a profile
   resource page with selected-profile plugin actions, and resource pages for
-  runtimes and homes. The application menu exposes only
+  runtimes and DSH data directories. The application menu exposes only
   Settings and Help (with update check and About commands). The Workspace
   window is DSH-owned and receives no injected Host markup; application menu
   and tray handlers remain at the Host composition edge.
-- DSH owns `ui-theme.preference` in the selected DSH home. `dshmanager`
+- DSH owns `ui-theme.preference` in the selected DSH data directory. `dshmanager`
   projects that read-only value in its snapshot; Work consumes it for trusted
   surfaces and never writes a duplicate appearance setting. `system` is
   resolved by the platform/webview through the operating-system preference;
@@ -83,7 +84,8 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 | `platform notification adapters` | native desktop notification delivery | product event classification |
 | `supervisor` | process ownership, readiness, restart, cleanup | DSH plugin internals, approval UI |
 | `dshadapter` | supported versions, command construction, readiness parsing | tray, browser driver details |
-| `dshmanager` | explicit DSH runtime catalog, home/profile selection and CLI-backed management; delegates profile/plugin semantics to DSH | Wails, lifecycle state, process handles |
+| `dshmanager` | explicit DSH runtime catalog, DSH data-directory/profile selection and CLI-backed management; delegates profile/plugin semantics to DSH | Wails, lifecycle state, process handles, Workspace selection |
+| `workspacecontext` | resolves or resumes a DSH-owned Workspace for an explicit session and exposes its current context | runtime catalog, profile/plugin composition, Wails window handles |
 | `workergateway` | trusted-origin HTTP／WebSocket access to the Worker | DSH command grammar, approval policy |
 | `toolbridge` | typed Host–DSH request/result protocol | visual UI components |
 | `browserpolicy` | DSH Tool classification plus Host hard-deny revalidation | UI layout and raw browser transport |
@@ -105,22 +107,40 @@ Wails and DSH versions must be pinned. Both integrations are isolated because th
 5. Storage implementations own migration; callers use versioned repositories.
 6. Logging is an observer, never the source of lifecycle truth.
 
+## Launch target and Workspace context
+
+The persisted Work launch target is the smallest stable selection needed by
+the manager:
+
+```text
+DSH runtime identity + DSH data-directory identity + profile name
+```
+
+It does not contain a Workspace path or identifier. The `workspacecontext`
+Module consumes DSH's Workspace Seam or an explicit session action and keeps
+the resulting Workspace context in the per-generation Launch context. A DSH
+Adapter Implementation may pass that context to the Worker, but it must not
+write it back into the global launch target. If no Workspace is selected, the
+session presents DSH's selection/creation surface rather than falling back to
+the process current directory.
+
 ## Primary runtime sequence
 
 1. The Host obtains the single-instance lock and opens trusted UI.
-2. The runtime manager resolves the selected compatible local DSH runtime, DSH home and profile without network access; the settings module loads the versioned Work close policy, locale and notification preferences with tray-safe, language and notification defaults.
-3. Supervisor prepares a Work-owned profile overlay, private IPC endpoint and loopback port candidate.
-4. The selected platform adapter creates the Worker inside its managed process boundary.
-5. DSH adapter reads structured process events, validates the announced origin, then performs an active readiness probe.
-6. Worker gateway establishes the per-generation trusted application session and validates upstream HTTP／WebSocket behaviour.
-7. Lifecycle enters `Ready`; only then may the Workspace window navigate through the gateway. The Settings window remains on trusted Work content.
-8. The notification bridge accepts only structured, versioned DSH events after its generation handshake.
-9. Notification policy evaluates source class, persisted preferences, window state and deduplication before the native notifier delivers an eligible event.
-10. Work Tool classifier returns `allow`, `ask` or `deny`; `ask` reuses DSH's approval service and official UI.
-11. After DSH policy permits execution, the Work plugin sends the typed operation over private IPC.
-12. Host hard-policy guard revalidates schema, browser connection and assigned tab before Browser service acts.
-13. Result, DSH call ID and redacted Host execution event share a correlation ID.
-14. Quit cancels operations, detaches browser control, requests Worker shutdown and verifies the process tree is gone.
+2. The runtime manager resolves the selected compatible local DSH runtime, DSH data directory and profile without network access; the settings module loads the versioned Work close policy, locale and notification preferences with tray-safe, language and notification defaults.
+3. The Workspace context Module obtains a current or explicitly requested DSH Workspace through the DSH Workspace seam. If none is available, the session enters Workspace selection instead of inferring one from a process directory.
+4. Supervisor prepares a Work-owned profile overlay, private IPC endpoint and loopback port candidate, carrying the Workspace context only in the per-generation launch context when the DSH adapter requires it.
+5. The selected platform adapter creates the Worker inside its managed process boundary.
+6. DSH adapter reads structured process events, validates the announced origin, then performs an active readiness probe.
+7. Worker gateway establishes the per-generation trusted application session and validates upstream HTTP／WebSocket behaviour.
+8. Lifecycle enters `Ready`; only then may the Workspace window navigate through the gateway. The Settings window remains on trusted Work content and shows Workspace context read-only.
+9. The notification bridge accepts only structured, versioned DSH events after its generation handshake.
+10. Notification policy evaluates source class, persisted preferences, window state and deduplication before the native notifier delivers an eligible event.
+11. Work Tool classifier returns `allow`, `ask` or `deny`; `ask` reuses DSH's approval service and official UI.
+12. After DSH policy permits execution, the Work plugin sends the typed operation over private IPC.
+13. Host hard-policy guard revalidates schema, browser connection and assigned tab before Browser service acts.
+14. Result, DSH call ID and redacted Host execution event share a correlation ID.
+15. Quit cancels operations, detaches browser control, requests Worker shutdown and verifies the process tree is gone.
 
 Window close is a separate composition-edge policy: the shared WindowLedger
 tracks visible Work windows and decides between hide-to-tray and full quit. The
@@ -155,6 +175,7 @@ internal/lifecycle/
 internal/supervisor/
 internal/dshadapter/
 internal/dshmanager/
+internal/workspacecontext/
 internal/workergateway/
 internal/notifications/
 internal/notificationbridge/

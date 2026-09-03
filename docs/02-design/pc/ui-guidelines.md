@@ -9,7 +9,7 @@ Work is a **quiet, desktop-native and information-clear local control plane**.
 - **Quiet:** the shell supports the work instead of competing with it. Colour, elevation and motion communicate meaning rather than decoration.
 - **Desktop-native:** the application respects operating-system window, menu, focus, shortcut and notification conventions.
 - **Information-clear:** current state, required action and safe next step are visually obvious without exposing unnecessary technical detail.
-- **Control plane:** runtime, home, profile, permission, recovery and task state are organised as inspectable resources and named steps.
+- **Control plane:** runtime, DSH data directory, profile, permission, recovery and task state are organised as inspectable resources and named steps.
 
 The DSH workspace is the visual subject when it is available. Work-owned chrome is quiet, stable and recognisable. The product must not look like a traditional IDE, a web administration dashboard, a marketing landing page or a game launcher.
 
@@ -77,7 +77,8 @@ Exact measurements belong to theme tokens and validated screen specifications. F
 For the Settings manager, the rail is a 240px navigation surface and the main
 area is one continuous work surface with a 1040px content maximum. The reading
 order remains one column; only related short form fields may share a two-column
-row. Long paths and workspace values span the content width. At 760px and
+row. Long DSH data-directory paths and read-only current-Workspace values span
+the content width. At 760px and
 below, forms collapse to one column and the rail becomes a horizontally
 scrollable, shallow navigation row.
 
@@ -134,7 +135,7 @@ source observations and rejection criteria are maintained in
 [PC manager style research](../../../.research/pc-manager-style-research.md).
 
 DSH owns the appearance preference. Work reads `ui-theme.preference` from the
-selected DSH home, resolves `system` through the operating system and does not
+selected DSH data directory, resolves `system` through the operating system and does not
 display or persist a second Work appearance setting.
 
 ## Typography

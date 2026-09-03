@@ -6,9 +6,11 @@ Work treats DSH as a versioned external runtime. The adapter uses public DSH lau
 
 The `dsh-work` runtime manager may keep multiple installed DSH runtimes. A
 runtime is an immutable installed distribution; a profile is named data under
-a DSH home and owns its own bundle, plugin and patch composition. One
-immutable launch selection pairs an exact runtime with a DSH home and profile
-for a Worker generation. The Host consumes that resolved tuple; it does not
+a DSH data directory (DSH's upstream/internal `DSH home` term) and owns its
+own bundle, plugin and patch composition. One immutable launch target pairs an
+exact runtime with a DSH data directory and profile. A separately resolved
+Workspace context is attached only to the launch/session request for one
+Worker generation. The Host consumes that resolved launch context; it does not
 install packages or edit profile composition during GUI startup. The initial
 F3 exact version remains the baseline fixture while each additional supported
 runtime/profile compatibility pair earns its own adapter contract tests.
@@ -18,6 +20,8 @@ Official references:
 - [DeepSeek Harness repository](https://github.com/deepseek-ai/deepseek-harness)
 - [CLI launcher documentation](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/README.md)
 - [Architecture and profile layers](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)
+- [Workspace subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/workspace.md)
+- [DSH home paths](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/util/home-paths/README.md)
 
 ## Adapter interface
 
@@ -30,8 +34,9 @@ The DSH adapter owns:
 - graceful-shutdown request when supported;
 - classification of exit and protocol failures.
 
-The runtime manager owns runtime installation, local catalog state, launch
-selection and explicit profile/plugin management commands. DSH remains the
+The runtime manager owns runtime installation, local catalog state, the global
+launch target and explicit profile/plugin management commands. It does not own
+Workspace selection or persist a Workspace path in the global target. DSH remains the
 source of truth for profile composition. Plugin operations delegate to DSH's
 supported `dsh plugin --profile` seam; they are not reimplemented by the Host
 or DSH Adapter.
@@ -43,6 +48,27 @@ not carry Windows shell rules.
 
 No other package builds a DSH command or parses DSH log text.
 
+## Launch target and Workspace context
+
+The persisted Work launch target is deliberately small:
+
+```text
+runtime_id
+dsh_data_directory_id
+profile_name
+```
+
+The target has no Workspace path or Workspace identifier. DSH owns the
+Workspace registry and its session semantics. Work obtains a Workspace through
+the DSH Workspace surface or an explicit launch/session action, then carries
+the resolved context only for that active session or Worker generation.
+
+The DSH Workspace contract treats a Workspace as a persistent record over a
+canonical directory, with its own identity/title and associated sessions. A
+Workspace registration can be removed without deleting the directory or its
+user-owned files. Work must not infer a Workspace from its current working
+directory, install directory, operating-system home or DSH data directory.
+
 ## Launch preparation
 
 Inputs to one launch are immutable:
@@ -50,8 +76,8 @@ Inputs to one launch are immutable:
 ```text
 generation_id
 executable and resolved version
-workspace directory
-Work-owned DSH home or explicitly selected user home
+Workspace context (resolved for this request)
+Work-owned DSH data directory or explicitly selected user data directory
 profile and patch paths
 loopback port candidate
 private IPC endpoint and one-launch credential
@@ -140,7 +166,7 @@ The Workspace window is the only Work WebView that navigates to the gateway
 URL. The Settings window never receives a DSH URL and remains a trusted Host
 surface with a flat rail: read-only Overview, top-level General and
 Notifications pages, a profile resource page with selected-profile plugin
-actions, and shallow runtime/home resource pages. The application menu exposes Settings and Help;
+actions, and shallow runtime/data-directory resource pages. The application menu exposes Settings and Help;
 Help contains update-check and About commands. Native menu handlers execute in
 the Host and do not modify the DSH document.
 
@@ -160,19 +186,20 @@ The ownership and relationship model is:
 DSH runtime (immutable distribution)
   └── executable, launcher and built-in bundles
 
-DSH home (data root)
+DSH data directory / DSH home (data root)
   └── DSH profile
         ├── plugin dependency declarations and installed profile state
         ├── ordered bundle references (`dsh.profile`)
         ├── profile patch layers (`cordis.patch.yml`)
         └── profile data
 
-Worker generation = selected runtime + selected DSH home/profile
+launch target = selected runtime + selected DSH data directory/profile
+Worker generation = launch target + per-generation Workspace context
 ```
 
 - The profile is the logical owner and enablement scope of its plugins. The
   same plugin in another profile is a separate association.
-- Plugin management always carries a `ProfileRef` (DSH home identity plus
+- Plugin management always carries a `ProfileRef` (DSH data-directory identity plus
   profile name); an active profile is only a default UI context, never an
   implicit backend target.
 - The profile resource page keeps profile selection separate from the General
@@ -186,7 +213,7 @@ Worker generation = selected runtime + selected DSH home/profile
   selected profile for one Worker generation and may be recreated from their
   schema.
 - User-owned DSH data is never edited in place without an explicit migration.
-- A user-selected existing DSH home is mounted through an adapter and backed up before a migration.
+- A user-selected existing DSH data directory is mounted through an adapter and backed up before a migration.
 - Generated files contain a schema version and generation marker.
 - Safe mode uses a separate generated overlay; it does not delete the normal overlay or user profile.
 
@@ -194,8 +221,9 @@ The runtime manager must validate runtime/profile compatibility before launch.
 A profile is not automatically copied, migrated or made version-scoped when a
 different runtime is selected.
 
-The first implementation persists the catalog and desired launch selection in
-Work application data. The Windows runtime installer is explicit and uses npm
+The first implementation persists the catalog and desired launch target in
+Work application data. Workspace context is resolved separately for each
+session and is not part of that persisted target. The Windows runtime installer is explicit and uses npm
 only when the user requests `runtime install`; its native adapter returns a
 catalog entry only after the expected DSH launcher is present. The pinned
 `0.1.2-alpha.3` adapter remains the only verified launch contract in this

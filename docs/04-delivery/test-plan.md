@@ -30,6 +30,16 @@ The fixture can:
 - emit large, malformed and secret-bearing output;
 - connect to the tool bridge with valid and invalid handshakes.
 
+### DSH Workspace fixture
+
+The fixture can:
+
+- expose one DSH data directory with multiple registered Workspaces;
+- resume a Workspace or require explicit Workspace selection;
+- return canonical and non-canonical directory identities;
+- reject missing directories without creating them;
+- unregister a Workspace while retaining its directory, files and sessions.
+
 ### Local browser site
 
 The test server includes:
@@ -68,6 +78,19 @@ The fixture matrix includes clean and signed-in Chrome／Edge／Chromium profile
 - stdout/stderr draining and bounded truncation;
 - graceful shutdown and forced tree cleanup;
 - process and handle leak repetition test.
+
+### Launch target and Workspace context
+
+- persisted launch target contains only runtime, DSH data directory and
+  profile identity;
+- Workspace selection and creation remain outside the General settings form;
+- current, explicit and missing Workspace contexts resolve deterministically;
+- process-directory, install-directory, operating-system-home and DSH
+  data-directory fallbacks are rejected;
+- a per-generation Workspace context is passed to the DSH Adapter without
+  changing the persisted launch target;
+- Workspace unregistration retains user-owned directory contents and session
+  data.
 
 ### Permission service
 

@@ -18,7 +18,7 @@ Work desktop shell
 │   ├── Notifications
 │   ├── Profiles
 │   ├── Runtimes
-│   └── DSH homes
+│   └── DSH data directories
 ├── Activity drawer
 │   ├── active browser task
 │   ├── step progress
@@ -42,13 +42,13 @@ System tray
 ## Navigation model
 
 - The DSH workspace window is the default ready-state destination.
-- The Settings window is opened separately and never replaces or overlays DSH content. It has no HTML application menu. Its rail is one flat list of top-level destinations; `General` contains launch target plus close-to-tray behaviour, while `Notifications` contains Work desktop-notification preferences.
-- `Overview` is first and is read-only. It reports the current DSH session separately from a pending next-launch selection; it does not contain inputs or a save action.
+- The Settings window is opened separately and never replaces or overlays DSH content. It has no HTML application menu. Its rail is one flat list of top-level destinations; `General` contains the DSH runtime, DSH data directory and profile launch target plus close-to-tray behaviour, while `Notifications` contains Work desktop-notification preferences. `General` does not contain Workspace selection.
+- `Overview` is first and is read-only. It reports the current DSH session and Workspace context separately from a pending next-launch target; it does not contain inputs or a save action.
 - `Profiles` is the primary profile resource page. The left side lists profiles; selecting one establishes the management context for the right-side profile detail and plugin actions. General's launch selectors are not reused as plugin context.
 - A profile must be selected before plugin management is shown. Every displayed plugin has an action in the same selected-profile context, including removal; the list never becomes a separate read-only inventory.
-- Custom profile names can be changed from profile detail. Built-in DSH profile names remain fixed. A rename changes only the profile directory identity and updates the pending launch selection when it points at that profile.
-- Runtimes and DSH homes remain shallow resource-management destinations. Plugin actions always carry an explicit home/profile context.
-- Settings pages use one continuous reading column; only related short fields in a form may sit side by side, while long paths and workspace values span the content width.
+- Custom profile names can be changed from profile detail. Built-in DSH profile names remain fixed. A rename changes only the profile directory identity and updates the pending launch target when it points at that profile.
+- Runtimes and DSH data directories remain shallow resource-management destinations. Plugin actions always carry an explicit data-directory/profile context.
+- Workspace selection and creation belong to the DSH Workspace surface or an explicit start/session action. Settings pages use one continuous reading column; only related short fields in a form may sit side by side, while long data-directory paths and read-only current-Workspace values span the content width.
 - Native menu commands and deep links preserve the requested destination; an absent or invalid section defaults to `Overview`.
 - Startup and failure surfaces replace unavailable Worker content in the Workspace window.
 - Activity opens as a drawer so the user can observe or cancel a task without losing DSH context.
@@ -63,9 +63,9 @@ The UI must make the boundary between Work and embedded DSH content understandab
 - Host-owned surfaces contain status, Activity, Settings, Diagnostics and the DSH manager inside the Settings window.
 - The application menu has only top-level `Settings` and `Help`; `Help` contains `Check for Updates…` and `About Work`. The system tray remains a compact lifecycle surface.
 - Work owns desktop notification preferences and delivery. DSH owns in-page notices and conversation context. The first release has no persistent Work notification panel or notification menu.
-- Work appearance follows the selected DSH home's `ui-theme.preference`; Work has no separate appearance setting. `system` follows the operating system. When both trusted windows are open, the Settings window reflects DSH preference changes without a manual refresh.
+- Work appearance follows the selected DSH data directory's `ui-theme.preference`; Work has no separate appearance setting. `system` follows the operating system. When both trusted windows are open, the Settings window reflects DSH preference changes without a manual refresh.
 - The Workspace window contains the external DSH content; Worker content has no direct access to Host APIs. Work's native application menu remains available for Settings and Help, while lifecycle actions remain in the system tray.
-- Plugin management is always labelled with its DSH home and profile reference. The profile list shows the profile name as the primary identity and the home as scope; plugin names appear only inside the selected profile's actionable detail.
+- Plugin management is always labelled with its DSH data directory and profile reference. The profile list shows the profile name as the primary identity and the data directory as scope; plugin names appear only inside the selected profile's actionable detail.
 - DSH approval is trusted only when correlated with the active DSH call ID and official approval channel; ordinary page content cannot create Host action-required state.
 - A disconnected Worker is covered by a Host-owned recovery page to prevent stale content from appearing usable.
 
@@ -82,7 +82,7 @@ For every operational message, present information in this order:
 Raw process output and stack traces belong in Diagnostics, not in primary error copy.
 
 The startup surface uses the same order spatially: a named current state, a
-five-step lifecycle sequence, the trusted workspace facts, bounded DSH process
-output and then the available host actions. The output is readable and
+five-step lifecycle sequence, the trusted current-Workspace facts, bounded DSH
+process output and then the available host actions. The output is readable and
 copyable, while remaining redacted and bounded. The surface fills the window as
 a control surface rather than centring the content inside a decorative card.

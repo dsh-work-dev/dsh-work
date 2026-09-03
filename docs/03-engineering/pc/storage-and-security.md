@@ -2,7 +2,7 @@
 
 ## Storage ownership
 
-Work stores Host-owned data under the operating system's per-user application-data location. User-selected workspaces and DSH-owned homes remain separate.
+Work stores Host-owned data under the operating system's per-user application-data location. DSH Workspaces and DSH data directories remain separate from Work application data and from each other.
 
 | Data | Owner | Persistence | Protection |
 |---|---|---|---|
@@ -13,6 +13,7 @@ Work stores Host-owned data under the operating system's per-user application-da
 | Runtime packages | Work or user | versioned cache | integrity checked before execution |
 | Generated DSH overlay | Work | reproducible | schema and generation marker |
 | DSH user data | DSH / user | governed by DSH | never silently rewritten by Work |
+| DSH Workspace registry and session records | DSH / user | governed by DSH | registration changes do not delete the Workspace directory or files |
 | Browser connection metadata | Work | until disconnected | browser／extension identity only; no cookies or passwords |
 | Tab assignment | Work | task lifetime | IDs, origin and generation; no unrelated-tab inventory |
 | Browser profile and login state | user／browser | browser-owned | never copied into Work storage |
@@ -25,6 +26,9 @@ Work stores Host-owned data under the operating system's per-user application-da
 - A recoverable backup is kept until the new version starts successfully.
 - Unknown fields are preserved only when the schema explicitly supports forward compatibility.
 - Configuration paths are canonicalised and checked before file access.
+- The persisted Work launch target contains only DSH runtime, DSH data-directory
+  and profile identity; a Workspace context is resolved separately per session
+  or Worker generation.
 - Work does not change global environment variables or package-manager configuration.
 
 ## Local endpoints
@@ -67,4 +71,4 @@ Export is built in a temporary owner-only location, redacted, rendered for previ
 - Rotating logs and audit records have bounded retention configurable within supported limits.
 - Clearing a browser session closes it before deleting its profile.
 - Deletion reports partial failure and leaves a diagnostic record without sensitive contents.
-- Uninstall behaviour must state which user-owned data remains; uninstall must not silently delete DSH homes or workspaces.
+- Uninstall behaviour must state which user-owned data remains; uninstall must not silently delete DSH data directories or Workspaces.

@@ -11,7 +11,7 @@ launch Work
   → show trusted startup state
   → start one pinned local DSH Worker
   → validate its loopback endpoint and readiness
-  → display the real DSH workspace
+  → display the real DSH Workspace context
   → quit Work
   → verify the managed Worker process boundary is empty
 ```
@@ -63,7 +63,7 @@ The following are intentionally deferred to later roadmap milestones:
 - The Host is the final authority for process and native effects.
 - Work owns desktop notification preferences and delivery; DSH owns
   contextual in-page notices.
-- The real DSH workspace is embedded only after active readiness validation.
+- The real DSH Workspace context is embedded only after active readiness validation.
 - Windows, macOS and Linux share one Supervisor Interface and require separate native Adapter Implementations; Windows is implemented first.
 - Test fakes may implement an Interface inside tests; no production platform placeholder may report success without establishing a real native process boundary.
 - Local-only research and confidential material remains excluded from version control. Public planning and engineering documentation lives under `docs/`.
@@ -152,7 +152,7 @@ Work:
 1. define the smallest lifecycle state set needed by the tracer bullet: `Starting`, `Ready`, `Stopping` and `Failed`;
 2. make one lifecycle Module own transition ordering and terminal results;
 3. expose a narrow read model and allowlisted commands to the frontend;
-4. render minimal startup, workspace placeholder and failure surfaces;
+4. render minimal startup, Workspace-context placeholder and failure surfaces;
 5. add cancellation and shutdown contexts even before all operations use them;
 6. add correlation ID and structured event foundations;
 7. use a test-only Worker fake to drive transition tests and UI state tests.
@@ -178,7 +178,7 @@ Work:
 4. capture bounded stdout and stderr for readiness diagnosis;
 5. recognise the pinned DSH readiness signal and confirm it with an active health probe;
 6. validate scheme, host, port and trusted application origin;
-7. navigate the embedded workspace only after readiness succeeds;
+7. navigate the embedded DSH Workspace surface only after readiness succeeds;
 8. request graceful shutdown on Work exit and verify the initial Worker has terminated;
 9. map missing runtime, incompatible version, early exit and readiness timeout into stable failures.
 
@@ -186,7 +186,7 @@ The first tracer bullet may use the Windows Adapter directly behind the already-
 
 Exit gate:
 
-- a clean configured Windows environment can launch Work and reach the real pinned DSH workspace;
+- a clean configured Windows environment can launch Work and reach the real pinned DSH Workspace surface;
 - external top-level navigation is blocked or delegated to the system browser;
 - missing and incompatible DSH versions produce stable Work failures;
 - normal Work exit stops the real Worker and leaves no known managed child alive;
@@ -227,7 +227,7 @@ Purpose: make the proven Windows lifecycle understandable without expanding into
 
 Work:
 
-1. display named startup steps: configuration, runtime, Worker, readiness and workspace;
+1. display named startup steps: configuration, runtime, Worker, readiness and Workspace context;
 2. show stable error code, summary and one safe primary recovery action;
 3. implement window, tray, close and full-quit behaviour through the shared
    policy contract and Wails' native composition-edge window/tray APIs; do not

@@ -1,7 +1,11 @@
 # ADR-0003: External DSH workspace and dsh-work runtime manager
 
-- Status: Accepted; initial shared manager/CLI and Windows GUI slice implemented
+- Status: Superseded by ADR-0007 for the launch model; retained as a historical record of the initial manager/runtime decision
 - Date: 2026-09-02
+
+> Historical note: the launch model in this ADR is replaced by ADR-0007.
+> The runtime/profile ownership details remain useful background, but this ADR
+> is not the current product contract.
 
 ## Context
 

@@ -6,10 +6,12 @@
 | Host shell | The embedded trusted Work startup, status and recovery UI; it is not the DSH Web UI. |
 | DSH | DeepSeek Harness, the agent runtime hosted and supervised by Work. |
 | DSH runtime | One immutable, installed and versioned DSH distribution: its executable, launcher and built-in bundles. It does not own profile-specific plugin state. |
-| DSH home | A DSH data root containing named profiles and related runtime data. It may be Work-managed or an explicitly selected existing user home. |
-| DSH profile | A named configuration under a DSH home. It owns ordered bundle references, plugin dependency state, profile patch layers and profile data; it is not owned by a DSH runtime. |
+| DSH data directory | The user-facing name for the DSH data root containing named profiles and related DSH runtime data. It may be Work-managed or an explicitly selected existing user directory; it is distinct from Work application data and an installed DSH runtime. |
+| DSH home | DSH's external technical name for a DSH data directory, including the `DSH_HOME` environment-variable term. Work's domain term is `DSH data directory`. |
+| DSH profile | A named configuration under a DSH data directory. It owns ordered bundle references, plugin dependency state, profile patch layers and profile data; it is not owned by a DSH runtime. |
 | DSH plugin | A package or bundle associated with one DSH profile through DSH's supported profile plugin seam. The same package in another profile is a separate association. |
-| DSH workspace | The Web UI and session served by the out-of-process DSH Worker for one runtime/profile launch; it is not the profile store or the Host shell. |
+| DSH Workspace | A DSH-owned persistent record for a canonical directory, stable identity/title and associated sessions. The Work Workspace window displays its DSH Web UI; it is not the DSH data directory, profile store or Host shell. |
+| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. It is resolved separately from Work's global launch target and may be carried by one launch/session request. |
 | Notification event | A meaningful Work or DSH occurrence that may need delivery outside its source surface; raw process output is not a notification event. |
 | Desktop notification | A notification delivered through the operating system by Work. |
 | In-page notice | Contextual feedback rendered by DSH inside its own Web UI, such as a conversation or composer notice. |
@@ -19,10 +21,11 @@
 | dsh-work CLI | The explicit operator tool that installs and selects DSH runtimes and manages profile/plugin operations. |
 | Runtime/profile compatibility | The result of validating one DSH runtime against one profile's bundle, plugin and patch composition. |
 | Runtime selection | The exact DSH runtime selected for one launch; it is paired with, but does not own, a profile. |
-| Launch selection | The immutable runtime, DSH home/profile and workspace inputs resolved for one Work Worker generation. |
-| Profile reference | The stable pair of DSH home identity and profile name required by profile-scoped operations; a profile name alone is not sufficient. |
+| Launch target | The immutable DSH runtime, DSH data-directory identity and profile reference persisted by Work for future launches. It does not contain a Workspace. |
+| Launch context | The resolved launch target plus a separately resolved Workspace context for one Work Worker generation. |
+| Profile reference | The stable pair of DSH data-directory identity and profile name required by profile-scoped operations; a profile name alone is not sufficient. |
 | Settings window | A separate trusted Work WebView window for Work-global settings and the nested DSH manager. It never loads the DSH Web UI or shares a document with the Workspace window. |
-| DSH manager | The runtime, DSH home, profile and profile-scoped plugin management area inside the Settings window; it delegates profile composition to DSH. |
+| DSH manager | The runtime, DSH data-directory, profile and profile-scoped plugin management area inside the Settings window; it delegates profile composition to DSH and does not own Workspace selection. |
 | Workspace window | The Work WebView window that displays the external DSH workspace. Work's application menu and system tray remain Host-owned without modifying DSH page content. |
 | Host | The Work desktop process and its trusted backend services. |
 | Worker | A DSH process started and supervised by the Host. |

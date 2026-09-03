@@ -35,7 +35,12 @@ Given fixtures for missing runtime, unsupported version, bind failure, readiness
 
 ### AC-029 — External selected DSH runtime
 
-Given a catalog containing more than one registered DSH runtime, home and profile, when the user selects one complete launch tuple, then Work verifies that runtime and launches its external DSH Web UI with the exact home, profile and workspace after readiness. Normal startup performs no package installation or profile reconciliation.
+Given a catalog containing more than one registered DSH runtime, DSH data
+directory and profile, when the user selects one launch target and a separate
+Workspace context, then Work verifies the runtime and launches its external
+DSH Web UI with the exact data directory and profile while passing the
+Workspace only to that session or Worker generation. Normal startup performs
+no package installation or profile reconciliation.
 
 ### AC-030 — Separate Settings surface with nested DSH manager
 
@@ -43,12 +48,14 @@ Given the DSH Workspace window is open, when the user chooses a DSH management
 command or Settings, then Work opens or focuses the separate trusted Settings
 window without injecting management markup into the DSH document; its rail
 starts with a read-only Overview, has one top-level General page, and exposes
-top-level Notifications plus shallow DSH resource pages. The application menu exposes Settings and Help;
+top-level Notifications plus shallow DSH resource pages for runtimes and DSH
+data directories. `General` contains the runtime, data directory and profile
+launch target but no Workspace selector. The application menu exposes Settings and Help;
 Help contains Check for Updates and About Work.
 
 ### AC-034 — DSH-owned appearance
 
-Given the selected DSH home stores `ui-theme.preference` as `light`, `dark` or
+Given the selected DSH data directory stores `ui-theme.preference` as `light`, `dark` or
 `system`, when a trusted Work surface opens, the operating system theme changes,
 or DSH changes the preference while both windows are open, then Work uses that
 preference without presenting or persisting a second Work appearance setting.
@@ -119,23 +126,40 @@ Given a user changes the top-level close-to-tray setting, when Work is
 restarted, then the setting is loaded from the versioned Work settings store;
 the default for a missing setting is tray, an invalid settings document fails
 closed to the tray-safe default and reports a recoverable Settings error, and
-the setting does not alter DSH home or profile data.
+the setting does not alter the DSH data directory or profile data.
 
 ### AC-031 — Profile-owned plugin management
 
-Given two DSH homes or profiles with independent plugin state, when the user lists, installs or removes a plugin, then the operation requires the exact DSH home and profile, delegates composition to DSH's supported CLI and changes only that profile's association. An operation against the active profile reports whether a restart is required.
+Given two DSH data directories or profiles with independent plugin state,
+when the user lists, installs or removes a plugin, then the operation requires
+the exact data directory and profile, delegates composition to DSH's supported
+CLI and changes only that profile's association. An operation against the
+active profile reports whether a restart is required.
 
-### AC-032 — DSH home and runtime data safety
+### AC-032 — DSH data directory and runtime data safety
 
-Given a user-owned DSH home that does not exist locally, Work refuses to launch or register it and does not create the directory. Given a selected or active runtime/home, Work refuses removal; catalog removal explicitly states that managed runtime files are retained until a future data-management action.
+Given a user-owned DSH data directory that does not exist locally, Work
+refuses to launch or register it and does not create the directory. Given a
+selected or active runtime/data directory, Work refuses removal; catalog
+removal explicitly states that managed runtime files are retained until a
+future data-management action.
 
-### AC-036 — Custom profile identity editing
+### AC-043 — Custom profile identity editing
 
 Given an existing custom DSH profile, when the user changes its name from the
 profile detail, then Work renames only the profile directory, preserves the
-profile manifest and patch layers, keeps the selected home identity, and
-updates the pending launch selection when it references that profile. Built-in
+profile manifest and patch layers, keeps the selected data-directory identity, and
+updates the pending launch target when it references that profile. Built-in
 or active profiles cannot be renamed.
+
+### AC-044 — Workspace context is independent of the launch target
+
+Given one DSH data directory serves two valid DSH Workspaces, when the user
+selects or creates a Workspace in the DSH Workspace surface, then Work attaches
+that Workspace context to the active session without changing the persisted
+runtime, data-directory or profile launch target. `General` does not offer an
+editable Workspace path, and removing a Workspace registration leaves its
+directory, files and sessions intact.
 
 ### AC-007 — Bounded retry
 
@@ -207,7 +231,7 @@ Given synthetic secrets across Host, Worker and browser error fixtures, when dia
 
 ### AC-020 — Local storage isolation
 
-Given a normal task and shutdown, then Host files stay in the per-user application-data area, user workspaces and DSH homes are not silently rewritten, and global environment or package-manager settings are unchanged.
+Given a normal task and shutdown, then Host files stay in the per-user application-data area, user Workspaces and DSH data directories are not silently rewritten, and global environment or package-manager settings are unchanged.
 
 ### AC-021 — Keyboard operation
 
@@ -227,7 +251,7 @@ Given a secret that must persist, when Work saves and later reads it, then only 
 
 ### AC-025 — Clean install and uninstall
 
-Given clean supported Windows, macOS and Linux environments, installation and first launch complete through documented steps; uninstall states what data remains and does not silently remove user-owned workspaces or DSH homes.
+Given clean supported Windows, macOS and Linux environments, installation and first launch complete through documented steps; uninstall states what data remains and does not silently remove user-owned Workspaces or DSH data directories.
 
 ## Requirement coverage
 
@@ -241,12 +265,14 @@ Given clean supported Windows, macOS and Linux environments, installation and fi
 | FR-SUP-005 | AC-006, AC-019 |
 | FR-SUP-006, FR-SUP-007, FR-SUP-010 | AC-003, AC-005 |
 | FR-SUP-008, FR-SUP-009 | AC-006, AC-007 |
-| FR-MGR-001, FR-MGR-002, FR-MGR-003 | AC-002, AC-029 |
+| FR-MGR-001, FR-MGR-002, FR-MGR-003 | AC-002, AC-029, AC-044 |
 | FR-MGR-004 | AC-031 |
 | FR-MGR-005 | AC-030 |
 | FR-MGR-006, FR-MGR-007 | AC-032, AC-025 |
 | FR-MGR-008 | AC-034 |
 | FR-MGR-009 | AC-035 |
+| FR-MGR-010 | AC-043 |
+| FR-MGR-011, FR-MGR-012 | AC-044 |
 | FR-NOT-001, FR-NOT-002, FR-NOT-003 | AC-036 |
 | FR-NOT-004 | AC-037 |
 | FR-NOT-005 | AC-038 |
