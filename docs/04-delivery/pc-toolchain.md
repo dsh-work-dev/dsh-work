@@ -1,17 +1,17 @@
 # PC foundation toolchain baseline
 
-This is the F0 baseline for the first Work desktop slice. Exact values are
-duplicated in [`toolchain.lock.json`](../../toolchain.lock.json) so setup and
-verification scripts can consume one machine-readable manifest.
+This is the F0 baseline for the first Work desktop slice. Toolchain
+requirements are declared in [`toolchain.lock.json`](../../toolchain.lock.json)
+so setup and verification scripts can consume one machine-readable manifest.
 
-## Locked tools
+## Toolchain requirements
 
-| Tool | Version | Role |
+| Tool | Requirement | Role |
 |---|---:|---|
 | Go | `1.25.14` | Host and shared Modules |
 | Wails CLI | `v3.0.0-beta.16` | Desktop composition, bindings and build tasks |
 | Wails Go module | `v3.0.0-beta.16` | Native WebView Host |
-| Node.js | `24.20.0` | Frontend tooling and local DSH launcher |
+| Node.js | `>= 24` | Frontend tooling and local DSH launcher |
 | npm | `11.19.0` | Frontend dependency installation |
 | DSH | `@deepseek-ai/dsh@0.1.2-alpha.3` | Pinned out-of-process Web Worker |
 
@@ -38,15 +38,16 @@ lands, the Host accepts `WORK_DSH_EXECUTABLE` as an explicit override and
 otherwise checks the local locked install at `tools/dsh/node_modules/.bin/dsh`
 (with the Windows `.cmd` launcher selected by the Windows Adapter).
 
-`DSH_HOME` is set to a Work-owned application-data directory for each launch.
-The Host does not edit a user-owned DSH home during this foundation slice.
+`DSH_HOME` is set to a Work-owned DSH data directory under application data for
+each launch. The Host does not edit a user-owned DSH data directory during
+this foundation slice.
 On Windows the locked local install is invoked through the checked-in
 `tools/dsh/run-dsh.cmd` launcher, which calls the installed DSH entry module
 directly and avoids package-manager shim behavior at runtime.
 
 The Settings window's DSH manager and `dsh-work` CLI share the same catalog. Plugin changes
-are delegated to `dsh plugin --profile <name> ...` with an explicit DSH home
-identity; Work does not configure or relocate npm/pnpm stores.
+are delegated to `dsh plugin --profile <name> ...` with an explicit DSH
+data-directory identity; Work does not configure or relocate npm/pnpm stores.
 
 ## Verification inventory
 

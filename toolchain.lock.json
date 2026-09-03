@@ -10,7 +10,7 @@
     "install": "go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16"
   },
   "node": {
-    "version": "24.20.0"
+    "minimumMajor": 24
   },
   "packageManager": {
     "name": "npm",

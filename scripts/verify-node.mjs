@@ -8,11 +8,12 @@ const manifest = JSON.parse(readFileSync(join(root, "toolchain.lock.json"), "utf
 const npmCommand = process.platform === "win32" ? "cmd.exe" : "npm";
 const npmArgs = process.platform === "win32" ? ["/d", "/c", "npm", "--version"] : ["--version"];
 const npmVersion = execFileSync(npmCommand, npmArgs, { encoding: "utf8" }).trim();
-const expectedNode = `v${manifest.node.version}`;
+const minimumNodeMajor = manifest.node.minimumMajor;
+const currentNodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
 const expectedNpm = manifest.packageManager.version;
 
-if (process.version !== expectedNode) {
-  throw new Error(`Node mismatch: expected ${expectedNode}, got ${process.version}`);
+if (currentNodeMajor < minimumNodeMajor) {
+  throw new Error(`Node mismatch: expected >=${minimumNodeMajor}, got ${process.version}`);
 }
 if (npmVersion !== expectedNpm) {
   throw new Error(`npm mismatch: expected ${expectedNpm}, got ${npmVersion}`);

@@ -4,6 +4,7 @@ $manifest = Get-Content -Raw (Join-Path $PSScriptRoot '..\toolchain.lock.json') 
 
 $go = (go version).Trim()
 $node = (node --version).Trim()
+$nodeMajorMatch = [regex]::Match($node, '^v(?<major>\d+)')
 $npm = (npm --version).Trim()
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -14,8 +15,8 @@ $wails = ([regex]::Match($wailsOutput, 'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]
 if ($go -notmatch [regex]::Escape("go$($manifest.go.version)")) {
     throw "Go mismatch: expected go$($manifest.go.version), got $go"
 }
-if ($node -ne "v$($manifest.node.version)") {
-    throw "Node mismatch: expected v$($manifest.node.version), got $node"
+if (-not $nodeMajorMatch.Success -or [int]$nodeMajorMatch.Groups['major'].Value -lt [int]$manifest.node.minimumMajor) {
+    throw "Node mismatch: expected >=$($manifest.node.minimumMajor), got $node"
 }
 if ($npm -ne $manifest.packageManager.version) {
     throw "npm mismatch: expected $($manifest.packageManager.version), got $npm"
