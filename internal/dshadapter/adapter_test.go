@@ -54,6 +54,30 @@ func TestDiscoverRequiresExactPinnedVersion(t *testing.T) {
 	}
 }
 
+func TestDiscoverUsesDSHWorkOverrideNameOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DSH_WORK_EXECUTABLE", path)
+	t.Setenv("WORK_DSH_EXECUTABLE", filepath.Join(t.TempDir(), "old-dsh.cmd"))
+	adapter := New(&fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion}}, SupportedVersion)
+
+	runtime, err := adapter.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover() with DSH_WORK_EXECUTABLE error = %v", err)
+	}
+	if runtime.Path != path {
+		t.Fatalf("runtime path = %q, want %q", runtime.Path, path)
+	}
+
+	t.Setenv("DSH_WORK_EXECUTABLE", "")
+	adapter.SetDiscoveryRoot(t.TempDir())
+	if _, err := adapter.Discover(context.Background()); err == nil {
+		t.Fatal("Discover() accepted the removed WORK_DSH_EXECUTABLE compatibility name")
+	}
+}
+
 func TestParseAndValidateReadyAnnouncement(t *testing.T) {
 	adapter := New(nil, SupportedVersion)
 	announcement, ok := adapter.ParseReadyAnnouncement("\x1b[32mdsh web:\x1b[0m http://127.0.0.1:4321/.\r\n")

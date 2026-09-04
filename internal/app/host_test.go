@@ -54,6 +54,35 @@ func newTestDSH() *testDSH {
 	return dsh
 }
 
+func newHostTestManager(t *testing.T, profile string) *dshmanager.Manager {
+	t.Helper()
+	root := t.TempDir()
+	dataDirectory := filepath.Join(root, "dsh-work")
+	if err := os.MkdirAll(filepath.Join(dataDirectory, "profiles", profile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath: filepath.Join(root, "manager.json"),
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "dsh-work", Name: "dsh-work", Path: dataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
+		}},
+		Runtimes: []dshmanager.RuntimeInfo{{
+			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+		}},
+		DefaultRunContext: dshmanager.RunContext{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: profile},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return manager
+}
+
 func (d *testDSH) Discover(context.Context) (dshadapter.Runtime, error) {
 	return dshadapter.Runtime{Path: "test-dsh", Version: dshadapter.SupportedVersion}, nil
 }
@@ -177,8 +206,9 @@ func (w *testWorker) Close() error {
 func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	dsh := newTestDSH()
 	defer dsh.server.Close()
+	manager := newHostTestManager(t, "web")
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
 		BootstrapDirectory:  t.TempDir(),
 		DSHDataDirectory:    t.TempDir(),
 		ReadinessTimeout:    time.Second,
@@ -380,11 +410,38 @@ func TestHostDoesNotStartWhenTheRunContextManagerCannotLoad(t *testing.T) {
 	}
 }
 
-func TestHostRestoresRecoverySurfaceAfterReadyWorkerExit(t *testing.T) {
+func TestHostDoesNotUseAnImplicitRunContextWithoutManager(t *testing.T) {
 	dsh := newTestDSH()
 	defer dsh.server.Close()
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{
+		DSH:        dsh,
+		Supervisor: supervisorAdapter,
+		Gateway:    &testGateway{server: dsh.server},
+	}, Config{
+		BootstrapDirectory: t.TempDir(),
+		DSHDataDirectory:   t.TempDir(),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+	})
+	statuses := make(chan lifecycle.Status, 8)
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	host.Start()
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	if failed.Error == nil || failed.Error.Code != lifecycle.ErrorManagerStateInvalid {
+		t.Fatalf("unexpected implicit-context failure: %+v", failed)
+	}
+	if supervisorAdapter.starts != 0 {
+		t.Fatalf("worker started without a Run context manager: %d", supervisorAdapter.starts)
+	}
+}
+
+func TestHostRestoresRecoverySurfaceAfterReadyWorkerExit(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	manager := newHostTestManager(t, "web")
+	supervisorAdapter := &testSupervisor{}
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
 		ReadinessTimeout:   time.Second,
@@ -412,8 +469,9 @@ func TestHostRestoresRecoverySurfaceAfterReadyWorkerExit(t *testing.T) {
 func TestHostDoesNotOverlapAWorkerWhenCleanupIsUnverified(t *testing.T) {
 	dsh := newTestDSH()
 	defer dsh.server.Close()
+	manager := newHostTestManager(t, "web")
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
 		ReadinessTimeout:   time.Second,
@@ -616,6 +674,42 @@ func TestHostCommitsCandidateOnlyAfterReady(t *testing.T) {
 	}
 }
 
+func TestHostCancellingCandidateSwitchStillRestoresKnownGood(t *testing.T) {
+	fixture := newRunContextSwitchFixture(t)
+	defer fixture.close()
+	fixture.startReady(t)
+
+	releaseReady := make(chan struct{})
+	fixture.supervisor.readyGates["beta"] = releaseReady
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan struct {
+		snapshot dshmanager.Snapshot
+		err      error
+	}, 1)
+	go func() {
+		snapshot, err := fixture.host.SwitchRunContext(ctx, fixture.target("beta"))
+		result <- struct {
+			snapshot dshmanager.Snapshot
+			err      error
+		}{snapshot: snapshot, err: err}
+	}()
+	fixture.supervisor.waitForStart(t, "beta")
+	cancel()
+
+	select {
+	case outcome := <-result:
+		assertFailureCode(t, outcome.err, lifecycle.ErrorCancelled)
+		assertRunContext(t, outcome.snapshot.Current, fixture.target("alpha"), "cancelled-switch current")
+		if status := fixture.host.Status(); status.State != lifecycle.StateReady {
+			t.Fatalf("host status after cancelled switch = %+v, want Ready", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled context switch did not finish")
+	}
+	fixture.supervisor.assertNoOverlap(t)
+	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta", "start:alpha")
+}
+
 func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
 	fixture := newRunContextSwitchFixture(t)
 	defer fixture.close()
@@ -636,6 +730,27 @@ func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
 	}
 	fixture.supervisor.assertNoOverlap(t)
 	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta", "start:alpha")
+}
+
+func TestHostRollsBackCandidateStartFailureWithoutWorkerOverlap(t *testing.T) {
+	fixture := newRunContextSwitchFixture(t)
+	defer fixture.close()
+	fixture.startReady(t)
+	fixture.supervisor.startErrors["beta"] = errors.New("candidate process boundary could not be created")
+
+	snapshot, err := fixture.host.SwitchRunContext(context.Background(), fixture.target("beta"))
+	if err == nil {
+		t.Fatal("SwitchRunContext() error = nil, want candidate start failure")
+	}
+	assertFailureCode(t, err, lifecycle.ErrorProcessStartFailed)
+	assertRunContext(t, snapshot.Current, fixture.target("alpha"), "start-failure current")
+	assertRunContext(t, snapshot.Configured, fixture.target("alpha"), "start-failure configured")
+	assertRunContext(t, snapshot.KnownGood, fixture.target("alpha"), "start-failure known-good")
+	if status := fixture.host.Status(); status.State != lifecycle.StateReady {
+		t.Fatalf("host status after candidate start rollback = %+v, want Ready", status)
+	}
+	fixture.supervisor.assertNoOverlap(t)
+	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:alpha")
 }
 
 func TestHostEntersRetryableFailedWhenRollbackFails(t *testing.T) {
@@ -727,7 +842,11 @@ func newRunContextSwitchFixture(t *testing.T) *runContextSwitchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisorAdapter := &switchTestSupervisor{readyGates: make(map[string]<-chan struct{}), startSignals: make(map[string]chan struct{})}
+	supervisorAdapter := &switchTestSupervisor{
+		readyGates:   make(map[string]<-chan struct{}),
+		startErrors:  make(map[string]error),
+		startSignals: make(map[string]chan struct{}),
+	}
 	host := NewHost(Dependencies{
 		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
 	}, Config{
@@ -896,6 +1015,7 @@ type switchTestSupervisor struct {
 	plans        []supervisor.LaunchPlan
 	events       []string
 	readyGates   map[string]<-chan struct{}
+	startErrors  map[string]error
 	startSignals map[string]chan struct{}
 	workers      []*switchTestWorker
 	onStart      func(string)
@@ -904,6 +1024,10 @@ type switchTestSupervisor struct {
 func (s *switchTestSupervisor) Start(ctx context.Context, plan supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
 	profile := switchTestProfile(plan)
 	s.mu.Lock()
+	if err := s.startErrors[profile]; err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
 	s.active++
 	if s.active > s.maxActive {
 		s.maxActive = s.active

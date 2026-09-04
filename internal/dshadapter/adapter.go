@@ -113,7 +113,7 @@ func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
 			Code:      lifecycle.ErrorDSHRuntimeNotFound,
 			Summary:   "A compatible local DSH runtime was not found.",
 			Retryable: false,
-			Detail:    "Set WORK_DSH_EXECUTABLE or run task setup:dsh.",
+			Detail:    "Set DSH_WORK_EXECUTABLE or run task setup:dsh.",
 		}
 	}
 	return a.DiscoverPath(ctx, path)
@@ -368,7 +368,7 @@ func (a *Adapter) locateExecutable() (string, error) {
 	if override := strings.TrimSpace(a.executableOverride); override != "" {
 		return existingExecutable(override)
 	}
-	if override := strings.TrimSpace(os.Getenv("WORK_DSH_EXECUTABLE")); override != "" {
+	if override := strings.TrimSpace(os.Getenv("DSH_WORK_EXECUTABLE")); override != "" {
 		return existingExecutable(override)
 	}
 	root := a.discoveryRoot
@@ -386,7 +386,7 @@ func (a *Adapter) locateExecutable() (string, error) {
 			return path, nil
 		}
 	}
-	if os.Getenv("WORK_DSH_ALLOW_PATH") == "1" {
+	if os.Getenv("DSH_WORK_ALLOW_PATH") == "1" {
 		if path, err := exec.LookPath("dsh"); err == nil {
 			return path, nil
 		}
@@ -398,7 +398,7 @@ func (a *Adapter) executableHint() string {
 	if override := strings.TrimSpace(a.executableOverride); override != "" {
 		return override
 	}
-	if override := strings.TrimSpace(os.Getenv("WORK_DSH_EXECUTABLE")); override != "" {
+	if override := strings.TrimSpace(os.Getenv("DSH_WORK_EXECUTABLE")); override != "" {
 		return override
 	}
 	root := a.discoveryRoot

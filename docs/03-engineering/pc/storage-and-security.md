@@ -25,6 +25,10 @@ dsh-work stores Host-owned data under the operating system's per-user applicatio
 - Migration writes a new file, validates it, then atomically replaces the prior version.
 - A recoverable backup is kept until the new version starts successfully.
 - Unknown fields are preserved only when the schema explicitly supports forward compatibility.
+- The pre-stability manager state schema is an explicit replacement contract:
+  older manager state is rejected, not migrated or read through compatibility
+  aliases. This exception is recorded in [ADR-0007](adr/0007-dsh-data-directory-and-workspace-context.md)
+  and prevents old selection data from entering the Run-context model.
 - Configuration paths are canonicalised and checked before file access.
 - The persisted Configured Run context contains only DSH runtime,
   DSH data-directory and profile identity; the data directory scopes the

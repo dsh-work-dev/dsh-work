@@ -33,10 +33,10 @@ npm install --prefix tools/dsh
 ```
 
 This creates a local, ignored `tools/dsh/node_modules` tree. dsh-work startup never
-runs npm, pnpm, npx or another package runner. Until the runtime-manager slice
-lands, the Host accepts `WORK_DSH_EXECUTABLE` as an explicit override and
-otherwise checks the local locked install at `tools/dsh/node_modules/.bin/dsh`
-(with the Windows `.cmd` launcher selected by the Windows Adapter).
+runs npm, pnpm, npx or another package runner. The Host accepts
+`DSH_WORK_EXECUTABLE` as an explicit override and otherwise checks the local
+locked install at `tools/dsh/node_modules/.bin/dsh` (with the Windows `.cmd`
+launcher selected by the Windows Adapter).
 
 `DSH_HOME` is set to a dsh-work-owned DSH data directory under application data for
 each launch. The Host does not edit a user-owned DSH data directory during

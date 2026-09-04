@@ -53,7 +53,7 @@ type LaunchManager interface {
 
 // RunContextManager adds the commit and mutation-lock operations needed by the
 // Host's serialized context-switch transaction. Keeping it separate lets the
-// legacy discovery-only fallback remain usable when no catalog is available.
+// Host depend on the smallest read-only manager seam during ordinary startup.
 type RunContextManager interface {
 	LaunchManager
 	BeginRunContextSwitch(context.Context) error
@@ -645,7 +645,7 @@ func (h *Host) Restart() lifecycle.Status {
 // post-transaction manager view; when the candidate fails after rollback, the
 // error is the terminal switch result and the configured context remains the
 // rollback source.
-func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContext) (dshmanager.Snapshot, error) {
+func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContext) (result dshmanager.Snapshot, resultErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -670,7 +670,7 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 
 	switchTimeout := h.config.ShutdownTimeout +
 		2*(h.config.ReadinessTimeout+h.config.GracefulStopTimeout+h.config.ForceStopTimeout+h.config.EmptyTimeout)
-	switchCtx, cancelSwitch := context.WithTimeout(context.Background(), switchTimeout)
+	switchCtx, cancelSwitch := context.WithTimeout(ctx, switchTimeout)
 	defer cancelSwitch()
 	if err := manager.BeginRunContextSwitch(switchCtx); err != nil {
 		h.setSwitching(false)
@@ -687,7 +687,14 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 			keepGuard = true
 		}
 		if !keepGuard {
-			_ = manager.EndRunContextSwitch(context.Background())
+			if err := manager.EndRunContextSwitch(context.Background()); err != nil {
+				releaseFailure := h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not release the Run context operation guard.", true)
+				if resultErr == nil {
+					resultErr = releaseFailure
+				} else {
+					resultErr = errors.Join(resultErr, releaseFailure)
+				}
+			}
 		}
 		h.setManagerSwitchGuarded(false)
 		h.setSwitching(false)
@@ -714,9 +721,12 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 		}
 	}
 
-	candidateStatus, candidateFailure, err := h.runResolvedContext(switchCtx, resolved)
-	if err != nil {
-		return dshmanager.Snapshot{}, err
+	candidateStatus, candidateFailure, beginErr := h.runResolvedContext(switchCtx, resolved)
+	if beginErr != nil {
+		// The previous Worker has already been stopped at this point. Treat a
+		// candidate generation-boundary failure exactly like any other
+		// candidate startup failure so the known-good context is restored.
+		candidateFailure = h.failureFor(beginErr, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
 	}
 	if candidateFailure == nil && candidateStatus.State == lifecycle.StateReady {
 		snapshot, snapshotErr := manager.Snapshot(context.Background())
@@ -739,14 +749,16 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 		return snapshot, candidateFailure
 	}
 
-	rollbackLaunch, rollbackErr := manager.ResolveLaunch(switchCtx, dshmanager.LaunchRequest{
+	rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), switchTimeout)
+	defer cancelRollback()
+	rollbackLaunch, rollbackErr := manager.ResolveLaunch(rollbackCtx, dshmanager.LaunchRequest{
 		RuntimeID: knownGood.RuntimeID,
 		Profile:   knownGood.Profile,
 	})
 	if rollbackErr != nil {
 		return h.finishContextSwitchFailure(manager, candidateFailure, rollbackErr)
 	}
-	rollbackStatus, rollbackFailure, beginErr := h.runResolvedContext(switchCtx, rollbackLaunch)
+	rollbackStatus, rollbackFailure, beginErr := h.runResolvedContext(rollbackCtx, rollbackLaunch)
 	if beginErr != nil {
 		return h.finishContextSwitchFailure(manager, candidateFailure, beginErr)
 	}
@@ -832,7 +844,7 @@ func (h *Host) ShutdownForApp() error {
 		shutdownComplete = true
 		return nil
 	case <-timer.C:
-		return fmt.Errorf("host shutdown timed out")
+		return h.failureFor(context.DeadlineExceeded, lifecycle.ErrorProcessCleanupFailed, "dsh-work could not finish host shutdown.", true)
 	}
 }
 
@@ -964,6 +976,9 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	if h.deps.PlatformError != nil {
 		return nil, h.failureFor(h.deps.PlatformError, lifecycle.ErrorPlatformUnsupported, "This platform does not have a native dsh-work process adapter.", false)
+	}
+	if h.deps.Manager == nil {
+		return nil, h.failureFor(errors.New("Run context manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not load its DSH Run context manager.", true)
 	}
 	if h.deps.DSH == nil {
 		return nil, h.failureFor(errors.New("DSH adapter is unavailable"), lifecycle.ErrorPlatformUnsupported, "The native DSH adapter is unavailable.", false)
@@ -1103,26 +1118,6 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 			resolved:      prepared,
 		}, nil
 	}
-	if h.deps.Manager == nil {
-		runtime, err := h.deps.DSH.Discover(run.ctx)
-		if err != nil {
-			if run.ctx.Err() != nil {
-				return hostLaunch{}, nil
-			}
-			return hostLaunch{}, h.failureFor(err, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not discover a compatible DSH runtime.", false)
-		}
-		return hostLaunch{
-			runtime: runtime,
-			dataDirectory: dshmanager.DataDirectoryInfo{
-				ID:        "dsh-work",
-				Name:      "dsh-work DSH data directory",
-				Path:      h.config.DSHDataDirectory,
-				Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
-			},
-			profile: "web",
-		}, nil
-	}
-
 	snapshot, err := h.deps.Manager.Snapshot(run.ctx)
 	if err != nil {
 		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not read the DSH launch selection.", false)
@@ -1578,7 +1573,7 @@ func (h *Host) failureFor(err error, fallbackCode lifecycle.ErrorCode, summary s
 func defaultRemediation(code lifecycle.ErrorCode) string {
 	switch code {
 	case lifecycle.ErrorDSHRuntimeNotFound:
-		return "Set WORK_DSH_EXECUTABLE or run task setup:dsh, then retry."
+		return "Set DSH_WORK_EXECUTABLE or run task setup:dsh, then retry."
 	case lifecycle.ErrorDSHUnsupportedVersion, lifecycle.ErrorDSHVersionCheckFailed:
 		return "Install the pinned DSH version and retry."
 	case lifecycle.ErrorProfileRequired, lifecycle.ErrorProfileNotFound, lifecycle.ErrorProfileInvalid:

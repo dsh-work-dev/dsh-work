@@ -58,6 +58,13 @@ This is a direct pre-release schema change. dsh-work reads and writes only the n
 launch-target shape; no legacy field alias, compatibility reader or migration
 path is required.
 
+The same pre-release rule applies to the dsh-work manager state file: the current
+transactional state schema is the only accepted schema. Older manager state is
+rejected as invalid rather than migrated or read through compatibility aliases.
+This is an intentional exception to the normal migration rule while the data
+contract is not stable; it prevents old runtime, data-directory or profile
+selection records from silently re-entering the new Run-context model.
+
 This keeps the deep ownership and locality of each concept: the manager owns
 the durable Configured Run context, DSH owns Workspace identity and session
 semantics, and the Adapter seam carries only the context needed for one run.
