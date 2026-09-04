@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
 )
 
 type installerCommandFake struct {

@@ -5,7 +5,7 @@
 
 ## Context
 
-Work needs Windows, macOS and Linux desktop shells, system-tray integration, a responsive trusted recovery surface and strong ownership of a separate DSH process tree. DSH is a Node.js-based, plugin-composed runtime with a Web UI and public profile／patch seams. Its agent behaviour should remain outside the desktop Host.
+dsh-work needs Windows, macOS and Linux desktop shells, system-tray integration, a responsive trusted recovery surface and strong ownership of a separate DSH process tree. DSH is a Node.js-based, plugin-composed runtime with a Web UI and public profile／patch seams. Its agent behaviour should remain outside the desktop Host.
 
 Wails 3 currently provides a Go application model and native desktop WebView integration, but is still in beta. DSH is in developer preview and warns that compatibility-breaking changes may occur. Both dependencies therefore need exact version pinning and adapter boundaries.
 
@@ -22,7 +22,7 @@ Use:
 - Go for the trusted desktop Host;
 - Wails 3 for native window, WebView and desktop integration;
 - an out-of-process DSH Worker supervised by Go;
-- a Work-owned DSH plugin injected through a supported profile／patch seam;
+- a dsh-work-owned DSH plugin injected through a supported profile／patch seam;
 - private authenticated local IPC for Host capability requests;
 - a TypeScript trusted UI, with the UI framework selected separately;
 - separate Windows, macOS and Linux process-ownership adapters behind one Supervisor contract.

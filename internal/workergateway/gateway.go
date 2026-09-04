@@ -60,7 +60,7 @@ func (a *Adapter) Start(ctx context.Context, upstreamAuthURL string) (Session, e
 	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("listen for Work Worker gateway: %w", err)
+		return nil, fmt.Errorf("listen for dsh-work Worker gateway: %w", err)
 	}
 
 	port := listener.Addr().(*net.TCPAddr).Port
@@ -68,7 +68,7 @@ func (a *Adapter) Start(ctx context.Context, upstreamAuthURL string) (Session, e
 	sessionID, err := randomToken(32)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("create Work Worker gateway session: %w", err)
+		return nil, fmt.Errorf("create dsh-work Worker gateway session: %w", err)
 	}
 	proxy := &httputil.ReverseProxy{}
 	proxy.Transport = &http.Transport{

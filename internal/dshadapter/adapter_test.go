@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/supervisor"
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 type fakeExecutor struct {

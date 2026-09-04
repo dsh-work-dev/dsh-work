@@ -1,4 +1,4 @@
-// Package notifications owns Work's notification vocabulary and delivery
+// Package notifications owns dsh-work's notification vocabulary and delivery
 // policy. It deliberately has no Wails, window-handle or DSH DOM dependency.
 package notifications
 
@@ -36,7 +36,7 @@ const (
 	PreferenceLifecycle           PreferenceKey = "lifecycle"
 )
 
-// Preferences is persisted by Work and projected to the trusted Settings
+// Preferences is persisted by dsh-work and projected to the trusted Settings
 // surface. Defaults keep meaningful task and error signals available while
 // leaving routine lifecycle noise off.
 type Preferences struct {

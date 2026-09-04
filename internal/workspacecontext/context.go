@@ -11,7 +11,7 @@ import (
 
 // State describes what the DSH Workspace surface must do for one session.
 // SelectionRequired is an explicit result, not a fallback to a process
-// directory or another Work-owned path.
+// directory or another dsh-work-owned path.
 type State string
 
 const (
@@ -29,7 +29,7 @@ type Request struct {
 }
 
 // Context is intentionally per-generation. It is never part of the durable
-// Work Run context or the global manager state.
+// dsh-work Run context or the global manager state.
 type Context struct {
 	GenerationID string `json:"generationId"`
 	State        State  `json:"state"`
@@ -40,7 +40,7 @@ type Context struct {
 
 // Resolver obtains a DSH-owned Workspace context for one Worker generation.
 // Implementations may call DSH's Workspace seam; they must not persist the
-// returned context in Work's global configuration.
+// returned context in dsh-work's global configuration.
 type Resolver interface {
 	Resolve(context.Context, string, Request) (Context, error)
 }

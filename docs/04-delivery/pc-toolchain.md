@@ -1,6 +1,6 @@
 # PC foundation toolchain baseline
 
-This is the F0 baseline for the first Work desktop slice. Toolchain
+This is the F0 baseline for the first dsh-work desktop slice. Toolchain
 requirements are declared in [`toolchain.lock.json`](../../toolchain.lock.json)
 so setup and verification scripts can consume one machine-readable manifest.
 
@@ -32,13 +32,13 @@ The repository declares the initial DSH compatibility fixture in
 npm install --prefix tools/dsh
 ```
 
-This creates a local, ignored `tools/dsh/node_modules` tree. Work startup never
+This creates a local, ignored `tools/dsh/node_modules` tree. dsh-work startup never
 runs npm, pnpm, npx or another package runner. Until the runtime-manager slice
 lands, the Host accepts `WORK_DSH_EXECUTABLE` as an explicit override and
 otherwise checks the local locked install at `tools/dsh/node_modules/.bin/dsh`
 (with the Windows `.cmd` launcher selected by the Windows Adapter).
 
-`DSH_HOME` is set to a Work-owned DSH data directory under application data for
+`DSH_HOME` is set to a dsh-work-owned DSH data directory under application data for
 each launch. The Host does not edit a user-owned DSH data directory during
 this foundation slice.
 On Windows the locked local install is invoked through the checked-in
@@ -47,7 +47,7 @@ directly and avoids package-manager shim behavior at runtime.
 
 The Settings window's DSH manager and `dsh-work` CLI share the same catalog. Plugin changes
 are delegated to `dsh plugin --profile <name> ...` with an explicit DSH
-data-directory identity; Work does not configure or relocate npm/pnpm stores.
+data-directory identity; dsh-work does not configure or relocate npm/pnpm stores.
 
 ## Verification inventory
 

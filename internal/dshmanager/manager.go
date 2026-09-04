@@ -11,7 +11,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 const stateVersion = 3
@@ -53,7 +53,7 @@ type RuntimeInstaller interface {
 
 // RuntimeVerifier is implemented by the selected DSH adapter. The manager
 // owns catalog identity and presence checks; only the adapter can verify that
-// an executable speaks the DSH contract expected by this Work build.
+// an executable speaks the DSH contract expected by this dsh-work build.
 type RuntimeVerifier interface {
 	Verify(context.Context, string, string) error
 }
@@ -322,9 +322,9 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 		m.mu.Unlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH data directory is still selected", "choose another profile before removing it")
 	}
-	if m.config.DataDirectories[index].Ownership == DataDirectoryOwnershipWork {
+	if m.config.DataDirectories[index].Ownership == DataDirectoryOwnershipDSHWork {
 		m.mu.Unlock()
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the Work DSH data directory cannot be removed here", "remove the data directory through an explicit data-management flow")
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the dsh-work DSH data directory cannot be removed here", "remove the data directory through an explicit data-management flow")
 	}
 	m.config.DataDirectories = append(m.config.DataDirectories[:index], m.config.DataDirectories[index+1:]...)
 	state := m.stateLocked()
@@ -399,7 +399,7 @@ func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([
 }
 
 // InstallPlugin delegates profile composition to DSH's supported plugin
-// command. Work validates the target and package spec, but never edits DSH
+// command. dsh-work validates the target and package spec, but never edits DSH
 // manifests or runs pnpm directly.
 func (m *Manager) InstallPlugin(ctx context.Context, request PluginInstallRequest) (PluginResult, error) {
 	return m.runPluginCommand(ctx, request.Target, request.Package, "add")
@@ -620,7 +620,7 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 		return ResolvedLaunch{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "the selected runtime is not in the catalog")
 	}
 	if !runtimeExecutablePresent(runtime.Path) {
-		return ResolvedLaunch{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before starting Work")
+		return ResolvedLaunch{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before starting dsh-work")
 	}
 	if err := verifyRuntime(ctx, config.RuntimeVerifier, runtime); err != nil {
 		return ResolvedLaunch{}, err
@@ -657,7 +657,7 @@ func (m *Manager) SetConfigured(ctx context.Context, target RunContext) (Snapsho
 	busy := m.switching || m.current != nil
 	m.mu.RUnlock()
 	if busy {
-		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is already active", "use the managed context switch while Work is running")
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is already active", "use the managed context switch while dsh-work is running")
 	}
 	resolved, err := m.ResolveLaunch(ctx, LaunchRequest{
 		RuntimeID: target.RuntimeID,
@@ -808,7 +808,7 @@ func normalizeConfig(config Config) (Config, error) {
 		if err != nil || configRoot == "" {
 			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "the operating system did not provide a user application-data directory")
 		}
-		config.StatePath = filepath.Join(configRoot, "Work", "dsh-work", "manager.json")
+		config.StatePath = filepath.Join(configRoot, "dsh-work", "manager.json")
 	}
 	statePath, err := filepath.Abs(config.StatePath)
 	if err != nil {
@@ -835,8 +835,8 @@ func normalizeConfig(config Config) (Config, error) {
 		if dataDirectory.Ownership == "" {
 			dataDirectory.Ownership = DataDirectoryOwnershipUser
 		}
-		if dataDirectory.Ownership != DataDirectoryOwnershipWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "use work or user ownership")
+		if dataDirectory.Ownership != DataDirectoryOwnershipDSHWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory catalog is invalid", "use dsh-work or user ownership")
 		}
 	}
 
@@ -862,8 +862,8 @@ func validateDataDirectory(dataDirectory DataDirectoryInfo) error {
 	if dataDirectory.ID == "" || dataDirectory.Path == "" {
 		return failure(lifecycle.ErrorManagerStateInvalid, "DSH data directory is invalid", "a data directory needs an id and path")
 	}
-	if dataDirectory.Ownership != "" && dataDirectory.Ownership != DataDirectoryOwnershipWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
-		return failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory ownership is invalid", "use work or user ownership")
+	if dataDirectory.Ownership != "" && dataDirectory.Ownership != DataDirectoryOwnershipDSHWork && dataDirectory.Ownership != DataDirectoryOwnershipUser {
+		return failure(lifecycle.ErrorManagerStateInvalid, "DSH data-directory ownership is invalid", "use dsh-work or user ownership")
 	}
 	return nil
 }

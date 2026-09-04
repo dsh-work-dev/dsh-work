@@ -4,11 +4,11 @@ package platform
 
 import "errors"
 
-import "github.com/local/work/internal/dshmanager"
+import "github.com/local/dsh-work/internal/dshmanager"
 
 func newDependencies() Dependencies {
 	return Dependencies{
-		Err: errors.New("native Work process supervision is not implemented for this target"),
+		Err: errors.New("native dsh-work process supervision is not implemented for this target"),
 	}
 }
 

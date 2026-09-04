@@ -1,4 +1,4 @@
-import type {DataDirectoryInfo, RunContext, RuntimeInfo, Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import type {DataDirectoryInfo, RunContext, RuntimeInfo, Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 
 export type OverviewLane = {
   target: RunContext | null;

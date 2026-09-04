@@ -9,14 +9,14 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-// RuntimeInstaller performs an explicit DSH package installation into Work's
+// RuntimeInstaller performs an explicit DSH package installation into dsh-work's
 // managed runtime store. It uses npm only for this user-requested operation;
-// normal Work startup never reaches this adapter.
+// normal dsh-work startup never reaches this adapter.
 type RuntimeInstaller struct {
 	executor  dshadapter.CommandExecutor
 	storeRoot string
@@ -42,21 +42,21 @@ func (i RuntimeInstaller) Install(ctx context.Context, version string) (dshmanag
 	if strings.TrimSpace(i.storeRoot) == "" {
 		return dshmanager.RuntimeInfo{}, lifecycle.Failure{
 			Code:    lifecycle.ErrorRuntimeInstallFailed,
-			Summary: "The Work runtime store is unavailable.",
+			Summary: "The dsh-work runtime store is unavailable.",
 		}
 	}
 	storeRoot, err := filepath.Abs(i.storeRoot)
 	if err != nil || storeRoot == "" {
 		return dshmanager.RuntimeInfo{}, lifecycle.Failure{
 			Code:    lifecycle.ErrorRuntimeInstallFailed,
-			Summary: "The Work runtime store is unavailable.",
+			Summary: "The dsh-work runtime store is unavailable.",
 		}
 	}
 	destination := filepath.Join(storeRoot, "dsh-"+version)
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return dshmanager.RuntimeInfo{}, lifecycle.Failure{
 			Code:    lifecycle.ErrorRuntimeInstallFailed,
-			Summary: "The Work runtime store could not be prepared.",
+			Summary: "The dsh-work runtime store could not be prepared.",
 		}
 	}
 	_, err = i.executor.Run(ctx, "npm.cmd", []string{

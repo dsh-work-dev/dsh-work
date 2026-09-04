@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 // State is the platform-neutral lifecycle state projected to the trusted UI.
@@ -35,7 +35,7 @@ const (
 	PhaseFailed        Phase = "failed"
 )
 
-// ErrorCode is the stable Work error vocabulary. Dependency-specific detail
+// ErrorCode is the stable dsh-work error vocabulary. Dependency-specific detail
 // stays at the Adapter boundary and is never used as a UI control protocol.
 type ErrorCode string
 

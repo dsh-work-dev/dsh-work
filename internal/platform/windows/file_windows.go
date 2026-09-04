@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/local/work/internal/settings"
+	"github.com/local/dsh-work/internal/settings"
 	win "golang.org/x/sys/windows"
 )
 

@@ -18,7 +18,7 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as dshmanager$0 from "../dshmanager/models.js";
 
 export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3103025421);
+    return $Call.ByID(3706159683);
 }
 
 /**
@@ -27,45 +27,45 @@ export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
  * by DSH.
  */
 export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
-    return $Call.ByID(2854035570);
+    return $Call.ByID(500405340);
 }
 
 export function InstallPlugin(request: dshmanager$0.PluginInstallRequest): $CancellablePromise<dshmanager$0.PluginResult> {
-    return $Call.ByID(1130688437, request);
+    return $Call.ByID(1606435111, request);
 }
 
 export function InstallRuntime(version: string): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3933820354, version);
+    return $Call.ByID(1408476440, version);
 }
 
 export function ListPlugins(request: dshmanager$0.PluginListRequest): $CancellablePromise<dshmanager$0.PluginInfo[] | null> {
-    return $Call.ByID(2864409457, request);
+    return $Call.ByID(3735864195, request);
 }
 
 export function RegisterDataDirectory(dataDirectory: dshmanager$0.DataDirectoryInfo): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(4210621493, dataDirectory);
+    return $Call.ByID(2482295343, dataDirectory);
 }
 
 export function RemoveDataDirectory(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(1955812790, id);
+    return $Call.ByID(3899737548, id);
 }
 
 export function RemovePlugin(request: dshmanager$0.PluginRemoveRequest): $CancellablePromise<dshmanager$0.PluginResult> {
-    return $Call.ByID(547869100, request);
+    return $Call.ByID(4146020966, request);
 }
 
 export function RemoveRuntime(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3251481673, id);
+    return $Call.ByID(1481344487, id);
 }
 
 export function RenameProfile(request: dshmanager$0.ProfileRenameRequest): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(2306798674, request);
+    return $Call.ByID(2984344992, request);
 }
 
 export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $CancellablePromise<dshmanager$0.ResolvedLaunch> {
-    return $Call.ByID(1105056358, request);
+    return $Call.ByID(1114420160, request);
 }
 
 export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3523733425, target);
+    return $Call.ByID(2077442307, target);
 }

@@ -70,7 +70,7 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 	if (status.state === "Failed") {
 		return {
 			label: copy("status.failed", "Failed"),
-			message: failure?.summary ?? copy("status.failureFallback", "Work could not start the local workspace."),
+			message: failure?.summary ?? copy("status.failureFallback", "dsh-work could not start the local workspace."),
 			detail: failure?.detail ?? failure?.code ?? "UNKNOWN_FAILURE",
 			tone: "failed",
 			showCancel: false,
@@ -113,7 +113,7 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 	}
 	return {
 		label: copy(phaseLabelKeys[status.phase], phaseLabels[status.phase]),
-		message: copy("status.startupMessage", "Work is starting your DSH workspace."),
+		message: copy("status.startupMessage", "dsh-work is starting your DSH workspace."),
 		detail: copy("status.waitingDsh", "Waiting for DSH to respond."),
 		tone: "progress",
 		showCancel: status.canCancel,

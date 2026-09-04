@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Work turns a command-line-hosted DSH environment into a dependable desktop application. It removes routine lifecycle work from the user and provides a controlled bridge from an agent to local desktop capabilities.
+dsh-work turns a command-line-hosted DSH environment into a dependable desktop application. It removes routine lifecycle work from the user and provides a controlled bridge from an agent to local desktop capabilities.
 
 ## Product boundary
 
-Work owns:
+dsh-work owns:
 
 - application window and system-tray behaviour;
 - discovery or provisioning of a compatible DSH runtime;
@@ -22,13 +22,13 @@ DSH owns:
 - agent-specific tools and business logic;
 - its own persistent data formats.
 
-Work must integrate through supported seams. It must not reimplement DSH agent behaviour or silently mutate DSH-owned data.
+dsh-work must integrate through supported seams. It must not reimplement DSH agent behaviour or silently mutate DSH-owned data.
 
 ## First release
 
 The first PC release targets Windows, macOS and Linux and proves one complete local workflow on every supported platform:
 
-1. launch Work;
+1. launch dsh-work;
 2. start and display DSH reliably;
 3. connect the user's browser and run a DSH-approved task in the selected tab;
 4. show its progress and result;
@@ -44,7 +44,7 @@ Remote control, full desktop UI automation and a plugin marketplace are outside 
 3. **Visible state.** Starting, ready, busy, waiting for approval, failed and recovering are explicit states.
 4. **Recoverable failure.** A failed worker must not make the desktop shell unusable.
 5. **Replaceable integration.** DSH, operating-system and browser details sit behind adapters.
-6. **No hidden global mutation.** Work does not silently change global shell, package-manager or browser settings.
+6. **No hidden global mutation.** dsh-work does not silently change global shell, package-manager or browser settings.
 
 ## Document authority
 

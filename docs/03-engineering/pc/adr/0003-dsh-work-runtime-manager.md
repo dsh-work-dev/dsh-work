@@ -10,25 +10,25 @@
 
 ## Context
 
-Work owns the desktop lifecycle, trusted recovery surface and native process
+dsh-work owns the desktop lifecycle, trusted recovery surface and native process
 boundary. DSH owns the agent runtime, profile composition and DSH Web UI. The
-embedded `frontend/dist` assets in Work can therefore be misunderstood as an
+embedded `frontend/dist` assets in dsh-work can therefore be misunderstood as an
 embedded DSH application even though they are only the Host shell shown before
 readiness and after recovery.
 
 The product also needs to keep more than one DSH version and profile available,
-select one for a Work launch and manage DSH plugins. DSH already exposes public
+select one for a dsh-work launch and manage DSH plugins. DSH already exposes public
 seams for profile selection and profile plugin management:
 
 - `dsh --profile <name>`
 - `dsh plugin --profile <name> <pnpm arguments>`
 
-Work must not duplicate those profile or plugin semantics.
+dsh-work must not duplicate those profile or plugin semantics.
 
 ## Decision
 
-1. Work continues to embed only the trusted Host shell. It never embeds or
-   copies the DSH Web UI into the Work binary.
+1. dsh-work continues to embed only the trusted Host shell. It never embeds or
+   copies the DSH Web UI into the dsh-work binary.
 2. DSH remains an out-of-process runtime. Its Web UI is served by the selected
    Worker and is navigated only after readiness and gateway validation.
 3. Add a separate `dsh-work` CLI and a shared runtime-manager Module. The CLI
@@ -49,7 +49,7 @@ Work must not duplicate those profile or plugin semantics.
            ├── profile patch layers
            └── profile data
 
-   launch selection = runtime + DSH home + profile + Work workspace
+   launch selection = runtime + DSH home + profile + dsh-work workspace
    ```
 
    A runtime loads a profile; it does not own that profile. The initial F3
@@ -62,17 +62,17 @@ Work must not duplicate those profile or plugin semantics.
    runtime-owned. Profile creation and plugin operations use DSH's supported
    profile/plugin seam. `dsh-work` may orchestrate those commands, but does not
    parse or reimplement DSH's patch-layer composition.
-6. Normal Work GUI startup is read-only with respect to runtime management. It
+6. Normal dsh-work GUI startup is read-only with respect to runtime management. It
    must never invoke npm, pnpm, npx or an implicit download. Installation,
    update, rollback and plugin changes are explicit CLI operations.
-7. The manager's runtime installation store and Work-managed DSH homes are
+7. The manager's runtime installation store and dsh-work-managed DSH homes are
    distinct from user-owned DSH homes unless the user explicitly selects an
    existing home. A profile is not version-scoped by ownership. A profile may
    be paired with another runtime only after explicit runtime/profile
    compatibility validation; there is no implicit copy, migration or upgrade
    of profile data.
-8. Work's integration plugin, when needed, is attached to the selected profile
-   for that Worker generation. Its generated overlay is Work-owned and
+8. dsh-work's integration plugin, when needed, is attached to the selected profile
+   for that Worker generation. Its generated overlay is dsh-work-owned and
    disposable, but it is not a global runtime plugin and must not alter other
    profiles.
 9. Runtime, DSH home, profile and plugin management is presented in a flat,
@@ -99,9 +99,9 @@ Work must not duplicate those profile or plugin semantics.
     the changed profile composition is used.
 12. Custom profile names may be changed by renaming the profile directory,
     because DSH 0.1.2 has no public rename command and defines profile identity
-    by `$DSH_HOME/profiles/<name>`. Work never rewrites the profile manifest or
+    by `$DSH_HOME/profiles/<name>`. dsh-work never rewrites the profile manifest or
     patch layers, refuses built-in and active profiles, and updates the
-    persisted desired selection when it references the renamed profile.
+   persisted Configured Run context when it references the renamed profile.
 13. The Settings window is created lazily and reused as one application-level
     settings and DSH management surface. Closing it hides the window without
     stopping DSH; application quit still cancels management operations and
@@ -111,8 +111,8 @@ Work must not duplicate those profile or plugin semantics.
 
 Positive:
 
-- The Work binary stays a Host, not a second DSH distribution.
-- Work can switch DSH versions and profiles without changing lifecycle code.
+- The dsh-work binary stays a Host, not a second DSH distribution.
+- dsh-work can switch DSH versions and profiles without changing lifecycle code.
 - DSH remains the source of truth for profile and plugin composition.
 - Plugin enablement and configuration stay isolated per profile while one
   package can be reused physically by a package manager.
@@ -136,13 +136,13 @@ Costs and risks:
 
 ## Rejected alternatives
 
-- **Embed DSH assets in Work:** duplicates ownership and prevents independent
+- **Embed DSH assets in dsh-work:** duplicates ownership and prevents independent
   DSH upgrades.
 - **Make Host edit DSH profile files directly:** duplicates DSH's composition
   rules and risks corrupting user-owned profile data.
 - **Run npm/pnpm during GUI startup:** makes startup non-deterministic and can
   mutate or download dependencies without an explicit user action.
-- **Inject a Work toolbar into the DSH DOM:** mixes ownership, depends on DSH
+- **Inject a dsh-work toolbar into the DSH DOM:** mixes ownership, depends on DSH
   page structure and risks exposing Host controls to untrusted content.
 
 ## Follow-up implementation seam

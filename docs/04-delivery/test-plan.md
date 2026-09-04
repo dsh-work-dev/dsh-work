@@ -66,7 +66,7 @@ The fixture matrix includes clean and signed-in Chrome／Edge／Chromium profile
 - legal and illegal transition table;
 - duplicate, late and old-generation events;
 - bounded timeout and cancellation;
-- explicit quit hides all Work windows before background cleanup, suppresses
+- explicit quit hides all dsh-work windows before background cleanup, suppresses
   duplicate quit/restart actions, and exits only after verified cleanup;
 - cleanup failure leaves a retryable tray/recovery surface and does not create
   an overlapping Worker;
@@ -108,7 +108,7 @@ The fixture matrix includes clean and signed-in Chrome／Edge／Chromium profile
 
 ### Permission service
 
-- exhaustive Work Tool allow／ask／deny classification;
+- exhaustive dsh-work Tool allow／ask／deny classification;
 - DSH `allowed-once`, rejected, cancelled and unavailable outcomes;
 - no duplicate Host approval after DSH approval;
 - browser connection grant and revocation;

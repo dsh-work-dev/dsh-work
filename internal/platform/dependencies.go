@@ -1,13 +1,13 @@
 package platform
 
 import (
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/settings"
-	"github.com/local/work/internal/supervisor"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/supervisor"
 )
 
 // Dependencies are the native seams selected by the current build target.
-// The rest of Work only sees the shared interfaces; platform handles and
+// The rest of dsh-work only sees the shared interfaces; platform handles and
 // signals never cross this boundary.
 type Dependencies struct {
 	Supervisor      supervisor.Adapter

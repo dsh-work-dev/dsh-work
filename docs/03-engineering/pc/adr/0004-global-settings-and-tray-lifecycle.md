@@ -5,16 +5,16 @@
 
 ## Context
 
-Work has more than one native window: the external DSH Workspace and the
+dsh-work has more than one native window: the external DSH Workspace and the
 trusted Settings window. The DSH manager lives inside Settings. Closing one
 window must not accidentally stop the DSH Worker,
 but leaving every window closed must have an explicit, user-configurable
 meaning. The default should preserve the tray workflow; users who do not want
-background Work must be able to make closing the last window a full quit.
+background dsh-work must be able to make closing the last window a full quit.
 
-The preference is Work-global. It is not a DSH runtime, DSH home, profile or
+The preference is dsh-work-global. It is not a DSH runtime, DSH home, profile or
 plugin property, and it must remain available from the separate Settings
-window. Explicit `Quit DSH Work` must always perform managed Worker cleanup,
+window. Explicit `Quit dsh-work` must always perform managed Worker cleanup,
 regardless of the close preference.
 
 Settings persistence also needs to publish a complete JSON document. The
@@ -48,15 +48,15 @@ therefore required for the Windows slice.
 
 5. Use Wails' native `SystemTray` API at the composition edge for the tray
    icon and menu on supported desktop platforms. The tray offers Workspace,
-   Settings, Restart DSH and Quit DSH Work. The application menu contains only
+   Settings, Restart DSH and Quit dsh-work. The application menu contains only
    Settings and Help; Help contains update-check and About commands.
-6. Expose Work Settings and nested DSH manager controls only through the
+6. Expose dsh-work Settings and nested DSH manager controls only through the
    trusted Settings window. Its Overview is read-only and its single General
    page contains the Run context and close policy. Saving the close preference
    updates the shared ledger immediately; it does not restart DSH or mutate DSH
    data.
 7. Realize explicit quit as a pre-exit `QuitFlow`: mark the window ledger as
-   quitting, hide every existing Work window synchronously, run bounded Host
+   quitting, hide every existing dsh-work window synchronously, run bounded Host
    cleanup in the background, and call the native application quit only after
    cleanup succeeds. A cleanup failure clears the quit gate, leaves the tray
    available and opens the trusted Settings overview for retry. The Wails
@@ -74,7 +74,7 @@ Positive:
 - A slow or active DSH shutdown no longer leaves a visible WebView looking
   frozen, and cleanup failures remain recoverable without a second Host.
 - Shared tests cover the decision without importing Wails or Windows handles.
-- Wails owns native tray realization for Windows, macOS and Linux; Work does
+- Wails owns native tray realization for Windows, macOS and Linux; dsh-work does
   not create placeholder platform implementations.
 
 Costs and risks:
@@ -90,8 +90,8 @@ Costs and risks:
 ## Rejected alternatives
 
 - **Stop on every window close:** loses the expected tray workflow and can
-  terminate DSH while another Work surface is being opened.
-- **Put the preference in a DSH profile:** makes a Work application policy
+  terminate DSH while another dsh-work surface is being opened.
+- **Put the preference in a DSH profile:** makes a dsh-work application policy
   incorrectly depend on DSH data ownership.
 - **Put all lifecycle actions in the application menu:** duplicates the tray
   surface and makes Settings harder to find; lifecycle actions remain in the

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-var errProcessLockHeld = errors.New("Work manager process lock is already held")
+var errProcessLockHeld = errors.New("dsh-work manager process lock is already held")
 
 // ProcessLock coordinates the desktop Host and the standalone dsh-work CLI.
 // It is deliberately a kernel-owned file lock rather than a marker file: the
-// operating system releases it if Work exits unexpectedly, so a stale marker
+// operating system releases it if dsh-work exits unexpectedly, so a stale marker
 // can never block recovery or permit a second manager to write state.
 type ProcessLock struct {
 	file   *os.File
@@ -35,11 +35,11 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 	}
 	lockPath := filepath.Join(filepath.Dir(settingsPath), "manager.lock")
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create Work manager lock directory: %w", err)
+		return nil, fmt.Errorf("create dsh-work manager lock directory: %w", err)
 	}
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open Work manager process lock: %w", err)
+		return nil, fmt.Errorf("open dsh-work manager process lock: %w", err)
 	}
 	unlock, err := lockProcessFile(file)
 	if err != nil {
@@ -47,13 +47,13 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 		if errors.Is(err, errProcessLockHeld) {
 			return nil, lifecycle.Failure{
 				Code:          lifecycle.ErrorManagerOperationBusy,
-				Summary:       "Work is already running.",
+				Summary:       "dsh-work is already running.",
 				Retryable:     true,
 				CorrelationID: lifecycle.NewCorrelationID(),
-				Detail:        "Use the running Work Settings window for Run context and profile plugin changes.",
+				Detail:        "Use the running dsh-work Settings window for Run context and profile plugin changes.",
 			}
 		}
-		return nil, fmt.Errorf("lock Work manager process boundary: %w", err)
+		return nil, fmt.Errorf("lock dsh-work manager process boundary: %w", err)
 	}
 	return &ProcessLock{file: file, unlock: unlock}, nil
 }

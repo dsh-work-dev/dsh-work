@@ -2,27 +2,27 @@
 
 ## Application shell
 
-Work uses two native WebView windows. The separate Settings window contains a
+dsh-work uses two native WebView windows. The separate Settings window contains a
 flat, shallow rail and no HTML application menu: `Overview` first and read-only, one top-level `General`
 page for the Run context and close-to-tray behaviour, one top-level `Notifications`
-page for Work desktop-notification preferences, then DSH resource pages for
+page for dsh-work desktop-notification preferences, then DSH resource pages for
 profiles, runtimes and DSH data directories. The Workspace window contains the
-external DSH Web UI. Work's native application menu and system tray remain
-Host-owned; no Work HTML or JavaScript is injected into the DSH document. Host state
+external DSH Web UI. dsh-work's native application menu and system tray remain
+Host-owned; no dsh-work HTML or JavaScript is injected into the DSH document. Host state
 and recovery actions remain available even if Worker content is loading or
 failed.
 
 The native settings command and window title are `设置`; the Workspace window
-title is `Work`.
+title is `dsh-work`.
 
-Work does not own an appearance setting. It reads the selected DSH data
+dsh-work does not own an appearance setting. It reads the selected DSH data
 directory's
 `ui-theme.preference`; `system` resolves through the operating system and
-changes are reflected in Work's trusted surfaces. If DSH changes the
+changes are reflected in dsh-work's trusted surfaces. If DSH changes the
 preference while the Settings window is open, the window updates automatically.
 
-Work's chrome supports English, Simplified Chinese and Japanese. Language is a
-Work preference in General; switching it updates both trusted WebView surfaces
+dsh-work's chrome supports English, Simplified Chinese and Japanese. Language is a
+dsh-work preference in General; switching it updates both trusted WebView surfaces
 and the native menu/tray through the same locale event. The default locale is
 Simplified Chinese, and the DSH workspace remains the owner of its own content
 and language.
@@ -37,7 +37,7 @@ context exposes install, removal and other composition actions, and every
 mutation carries its exact data-directory/profile reference to the manager.
 
 The profile detail also edits custom profile names. Built-in names are fixed.
-Because DSH 0.1.2 has no public rename command, Work changes only the custom
+Because DSH 0.1.2 has no public rename command, dsh-work changes only the custom
 profile directory identity, preserves its manifest and patch layers, blocks
 renaming the current profile, and updates the Configured Run context when
 needed.
@@ -59,12 +59,12 @@ the running session.
 Changing the runtime, DSH data directory or profile is one atomic user action
 at the Run-context boundary:
 
-1. Work validates the complete candidate triple.
-2. Work enters `Stopping`, blocks new context/plugin mutations and stops the
+1. dsh-work validates the complete candidate triple.
+2. dsh-work enters `Stopping`, blocks new context/plugin mutations and stops the
    current Worker generation.
-3. Work verifies cleanup before starting the candidate generation.
-4. Work commits the candidate only after its Worker reaches `Ready`.
-5. If startup or readiness fails, Work automatically restores the last
+3. dsh-work verifies cleanup before starting the candidate generation.
+4. dsh-work commits the candidate only after its Worker reaches `Ready`.
+5. If startup or readiness fails, dsh-work automatically restores the last
    known-good Run context. The failed candidate is never shown as current and
    two Worker generations never overlap.
 
@@ -74,27 +74,27 @@ there is no deferred “next startup” operation.
 
 ### Window close and quit
 
-- The default close policy hides the closed Work window. When all Work windows
+- The default close policy hides the closed dsh-work window. When all dsh-work windows
   are hidden, the process remains available from the tray.
-- If the user disables the close-to-tray setting, closing the last visible Work
+- If the user disables the close-to-tray setting, closing the last visible dsh-work
   window initiates managed shutdown instead of hiding it.
-- `Quit DSH Work` is always distinct from close and initiates managed shutdown.
-- During shutdown, the tray reports `Stopping`; Work-owned windows hide immediately
+- `Quit dsh-work` is always distinct from close and initiates managed shutdown.
+- During shutdown, the tray reports `Stopping`; dsh-work-owned windows hide immediately
   and cannot be reopened; duplicate quit actions are ignored.
 - If a task is active, quit explains that it will cancel the task and detach browser control; it does not close the user's browser.
 
 Managed quit is a two-stage boundary:
 
-1. Work enters `Stopping`, blocks new lifecycle actions and immediately hides
-   every Work-owned window so a slow Worker cleanup does not look like a frozen
+1. dsh-work enters `Stopping`, blocks new lifecycle actions and immediately hides
+   every dsh-work-owned window so a slow Worker cleanup does not look like a frozen
    desktop surface.
-2. Work cancels its own active operations, lets DSH handle the current
+2. dsh-work cancels its own active operations, lets DSH handle the current
    conversation/session shutdown, closes the per-generation gateway and
    verifies the managed Worker boundary. Only a successful verification exits
    the Host.
 
-If cleanup fails, Work stays in the tray, reopens the trusted Settings overview
-and keeps the cleanup owner so the user can retry. Work does not answer,
+If cleanup fails, dsh-work stays in the tray, reopens the trusted Settings overview
+and keeps the cleanup owner so the user can retry. dsh-work does not answer,
 approve, save or reconstruct DSH conversation state; DSH remains the source of
 truth for that state. Closing an active DSH conversation therefore cannot grant
 an approval or continue a partially completed action, and it never closes the
@@ -121,15 +121,15 @@ startup feedback.
 ### Application menu
 
 The application menu exposes `Settings` and `Help`. `Help` contains
-`Check for Updates…` and `About Work`. The update command must report its
+`Check for Updates…` and `About dsh-work`. The update command must report its
 availability truthfully until an update channel is implemented; it must not
 claim that a check succeeded when no service exists.
 
 ## Notifications
 
-Work desktop notifications are a background companion to the DSH workspace, not
+dsh-work desktop notifications are a background companion to the DSH workspace, not
 a second conversation surface. DSH keeps its contextual notices and toast
-feedback. Work owns desktop delivery, preference checks, foreground/background
+feedback. dsh-work owns desktop delivery, preference checks, foreground/background
 routing and event deduplication.
 
 The top-level Settings route `Notifications` contains these immediate-save
@@ -158,7 +158,7 @@ See the [notification interaction design](notifications.md) and [notification pr
 ## Tray
 
 Tray status uses icon shape plus text, not colour alone. Its menu offers
-`Open Workspace`, `Settings`, `Restart DSH` and `Quit DSH Work`.
+`Open Workspace`, `Settings`, `Restart DSH` and `Quit dsh-work`.
 `Diagnostics` is available in failure states. An active approval is
 surfaced as `Action required` and selecting it focuses the trusted approval
 surface.
@@ -177,7 +177,7 @@ Completed steps use concise summaries. Sensitive field values, cookies and crede
 
 ## DSH approval integration
 
-Work does not render a second approval dialog. For operations classified `ask`, DSH's official Tool call and approval UI includes:
+dsh-work does not render a second approval dialog. For operations classified `ask`, DSH's official Tool call and approval UI includes:
 
 - requester: DSH agent/tool identity;
 - action: plain-language operation;
@@ -190,12 +190,12 @@ Work does not render a second approval dialog. For operations classified `ask`, 
 
 ## User-browser connection visibility
 
-- Work identifies the connected browser, profile label, window and controlled tab without displaying account secrets.
+- dsh-work identifies the connected browser, profile label, window and controlled tab without displaying account secrets.
 - Control begins only after the user enables and approves a supported browser connection, then assigns a tab.
-- Work shows whether browser control is connected, busy or disconnected; browser-owned debugging／extension indicators remain visible.
+- dsh-work shows whether browser control is connected, busy or disconnected; browser-owned debugging／extension indicators remain visible.
 - Disconnecting stops new operations and detaches debugging without signing the user out, clearing cookies or closing the browser.
-- Authentication occurs in the user's browser UI; Work never asks the user to copy cookies or passwords into Work.
-- Work explains that direct personal-browser control may technically expose the profile, while unrelated windows and tabs are not projected into DSH context or captured for diagnostics.
+- Authentication occurs in the user's browser UI; dsh-work never asks the user to copy cookies or passwords into dsh-work.
+- dsh-work explains that direct personal-browser control may technically expose the profile, while unrelated windows and tabs are not projected into DSH context or captured for diagnostics.
 
 ## Error interaction
 

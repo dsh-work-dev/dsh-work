@@ -37,7 +37,7 @@ Deliver:
   the last known-good Run context;
 - stable missing-runtime, incompatible-version, early-exit and timeout failures.
 
-Exit gate: on the primary Windows development environment, Work launches the
+Exit gate: on the primary Windows development environment, dsh-work launches the
 configured runtime/profile Run context, displays the external DSH page only after
 readiness, exits without manual process or port cleanup, and repeats the path
 reliably. The selection seam does not require the Host to embed or install DSH.
@@ -59,27 +59,27 @@ Deliver:
 - graceful and forced cleanup;
 - stable startup and process error mapping;
 - minimum startup, failure and accessibility surfaces;
-- versioned Work notification preferences and native desktop delivery for Work
+- versioned dsh-work notification preferences and native desktop delivery for dsh-work
   lifecycle and error events;
 - DSH-aligned visual convergence after the real first-run path is stable.
 
-Exit gate: on Windows, Work starts the pinned DSH Web profile from a clean environment, handles all defined fixture failure modes, and leaves no managed descendants after normal or forced Host exit; lifecycle tests reject stale generations and duplicate terminal results. The shared Interface contains no Windows-only types, and the documented macOS and Linux Implementations can satisfy it without changing callers.
+Exit gate: on Windows, dsh-work starts the pinned DSH Web profile from a clean environment, handles all defined fixture failure modes, and leaves no managed descendants after normal or forced Host exit; lifecycle tests reject stale generations and duplicate terminal results. The shared Interface contains no Windows-only types, and the documented macOS and Linux Implementations can satisfy it without changing callers.
 
 ## M3 — Tool bridge and permission slice
 
 Deliver:
 
-- Work-owned DSH plugin attached to the current profile;
+- dsh-work-owned DSH plugin attached to the current profile;
 - private authenticated IPC handshake;
 - versioned request and result schemas;
-- exhaustive Work Tool `allow`／`ask`／`deny` classifier;
+- exhaustive dsh-work Tool `allow`／`ask`／`deny` classifier;
 - DSH official one-shot approval integration without a duplicate Host prompt;
 - browser-connection grant and Host hard-policy state;
 - correlated DSH approval and Host execution events with redaction;
 - structured DSH notification event bridge for action-required, completed,
   error and lifecycle events, with preference-aware desktop routing;
 
-Exit gate: on Windows, every Work Tool variant has a deterministic classifier result; high-impact calls execute only after DSH `allowed-once`, while altered, replayed, unclassified and stale-generation requests are rejected. Notification fixtures prove preference filtering, foreground/background routing, deduplication and safe focus actions. The wire and policy contracts remain platform-neutral.
+Exit gate: on Windows, every dsh-work Tool variant has a deterministic classifier result; high-impact calls execute only after DSH `allowed-once`, while altered, replayed, unclassified and stale-generation requests are rejected. Notification fixtures prove preference filtering, foreground/background routing, deduplication and safe focus actions. The wire and policy contracts remain platform-neutral.
 
 ## M4 — User-browser vertical slice
 

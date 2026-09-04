@@ -10,16 +10,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/settings"
-	"github.com/local/work/internal/supervisor"
-	"github.com/local/work/internal/workergateway"
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
-// DSHAdapter is the Work-owned contract for discovery, launch construction,
+// DSHAdapter is the dsh-work-owned contract for discovery, launch construction,
 // readiness validation and shutdown. It deliberately contains no Wails or
 // operating-system types.
 type DSHAdapter interface {
@@ -108,9 +108,9 @@ func DefaultConfig(discoveryRoot string) Config {
 	}
 	return Config{
 		DiscoveryRoot:       discoveryRoot,
-		BootstrapDirectory:  filepath.Join(configRoot, "Work", "dsh-work", "bootstrap"),
-		DSHDataDirectory:    filepath.Join(configRoot, "Work", "dsh"),
-		SettingsPath:        filepath.Join(configRoot, "Work", "dsh-work", "settings.json"),
+		BootstrapDirectory:  filepath.Join(configRoot, "dsh-work", "bootstrap"),
+		DSHDataDirectory:    filepath.Join(configRoot, "dsh-work", "dsh"),
+		SettingsPath:        filepath.Join(configRoot, "dsh-work", "settings.json"),
 		ExpectedDSHVersion:  dshadapter.SupportedVersion,
 		ReadinessTimeout:    20 * time.Second,
 		ProbeTimeout:        750 * time.Millisecond,
@@ -475,7 +475,7 @@ func (h *Host) waitForRun(ctx context.Context, run *generationRun) (lifecycle.St
 			}
 			return status, h.failureFor(ctx.Err(), lifecycle.ErrorCancelled, "The Run context operation was cancelled.", true)
 		case <-cleanupTimer.C:
-			return h.Status(), h.failureFor(errors.New("Run context operation timed out"), lifecycle.ErrorProcessCleanupFailed, "Work could not finish the Run context operation.", true)
+			return h.Status(), h.failureFor(errors.New("Run context operation timed out"), lifecycle.ErrorProcessCleanupFailed, "dsh-work could not finish the Run context operation.", true)
 		}
 	}
 }
@@ -487,14 +487,14 @@ func (h *Host) stopRun(ctx context.Context, run *generationRun) *lifecycle.Failu
 			failure := *status.Error
 			return &failure
 		}
-		return h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not stop the previous Worker generation.", true)
+		return h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not stop the previous Worker generation.", true)
 	}
 	h.emit(status)
 	run.cancel()
 	select {
 	case <-run.done:
 	case <-ctx.Done():
-		return h.failureFor(ctx.Err(), lifecycle.ErrorProcessCleanupFailed, "Work could not verify the previous Worker cleanup.", true)
+		return h.failureFor(ctx.Err(), lifecycle.ErrorProcessCleanupFailed, "dsh-work could not verify the previous Worker cleanup.", true)
 	}
 	if run.cleanupPending() {
 		if failure := h.cleanupWorker(run, run.getWorker()); failure != nil {
@@ -521,7 +521,7 @@ func (h *Host) stopRun(ctx context.Context, run *generationRun) *lifecycle.Failu
 }
 
 func (h *Host) finishContextSwitchFailure(manager RunContextManager, candidateFailure, rollbackFailure error) (dshmanager.Snapshot, error) {
-	failure := h.failureFor(rollbackFailure, lifecycle.ErrorProcessStartFailed, "Work could not restore the known-good Run context.", true)
+	failure := h.failureFor(rollbackFailure, lifecycle.ErrorProcessStartFailed, "dsh-work could not restore the known-good Run context.", true)
 	failure.Retryable = true
 	if candidateFailure != nil {
 		candidate := h.failureFor(candidateFailure, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
@@ -562,7 +562,7 @@ func (h *Host) InstallPlugin(ctx context.Context, request dshmanager.PluginInsta
 	}
 	manager, ok := h.deps.Manager.(ProfilePluginManager)
 	if !ok {
-		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "Work could not change profile plugins.", true)
+		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not change profile plugins.", true)
 	}
 	return manager.InstallPlugin(ctx, request)
 }
@@ -575,17 +575,17 @@ func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemove
 	}
 	manager, ok := h.deps.Manager.(ProfilePluginManager)
 	if !ok {
-		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "Work could not change profile plugins.", true)
+		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not change profile plugins.", true)
 	}
 	return manager.RemovePlugin(ctx, request)
 }
 
 func (h *Host) readyWorkerForPluginMutation() *lifecycle.Failure {
 	if h.isShutdownRequested() {
-		return h.failureFor(errors.New("Work shutdown is in progress"), lifecycle.ErrorManagerOperationBusy, "Work is finishing the current Run context.", true)
+		return h.failureFor(errors.New("dsh-work shutdown is in progress"), lifecycle.ErrorManagerOperationBusy, "dsh-work is finishing the current Run context.", true)
 	}
 	if h.isSwitching() {
-		return h.failureFor(errors.New("Run context switching is in progress"), lifecycle.ErrorManagerOperationBusy, "Work is finishing the current Run context.", true)
+		return h.failureFor(errors.New("Run context switching is in progress"), lifecycle.ErrorManagerOperationBusy, "dsh-work is finishing the current Run context.", true)
 	}
 	if h.Status().State != lifecycle.StateReady {
 		return h.failureFor(errors.New("profile plugins require a Ready Worker"), lifecycle.ErrorManagerOperationBusy, "Profile plugins can be changed only while the current Run context is Ready.", true)
@@ -600,7 +600,7 @@ func (h *Host) readyWorkerForPluginMutation() *lifecycle.Failure {
 	}
 	select {
 	case <-worker.Exited():
-		return h.failureFor(errors.New("the Ready Worker has exited"), lifecycle.ErrorManagerOperationBusy, "Work is finishing the current Run context.", true)
+		return h.failureFor(errors.New("the Ready Worker has exited"), lifecycle.ErrorManagerOperationBusy, "dsh-work is finishing the current Run context.", true)
 	default:
 		return nil
 	}
@@ -651,7 +651,7 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 	}
 	manager, ok := h.deps.Manager.(RunContextManager)
 	if !ok {
-		return dshmanager.Snapshot{}, h.failureFor(errors.New("Run context manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "Work could not switch its Run context.", true)
+		return dshmanager.Snapshot{}, h.failureFor(errors.New("Run context manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not switch its Run context.", true)
 	}
 
 	h.switchMu.Lock()
@@ -662,7 +662,7 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 		return dshmanager.Snapshot{}, h.failureFor(lifecycle.Failure{
 			Code:    lifecycle.ErrorManagerOperationBusy,
 			Summary: "Another Run context switch is already in progress.",
-		}, lifecycle.ErrorManagerOperationBusy, "Work is already switching its Run context.", true)
+		}, lifecycle.ErrorManagerOperationBusy, "dsh-work is already switching its Run context.", true)
 	}
 	h.switching = true
 	knownGood := h.knownGoodRunContextLocked()
@@ -766,7 +766,7 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.ResolvedLaunch) (lifecycle.Status, *lifecycle.Failure, error) {
 	run, status, err := h.beginResolvedRun(ctx, resolved)
 	if err != nil {
-		return status, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not start the Run context.", true), err
+		return status, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not start the Run context.", true), err
 	}
 	h.emit(status)
 	go h.run(run)
@@ -954,16 +954,16 @@ func (h *Host) run(run *generationRun) {
 
 func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Failure) {
 	if err := h.setPhase(run, lifecycle.PhaseConfiguration); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not enter configuration.", false)
+		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not enter configuration.", false)
 	}
 	if h.configError != nil {
-		return nil, h.failureFor(h.configError, lifecycle.ErrorManagerStateInvalid, "Work could not locate its per-user application-data directory.", false)
+		return nil, h.failureFor(h.configError, lifecycle.ErrorManagerStateInvalid, "dsh-work could not locate its per-user application-data directory.", false)
 	}
 	if h.deps.ManagerError != nil {
-		return nil, h.failureFor(h.deps.ManagerError, lifecycle.ErrorManagerStateInvalid, "Work could not load its DSH Run context manager.", true)
+		return nil, h.failureFor(h.deps.ManagerError, lifecycle.ErrorManagerStateInvalid, "dsh-work could not load its DSH Run context manager.", true)
 	}
 	if h.deps.PlatformError != nil {
-		return nil, h.failureFor(h.deps.PlatformError, lifecycle.ErrorPlatformUnsupported, "This platform does not have a native Work process adapter.", false)
+		return nil, h.failureFor(h.deps.PlatformError, lifecycle.ErrorPlatformUnsupported, "This platform does not have a native dsh-work process adapter.", false)
 	}
 	if h.deps.DSH == nil {
 		return nil, h.failureFor(errors.New("DSH adapter is unavailable"), lifecycle.ErrorPlatformUnsupported, "The native DSH adapter is unavailable.", false)
@@ -975,7 +975,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		return nil, h.failureFor(errors.New("trusted DSH workspace gateway is unavailable"), lifecycle.ErrorGatewayUnavailable, "The trusted DSH workspace gateway is unavailable.", false)
 	}
 	if err := h.setPhase(run, lifecycle.PhaseRuntime); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not enter runtime discovery.", false)
+		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not enter runtime discovery.", false)
 	}
 	workspace, failure := h.resolveWorkspace(run)
 	if failure != nil {
@@ -990,15 +990,15 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	launch.workspace = workspace
 	if workspace.State == workspacecontext.StateSelected && filepath.Clean(workspace.Path) == filepath.Clean(launch.dataDirectory.Path) {
-		return nil, h.failureFor(errors.New("Workspace path must be separate from the DSH data directory"), lifecycle.ErrorWorkspaceInvalid, "Work could not use the DSH data directory as a Workspace.", false)
+		return nil, h.failureFor(errors.New("Workspace path must be separate from the DSH data directory"), lifecycle.ErrorWorkspaceInvalid, "dsh-work could not use the DSH data directory as a Workspace.", false)
 	}
 	if status, err := h.machine.SetWorkspaceContext(run.generation, workspace); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "Work could not record the DSH Workspace context.", false)
+		return nil, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "dsh-work could not record the DSH Workspace context.", false)
 	} else {
 		h.emit(status)
 	}
 	if launch.dataDirectory.Path == "" {
-		return nil, h.failureFor(errors.New("DSH data directory is empty"), lifecycle.ErrorDSHStartFailed, "Work could not prepare the selected DSH data directory.", false)
+		return nil, h.failureFor(errors.New("DSH data directory is empty"), lifecycle.ErrorDSHStartFailed, "dsh-work could not prepare the selected DSH data directory.", false)
 	}
 	if launch.dataDirectory.Ownership == dshmanager.DataDirectoryOwnershipUser {
 		info, err := os.Stat(launch.dataDirectory.Path)
@@ -1009,13 +1009,13 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 			return nil, h.failureFor(err, lifecycle.ErrorProfileNotFound, "The selected user DSH data directory is unavailable.", false)
 		}
 	} else if err := os.MkdirAll(launch.dataDirectory.Path, 0o700); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "Work could not prepare the selected DSH data directory.", true)
+		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not prepare the selected DSH data directory.", true)
 	}
 	if h.config.BootstrapDirectory == "" {
-		return nil, h.failureFor(errors.New("Work bootstrap directory is empty"), lifecycle.ErrorDSHStartFailed, "Work could not prepare the DSH bootstrap directory.", false)
+		return nil, h.failureFor(errors.New("dsh-work bootstrap directory is empty"), lifecycle.ErrorDSHStartFailed, "dsh-work could not prepare the DSH bootstrap directory.", false)
 	}
 	if err := os.MkdirAll(h.config.BootstrapDirectory, 0o700); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "Work could not prepare the DSH bootstrap directory.", true)
+		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not prepare the DSH bootstrap directory.", true)
 	}
 	if err := h.checkCancelled(run); err != nil {
 		return nil, nil
@@ -1023,7 +1023,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 
 	port, err := dshadapter.AllocateLoopbackPort()
 	if err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "Work could not allocate a loopback port for DSH.", true)
+		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not allocate a loopback port for DSH.", true)
 	}
 	plan, err := h.deps.DSH.BuildLaunchPlan(dshadapter.LaunchContext{
 		GenerationID:       run.generation,
@@ -1035,10 +1035,10 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		Port:               port,
 	})
 	if err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "Work could not construct the DSH launch plan.", false)
+		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not construct the DSH launch plan.", false)
 	}
 	if err := h.setPhase(run, lifecycle.PhaseWorker); err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not enter worker startup.", false)
+		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not enter worker startup.", false)
 	}
 	if err := h.checkCancelled(run); err != nil {
 		return nil, nil
@@ -1058,7 +1058,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	worker, err := h.deps.Supervisor.Start(run.ctx, plan, rawHandler)
 	if err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorProcessStartFailed, "Work could not start the managed DSH process.", true)
+		return nil, h.failureFor(err, lifecycle.ErrorProcessStartFailed, "dsh-work could not start the managed DSH process.", true)
 	}
 	run.mu.Lock()
 	run.plan = plan
@@ -1082,10 +1082,10 @@ func (h *Host) resolveWorkspace(run *generationRun) (workspacecontext.Context, *
 		if run.ctx.Err() != nil {
 			return workspacecontext.Context{}, nil
 		}
-		return workspacecontext.Context{}, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "Work could not resolve the DSH Workspace context.", false)
+		return workspacecontext.Context{}, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "dsh-work could not resolve the DSH Workspace context.", false)
 	}
 	if err := workspace.ValidateForGeneration(run.generation); err != nil {
-		return workspacecontext.Context{}, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "Work received an invalid DSH Workspace context.", false)
+		return workspacecontext.Context{}, h.failureFor(err, lifecycle.ErrorWorkspaceInvalid, "dsh-work received an invalid DSH Workspace context.", false)
 	}
 	return workspace, nil
 }
@@ -1109,15 +1109,15 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 			if run.ctx.Err() != nil {
 				return hostLaunch{}, nil
 			}
-			return hostLaunch{}, h.failureFor(err, lifecycle.ErrorDSHRuntimeNotFound, "Work could not discover a compatible DSH runtime.", false)
+			return hostLaunch{}, h.failureFor(err, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not discover a compatible DSH runtime.", false)
 		}
 		return hostLaunch{
 			runtime: runtime,
 			dataDirectory: dshmanager.DataDirectoryInfo{
-				ID:        "work",
-				Name:      "Work DSH data directory",
+				ID:        "dsh-work",
+				Name:      "dsh-work DSH data directory",
 				Path:      h.config.DSHDataDirectory,
-				Ownership: dshmanager.DataDirectoryOwnershipWork,
+				Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 			},
 			profile: "web",
 		}, nil
@@ -1125,20 +1125,20 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 
 	snapshot, err := h.deps.Manager.Snapshot(run.ctx)
 	if err != nil {
-		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "Work could not read the DSH launch selection.", false)
+		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not read the DSH launch selection.", false)
 	}
 	if snapshot.Configured == nil {
 		return hostLaunch{}, h.failureFor(lifecycle.Failure{
 			Code:    lifecycle.ErrorProfileRequired,
-			Summary: "Choose a DSH runtime and profile before starting Work.",
-		}, lifecycle.ErrorProfileRequired, "Choose a DSH runtime and profile before starting Work.", false)
+			Summary: "Choose a DSH runtime and profile before starting dsh-work.",
+		}, lifecycle.ErrorProfileRequired, "Choose a DSH runtime and profile before starting dsh-work.", false)
 	}
 	resolved, err := h.deps.Manager.ResolveLaunch(run.ctx, dshmanager.LaunchRequest{
 		RuntimeID: snapshot.Configured.RuntimeID,
 		Profile:   snapshot.Configured.Profile,
 	})
 	if err != nil {
-		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "Work could not resolve the selected DSH runtime and profile.", false)
+		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not resolve the selected DSH runtime and profile.", false)
 	}
 	runtime := dshadapter.Runtime{Path: resolved.Runtime.Path, Version: resolved.Runtime.Version}
 	if verifier, ok := h.deps.DSH.(interface {
@@ -1149,7 +1149,7 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 			if run.ctx.Err() != nil {
 				return hostLaunch{}, nil
 			}
-			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "Work could not verify the selected DSH runtime.", false)
+			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not verify the selected DSH runtime.", false)
 		}
 		if verified.Version != resolved.Runtime.Version {
 			return hostLaunch{}, h.failureFor(lifecycle.Failure{
@@ -1180,16 +1180,16 @@ func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
 	if target != nil {
 		manager, ok := h.deps.Manager.(RunContextManager)
 		if !ok {
-			return h.failureFor(errors.New("Run context commit boundary is unavailable"), lifecycle.ErrorManagerStateInvalid, "Work could not publish the ready Run context.", true)
+			return h.failureFor(errors.New("Run context commit boundary is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not publish the ready Run context.", true)
 		}
 		if _, err := manager.CommitCurrent(run.ctx, target); err != nil {
-			return h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "Work could not publish the ready Run context.", true)
+			return h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not publish the ready Run context.", true)
 		}
 		run.setTarget(target)
 	}
 	status := h.machine.Snapshot()
 	if status.State != lifecycle.StateReady {
-		return h.failureFor(errors.New("Worker readiness was not published"), lifecycle.ErrorInvalidTransition, "Work could not publish DSH readiness.", false)
+		return h.failureFor(errors.New("Worker readiness was not published"), lifecycle.ErrorInvalidTransition, "dsh-work could not publish DSH readiness.", false)
 	}
 	if ready := h.readyHandler(); ready != nil {
 		ready(handoffURL)
@@ -1201,7 +1201,7 @@ func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
 
 func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapter.ReadyAnnouncement, *lifecycle.Failure) {
 	if err := h.setPhase(run, lifecycle.PhaseReadiness); err != nil {
-		return dshadapter.ReadyAnnouncement{}, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not enter DSH readiness validation.", false)
+		return dshadapter.ReadyAnnouncement{}, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not enter DSH readiness validation.", false)
 	}
 	deadline := time.NewTimer(h.config.ReadinessTimeout)
 	defer deadline.Stop()
@@ -1227,10 +1227,10 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 				h.debugf("active readiness probe passed")
 				gateway, err := h.startGateway(run, candidate.URL)
 				if err != nil {
-					return announcement, h.failureFor(err, lifecycle.ErrorGatewayStartFailed, "Work could not establish the trusted DSH workspace path.", true)
+					return announcement, h.failureFor(err, lifecycle.ErrorGatewayStartFailed, "dsh-work could not establish the trusted DSH workspace path.", true)
 				}
 				if err := h.markReady(run, gateway.Origin(), gateway.URL()); err != nil {
-					return announcement, h.failureFor(err, lifecycle.ErrorInvalidTransition, "Work could not publish DSH readiness.", false)
+					return announcement, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not publish DSH readiness.", false)
 				}
 				return announcement, nil
 			} else if failure.Code == lifecycle.ErrorDSHInvalidReadiness {
@@ -1365,7 +1365,7 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 	h.workerBoundaryMu.Lock()
 	defer h.workerBoundaryMu.Unlock()
 	if !h.beginManagerStopGuard(run) {
-		return h.failureFor(errors.New("Run context mutation guard is unavailable during Worker cleanup"), lifecycle.ErrorManagerOperationBusy, "Work is finishing the previous Run context.", true)
+		return h.failureFor(errors.New("Run context mutation guard is unavailable during Worker cleanup"), lifecycle.ErrorManagerOperationBusy, "dsh-work is finishing the previous Run context.", true)
 	}
 	var cleanupFailure *lifecycle.Failure
 	rememberFailure := func(failure *lifecycle.Failure) {
@@ -1378,7 +1378,7 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 	}
 	gatewayErr := h.closeGateway(run)
 	if gatewayErr != nil {
-		rememberFailure(h.failureFor(gatewayErr, lifecycle.ErrorGatewayCloseFailed, "Work could not close the trusted DSH workspace path.", true))
+		rememberFailure(h.failureFor(gatewayErr, lifecycle.ErrorGatewayCloseFailed, "dsh-work could not close the trusted DSH workspace path.", true))
 	}
 	gracefulCtx, cancel := context.WithTimeout(context.Background(), h.config.GracefulStopTimeout)
 	_ = h.deps.DSH.RequestShutdown(gracefulCtx, worker)
@@ -1388,7 +1388,7 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 		forceErr := worker.ForceStop(forceCtx)
 		forceCancel()
 		if forceErr != nil {
-			rememberFailure(h.failureFor(forceErr, lifecycle.ErrorProcessStopFailed, "Work could not stop the managed DSH process.", true))
+			rememberFailure(h.failureFor(forceErr, lifecycle.ErrorProcessStopFailed, "dsh-work could not stop the managed DSH process.", true))
 		}
 	}
 	emptyCtx, emptyCancel := context.WithTimeout(context.Background(), h.config.EmptyTimeout)
@@ -1398,12 +1398,12 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 	h.lastDiagnostics = worker.Diagnostics()
 	h.mu.Unlock()
 	if emptyErr != nil {
-		rememberFailure(h.failureFor(emptyErr, lifecycle.ErrorProcessCleanupFailed, "Work could not verify that the managed process boundary is empty.", true))
+		rememberFailure(h.failureFor(emptyErr, lifecycle.ErrorProcessCleanupFailed, "dsh-work could not verify that the managed process boundary is empty.", true))
 		return cleanupFailure
 	}
 	closeErr := worker.Close()
 	if closeErr != nil {
-		rememberFailure(h.failureFor(closeErr, lifecycle.ErrorProcessCleanupFailed, "Work could not close the managed DSH process boundary.", true))
+		rememberFailure(h.failureFor(closeErr, lifecycle.ErrorProcessCleanupFailed, "dsh-work could not close the managed DSH process boundary.", true))
 	}
 	if cleanupFailure != nil {
 		return cleanupFailure
@@ -1418,13 +1418,13 @@ func (h *Host) clearCurrent(run *generationRun) *lifecycle.Failure {
 	}
 	manager, ok := h.deps.Manager.(RunContextManager)
 	if !ok {
-		return h.failureFor(errors.New("Run context clear boundary is unavailable"), lifecycle.ErrorManagerStateInvalid, "Work could not clear the current Run context.", true)
+		return h.failureFor(errors.New("Run context clear boundary is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not clear the current Run context.", true)
 	}
 	activeCtx, activeCancel := context.WithTimeout(context.Background(), h.config.ShutdownTimeout)
 	_, err := manager.ClearCurrent(activeCtx)
 	activeCancel()
 	if err != nil {
-		return h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "Work could not clear the current Run context.", true)
+		return h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not clear the current Run context.", true)
 	}
 	run.setManagerLive(false)
 	return nil
@@ -1582,7 +1582,7 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorDSHUnsupportedVersion, lifecycle.ErrorDSHVersionCheckFailed:
 		return "Install the pinned DSH version and retry."
 	case lifecycle.ErrorProfileRequired, lifecycle.ErrorProfileNotFound, lifecycle.ErrorProfileInvalid:
-		return "Open Work Settings and choose an existing DSH data directory and profile."
+		return "Open dsh-work Settings and choose an existing DSH data directory and profile."
 	case lifecycle.ErrorRuntimeInUse, lifecycle.ErrorProfileInUse:
 		return "Choose another Run context before removing this runtime or DSH data directory."
 	case lifecycle.ErrorPluginSpecInvalid, lifecycle.ErrorPluginCommandUnavailable, lifecycle.ErrorPluginCommandFailed:
@@ -1596,11 +1596,11 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorProcessStopFailed, lifecycle.ErrorProcessCleanupFailed:
 		return "Retry cleanup before starting another workspace."
 	case lifecycle.ErrorPlatformUnsupported:
-		return "Run the Windows-first Work build on a supported native platform."
+		return "Run the Windows-first dsh-work build on a supported native platform."
 	case lifecycle.ErrorTrustedSurfaceRequired:
-		return "Use the trusted Work shell or Settings window for this control."
+		return "Use the trusted dsh-work shell or Settings window for this control."
 	default:
-		return "Retry after checking the current Work configuration."
+		return "Retry after checking the current dsh-work configuration."
 	}
 }
 
@@ -1783,7 +1783,7 @@ type HostService struct {
 }
 
 // StartupOutput is the redacted DSH process output retained by the supervisor
-// while Work is starting or recovering. It intentionally omits process
+// while dsh-work is starting or recovering. It intentionally omits process
 // metadata and exposes no raw, unredacted stream.
 type StartupOutput struct {
 	Stdout string `json:"stdout"`
@@ -1812,7 +1812,7 @@ func (s *HostService) GetWorkspaceStatus(ctx context.Context) lifecycle.Status {
 }
 
 // GetTheme projects the selected DSH data directory's appearance preference. DSH owns
-// the value; Work only uses it to paint its trusted startup surface.
+// the value; dsh-work only uses it to paint its trusted startup surface.
 func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
 	if !s.authorized(ctx) || s.host.deps.Manager == nil {
 		return dshmanager.ThemePreferenceSystem
@@ -1824,7 +1824,7 @@ func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
 	return snapshot.Theme
 }
 
-// GetLocale reads the Work-owned language preference for the trusted startup
+// GetLocale reads the dsh-work-owned language preference for the trusted startup
 // surface. It is read-only here; SettingsService remains the write boundary.
 func (s *HostService) GetLocale(ctx context.Context) settings.Locale {
 	if !s.authorized(ctx) || s.localeProvider == nil {
@@ -1894,8 +1894,8 @@ func (s *HostService) authorized(ctx context.Context) bool {
 func trustedSurfaceStatus() lifecycle.Status {
 	failure := lifecycle.Failure{
 		Code:          lifecycle.ErrorTrustedSurfaceRequired,
-		Summary:       "This Work control is unavailable from the current page.",
-		Detail:        "Return to the trusted Work shell before using Host controls.",
+		Summary:       "This dsh-work control is unavailable from the current page.",
+		Detail:        "Return to the trusted dsh-work shell before using Host controls.",
 		CorrelationID: lifecycle.NewCorrelationID(),
 	}
 	return lifecycle.Status{

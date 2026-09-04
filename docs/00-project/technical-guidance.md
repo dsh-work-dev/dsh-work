@@ -1,12 +1,12 @@
 # Global technical guidance
 
-Status: normative engineering guidance for Work. Product requirements and accepted ADRs remain authoritative when they make a more specific decision.
+Status: normative engineering guidance for dsh-work. Product requirements and accepted ADRs remain authoritative when they make a more specific decision.
 
 ## Purpose
 
 This document defines how engineering decisions are made across the desktop Host, DSH integration, browser control and the three operating-system implementations. It is deliberately broader than the [PC architecture](../03-engineering/pc/architecture.md): architecture records the current shape of the system, while this guide constrains how that shape may evolve.
 
-The desired result is a small, dependable desktop Host whose complexity is concentrated behind narrow, testable interfaces. Work must add desktop lifecycle and controlled local capabilities without becoming a second agent runtime or a general-purpose automation platform.
+The desired result is a small, dependable desktop Host whose complexity is concentrated behind narrow, testable interfaces. dsh-work must add desktop lifecycle and controlled local capabilities without becoming a second agent runtime or a general-purpose automation platform.
 
 ## Engineering priorities
 
@@ -110,7 +110,7 @@ Detailed lifecycle primitives and test obligations are defined in [three-platfor
 - Pin and verify the supported DSH version range.
 - Keep launch grammar, readiness parsing, profile overlays, compatibility and shutdown translation inside the DSH Adapter.
 - Use supported DSH extension and approval Seams; do not modify DSH source or reproduce its agent, conversation, plugin or approval behaviour.
-- An unrecognised DSH version, event or Work Tool fails closed unless an explicitly non-mutating diagnostic mode handles it.
+- An unrecognised DSH version, event or dsh-work Tool fails closed unless an explicitly non-mutating diagnostic mode handles it.
 - Protocol requests MUST be typed, versioned, correlated and idempotent where retries are possible.
 - The Worker web endpoint stays on loopback and requires origin, session and route controls; loopback alone is not a security control.
 
@@ -124,20 +124,20 @@ See [DSH integration contract](../03-engineering/pc/dsh-integration.md).
 - A browser connection and tab assignment are visible, revocable, generation-scoped capabilities.
 - Ordinary operations may run automatically inside an active assignment; high-impact operations use DSH's official one-shot approval flow.
 - The Host revalidates the operation after approval and immediately before execution. Unknown, stale or expanded scope fails closed.
-- Disconnect and Work exit detach control without closing the user's browser, clearing its profile or silently changing browser settings.
+- Disconnect and dsh-work exit detach control without closing the user's browser, clearing its profile or silently changing browser settings.
 - Browser-specific connection mechanisms remain behind Adapters and share semantic contract tests.
 
 See [browser automation](../03-engineering/pc/browser-automation.md) and [permission ownership](../02-design/pc/permissions-and-safety.md).
 
 ## Data, storage and privacy
 
-- User and DSH-owned data are preserved by default. Work-owned migrations are versioned, atomic and recoverable.
+- User and DSH-owned data are preserved by default. dsh-work-owned migrations are versioned, atomic and recoverable.
 - Secrets use operating-system protected storage when persistence is required.
 - Configuration and generated overlays have explicit ownership and schema versions.
 - Research, competitive analysis, internal metrics and unpublished strategy are local-only material and MUST NOT enter public repository content.
 - Logs and diagnostics use structured fields and redact before buffering, persistence or UI projection.
 - Credentials, cookies, sensitive form values and full page contents MUST NOT be logged.
-- Work MUST NOT upload user content, diagnostics or audit data without a separate explicit user action.
+- dsh-work MUST NOT upload user content, diagnostics or audit data without a separate explicit user action.
 - Retention and deletion behaviour MUST be deterministic and report partial failure.
 
 ## Concurrency and resource ownership
@@ -151,7 +151,7 @@ See [browser automation](../03-engineering/pc/browser-automation.md) and [permis
 
 ## Errors and observability
 
-- Convert dependency-specific failures into stable Work error codes at the Adapter that understands them.
+- Convert dependency-specific failures into stable dsh-work error codes at the Adapter that understands them.
 - An error result states category, safe user summary, retryability, whether an effect occurred and a correlation ID.
 - Expected rejection, cancellation and unavailable approval are structured results, not crashes.
 - Events use stable names and correlation IDs across Host, Worker, approval and browser execution.
@@ -186,7 +186,7 @@ The full matrix lives in the [PC test plan](../04-delivery/test-plan.md).
 - unrestricted native JavaScript bridges;
 - duplicated DSH command or output parsing;
 - one cross-platform process implementation containing scattered platform branches;
-- unclassified Work Tools or permissive unknown-operation fallbacks;
+- unclassified dsh-work Tools or permissive unknown-operation fallbacks;
 - arbitrary browser-protocol execution exposed to the model;
 - unbounded waits, retries, queues, logs or background work;
 - hidden network listeners, downloads or global configuration mutation;

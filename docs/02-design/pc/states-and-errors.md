@@ -69,7 +69,7 @@ Every task reaches exactly one terminal state. A late browser event after a term
 | `TOOL_REQUEST_INVALID` | Browser tool request failed schema validation | Return structured failure to DSH |
 | `CAPABILITY_DENIED` | User denied or policy blocked an operation | Continue without the capability |
 | `APPROVAL_EXPIRED` | Approval was not answered in time | Return expired result |
-| `TOOL_POLICY_UNCLAIMED` | A Work Tool was not classified by the Work DSH pre-execute policy | Deny the operation and report an integration fault |
+| `TOOL_POLICY_UNCLAIMED` | A dsh-work Tool was not classified by the dsh-work DSH pre-execute policy | Deny the operation and report an integration fault |
 | `BROWSER_START_FAILED` | Managed browser session could not start | Retry or inspect browser setup |
 | `BROWSER_ACTION_FAILED` | Page operation failed | Show step and safe retry options |
 | `TASK_CANCELLED` | User cancelled the task | Return cancelled result |

@@ -3,7 +3,7 @@
 
 /**
  * StartupOutput is the redacted DSH process output retained by the supervisor
- * while Work is starting or recovering. It intentionally omits process
+ * while dsh-work is starting or recovering. It intentionally omits process
  * metadata and exposes no raw, unredacted stream.
  */
 export interface StartupOutput {

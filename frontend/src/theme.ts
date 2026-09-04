@@ -26,7 +26,7 @@ export function applyTheme(value: unknown) {
 }
 
 /**
- * Work has no appearance setting of its own. The host asks DSH for its
+ * dsh-work has no appearance setting of its own. The host asks DSH for its
  * preference, then this listener only resolves the DSH `system` choice when
  * the operating system changes.
  */

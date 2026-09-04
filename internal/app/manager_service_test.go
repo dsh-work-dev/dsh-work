@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {

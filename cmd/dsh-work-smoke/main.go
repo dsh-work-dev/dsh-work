@@ -13,15 +13,15 @@ import (
 	"path/filepath"
 	"time"
 
-	workapp "github.com/local/work/internal/app"
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/platform"
-	"github.com/local/work/internal/workergateway"
+	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/platform"
+	"github.com/local/dsh-work/internal/workergateway"
 )
 
-// work-smoke exercises the same Host, DSH Adapter and native Windows
+// dsh-work-smoke exercises the same Host, DSH Adapter and native Windows
 // Supervisor used by the desktop composition root. It never substitutes a
 // fake worker, server or readiness signal.
 func main() {
@@ -33,14 +33,14 @@ func main() {
 	if dependencies.Err != nil {
 		fatalf("native platform dependencies unavailable: %v", dependencies.Err)
 	}
-	config := workapp.DefaultConfig(root)
+	config := dshworkapp.DefaultConfig(root)
 	// Keep the smoke data directory under ignored generated state so a second run tests
 	// the normal persistent data-directory path instead of copying the preview profile
-	// tree from scratch every time. It remains Work-owned and never touches
+	// tree from scratch every time. It remains dsh-work-owned and never touches
 	// the user's default ~/.dsh.
 	config.DSHDataDirectory = filepath.Join(root, ".task", "dsh-smoke-data")
 	config.BootstrapDirectory = filepath.Join(root, ".task", "dsh-smoke-bootstrap")
-	// A fresh Work-owned DSH data directory may materialise the pinned profile tree on
+	// A fresh dsh-work-owned DSH data directory may materialise the pinned profile tree on
 	// first launch. Keep the smoke deadline bounded but long enough to cover
 	// that real initialization rather than turning cold-start latency into a
 	// false readiness failure.
@@ -59,15 +59,15 @@ func main() {
 		PluginCommands:    dshadapter.NewPluginCommands(),
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
-		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "work", Name: "Smoke DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork}},
+		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
 		Runtimes:          []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"}},
+		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)
 	}
 	gateway := workergateway.New()
-	host := workapp.NewHost(workapp.Dependencies{
+	host := dshworkapp.NewHost(dshworkapp.Dependencies{
 		DSH:        dsh,
 		Manager:    manager,
 		Supervisor: dependencies.Supervisor,

@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 func TestManagerProcessLockRejectsASecondOwnerUntilTheFirstReleases(t *testing.T) {
-	settingsPath := filepath.Join(t.TempDir(), "Work", "settings.json")
+	settingsPath := filepath.Join(t.TempDir(), "dsh-work", "settings.json")
 	first, err := AcquireManagerProcessLock(settingsPath)
 	if err != nil {
 		t.Fatal(err)

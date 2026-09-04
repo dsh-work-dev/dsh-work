@@ -3,7 +3,7 @@ package lifecycle
 import "sync"
 
 // WindowCloseAction is the platform-neutral result of a user closing one
-// Work window. The Wails/platform edge decides how to realize the action.
+// dsh-work window. The Wails/platform edge decides how to realize the action.
 type WindowCloseAction string
 
 const (

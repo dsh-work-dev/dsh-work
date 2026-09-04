@@ -5,14 +5,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/local/work/internal/lifecycle"
-	worknotifications "github.com/local/work/internal/notifications"
+	"github.com/local/dsh-work/internal/lifecycle"
+	dshworknotifications "github.com/local/dsh-work/internal/notifications"
 )
 
 func TestNativeNotificationDeliveryUsesStableFailure(t *testing.T) {
-	err := (nativeNotificationDelivery{}).Send(context.Background(), worknotifications.Event{
+	err := (nativeNotificationDelivery{}).Send(context.Background(), dshworknotifications.Event{
 		ID:    "event-1",
-		Class: worknotifications.ClassError,
+		Class: dshworknotifications.ClassError,
 		Title: "Error",
 	})
 	var failure lifecycle.Failure

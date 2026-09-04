@@ -25,7 +25,7 @@ Candidates evaluated:
   wrapper with creation, assignment, limits and process notifications. It does
   not cover the complete launch contract: in particular, the adapter still
   needs process creation with `STARTUPINFOEX` and an explicit inherited-handle
-  list, plus the Work-specific output and cleanup protocol.
+  list, plus the dsh-work-specific output and cleanup protocol.
 - [`hcsshim/internal/jobobject`](https://github.com/microsoft/hcsshim/blob/main/internal/jobobject/jobobject.go):
   a useful Microsoft implementation, but it is an `internal` package coupled
   to the HCS shim and is not an importable general-purpose dependency for this
@@ -34,7 +34,7 @@ Candidates evaluated:
 ## Decision
 
 Keep `golang.org/x/sys/windows` as the only Windows system boundary dependency
-for F3. The adapter owns only the narrow Work-specific orchestration around
+for F3. The adapter owns only the narrow dsh-work-specific orchestration around
 those bindings:
 
 1. create a kill-on-close Job Object;

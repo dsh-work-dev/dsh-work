@@ -5,24 +5,24 @@ import (
 	"log"
 	"sync/atomic"
 
-	"github.com/local/work/internal/lifecycle"
-	worknotifications "github.com/local/work/internal/notifications"
-	worksettings "github.com/local/work/internal/settings"
+	"github.com/local/dsh-work/internal/lifecycle"
+	dshworknotifications "github.com/local/dsh-work/internal/notifications"
+	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsnotifications "github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 // nativeNotificationService starts the optional Wails adapter without binding
-// its public notification methods to a WebView. Work is the only caller of
+// its public notification methods to a WebView. dsh-work is the only caller of
 // the native delivery API; startup failure is retained so delivery can fail
-// safely without making the Work shell fail to start.
+// safely without making the dsh-work shell fail to start.
 type nativeNotificationService struct {
 	service       *wailsnotifications.NotificationService
 	startupFailed atomic.Bool
 }
 
 func (s *nativeNotificationService) ServiceName() string {
-	return "Work desktop notifications"
+	return "dsh-work desktop notifications"
 }
 
 func (s *nativeNotificationService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
@@ -44,7 +44,7 @@ func (s *nativeNotificationService) ServiceShutdown() error {
 		log.Printf("%s: desktop notification service shutdown failed", lifecycle.ErrorNotificationDeliveryFailed)
 	}
 	// Desktop delivery is optional; an adapter cleanup error must not mask
-	// Work's managed host shutdown.
+	// dsh-work's managed host shutdown.
 	return nil
 }
 
@@ -53,7 +53,7 @@ type nativeNotificationDelivery struct {
 	host    *nativeNotificationService
 }
 
-func (d nativeNotificationDelivery) Send(ctx context.Context, event worknotifications.Event) error {
+func (d nativeNotificationDelivery) Send(ctx context.Context, event dshworknotifications.Event) error {
 	if err := contextError(ctx); err != nil {
 		return err
 	}
@@ -78,12 +78,12 @@ type nativeNotificationCopy struct {
 	body  string
 }
 
-func nativeNotificationCopyFor(locale worksettings.Locale) nativeNotificationCopy {
+func nativeNotificationCopyFor(locale dshworksettings.Locale) nativeNotificationCopy {
 	copy := nativeLocaleCopyFor(locale)
 	return nativeNotificationCopy{title: copy.workspaceFailureTitle, body: copy.workspaceFailureBody}
 }
 
-func nativeLifecycleNotificationCopyFor(locale worksettings.Locale, state lifecycle.State) nativeNotificationCopy {
+func nativeLifecycleNotificationCopyFor(locale dshworksettings.Locale, state lifecycle.State) nativeNotificationCopy {
 	copy := nativeLocaleCopyFor(locale)
 	return nativeNotificationCopy{title: copy.lifecycleTitles[state], body: copy.lifecycleBodies[state]}
 }

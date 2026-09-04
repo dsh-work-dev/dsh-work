@@ -3,9 +3,9 @@ package app
 import (
 	"context"
 
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/notifications"
-	"github.com/local/work/internal/settings"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/notifications"
+	"github.com/local/dsh-work/internal/settings"
 )
 
 // SettingsService is the trusted top-level Settings surface. It exposes only
@@ -33,7 +33,7 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("Work settings are available only in the Settings window.")
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -45,7 +45,7 @@ func (s *SettingsService) SetCloseToTray(ctx context.Context, enabled bool) (set
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("Work settings are available only in the Settings window.")
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -64,7 +64,7 @@ func (s *SettingsService) SetLocale(ctx context.Context, locale string) (setting
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("Work settings are available only in the Settings window.")
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -83,7 +83,7 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("Work settings are available only in the Settings window.")
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -100,9 +100,9 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 func settingsUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorSettingsUnavailable,
-		Summary:       "Work settings are unavailable.",
+		Summary:       "dsh-work settings are unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
-		Detail:        "Restart Work and try again.",
+		Detail:        "Restart dsh-work and try again.",
 	}
 }

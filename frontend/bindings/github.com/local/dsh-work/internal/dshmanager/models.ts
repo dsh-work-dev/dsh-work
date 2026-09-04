@@ -14,7 +14,7 @@ export interface DataDirectoryInfo {
 
 /**
  * DataDirectoryOwnership describes who owns the DSH data directory. A
- * Work-owned directory is safe for dsh-work to create and maintain; a
+ * dsh-work-owned directory is safe for dsh-work to create and maintain; a
  * user-owned directory is discovered only.
  */
 export enum DataDirectoryOwnership {
@@ -23,7 +23,7 @@ export enum DataDirectoryOwnership {
      */
     $zero = "",
 
-    DataDirectoryOwnershipWork = "work",
+    DataDirectoryOwnershipDSHWork = "dsh-work",
     DataDirectoryOwnershipUser = "user",
 };
 
@@ -129,7 +129,7 @@ export interface ResolvedLaunch {
 }
 
 /**
- * RunContext is the complete Work selection that defines one DSH Worker
+ * RunContext is the complete dsh-work selection that defines one DSH Worker
  * generation. Runtime, DSH data directory and profile are one unit and cannot
  * be persisted or switched independently.
  */
@@ -177,8 +177,8 @@ export interface Snapshot {
 }
 
 /**
- * ThemePreference is the DSH-owned appearance preference consumed by Work's
- * trusted surfaces. Work does not persist or edit this value.
+ * ThemePreference is the DSH-owned appearance preference consumed by dsh-work's
+ * trusted surfaces. dsh-work does not persist or edit this value.
  */
 export enum ThemePreference {
     /**

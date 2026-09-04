@@ -1,4 +1,4 @@
-# Contributing to Work
+# Contributing to dsh-work
 
 ## Before changing behaviour
 
@@ -29,7 +29,7 @@ Repository documentation is public. Do not add:
 - user interview notes or customer-identifying information;
 - private links, credentials, tokens or raw diagnostic bundles.
 
-Public documentation should describe Work's own behaviour, interfaces, decisions and contribution process. When unsure whether material is publishable, leave it out of the change and ask a maintainer.
+Public documentation should describe dsh-work's own behaviour, interfaces, decisions and contribution process. When unsure whether material is publishable, leave it out of the change and ask a maintainer.
 
 ## Verification
 

@@ -23,7 +23,7 @@ Shared invariants:
 
 ### Primitive
 
-Use a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Child processes normally inherit Job membership; Work must not enable silent breakaway. Nested-Job behaviour and DSH compatibility are verified on every supported Windows target.
+Use a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Child processes normally inherit Job membership; dsh-work must not enable silent breakaway. Nested-Job behaviour and DSH compatibility are verified on every supported Windows target.
 
 Official reference: [Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 
@@ -79,7 +79,7 @@ Official references:
 - Normal stop requests DSH shutdown, then guardian sends `SIGTERM` to the Worker group and waits.
 - After the grace boundary, guardian sends `SIGKILL` to the group and reaps direct children.
 - Host crash or force-kill closes the lease pipe; guardian performs the same bounded cleanup and exits.
-- Work does not claim kernel-enforced containment for a descendant that deliberately creates a new session; the DSH tree must pass escape fixtures.
+- dsh-work does not claim kernel-enforced containment for a descendant that deliberately creates a new session; the DSH tree must pass escape fixtures.
 
 ### macOS-specific tests
 

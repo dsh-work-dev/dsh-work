@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  APP_NAME: work
+  APP_NAME: dsh-work
   BIN_DIR: bin
   DSH_VERSION: 0.1.2-alpha.3
 
@@ -106,7 +106,7 @@ tasks:
       - wails3 generate bindings -ts -i -clean=true
 
   build:
-    summary: Build Work for the current platform
+    summary: Build dsh-work for the current platform
     deps:
       - frontend:build
     cmds:
@@ -118,7 +118,7 @@ tasks:
     platforms: [windows]
     cmds:
       - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
-      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}-smoke.exe" ./cmd/work-smoke
+      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}-smoke.exe" ./cmd/dsh-work-smoke
 
   build:dsh-work:
     summary: Build the explicit dsh-work runtime/profile manager CLI
@@ -127,7 +127,7 @@ tasks:
       - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/dsh-work{{exeExt}}" ./cmd/dsh-work
 
   run:
-    summary: Run the already-built Work application
+    summary: Run the already-built dsh-work application
     cmds:
       - "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}"
 

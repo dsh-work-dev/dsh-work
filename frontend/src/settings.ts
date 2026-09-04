@@ -1,7 +1,7 @@
 import {Events} from "@wailsio/runtime";
 
-import {SettingsService} from "../bindings/github.com/local/work/internal/app";
-import type {Values} from "../bindings/github.com/local/work/internal/settings";
+import {SettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import type {Values} from "../bindings/github.com/local/dsh-work/internal/settings";
 import {applyLocale, normalizeLocale, subscribeLocale, t} from "./i18n";
 
 type FeedbackTone = "neutral" | "success" | "error";
@@ -47,7 +47,7 @@ export function mountSettings(setFeedback: Feedback) {
     } catch (error) {
       status.textContent = settingsErrorMessage(error, t("error.loadSettings"));
       setFeedback(status.textContent, "error");
-      console.error("Could not read Work settings", error);
+      console.error("Could not read dsh-work settings", error);
       return false;
     }
   }
@@ -62,7 +62,7 @@ export function mountSettings(setFeedback: Feedback) {
       toggle.checked = previous;
       status.textContent = settingsErrorMessage(error, t("error.saveSettings"));
       setFeedback(status.textContent, "error");
-      console.error("Could not update Work close behavior", error);
+      console.error("Could not update dsh-work close behavior", error);
     } finally {
       toggle.disabled = false;
     }
@@ -79,7 +79,7 @@ export function mountSettings(setFeedback: Feedback) {
     } catch (error) {
       localeSelect.value = previous;
       setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
-      console.error("Could not update Work language", error);
+      console.error("Could not update dsh-work language", error);
     } finally {
       localeSelect.disabled = false;
     }
@@ -131,7 +131,7 @@ export function mountNotifications(setFeedback: Feedback) {
       const message = settingsErrorMessage(error, t("error.loadSettings"));
       status.textContent = message;
       setFeedback(message, "error");
-      console.error("Could not read Work notification settings", error);
+      console.error("Could not read dsh-work notification settings", error);
       return false;
     }
   }
@@ -148,7 +148,7 @@ export function mountNotifications(setFeedback: Feedback) {
         const message = settingsErrorMessage(error, t("error.saveSettings"));
         status.textContent = message;
         setFeedback(message, "error");
-        console.error("Could not update Work notification settings", error);
+        console.error("Could not update dsh-work notification settings", error);
       } finally {
         toggle.disabled = false;
       }

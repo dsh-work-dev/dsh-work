@@ -18,17 +18,17 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as settings$0 from "../settings/models.js";
 
 export function GetSettings(): $CancellablePromise<settings$0.Values> {
-    return $Call.ByID(3226009084);
+    return $Call.ByID(750465362);
 }
 
 export function SetCloseToTray(enabled: boolean): $CancellablePromise<settings$0.Values> {
-    return $Call.ByID(3879396778, enabled);
+    return $Call.ByID(217614504, enabled);
 }
 
 export function SetLocale(locale: string): $CancellablePromise<settings$0.Values> {
-    return $Call.ByID(2263426239, locale);
+    return $Call.ByID(1196125933, locale);
 }
 
 export function SetNotificationPreference(key: string, enabled: boolean): $CancellablePromise<settings$0.Values> {
-    return $Call.ByID(4030491503, key, enabled);
+    return $Call.ByID(3832860737, key, enabled);
 }

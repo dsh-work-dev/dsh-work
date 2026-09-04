@@ -1,13 +1,13 @@
 package dshmanager
 
 // DataDirectoryOwnership describes who owns the DSH data directory. A
-// Work-owned directory is safe for dsh-work to create and maintain; a
+// dsh-work-owned directory is safe for dsh-work to create and maintain; a
 // user-owned directory is discovered only.
 type DataDirectoryOwnership string
 
 const (
-	DataDirectoryOwnershipWork DataDirectoryOwnership = "work"
-	DataDirectoryOwnershipUser DataDirectoryOwnership = "user"
+	DataDirectoryOwnershipDSHWork DataDirectoryOwnership = "dsh-work"
+	DataDirectoryOwnershipUser    DataDirectoryOwnership = "user"
 )
 
 // RuntimeSource identifies how a DSH runtime entered the catalog.
@@ -19,8 +19,8 @@ const (
 	RuntimeSourceSystem             RuntimeSource = "system"
 )
 
-// ThemePreference is the DSH-owned appearance preference consumed by Work's
-// trusted surfaces. Work does not persist or edit this value.
+// ThemePreference is the DSH-owned appearance preference consumed by dsh-work's
+// trusted surfaces. dsh-work does not persist or edit this value.
 type ThemePreference string
 
 const (
@@ -133,7 +133,7 @@ type ProfileRenameRequest struct {
 	NewName string     `json:"newName"`
 }
 
-// RunContext is the complete Work selection that defines one DSH Worker
+// RunContext is the complete dsh-work selection that defines one DSH Worker
 // generation. Runtime, DSH data directory and profile are one unit and cannot
 // be persisted or switched independently.
 type RunContext struct {

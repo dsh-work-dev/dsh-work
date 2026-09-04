@@ -17,7 +17,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/local/work/internal/supervisor"
+	"github.com/local/dsh-work/internal/supervisor"
 	win "golang.org/x/sys/windows"
 )
 

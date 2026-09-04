@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/local/work/internal/notifications"
+	"github.com/local/dsh-work/internal/notifications"
 )
 
 func TestSettingsDefaultToDesktopNotificationPreferences(t *testing.T) {

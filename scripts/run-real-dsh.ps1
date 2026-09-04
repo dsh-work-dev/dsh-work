@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
-$smoke = Join-Path $root 'bin\work-smoke.exe'
+$smoke = Join-Path $root 'bin\dsh-work-smoke.exe'
 
 if (-not (Test-Path -LiteralPath $smoke)) {
     throw "Missing $smoke. Run the real-DSH smoke build first."

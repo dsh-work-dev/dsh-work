@@ -1,4 +1,4 @@
-# Work documentation
+# dsh-work documentation
 
 This directory contains publishable project documentation. Every file must be understandable without access to private planning material.
 
@@ -29,7 +29,7 @@ Requirements use stable IDs. Design, engineering and test documents refer to tho
 
 ## Documentation rules
 
-- Describe Work itself, its public interfaces and its contribution process.
+- Describe dsh-work itself, its public interfaces and its contribution process.
 - Do not publish third-party comparisons, confidential measurements, user research, credentials or unpublished business plans.
 - Keep implementation details out of product requirements unless users depend on them.
 - Record a significant technical decision in an ADR before changing a public architectural boundary.

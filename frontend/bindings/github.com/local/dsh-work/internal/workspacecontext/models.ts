@@ -3,7 +3,7 @@
 
 /**
  * Context is intentionally per-generation. It is never part of the durable
- * Work Run context or the global manager state.
+ * dsh-work Run context or the global manager state.
  */
 export interface Context {
     "generationId": string;
@@ -27,7 +27,7 @@ export interface Request {
 /**
  * State describes what the DSH Workspace surface must do for one session.
  * SelectionRequired is an explicit result, not a fallback to a process
- * directory or another Work-owned path.
+ * directory or another dsh-work-owned path.
  */
 export enum State {
     /**

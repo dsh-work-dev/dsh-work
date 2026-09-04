@@ -10,7 +10,7 @@ import (
 )
 
 // ThemeReader is a read-only seam into the selected DSH data directory. DSH remains the
-// owner of the setting and Work only projects it to its trusted surfaces.
+// owner of the setting and dsh-work only projects it to its trusted surfaces.
 type ThemeReader interface {
 	Read(context.Context, string) (ThemePreference, error)
 }

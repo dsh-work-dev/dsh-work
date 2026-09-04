@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/work/internal/supervisor"
+	"github.com/local/dsh-work/internal/supervisor"
 )
 
 func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
@@ -85,8 +85,8 @@ func TestJobObjectWorkerPassesExplicitEnvironment(t *testing.T) {
 	plan := supervisor.LaunchPlan{
 		GenerationID:     "windows-env-test",
 		Executable:       comspec,
-		Args:             []string{"/d", "/c", "echo %WORK_TEST_HOME%"},
-		Env:              map[string]string{"WORK_TEST_HOME": `C:\work-smoke-home`},
+		Args:             []string{"/d", "/c", "echo %DSH_WORK_TEST_HOME%"},
+		Env:              map[string]string{"DSH_WORK_TEST_HOME": `C:\dsh-work-smoke-home`},
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:4321",
 		ExpectedHost:     "127.0.0.1",
@@ -102,7 +102,7 @@ func TestJobObjectWorkerPassesExplicitEnvironment(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for worker exit")
 	}
-	if !strings.Contains(worker.Diagnostics().StdoutTail, `C:\work-smoke-home`) {
+	if !strings.Contains(worker.Diagnostics().StdoutTail, `C:\dsh-work-smoke-home`) {
 		t.Fatalf("explicit environment was not passed: %+v", worker.Diagnostics())
 	}
 }

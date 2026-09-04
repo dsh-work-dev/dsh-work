@@ -2,7 +2,7 @@
 
 ## Supported seam
 
-Work treats DSH as a versioned external runtime. The adapter uses public DSH launcher, profile and patch behaviour and does not modify DSH source code. DSH is currently a fast-moving developer-preview dependency, so Work pins and tests an explicit supported version range.
+dsh-work treats DSH as a versioned external runtime. The adapter uses public DSH launcher, profile and patch behaviour and does not modify DSH source code. DSH is currently a fast-moving developer-preview dependency, so dsh-work pins and tests an explicit supported version range.
 
 The `dsh-work` runtime manager may keep multiple installed DSH runtimes. A
 runtime is an immutable installed distribution; a profile is named data under
@@ -30,7 +30,7 @@ The DSH adapter owns:
 
 - version discovery and compatibility decisions;
 - command and environment construction;
-- Work profile／patch generation;
+- dsh-work profile／patch generation;
 - readiness-event parsing and health probing;
 - graceful-shutdown request when supported;
 - classification of exit and protocol failures.
@@ -64,14 +64,14 @@ profile_name
 ```
 
 The context has no Workspace path or Workspace identifier. DSH owns the
-Workspace registry and its session semantics. Work obtains a Workspace through
+Workspace registry and its session semantics. dsh-work obtains a Workspace through
 the DSH Workspace surface or an explicit launch/session action, then carries
 the resolved context only for that active session or Worker generation.
 
 The DSH Workspace contract treats a Workspace as a persistent record over a
 canonical directory, with its own identity/title and associated sessions. A
 Workspace registration can be removed without deleting the directory or its
-user-owned files. Work must not infer a Workspace from its current working
+user-owned files. dsh-work must not infer a Workspace from its current working
 directory, install directory, operating-system home or DSH data directory.
 
 ## Launch preparation
@@ -83,7 +83,7 @@ generation_id
 Run context (runtime identity, DSH data-directory identity, profile name)
 executable and resolved version
 Workspace context (resolved for this request)
-Work-owned DSH data directory or explicitly selected user data directory
+dsh-work-owned DSH data directory or explicitly selected user data directory
 profile and patch paths
 loopback port candidate
 private IPC endpoint and one-launch credential
@@ -91,9 +91,9 @@ diagnostic verbosity
 safe_mode flag
 ```
 
-The normal implementation launches the Web profile without opening the system browser, passes an explicit loopback port, and injects the Work tool plugin through a generated overlay. Exact arguments live in the version-specific adapter and are covered by command-construction tests.
+The normal implementation launches the Web profile without opening the system browser, passes an explicit loopback port, and injects the dsh-work tool plugin through a generated overlay. Exact arguments live in the version-specific adapter and are covered by command-construction tests.
 
-Work must not invoke a package runner that performs an implicit network download during ordinary startup.
+dsh-work must not invoke a package runner that performs an implicit network download during ordinary startup.
 
 ## Immediate Run-context switch
 
@@ -108,7 +108,7 @@ deferred configuration edit:
    is verified before the candidate starts.
 4. The candidate receives a new generation ID and a separately resolved
    Workspace context.
-5. Only after readiness and gateway validation does Work persist and publish
+5. Only after readiness and gateway validation does dsh-work persist and publish
    the candidate as current.
 6. If any compatibility, startup or readiness check fails, the candidate is
    discarded and the known-good tuple is started again automatically. A
@@ -127,13 +127,13 @@ Process creation is not readiness. A Worker becomes ready only when all checks p
 2. adapter receives a recognised URL announcement or equivalent structured signal;
 3. scheme, host and port match the expected loopback policy;
 4. an active probe returns an expected application response;
-5. the private Work plugin bridge completes its version handshake.
+5. the private dsh-work plugin bridge completes its version handshake.
 
 If the runtime does not offer a sufficiently stable announcement, the adapter may probe only the port allocated for that generation. It must not scan unrelated local ports.
 
 ## Tool bridge
 
-The Work DSH plugin registers narrowly scoped Tools, a complete `tools/pre-execute` classifier for those Tools, and communication with the Host over a private platform transport. The classifier deterministically returns `allow`, `ask` or `deny`; an unclaimed Work Tool is an integration error and fails closed. `ask` reuses DSH `ctx.approval` and only `allowed-once` reaches the Tool body.
+The dsh-work DSH plugin registers narrowly scoped Tools, a complete `tools/pre-execute` classifier for those Tools, and communication with the Host over a private platform transport. The classifier deterministically returns `allow`, `ask` or `deny`; an unclaimed dsh-work Tool is an integration error and fails closed. `ask` reuses DSH `ctx.approval` and only `allowed-once` reaches the Tool body.
 
 The Host creates the private endpoint before starting the Worker. The handshake authenticates the managed Worker generation, not every plugin executing inside the Worker; all payloads remain untrusted and pass Host hard-policy validation.
 
@@ -154,7 +154,7 @@ Browser-operation requests additionally carry the immutable DSH `callId`, task I
 
 ## Notification bridge
 
-The DSH notification bridge is a separate structured projection from the Work
+The DSH notification bridge is a separate structured projection from the dsh-work
 Tool request path. It carries only bounded event metadata:
 
 ```text
@@ -171,7 +171,7 @@ localised or bounded display data
 The initial event classes are action-required, completed, error and lifecycle.
 The bridge must provide stable identity for deduplication and must distinguish a
 contextual notice already rendered by DSH from an event that needs desktop
-promotion. Work evaluates user preferences and window state after validation;
+promotion. dsh-work evaluates user preferences and window state after validation;
 the DSH bridge does not decide whether a desktop notification is allowed.
 
 The bridge must not scrape DSH DOM, parse arbitrary stdout/stderr, inspect page
@@ -179,20 +179,20 @@ text or turn a notification click into an approval or operation request. A
 missing or invalid focus target degrades to focusing the Workspace only.
 
 The first implementation keeps DSH's existing in-page notice and toast paths
-unchanged. Work's desktop notification adapter is independent of the DSH
+unchanged. dsh-work's desktop notification adapter is independent of the DSH
 rendering surface and reports delivery failure without changing DSH state.
 Notification capability negotiation is non-blocking for Workspace readiness:
-when a pinned DSH version does not advertise a notification event class, Work
+when a pinned DSH version does not advertise a notification event class, dsh-work
 does not invent one and continues with the DSH in-page surface plus any
-Work-owned lifecycle events that remain available.
+dsh-work-owned lifecycle events that remain available.
 
 ## Worker web access
 
-The DSH endpoint stays on loopback behind a Host-controlled access policy. The adapter contract tests upstream HTTP and WebSocket behaviour, including Origin handling and state-changing requests. If the pinned DSH version does not provide sufficient browser-origin protection, Work exposes the embedded view through a per-generation gateway that authenticates the trusted application session and proxies only required routes.
+The DSH endpoint stays on loopback behind a Host-controlled access policy. The adapter contract tests upstream HTTP and WebSocket behaviour, including Origin handling and state-changing requests. If the pinned DSH version does not provide sufficient browser-origin protection, dsh-work exposes the embedded view through a per-generation gateway that authenticates the trusted application session and proxies only required routes.
 
 The gateway is not a general reverse proxy. It rejects unknown upstream targets, unsafe methods outside the required surface, untrusted WebSocket upgrades and requests after generation shutdown.
 
-The Workspace window is the only Work WebView that navigates to the gateway
+The Workspace window is the only dsh-work WebView that navigates to the gateway
 URL. The Settings window never receives a DSH URL and remains a trusted Host
 surface with a flat rail: read-only Overview, top-level General and
 Notifications pages, a profile resource page with selected-profile plugin
@@ -238,14 +238,14 @@ Worker generation = Run context + per-generation Workspace context
   General Run-context form. It shows plugin names inside the selected profile
   detail. Non-current details are read-only; only the current profile exposes
   mutation actions. No current `Ready` profile means no mutation action.
-- The desktop Host holds a kernel-owned manager lock in Work application data.
+- The desktop Host holds a kernel-owned manager lock in dsh-work application data.
   The standalone `dsh-work` CLI acquires the same lock for offline catalog
-  operations and rejects commands while Work is running; live Run-context and
+  operations and rejects commands while dsh-work is running; live Run-context and
   plugin changes go through the Settings Host transaction.
-- A package manager may deduplicate physical package artifacts. Work must not
+- A package manager may deduplicate physical package artifacts. dsh-work must not
   configure or relocate that store, and physical deduplication does not make a
   plugin global or runtime-owned.
-- Work-owned overlays live in Work application data, are attached to the
+- dsh-work-owned overlays live in dsh-work application data, are attached to the
   current profile for one Worker generation and may be recreated from their
   schema.
 - User-owned DSH data is never edited in place without an explicit migration.
@@ -258,7 +258,7 @@ A profile is not automatically copied, migrated or made version-scoped when a
 different runtime is selected.
 
 The first implementation persists the catalog and Configured Run context in
-Work application data. Workspace context is resolved separately for each
+dsh-work application data. Workspace context is resolved separately for each
 session and is not part of that persisted context. The Windows runtime installer is explicit and uses npm
 only when the user requests `runtime install`; its native adapter returns a
 catalog entry only after the expected DSH launcher is present. The pinned

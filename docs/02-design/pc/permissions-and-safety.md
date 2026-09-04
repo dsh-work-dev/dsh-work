@@ -2,9 +2,9 @@
 
 ## Decision
 
-Work reuses DSH's approval service and official approval UI for model-requested browser actions. It does not build a competing second approval system.
+dsh-work reuses DSH's approval service and official approval UI for model-requested browser actions. It does not build a competing second approval system.
 
-DSH provides the mechanism, but Work still defines the browser policy. A newly registered DSH Tool is not automatically sensitive: Work must explicitly classify every `browser_*` call through `tools/pre-execute`.
+DSH provides the mechanism, but dsh-work still defines the browser policy. A newly registered DSH Tool is not automatically sensitive: dsh-work must explicitly classify every `browser_*` call through `tools/pre-execute`.
 
 Official references:
 
@@ -16,15 +16,15 @@ Official references:
 
 | Layer | Owner | Purpose | Persistence |
 |---|---|---|---|
-| Browser connection | Work Host + browser | User explicitly lets Work connect to the current browser profile／session | Until disconnect, browser restart or expiry |
+| Browser connection | dsh-work Host + browser | User explicitly lets dsh-work connect to the current browser profile／session | Until disconnect, browser restart or expiry |
 | Tool-action approval | DSH `ctx.approval` | Decide whether one high-impact model-requested Tool call may run | One action only |
-| Hard safety enforcement | Work Host／browser adapter | Reject invalid, cross-session, protected or unsupported operations | Code and configuration policy |
+| Hard safety enforcement | dsh-work Host／browser adapter | Reject invalid, cross-session, protected or unsupported operations | Code and configuration policy |
 
 Browser connection is not blanket approval for every future action. DSH approval is not a substitute for browser-native prompts such as remote-debug connection, extension install, site access, camera, microphone or geolocation.
 
-## Work Tool classifier
+## dsh-work Tool classifier
 
-One Work-owned `tools/pre-execute` listener claims the complete Work browser Tool vocabulary. It derives a deterministic decision from the Tool name and already validated arguments.
+One dsh-work-owned `tools/pre-execute` listener claims the complete dsh-work browser Tool vocabulary. It derives a deterministic decision from the Tool name and already validated arguments.
 
 ### Automatic inside a connected session
 
@@ -57,7 +57,7 @@ Only DSH's `allowed-once` outcome executes. `rejected`, `cancelled` and `unavail
 - a tab not assigned to the task;
 - a stale browser／tab generation;
 - an operation received after disconnect or cancellation;
-- any unknown Work Tool name or unknown operation variant.
+- any unknown dsh-work Tool name or unknown operation variant.
 
 Page text and model explanations cannot alter these classifications.
 
@@ -65,7 +65,7 @@ Page text and model explanations cannot alter these classifications.
 
 DSH approval identifies the agent, Tool and exact `callId`. Its request intentionally does not duplicate Tool arguments; the official UI attaches the approval to the Tool call already rendered to the user.
 
-Work Tool presentation must therefore make the call card understandable before approval:
+dsh-work Tool presentation must therefore make the call card understandable before approval:
 
 - action in plain language;
 - exact target origin and assigned tab;
@@ -73,13 +73,13 @@ Work Tool presentation must therefore make the call card understandable before a
 - expected external effect;
 - reason the classifier selected `ask`.
 
-Closing or cancelling the DSH approval is a non-grant. Work does not display a second native confirmation for the same operation.
+Closing or cancelling the DSH approval is a non-grant. dsh-work does not display a second native confirmation for the same operation.
 
 ## Browser connection grant
 
 Connecting a personal browser can expose open tabs, session and local storage, cookies and other profile data accessible through debugging. The connection surface must state this before the user enables it.
 
-Work shows:
+dsh-work shows:
 
 - browser and profile label;
 - connection method and start time;
@@ -91,7 +91,7 @@ Disconnect invalidates the connection generation, cancels pending browser operat
 
 ## Trust boundaries
 
-Work treats Agent text, Tool arguments, DSH plugins, browser pages, extension messages and process output as untrusted data.
+dsh-work treats Agent text, Tool arguments, DSH plugins, browser pages, extension messages and process output as untrusted data.
 
 - A Worker handshake identifies the managed Worker generation; it does not make every plugin trustworthy.
 - DSH Tool approval protects execution through the Tool pipeline; it does not sandbox arbitrary plugin code already running inside the DSH process.
@@ -101,9 +101,9 @@ Work treats Agent text, Tool arguments, DSH plugins, browser pages, extension me
 
 ## Approval and execution audit
 
-DSH owns `approval/asked` and `approval/decided` events for one-shot decisions. Work owns browser-connection and execution events. The two records share `callId`, `taskId` and correlation ID.
+DSH owns `approval/asked` and `approval/decided` events for one-shot decisions. dsh-work owns browser-connection and execution events. The two records share `callId`, `taskId` and correlation ID.
 
-Work events record event type, timestamp, browser connection generation, assigned tab identity, semantic operation, outcome and error code. They do not duplicate credentials, cookies, full page contents or sensitive form values.
+dsh-work events record event type, timestamp, browser connection generation, assigned tab identity, semantic operation, outcome and error code. They do not duplicate credentials, cookies, full page contents or sensitive form values.
 
 ## Prompt-injection containment
 
@@ -119,4 +119,4 @@ Instructions found in a web page are data, not authority. They cannot:
 
 ## Local web-origin protection
 
-Loopback does not prevent hostile web pages from probing local ports. Work verifies DSH HTTP and WebSocket Origin／CSRF handling. Where upstream protection is insufficient, a Host-controlled per-generation gateway accepts only the trusted application session and required routes.
+Loopback does not prevent hostile web pages from probing local ports. dsh-work verifies DSH HTTP and WebSocket Origin／CSRF handling. Where upstream protection is insufficient, a Host-controlled per-generation gateway accepts only the trusted application session and required routes.

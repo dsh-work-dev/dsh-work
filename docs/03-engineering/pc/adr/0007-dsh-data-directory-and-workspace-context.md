@@ -5,9 +5,9 @@
 
 ## Context
 
-Work originally treated runtime, DSH home, profile and Workspace as one
+dsh-work originally treated runtime, DSH home, profile and Workspace as one
 launch-selection tuple. That makes two different DSH concepts look like one
-Work setting: DSH's home is the data root for profiles and runtime state,
+dsh-work setting: DSH's home is the data root for profiles and runtime state,
 while a DSH Workspace is a persistent record around a working directory and
 its sessions. The upstream DSH documentation defines these as separate
 concepts and gives Workspace its own registry and directory identity.
@@ -15,15 +15,15 @@ concepts and gives Workspace its own registry and directory identity.
 The distinction matters for a desktop shell. One DSH data directory can serve
 many Workspaces, and a user can switch Workspace without changing the runtime,
 profile or data root. A process current directory is also an unsafe and
-surprising source of user Workspace state, especially when Work is launched
+surprising source of user Workspace state, especially when dsh-work is launched
 from a shortcut, installer or shell integration.
 
 ## Decision
 
 1. The user-facing label is `DSH data directory`. `DSH home` and `DSH_HOME`
-   remain DSH's external technical terms. Work application data, installed
+   remain DSH's external technical terms. dsh-work application data, installed
    runtime files and DSH data-directory contents remain distinct.
-2. The persisted Work Configured Run context contains only:
+2. The persisted dsh-work Configured Run context contains only:
 
    ```text
    DSH runtime identity
@@ -41,7 +41,7 @@ from a shortcut, installer or shell integration.
    settings.
 4. Workspace resolution follows DSH's contract: directory identity is
    canonicalized and validated, and unregistering a Workspace does not delete
-   or relocate its directory, files, sessions or logs. Work never derives a
+   or relocate its directory, files, sessions or logs. dsh-work never derives a
    Workspace from its process directory, install directory, operating-system
    home or DSH data directory.
 5. `General` exposes the runtime, DSH data directory and profile Run context;
@@ -49,12 +49,12 @@ from a shortcut, installer or shell integration.
    the current Workspace context read-only. The DSH Workspace surface remains
    the place where a user selects or creates a Workspace.
 6. If a supported DSH Adapter needs a directory before its Workspace surface
-   can open, its Implementation uses an explicit Work bootstrap directory in
-   Work application data. That directory is not registered or presented as a
+   can open, its Implementation uses an explicit dsh-work bootstrap directory in
+   dsh-work application data. That directory is not registered or presented as a
    user's Workspace and is never the install directory, operating-system home
    or DSH data directory.
 
-This is a direct pre-release schema change. Work reads and writes only the new
+This is a direct pre-release schema change. dsh-work reads and writes only the new
 launch-target shape; no legacy field alias, compatibility reader or migration
 path is required.
 
@@ -90,8 +90,8 @@ Costs and risks:
 - **Use the process current directory as the default Workspace:** produces
   launch-location-dependent state and can accidentally expose an installer,
   repository or user home as a DSH Workspace.
-- **Use DSH home as the Work-facing label:** hides the purpose of the data
-  root; Work uses `DSH data directory` while the external DSH contract retains
+- **Use DSH home as the dsh-work-facing label:** hides the purpose of the data
+  root; dsh-work uses `DSH data directory` while the external DSH contract retains
   `DSH home` and `DSH_HOME`.
 
 ## Public references

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {viewModel, type LifecycleStatus} from "../src/lifecycle";
 import {buildOverviewModel} from "../src/overview";
-import {DataDirectoryOwnership, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import {DataDirectoryOwnership, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 
 const status = (overrides: Partial<LifecycleStatus>): LifecycleStatus => ({
   state: "Starting",
@@ -61,10 +61,10 @@ const managerSnapshot = (overrides: Partial<Snapshot>): Snapshot => ({
     removable: false
   }],
   dataDirectories: [{
-    id: "work",
-    name: "Work DSH data directory",
+    id: "dsh-work",
+    name: "dsh-work DSH data directory",
     path: "dsh-data",
-    ownership: DataDirectoryOwnership.DataDirectoryOwnershipWork
+    ownership: DataDirectoryOwnership.DataDirectoryOwnershipDSHWork
   }],
   profiles: [],
   theme: ThemePreference.ThemePreferenceSystem,
@@ -75,15 +75,15 @@ test("overview keeps current, configured and known-good contexts separate", () =
   const model = buildOverviewModel(managerSnapshot({
     current: {
       runtimeId: "dsh-current",
-      profile: {dataDirectoryId: "work", name: "web"}
+      profile: {dataDirectoryId: "dsh-work", name: "web"}
     },
     configured: {
       runtimeId: "dsh-current",
-      profile: {dataDirectoryId: "work", name: "coding"}
+      profile: {dataDirectoryId: "dsh-work", name: "coding"}
     },
     knownGood: {
       runtimeId: "dsh-current",
-      profile: {dataDirectoryId: "work", name: "web"}
+      profile: {dataDirectoryId: "dsh-work", name: "web"}
     }
   }));
 
@@ -96,7 +96,7 @@ test("overview keeps current, configured and known-good contexts separate", () =
 test("overview shows the same context in each applicable state lane", () => {
   const target = {
     runtimeId: "dsh-current",
-    profile: {dataDirectoryId: "work", name: "web"}
+    profile: {dataDirectoryId: "dsh-work", name: "web"}
   };
   const model = buildOverviewModel(managerSnapshot({current: target, configured: target, knownGood: target}));
 
@@ -108,13 +108,13 @@ test("overview shows the configured context when DSH is stopped", () => {
   const model = buildOverviewModel(managerSnapshot({
     configured: {
       runtimeId: "dsh-current",
-      profile: {dataDirectoryId: "work", name: "coding"}
+      profile: {dataDirectoryId: "dsh-work", name: "coding"}
     }
   }));
 
   assert.equal(model.current.target, null);
   assert.equal(model.configured?.runtime?.id, "dsh-current");
-  assert.equal(model.configured?.dataDirectory?.name, "Work DSH data directory");
+  assert.equal(model.configured?.dataDirectory?.name, "dsh-work DSH data directory");
   assert.equal(model.configured?.target?.profile.name, "coding");
   assert.equal(model.state, "not-running");
 });

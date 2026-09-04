@@ -6,7 +6,7 @@
 import * as workspacecontext$0 from "../workspacecontext/models.js";
 
 /**
- * ErrorCode is the stable Work error vocabulary. Dependency-specific detail
+ * ErrorCode is the stable dsh-work error vocabulary. Dependency-specific detail
  * stays at the Adapter boundary and is never used as a UI control protocol.
  */
 export enum ErrorCode {

@@ -1,4 +1,4 @@
-module github.com/local/work
+module github.com/local/dsh-work
 
 go 1.25.0
 

@@ -7,12 +7,12 @@ Status: approved execution plan. This document plans the work; it does not indic
 The first implementation objective is a thin but real end-to-end path:
 
 ```text
-launch Work
+launch dsh-work
   → show trusted startup state
   → start one pinned local DSH Worker
   → validate its loopback endpoint and readiness
   → display the real DSH Workspace context
-  → quit Work
+  → quit dsh-work
   → verify the managed Worker process boundary is empty
 ```
 
@@ -25,7 +25,7 @@ This path is the tracer bullet for the PC application. It proves the toolchain, 
 3. run and display a real DSH Worker on Windows;
 4. harden the Windows lifecycle, errors, cancellation and cleanup;
 5. establish the minimum operational UI states;
-6. converge Work-owned UI with DSH's visual language;
+6. converge dsh-work-owned UI with DSH's visual language;
 7. continue into Tool permission and browser vertical slices on Windows;
 8. implement macOS and Linux against the same three-platform contracts before release.
 
@@ -43,7 +43,7 @@ This plan covers the detailed execution of roadmap milestones M0 through M2:
 - three-platform Supervisor Interface, invariants, error vocabulary and test-contract design;
 - baseline tests and continuous integration;
 - minimum startup, ready and failure presentation;
-- first-class Work notification preferences and native delivery for Work-owned
+- first-class dsh-work notification preferences and native delivery for dsh-work-owned
   lifecycle and failure events;
 - DSH-aligned visual convergence after the functional path works.
 
@@ -61,7 +61,7 @@ The following are intentionally deferred to later roadmap milestones:
 - Go and Wails 3 form the desktop Host baseline; the frontend uses TypeScript.
 - DSH remains an out-of-process, pinned external runtime.
 - The Host is the final authority for process and native effects.
-- Work owns desktop notification preferences and delivery; DSH owns
+- dsh-work owns desktop notification preferences and delivery; DSH owns
   contextual in-page notices.
 - The real DSH Workspace context is embedded only after active readiness validation.
 - Windows, macOS and Linux share one Supervisor Interface and require separate native Adapter Implementations; Windows is implemented first.
@@ -88,7 +88,7 @@ Windows-first describes implementation order, not architecture scope.
 
 Purpose: make the scaffold reproducible before generated files or dependencies enter the repository.
 
-Work:
+dsh-work:
 
 1. record supported Go, Node, package-manager and Wails versions;
 2. pin the DSH version or revision used by the first-run fixture;
@@ -113,7 +113,7 @@ Exit gate:
 
 Purpose: establish one buildable composition root without creating empty abstraction packages.
 
-Work:
+dsh-work:
 
 1. initialise Git in the existing documentation directory;
 2. create the Go module and Wails 3 desktop application;
@@ -126,10 +126,10 @@ Work:
 Initial repository shape:
 
 ```text
-cmd/work/                 desktop composition root
+cmd/dsh-work/                 desktop composition root
 internal/app/             Host wiring and application lifecycle owner
 internal/lifecycle/       state and transition rules once required by F2
-frontend/                 trusted Work shell
+frontend/                 trusted dsh-work shell
 build/                    platform build and packaging inputs created by Wails
 docs/                     public project documentation
 ```
@@ -147,7 +147,7 @@ Exit gate:
 
 Purpose: prove Host／frontend communication and visible lifecycle projection without waiting for DSH integration.
 
-Work:
+dsh-work:
 
 1. define the smallest lifecycle state set needed by the tracer bullet: `Starting`, `Ready`, `Stopping` and `Failed`;
 2. make one lifecycle Module own transition ordering and terminal results;
@@ -170,7 +170,7 @@ Exit gate:
 
 Purpose: expose integration assumptions early using the current primary development platform.
 
-Work:
+dsh-work:
 
 1. locate an explicitly configured, compatible local DSH runtime;
 2. build the launch plan inside the first concrete DSH Adapter;
@@ -179,24 +179,24 @@ Work:
 5. recognise the pinned DSH readiness signal and confirm it with an active health probe;
 6. validate scheme, host, port and trusted application origin;
 7. navigate the embedded DSH Workspace surface only after readiness succeeds;
-8. request graceful shutdown on Work exit and verify the initial Worker has terminated;
+8. request graceful shutdown on dsh-work exit and verify the initial Worker has terminated;
 9. map missing runtime, incompatible version, early exit and readiness timeout into stable failures.
 
 The first tracer bullet may use the Windows Adapter directly behind the already-required Supervisor Seam. It must not place Windows calls in shared lifecycle or DSH Modules.
 
 Exit gate:
 
-- a clean configured Windows environment can launch Work and reach the real pinned DSH Workspace surface;
+- a clean configured Windows environment can launch dsh-work and reach the real pinned DSH Workspace surface;
 - external top-level navigation is blocked or delegated to the system browser;
-- missing and incompatible DSH versions produce stable Work failures;
-- normal Work exit stops the real Worker and leaves no known managed child alive;
+- missing and incompatible DSH versions produce stable dsh-work failures;
+- normal dsh-work exit stops the real Worker and leaves no known managed child alive;
 - repeating the run does not require manual port or process cleanup.
 
 ### F4 — Harden the Windows lifecycle against the shared contract
 
 Purpose: turn the Windows tracer bullet into deterministic product behaviour without allowing Windows details to redefine the three-platform Interface.
 
-Work:
+dsh-work:
 
 1. finalise immutable Worker generation IDs and ignore old-generation events;
 2. implement bounded readiness, graceful-stop and force-stop phases;
@@ -225,7 +225,7 @@ Exit gate:
 
 Purpose: make the proven Windows lifecycle understandable without expanding into the complete product UI.
 
-Work:
+dsh-work:
 
 1. display named startup steps: configuration, runtime, Worker, readiness and Workspace context;
 2. show stable error code, summary and one safe primary recovery action;
@@ -237,7 +237,7 @@ Work:
 6. ensure no sensitive Worker output appears in primary UI;
 7. add the flat Notifications Settings route with immediate-save global and
    per-class preferences;
-8. deliver Work-owned lifecycle and failure notifications through the native
+8. deliver dsh-work-owned lifecycle and failure notifications through the native
    adapter without changing DSH in-page notices;
 9. confirm that UI state consumes platform-neutral lifecycle projection rather than Windows events.
 
@@ -251,16 +251,16 @@ Exit gate:
 
 ### F6 — Align the functional shell with DSH styling
 
-Purpose: make the already-functional Work surfaces feel visually continuous with the real embedded DSH workspace.
+Purpose: make the already-functional dsh-work surfaces feel visually continuous with the real embedded DSH workspace.
 
 This stage starts after F5 provides stable real states to style. It is part of the main Windows foundation sequence, but it cannot move ahead of lifecycle correctness.
 
-Work:
+dsh-work:
 
 1. capture the pinned DSH light and dark workspace states used as visual references;
 2. inventory the relevant DSH semantic theme roles and shared visual primitives;
-3. choose between consuming an official reusable package and maintaining a versioned Work token Adapter;
-4. map Work shell semantics to the selected DSH-compatible theme roles;
+3. choose between consuming an official reusable package and maintaining a versioned dsh-work token Adapter;
+4. map dsh-work shell semantics to the selected DSH-compatible theme roles;
 5. align typography, density, borders, focus, icon family and motion without copying unrelated DSH feature code;
 6. compare startup, ready and failure screenshots against the agreed visual direction;
 7. verify that platform adaptations remain theme inputs rather than separate visual systems;
@@ -268,7 +268,7 @@ Work:
 
 Exit gate:
 
-- Work chrome and DSH content read as one restrained desktop workspace while their ownership remains visible;
+- dsh-work chrome and DSH content read as one restrained desktop workspace while their ownership remains visible;
 - light, dark, keyboard focus and minimum window states pass the UI review checklist on Windows;
 - macOS and Linux window adaptations are documented without hard-coding Windows chrome into shared UI;
 - upgrading the pinned DSH dependency has one documented place to review theme compatibility;
@@ -278,7 +278,7 @@ Exit gate:
 
 Purpose: close the foundation plan and make the next vertical slice independently executable.
 
-Work:
+dsh-work:
 
 1. run formatting, unit, contract, native integration, documentation and public-content checks;
 2. update architecture and ADRs for any implementation decision that differs from the current specification;
@@ -345,7 +345,7 @@ Do not combine the Windows Adapter, complete UI styling and DSH integration into
 The foundation is complete only when:
 
 - a clean checkout builds through pinned commands;
-- the trusted Work shell opens without DSH;
+- the trusted dsh-work shell opens without DSH;
 - a configured compatible DSH starts and becomes visible only after validation;
 - startup, readiness failure, quit and forced cleanup are deterministic;
 - Windows uses a tested native process Adapter and shared code contains no Windows-only contract assumptions;

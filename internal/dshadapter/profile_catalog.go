@@ -1,6 +1,6 @@
 package dshadapter
 
-import "github.com/local/work/internal/dshmanager"
+import "github.com/local/dsh-work/internal/dshmanager"
 
 // BuiltInProfiles exposes the profile catalog owned by this DSH adapter.
 // Profile names and initialization behavior are DSH contract data, not

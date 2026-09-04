@@ -4,14 +4,14 @@ Status: normative UI guidance for the first PC release. This document defines th
 
 ## Design direction
 
-Work is a **quiet, desktop-native and information-clear local control plane**.
+dsh-work is a **quiet, desktop-native and information-clear local control plane**.
 
 - **Quiet:** the shell supports the work instead of competing with it. Colour, elevation and motion communicate meaning rather than decoration.
 - **Desktop-native:** the application respects operating-system window, menu, focus, shortcut and notification conventions.
 - **Information-clear:** current state, required action and safe next step are visually obvious without exposing unnecessary technical detail.
 - **Control plane:** runtime, DSH data directory, profile, permission, recovery and task state are organised as inspectable resources and named steps.
 
-The DSH workspace is the visual subject when it is available. Work-owned chrome is quiet, stable and recognisable. The product must not look like a traditional IDE, a web administration dashboard, a marketing landing page or a game launcher.
+The DSH workspace is the visual subject when it is available. dsh-work-owned chrome is quiet, stable and recognisable. The product must not look like a traditional IDE, a web administration dashboard, a marketing landing page or a game launcher.
 
 The visual system is a synthesis of platform conventions, adjacent local-tool workflows and the Haystack admin-settings reference, not a copy of one reference image. It uses a neutral utility surface, restrained ink emphasis and explicit ownership/state cues. It MUST avoid gradient backgrounds, glass effects, glow, oversized display typography, all-caps microcopy, decorative metric tiles, pill-shaped labels and persistent shadows.
 
@@ -34,7 +34,7 @@ When visual goals conflict, use this order:
 
 1. current state and required action are understandable;
 2. the primary task remains usable with keyboard and assistive technology;
-3. trusted Work chrome is distinguishable from embedded or untrusted content;
+3. trusted dsh-work chrome is distinguishable from embedded or untrusted content;
 4. content remains legible at supported scaling and window sizes;
 5. platform behaviour feels native;
 6. visual consistency is preserved;
@@ -44,17 +44,17 @@ When visual goals conflict, use this order:
 
 The ready-state window has three visual layers:
 
-1. **Work chrome:** title or command area, application status and entry points for Activity, Diagnostics and Settings.
+1. **dsh-work chrome:** title or command area, application status and entry points for Activity, Diagnostics and Settings.
 2. **DSH workspace:** the dominant canvas and default focus destination.
 3. **Transient layer:** drawers, menus, tooltips and trusted dialogs used only while needed.
 
 Rules:
 
-- Work chrome MUST remain available when Worker content is loading or failed.
+- dsh-work chrome MUST remain available when Worker content is loading or failed.
 - The workspace receives the majority of the window area and MUST NOT be boxed inside decorative cards.
 - Activity SHOULD use a side drawer or adjacent panel so it does not replace task context.
 - Settings and Diagnostics are distinct Host-owned routes, not overlays on untrusted content.
-- Startup and recovery replace unavailable Worker content with a trusted Work surface.
+- Startup and recovery replace unavailable Worker content with a trusted dsh-work surface.
 - A persistent border, surface change or comparable cue MUST make the Host／Worker ownership transition perceptible without dominating the canvas.
 - The system tray is a compact companion surface, not an alternative full application UI.
 
@@ -107,11 +107,11 @@ Rules:
 
 - Semantic roles MUST be used instead of raw colour names in feature code.
 - Status MUST NOT rely on colour alone; pair it with text, icon shape or structure.
-- Blue is not a Work brand or interaction colour. Selection uses a neutral surface change, text weight and alignment; primary actions use an ink control with a clear verb; focus uses a neutral high-contrast outline.
+- Blue is not a dsh-work brand or interaction colour. Selection uses a neutral surface change, text weight and alignment; primary actions use an ink control with a clear verb; focus uses a neutral high-contrast outline.
 - Selection, focus and action emphasis MUST remain distinguishable without a coloured left rail or a coloured accent line.
 - Danger colour MUST NOT be used for ordinary cancellation or neutral close actions unless data or external state is at risk.
 - Light and dark themes preserve hierarchy and contrast rather than mechanically invert values.
-- Embedded DSH content may have its own theme, but Work chrome and ownership cues must remain recognisable in both themes.
+- Embedded DSH content may have its own theme, but dsh-work chrome and ownership cues must remain recognisable in both themes.
 
 The initial Settings window, startup surface and nested DSH manager use the
 quiet local control-plane direction: a stable navigation rail, one continuous
@@ -134,13 +134,13 @@ feature code; new surfaces must still map to the semantic roles above. The
 source observations and rejection criteria are maintained in
 [PC manager style research](../../../.research/pc-manager-style-research.md).
 
-DSH owns the appearance preference. Work reads `ui-theme.preference` from the
+DSH owns the appearance preference. dsh-work reads `ui-theme.preference` from the
 selected DSH data directory, resolves `system` through the operating system and does not
-display or persist a second Work appearance setting.
+display or persist a second dsh-work appearance setting.
 
 ## Typography
 
-- Use the platform UI font stack for Work chrome and ordinary interface text.
+- Use the platform UI font stack for dsh-work chrome and ordinary interface text.
 - Use a legible cross-platform monospace stack only for code, commands, paths, identifiers and diagnostic output.
 - Define semantic text roles for window title, section heading, body, control label, metadata, caption and monospace output.
 - Heading size and weight MUST reflect information hierarchy, not visual decoration.
@@ -208,13 +208,13 @@ Every shared control defines default, hover, pressed, focused, selected, disable
 - Treat desktop notifications as a background companion to the DSH workspace,
   not as a second conversation surface.
 - Use the operating system's notification language for native delivery. Any
-  Work-owned fallback uses the existing neutral surface tokens and stays near
+  dsh-work-owned fallback uses the existing neutral surface tokens and stays near
   the state or control it describes.
 - Do not use a blue left border, gradient, glow, glass, oversized icon,
   decorative badge or repeated success copy for notification emphasis.
 - A notification title names the event; its body states the useful context or
   next action. Raw logs and technical detail belong in Diagnostics.
-- The user's notification preferences control Work desktop delivery only;
+- The user's notification preferences control dsh-work desktop delivery only;
   DSH remains responsible for contextual in-page notices.
 
 ## AI and operational patterns
@@ -227,8 +227,8 @@ Every shared control defines default, hover, pressed, focused, selected, disable
 
 ### Tool calls and approval
 
-- Work MUST NOT draw a duplicate approval dialog for a DSH Tool call.
-- Work-owned `Waiting for approval` indicators focus the exact trusted DSH call card.
+- dsh-work MUST NOT draw a duplicate approval dialog for a DSH Tool call.
+- dsh-work-owned `Waiting for approval` indicators focus the exact trusted DSH call card.
 - The call presentation makes action, target, scope, consequence and masked sensitive data scannable.
 - Approval and rejection controls remain visually balanced enough to support a deliberate choice; the risky action is not visually coerced.
 
@@ -356,7 +356,7 @@ Each release candidate is reviewed at minimum across:
 
 Review checks:
 
-- [ ] Work chrome remains quiet and visually distinct from embedded content.
+- [ ] dsh-work chrome remains quiet and visually distinct from embedded content.
 - [ ] The current state and primary action are identifiable at a glance.
 - [ ] Alignment, spacing, typography, borders and radius are consistent.
 - [ ] No content is clipped, obscured or dependent on hover.
@@ -370,7 +370,7 @@ Review checks:
 
 - blank loading views or indefinite unlabeled spinners;
 - decorative card nesting, excessive shadows, blue accent lines or active-item left rails;
-- a second Work approval dialog for a DSH approval;
+- a second dsh-work approval dialog for a DSH approval;
 - hidden browser connection or automation state;
 - status communicated only with colour, animation or an icon;
 - placeholders used as labels;

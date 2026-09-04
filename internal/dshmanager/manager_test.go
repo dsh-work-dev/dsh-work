@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 func TestManagerPersistsAnExplicitRunContext(t *testing.T) {
@@ -27,10 +27,10 @@ func TestManagerPersistsAnExplicitRunContext(t *testing.T) {
 	config := Config{
 		StatePath: filepath.Join(root, "manager.json"),
 		DataDirectories: []DataDirectoryInfo{{
-			ID:        "work",
-			Name:      "Work managed",
+			ID:        "dsh-work",
+			Name:      "dsh-work managed",
 			Path:      dataDirectoryPath,
-			Ownership: DataDirectoryOwnershipWork,
+			Ownership: DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []RuntimeInfo{{
 			ID:      "dsh-0.1.2-alpha.3",
@@ -40,7 +40,7 @@ func TestManagerPersistsAnExplicitRunContext(t *testing.T) {
 		}},
 		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-0.1.2-alpha.3",
-			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+			Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
 	}
 
@@ -51,7 +51,7 @@ func TestManagerPersistsAnExplicitRunContext(t *testing.T) {
 
 	want := RunContext{
 		RuntimeID: "dsh-0.1.2-alpha.3",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	}
 	if _, err := manager.SetConfigured(context.Background(), want); err != nil {
 		t.Fatalf("SetConfigured() error = %v", err)
@@ -87,7 +87,7 @@ func TestManagerRejectsUnknownProfileReference(t *testing.T) {
 
 	_, err := manager.Resolve(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "missing"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "missing"},
 	})
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want profile-not-found failure")
@@ -103,7 +103,7 @@ func TestManagerRejectsAnUnverifiedRuntimeBeforeLaunch(t *testing.T) {
 	}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		Runtimes:        []RuntimeInfo{{ID: "missing", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "missing-dsh.cmd")}},
 	})
 	if err != nil {
@@ -117,7 +117,7 @@ func TestManagerRejectsAnUnverifiedRuntimeBeforeLaunch(t *testing.T) {
 		t.Fatalf("runtime verification projection = %#v", snapshot.Runtimes)
 	}
 	_, err = manager.Resolve(context.Background(), LaunchRequest{
-		RuntimeID: "missing", Profile: ProfileRef{DataDirectoryID: "work", Name: "web"},
+		RuntimeID: "missing", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	})
 	assertFailureCode(t, err, lifecycle.ErrorDSHRuntimeNotFound)
 }
@@ -135,7 +135,7 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	verifier := &recordingRuntimeVerifier{}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		ProfileCatalog: testProfileCatalog{definitions: []ProfileDefinition{{
 			Name: "web", Kind: ProfileKindBuiltIn, AutoInitialize: true,
 		}}},
@@ -147,7 +147,7 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	}
 	resolved, err := manager.ResolveLaunch(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 		StatePath:       filepath.Join(root, "manager.json"),
 		ProfileCatalog:  testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}},
 		RuntimeVerifier: failingRuntimeVerifier{},
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 	_, err = manager.ResolveLaunch(context.Background(), LaunchRequest{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	})
 	assertFailureCode(t, err, lifecycle.ErrorDSHUnsupportedVersion)
 	var failure lifecycle.Failure
@@ -195,7 +195,7 @@ func TestManagerKeepsConfiguredCurrentAndKnownGoodContextsSeparate(t *testing.T)
 	manager := newTestManager(t)
 	configured := RunContext{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	}
 	if _, err := manager.SetConfigured(context.Background(), configured); err != nil {
 		t.Fatal(err)
@@ -241,13 +241,13 @@ func TestManagerCommitKeepsCurrentAfterCallerCancellationDuringSnapshot(t *testi
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
 		StateStore:      cancelAfterSaveStore{cancel: cancel},
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web"}}
+	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
 	if _, err := manager.CommitCurrent(commitContext, &target); err != nil {
 		t.Fatalf("CommitCurrent() error = %v, want committed snapshot despite post-save cancellation", err)
 	}
@@ -273,7 +273,7 @@ func TestManagerRenamesCustomProfileAndUpdatesConfiguredContext(t *testing.T) {
 	}
 	target := RunContext{
 		RuntimeID: "dsh-test",
-		Profile:   ProfileRef{DataDirectoryID: "work", Name: "web-clean"},
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web-clean"},
 	}
 	if _, err := manager.SetConfigured(context.Background(), target); err != nil {
 		t.Fatal(err)
@@ -330,12 +330,12 @@ func TestManagerDoesNotRenameBuiltInOrCurrentProfile(t *testing.T) {
 	manager := newTestManager(t)
 	manager.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}}
 	_, err := manager.RenameProfile(context.Background(), ProfileRenameRequest{
-		Profile: ProfileRef{DataDirectoryID: "work", Name: "web"},
+		Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		NewName: "web-copy",
 	})
 	assertFailureCode(t, err, lifecycle.ErrorProfileInvalid)
 
-	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "web-clean"}}
+	target := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web-clean"}}
 	if _, err := manager.CommitCurrent(context.Background(), &target); err != nil {
 		t.Fatal(err)
 	}
@@ -367,23 +367,23 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	runner := &recordingRunner{}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		CommandRunner:   runner,
 		PluginCommands:  testPluginCommands{},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 		DefaultRunContext: RunContext{
-			RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"},
+			RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	want := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}
 	if _, err := manager.CommitCurrent(context.Background(), &want); err != nil {
 		t.Fatal(err)
 	}
 	result, err := manager.InstallPlugin(context.Background(), PluginInstallRequest{
-		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}},
+		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}},
 		Package: "@example/new-plugin@3.0.0",
 	})
 	if err != nil {
@@ -398,11 +398,11 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	if got := strings.Join(runner.args, " "); got != "plugin --profile alpha add @example/new-plugin@3.0.0" {
 		t.Fatalf("DSH plugin args = %q", got)
 	}
-	alpha, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}})
+	alpha, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	beta, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}}})
+	beta, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "beta"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestManagerDoesNotExposeProfileDependencyDirectory(t *testing.T) {
 	}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: filepath.Join(root, "dsh.cmd")}},
 	})
 	if err != nil {
@@ -451,7 +451,7 @@ func TestManagerRejectsPluginMutationForNonCurrentProfile(t *testing.T) {
 	runner := &recordingRunner{}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		CommandRunner:   runner,
 		PluginCommands:  testPluginCommands{},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
@@ -459,12 +459,12 @@ func TestManagerRejectsPluginMutationForNonCurrentProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}
 	if _, err := manager.CommitCurrent(context.Background(), &current); err != nil {
 		t.Fatal(err)
 	}
 	_, err = manager.InstallPlugin(context.Background(), PluginInstallRequest{
-		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}},
+		Target:  PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "beta"}},
 		Package: "@example/not-allowed",
 	})
 	assertFailureCode(t, err, lifecycle.ErrorManagerOperationBusy)
@@ -472,7 +472,7 @@ func TestManagerRejectsPluginMutationForNonCurrentProfile(t *testing.T) {
 		t.Fatalf("non-current mutation reached command runner: %#v", runner)
 	}
 	if _, err := manager.ListPlugins(context.Background(), PluginListRequest{
-		Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "beta"}},
+		Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "beta"}},
 	}); err != nil {
 		t.Fatalf("non-current profile inspection error = %v", err)
 	}
@@ -618,7 +618,7 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		CommandRunner:   runner,
 		PluginCommands:  testPluginCommands{},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
@@ -626,11 +626,11 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	current := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}
 	if _, err := manager.CommitCurrent(context.Background(), &current); err != nil {
 		t.Fatal(err)
 	}
-	target := PluginTarget{Profile: ProfileRef{DataDirectoryID: "work", Name: "alpha"}}
+	target := PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}
 	firstDone := make(chan error, 1)
 	go func() {
 		_, firstErr := manager.InstallPlugin(context.Background(), PluginInstallRequest{Target: target, Package: "@example/first"})
@@ -671,11 +671,11 @@ func newTestManager(t *testing.T) *Manager {
 	}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
-		DataDirectories: []DataDirectoryInfo{{ID: "work", Name: "Work managed", Path: homePath, Ownership: DataDirectoryOwnershipWork}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work managed", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
 		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
 		DefaultRunContext: RunContext{
 			RuntimeID: "dsh-test",
-			Profile:   ProfileRef{DataDirectoryID: "work", Name: "web"},
+			Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
 	})
 	if err != nil {

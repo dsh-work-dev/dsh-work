@@ -3,29 +3,29 @@
 ## Surface model
 
 ```text
-DSH event or Work event
+DSH event or dsh-work event
         │
         ▼
 structured notification event
         │
         ├── DSH contextual notice (DSH owns)
         │
-        └── Work policy
+        └── dsh-work policy
               ├── preference check
               ├── foreground/background check
               ├── deduplication
-              └── desktop notification (Work owns)
+              └── desktop notification (dsh-work owns)
 ```
 
-There is no persistent Work notification panel in the first version. This keeps
-the Workspace window free of an extra Work chrome layer and avoids competing
+There is no persistent dsh-work notification panel in the first version. This keeps
+the Workspace window free of an extra dsh-work chrome layer and avoids competing
 with DSH's conversation context.
 
 ## Settings route
 
 The Settings window remains a separate native window with no menu bar. Its rail
 is flat and shallow. `Notifications` is one top-level route, alongside the
-existing Work and DSH management routes; it is not a child route of `General`.
+existing dsh-work and DSH management routes; it is not a child route of `General`.
 
 The page contains:
 
@@ -42,13 +42,13 @@ when a category would otherwise be ambiguous.
 
 | Event | Workspace active | Workspace hidden or unfocused | Preference off |
 |---|---|---|---|
-| Action required | DSH context plus Work delivery when needed | Desktop delivery | DSH context only |
+| Action required | DSH context plus dsh-work delivery when needed | Desktop delivery | DSH context only |
 | Completed | No duplicate desktop delivery | Desktop delivery | No desktop delivery |
-| Error | Contextual DSH or Work error surface | Desktop delivery | Source surface only |
+| Error | Contextual DSH or dsh-work error surface | Desktop delivery | Source surface only |
 | Lifecycle | No delivery by default | Only if enabled | No desktop delivery |
 
 The bridge supplies the context needed to distinguish an event already visible
-in DSH from an event that needs promotion to the desktop. Work must not infer
+in DSH from an event that needs promotion to the desktop. dsh-work must not infer
 that state by searching DSH DOM text.
 
 ## Desktop notification action
@@ -62,14 +62,14 @@ that state by searching DSH DOM text.
 
 ## Visual language
 
-System notifications use the operating-system visual language. Any Work-owned
+System notifications use the operating-system visual language. Any dsh-work-owned
 transient fallback uses the existing neutral surface tokens:
 
 - no blue accent line or left rail;
 - no gradient, glow, glass, oversized icon or decorative badge;
 - one concise title and one concise body;
 - status is communicated by text and a familiar icon, not colour alone;
-- the fallback is placed near the active Work control or state it describes;
+- the fallback is placed near the active dsh-work control or state it describes;
 - errors remain visible until the user can reach the recommended action, while
   routine completion feedback is short-lived.
 
@@ -80,6 +80,6 @@ transient fallback uses the existing neutral surface tokens:
   paragraph of confirmation.
 - Desktop notification action labels are verbs and remain meaningful without
   colour.
-- Reduced-motion settings remove entrance animation from any Work fallback.
-- Notification delivery failures are presented as an actionable Work error,
+- Reduced-motion settings remove entrance animation from any dsh-work fallback.
+- Notification delivery failures are presented as an actionable dsh-work error,
   never as an unexplained silent failure.

@@ -6,8 +6,8 @@
 import * as notifications$0 from "../notifications/models.js";
 
 /**
- * Locale is the Work-owned language preference. It is deliberately separate
- * from DSH's appearance preference: DSH owns theme, while Work owns its own
+ * Locale is the dsh-work-owned language preference. It is deliberately separate
+ * from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
  * chrome and settings copy.
  */
 export enum Locale {
@@ -23,8 +23,8 @@ export enum Locale {
 };
 
 /**
- * Values is the versioned, platform-neutral Work preference contract.
- * CloseToTray is true by default so closing the last window keeps Work and
+ * Values is the versioned, platform-neutral dsh-work preference contract.
+ * CloseToTray is true by default so closing the last window keeps dsh-work and
  * its managed DSH worker available from the notification area.
  */
 export interface Values {

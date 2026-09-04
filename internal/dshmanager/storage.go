@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 // State is the versioned manager persistence contract. Current and known-good
@@ -21,16 +21,6 @@ type State struct {
 	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
 	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
 	Configured      *RunContext         `json:"configured,omitempty"`
-	migratedFrom    int
-}
-
-const legacyStateVersion = 2
-
-type legacyStateV2 struct {
-	Version         int                 `json:"version"`
-	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
-	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
-	Desired         *RunContext         `json:"desired,omitempty"`
 }
 
 // StateStore isolates persistence and version policy from manager policy. A future
@@ -60,12 +50,6 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 	if err != nil {
 		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted selection has an unsupported format")
 	}
-	if state.migratedFrom != 0 {
-		if err := (FileStateStore{}).Save(ctx, path, state); err != nil {
-			return nil, err
-		}
-		state.migratedFrom = 0
-	}
 	return &state, nil
 }
 
@@ -76,31 +60,9 @@ func decodeState(data []byte) (State, error) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return State{}, err
 	}
-	if envelope.Version == legacyStateVersion {
-		return migrateLegacyState(data)
-	}
-
 	var state State
 	if err := decodeStrict(data, &state); err != nil {
 		return State{}, err
-	}
-	if err := validateState(state); err != nil {
-		return State{}, err
-	}
-	return state, nil
-}
-
-func migrateLegacyState(data []byte) (State, error) {
-	var legacy legacyStateV2
-	if err := decodeStrict(data, &legacy); err != nil {
-		return State{}, err
-	}
-	state := State{
-		Version:         stateVersion,
-		DataDirectories: legacy.DataDirectories,
-		Runtimes:        legacy.Runtimes,
-		Configured:      cloneRunContext(legacy.Desired),
-		migratedFrom:    legacyStateVersion,
 	}
 	if err := validateState(state); err != nil {
 		return State{}, err

@@ -2,8 +2,8 @@
 
 package platform
 
-import winplatform "github.com/local/work/internal/platform/windows"
-import "github.com/local/work/internal/dshmanager"
+import winplatform "github.com/local/dsh-work/internal/platform/windows"
+import "github.com/local/dsh-work/internal/dshmanager"
 
 func newDependencies() Dependencies {
 	return Dependencies{

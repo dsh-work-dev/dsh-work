@@ -2,21 +2,21 @@
 
 ## Storage ownership
 
-Work stores Host-owned data under the operating system's per-user application-data location. DSH Workspaces and DSH data directories remain separate from Work application data and from each other.
+dsh-work stores Host-owned data under the operating system's per-user application-data location. DSH Workspaces and DSH data directories remain separate from dsh-work application data and from each other.
 
 | Data | Owner | Persistence | Protection |
 |---|---|---|---|
-| Host configuration | Work | persistent, versioned | user-only filesystem access |
-| Capability grants | Work | persistent only when allowed | user-only access; no high-risk permanent grants |
-| Audit events | Work | bounded local retention | redacted before write |
-| Diagnostic logs | Work | bounded rotating files | redacted before write |
-| Runtime packages | Work or user | versioned cache | integrity checked before execution |
-| Generated DSH overlay | Work | reproducible | schema and generation marker |
-| DSH data directory, profiles and plugin associations | DSH / user | governed by DSH | data-directory scope is preserved; never silently rewritten by Work |
+| Host configuration | dsh-work | persistent, versioned | user-only filesystem access |
+| Capability grants | dsh-work | persistent only when allowed | user-only access; no high-risk permanent grants |
+| Audit events | dsh-work | bounded local retention | redacted before write |
+| Diagnostic logs | dsh-work | bounded rotating files | redacted before write |
+| Runtime packages | dsh-work or user | versioned cache | integrity checked before execution |
+| Generated DSH overlay | dsh-work | reproducible | schema and generation marker |
+| DSH data directory, profiles and plugin associations | DSH / user | governed by DSH | data-directory scope is preserved; never silently rewritten by dsh-work |
 | DSH Workspace registry and session records | DSH / user | governed by DSH | registration changes do not delete the Workspace directory or files |
-| Browser connection metadata | Work | until disconnected | browser／extension identity only; no cookies or passwords |
-| Tab assignment | Work | task lifetime | IDs, origin and generation; no unrelated-tab inventory |
-| Browser profile and login state | user／browser | browser-owned | never copied into Work storage |
+| Browser connection metadata | dsh-work | until disconnected | browser／extension identity only; no cookies or passwords |
+| Tab assignment | dsh-work | task lifetime | IDs, origin and generation; no unrelated-tab inventory |
+| Browser profile and login state | user／browser | browser-owned | never copied into dsh-work storage |
 | Credentials | user | when required | operating-system protected credential store |
 
 ## Configuration rules
@@ -31,13 +31,13 @@ Work stores Host-owned data under the operating system's per-user application-da
   profile and its plugin associations. A Workspace context is resolved
   separately per session or Worker generation.
 - A context-switch candidate is not current and is not committed to the
-  Configured Run context until its Worker reaches `Ready`. Work retains the
+  Configured Run context until its Worker reaches `Ready`. dsh-work retains the
   last known-good Run context as the automatic rollback source; a failed
   candidate must not replace it.
 - Plugin mutations are authorised only for the profile in the current `Ready`
   Run context. Non-current profile/plugin data may be read for inspection but
   must be rejected for mutation at the manager boundary.
-- Work does not change global environment variables or package-manager configuration.
+- dsh-work does not change global environment variables or package-manager configuration.
 
 ## Local endpoints
 

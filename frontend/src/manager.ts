@@ -1,12 +1,12 @@
 import {Events} from "@wailsio/runtime";
 
-import {HostService, ManagerService} from "../bindings/github.com/local/work/internal/app";
-import {DataDirectoryOwnership, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/work/internal/dshmanager";
+import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {DataDirectoryOwnership, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {mountNotifications, mountSettings} from "./settings";
 import {buildOverviewModel, type OverviewLane} from "./overview";
 import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
-import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/work/internal/lifecycle/models";
+import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/dsh-work/internal/lifecycle/models";
 
 export type ManagerProfileRef = ProfileRef;
 export type ManagerRunContext = RunContext;
@@ -43,8 +43,8 @@ function managerErrorMessage(error: unknown, fallbackKey: string): string {
 }
 
 function dataDirectoryOwnershipLabel(value: DataDirectoryOwnership): string {
-  if (value === DataDirectoryOwnership.DataDirectoryOwnershipWork) {
-    return "Work";
+  if (value === DataDirectoryOwnership.DataDirectoryOwnershipDSHWork) {
+    return "dsh-work";
   }
   if (value === DataDirectoryOwnership.DataDirectoryOwnershipUser) {
     return t("value.user");

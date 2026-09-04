@@ -3,7 +3,7 @@
 ## Surface map
 
 ```text
-Work desktop shell
+dsh-work desktop shell
 ├── Startup / recovery surface
 │   ├── current startup step
 │   ├── error details
@@ -14,7 +14,7 @@ Work desktop shell
 │   └── Host lifecycle handoff
 ├── Settings window
 │   ├── Overview (read-only)
-│   ├── General (one Work settings page)
+│   ├── General (one dsh-work settings page)
 │   ├── Notifications
 │   ├── Profiles
 │   ├── Runtimes
@@ -36,13 +36,13 @@ System tray
 ├── open Workspace
 ├── Settings
 ├── Restart DSH
-└── Quit DSH Work
+└── Quit dsh-work
 ```
 
 ## Navigation model
 
 - The DSH workspace window is the default ready-state destination.
-- The Settings window is opened separately and never replaces or overlays DSH content. It has no HTML application menu. Its rail is one flat list of top-level destinations; `General` contains the DSH runtime, DSH data directory and profile Run context plus close-to-tray behaviour, while `Notifications` contains Work desktop-notification preferences. `General` does not contain Workspace selection.
+- The Settings window is opened separately and never replaces or overlays DSH content. It has no HTML application menu. Its rail is one flat list of top-level destinations; `General` contains the DSH runtime, DSH data directory and profile Run context plus close-to-tray behaviour, while `Notifications` contains dsh-work desktop-notification preferences. `General` does not contain Workspace selection.
 - `Overview` is first and is read-only. It reports the current/known-good Run context, any context-switch state and the Workspace context separately; it does not contain inputs or a save-for-next-launch action.
 - `Profiles` is the primary profile resource page. The left side lists profiles; selecting one establishes an inspection context for the right-side profile detail. An explicit `Switch to this profile` action changes the Run context immediately; General's runtime and data-directory selectors are not reused as plugin context.
 - A profile must be selected before plugin details are shown. Non-current profiles are inspectable but read-only. Only the profile in the current `Ready` Run context exposes install, removal and other plugin-composition actions; every mutation carries the exact data-directory/profile reference and is checked again by the manager.
@@ -58,13 +58,13 @@ System tray
 
 ## Ownership cues
 
-The UI must make the boundary between Work and embedded DSH content understandable:
+The UI must make the boundary between dsh-work and embedded DSH content understandable:
 
 - Host-owned surfaces contain status, Activity, Settings, Diagnostics and the DSH manager inside the Settings window.
-- The application menu has only top-level `Settings` and `Help`; `Help` contains `Check for Updates…` and `About Work`. The system tray remains a compact lifecycle surface.
-- Work owns desktop notification preferences and delivery. DSH owns in-page notices and conversation context. The first release has no persistent Work notification panel or notification menu.
-- Work appearance follows the selected DSH data directory's `ui-theme.preference`; Work has no separate appearance setting. `system` follows the operating system. When both trusted windows are open, the Settings window reflects DSH preference changes without a manual refresh.
-- The Workspace window contains the external DSH content; Worker content has no direct access to Host APIs. Work's native application menu remains available for Settings and Help, while lifecycle actions remain in the system tray.
+- The application menu has only top-level `Settings` and `Help`; `Help` contains `Check for Updates…` and `About dsh-work`. The system tray remains a compact lifecycle surface.
+- dsh-work owns desktop notification preferences and delivery. DSH owns in-page notices and conversation context. The first release has no persistent dsh-work notification panel or notification menu.
+- dsh-work appearance follows the selected DSH data directory's `ui-theme.preference`; dsh-work has no separate appearance setting. `system` follows the operating system. When both trusted windows are open, the Settings window reflects DSH preference changes without a manual refresh.
+- The Workspace window contains the external DSH content; Worker content has no direct access to Host APIs. dsh-work's native application menu remains available for Settings and Help, while lifecycle actions remain in the system tray.
 - Plugin management is always labelled with its DSH data directory and profile reference. The profile list shows the profile name as the primary identity and the data directory as scope; plugin names appear inside the selected profile's detail, with mutation actions only when that profile is current.
 - DSH approval is trusted only when correlated with the active DSH call ID and official approval channel; ordinary page content cannot create Host action-required state.
 - A disconnected Worker is covered by a Host-owned recovery page to prevent stale content from appearing usable.
@@ -73,7 +73,7 @@ The UI must make the boundary between Work and embedded DSH content understandab
 
 For every operational message, present information in this order:
 
-1. what state Work is in;
+1. what state dsh-work is in;
 2. what is happening or failed;
 3. whether user action is required;
 4. safest primary action;

@@ -28,15 +28,15 @@ import * as workspacecontext$0 from "../workspacecontext/models.js";
 import * as $models from "./models.js";
 
 export function Cancel(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(2192368078);
+    return $Call.ByID(3418678552);
 }
 
 /**
- * GetLocale reads the Work-owned language preference for the trusted startup
+ * GetLocale reads the dsh-work-owned language preference for the trusted startup
  * surface. It is read-only here; SettingsService remains the write boundary.
  */
 export function GetLocale(): $CancellablePromise<settings$0.Locale> {
-    return $Call.ByID(2222441474);
+    return $Call.ByID(1021097304);
 }
 
 /**
@@ -44,19 +44,19 @@ export function GetLocale(): $CancellablePromise<settings$0.Locale> {
  * active or last startup attempt so the user can inspect and copy them.
  */
 export function GetStartupOutput(): $CancellablePromise<$models.StartupOutput> {
-    return $Call.ByID(2529442400);
+    return $Call.ByID(2399609318);
 }
 
 export function GetStatus(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(3548614106);
+    return $Call.ByID(3810866152);
 }
 
 /**
  * GetTheme projects the selected DSH data directory's appearance preference. DSH owns
- * the value; Work only uses it to paint its trusted startup surface.
+ * the value; dsh-work only uses it to paint its trusted startup surface.
  */
 export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
-    return $Call.ByID(2409500109);
+    return $Call.ByID(1276069119);
 }
 
 /**
@@ -65,19 +65,19 @@ export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
  * controls from that surface.
  */
 export function GetWorkspaceStatus(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(120271503);
+    return $Call.ByID(2318209329);
 }
 
 export function Quit(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(336297499);
+    return $Call.ByID(4265271809);
 }
 
 export function Restart(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(3788146135);
+    return $Call.ByID(39976093);
 }
 
 export function Start(): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(265946144);
+    return $Call.ByID(3063548498);
 }
 
 /**
@@ -86,5 +86,5 @@ export function Start(): $CancellablePromise<lifecycle$0.Status> {
  * persisted with the global Run context.
  */
 export function StartWithWorkspace(request: workspacecontext$0.Request): $CancellablePromise<lifecycle$0.Status> {
-    return $Call.ByID(380825541, request);
+    return $Call.ByID(2093500751, request);
 }

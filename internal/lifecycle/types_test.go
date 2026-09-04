@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 func TestMachineLegalLifecycle(t *testing.T) {

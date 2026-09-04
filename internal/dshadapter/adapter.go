@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/supervisor"
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 const SupportedVersion = "0.1.2-alpha.3"
@@ -143,7 +143,7 @@ func (a *Adapter) DiscoverPath(ctx context.Context, path string) (Runtime, error
 	if version == "" || version != a.expectedVersion {
 		return Runtime{}, lifecycle.Failure{
 			Code:      lifecycle.ErrorDSHUnsupportedVersion,
-			Summary:   "The configured DSH version is not supported by this Work build.",
+			Summary:   "The configured DSH version is not supported by this dsh-work build.",
 			Retryable: false,
 			Detail:    "Expected " + a.expectedVersion,
 		}
@@ -200,7 +200,7 @@ func (a *Adapter) VerifyProfile(ctx context.Context, runtimePath, runtimeVersion
 }
 
 // BuildLaunchPlan constructs one generation's DSH process plan. The bootstrap
-// directory is an explicit Work application-data directory used only while
+// directory is an explicit dsh-work application-data directory used only while
 // DSH's Workspace surface is selecting a Workspace. A selected Workspace is
 // passed as the explicit process context; the DSH data directory remains the
 // value exported through DSH_HOME.

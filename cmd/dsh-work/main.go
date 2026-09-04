@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	workapp "github.com/local/work/internal/app"
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/platform"
+	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/platform"
 )
 
 func main() {
@@ -50,13 +50,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-func newManager() (*dshmanager.Manager, *workapp.ProcessLock, error) {
+func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	discoveryRoot, err := os.Getwd()
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve DSH discovery root: %w", err)
 	}
-	config := workapp.DefaultConfig(discoveryRoot)
-	managerLock, err := workapp.AcquireManagerProcessLock(config.SettingsPath)
+	config := dshworkapp.DefaultConfig(discoveryRoot)
+	managerLock, err := dshworkapp.AcquireManagerProcessLock(config.SettingsPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -68,7 +68,7 @@ func newManager() (*dshmanager.Manager, *workapp.ProcessLock, error) {
 	if dependencies.CommandExecutor != nil {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
 	}
-	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "dsh-work", "runtimes")
+	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, err := dshmanager.New(dshmanager.Config{
 		CommandRunner:    runner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
@@ -76,7 +76,7 @@ func newManager() (*dshmanager.Manager, *workapp.ProcessLock, error) {
 		RuntimeVerifier:  dsh,
 		ProfileCatalog:   dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
-			ID: "work", Name: "Work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipWork,
+			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-" + hint.Version, Version: hint.Version, Path: hint.Path,
@@ -84,7 +84,7 @@ func newManager() (*dshmanager.Manager, *workapp.ProcessLock, error) {
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-" + hint.Version,
-			Profile:   dshmanager.ProfileRef{DataDirectoryID: "work", Name: "web"},
+			Profile:   dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func runDataDirectory(manager *dshmanager.Manager, args []string, stdout io.Writ
 		id := set.String("id", "", "data-directory id")
 		name := set.String("name", "", "display name")
 		path := set.String("path", "", "DSH data-directory path")
-		ownership := set.String("ownership", string(dshmanager.DataDirectoryOwnershipUser), "data-directory ownership: work or user")
+		ownership := set.String("ownership", string(dshmanager.DataDirectoryOwnershipUser), "data-directory ownership: dsh-work or user")
 		if err := set.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -400,8 +400,8 @@ func executableExists(path string) bool {
 }
 
 func printUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "dsh-work manages DSH runtimes, data directories and profiles while Work is stopped.")
-	fmt.Fprintln(stdout, "Use the running Work Settings window for Run context and profile plugin changes.")
+	fmt.Fprintln(stdout, "dsh-work manages DSH runtimes, data directories and profiles while dsh-work is stopped.")
+	fmt.Fprintln(stdout, "Use the running dsh-work Settings window for Run context and profile plugin changes.")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")

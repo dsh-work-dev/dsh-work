@@ -1,10 +1,10 @@
-# ADR-0005: Keep Work localization small, typed and shared by native chrome
+# ADR-0005: Keep dsh-work localization small, typed and shared by native chrome
 
 Status: Accepted
 
 ## Context
 
-Work has two trusted WebView surfaces plus a Wails application menu and system
+dsh-work has two trusted WebView surfaces plus a Wails application menu and system
 tray. The language switch must update all of them while leaving the external DSH
 workspace untouched. The first release has a fixed set of short labels,
 statuses and feedback messages; it does not need plural rules, date/number
@@ -12,7 +12,7 @@ formatting or runtime-loaded translation packages.
 
 ## Decision
 
-Persist one `locale` field in the versioned Work settings document. Supported
+Persist one `locale` field in the versioned dsh-work settings document. Supported
 values are `en`, `zh-CN` and `ja-JP`; missing or invalid values use Simplified
 Chinese. Settings is the only write boundary. After a successful write, the
 composition root updates Wails menu/tray labels and emits a typed `locale`
@@ -32,7 +32,7 @@ infrastructure claim.
 
 - Language switching is immediate in Settings and the startup surface when
   both windows are open.
-- DSH theme ownership remains unchanged; Work does not add a language or theme
+- DSH theme ownership remains unchanged; dsh-work does not add a language or theme
   setting to the external DSH page.
 - New user-facing copy must be added to all three dictionaries and reviewed for
   concise labels before it is introduced.

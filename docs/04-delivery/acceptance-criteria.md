@@ -6,45 +6,45 @@ These scenarios describe externally observable release behaviour. Exact test own
 
 ### AC-001 — Single instance
 
-Given Work is running, when the user launches it again, then no second Host or Worker is created and the existing window becomes visible and focused.
+Given dsh-work is running, when the user launches it again, then no second Host or Worker is created and the existing window becomes visible and focused.
 
 ### AC-002 — Visible bounded startup
 
-Given a compatible runtime, when Work starts, then named startup steps and bounded DSH stdout/stderr are visible, the embedded workspace is not shown before readiness, the output can be copied locally, and startup reaches `Ready` or a stable error state.
+Given a compatible runtime, when dsh-work starts, then named startup steps and bounded DSH stdout/stderr are visible, the embedded workspace is not shown before readiness, the output can be copied locally, and startup reaches `Ready` or a stable error state.
 
 ### AC-003 — Configurable tray close and quit
 
-Given Work is ready with the default close policy, when any Work window is
-closed, then that window is hidden and Work remains available in the tray even
-when no Work window is visible. Given the close-to-tray setting is disabled,
-when the last visible Work window is closed, then Work enters `Stopping`,
+Given dsh-work is ready with the default close policy, when any dsh-work window is
+closed, then that window is hidden and dsh-work remains available in the tray even
+when no dsh-work window is visible. Given the close-to-tray setting is disabled,
+when the last visible dsh-work window is closed, then dsh-work enters `Stopping`,
 cancels active work and exits after cleanup. In either mode, choosing `Quit
-DSH Work` performs the full managed shutdown.
+dsh-work` performs the full managed shutdown.
 
-During an explicit managed shutdown, Work hides all Work-owned windows before
+During an explicit managed shutdown, dsh-work hides all dsh-work-owned windows before
 waiting for Worker cleanup and exits only after the managed process boundary is
-verified. If cleanup fails, Work remains available from the tray, preserves the
+verified. If cleanup fails, dsh-work remains available from the tray, preserves the
 cleanup owner and opens a trusted recovery surface so cleanup can be retried.
 An active DSH conversation, question or approval is cancelled by the Worker
-boundary; Work never approves, resumes or reconstructs DSH conversation state.
+boundary; dsh-work never approves, resumes or reconstructs DSH conversation state.
 
 ### AC-004 — Loopback and trusted navigation
 
-Given a Worker launch, then its service is reachable only through the selected loopback endpoint; when an unrelated web origin attempts HTTP or WebSocket access, it cannot read data or invoke state-changing Worker behaviour; when embedded content attempts top-level external navigation, Work blocks it and offers the system browser.
+Given a Worker launch, then its service is reachable only through the selected loopback endpoint; when an unrelated web origin attempts HTTP or WebSocket access, it cannot read data or invoke state-changing Worker behaviour; when embedded content attempts top-level external navigation, dsh-work blocks it and offers the system browser.
 
 ### AC-005 — Descendant cleanup
 
-Given a Worker fixture that creates descendants, when Work quits normally or its Host fixture is force-terminated on Windows, macOS or Linux, then every process assigned to that platform's managed boundary terminates and a later launch can start cleanly.
+Given a Worker fixture that creates descendants, when dsh-work quits normally or its Host fixture is force-terminated on Windows, macOS or Linux, then every process assigned to that platform's managed boundary terminates and a later launch can start cleanly.
 
 ### AC-006 — Startup failure classes
 
-Given fixtures for missing runtime, unsupported version, bind failure, readiness timeout and early exit, when each launches, then Work remains responsive and shows the corresponding stable code and safe action.
+Given fixtures for missing runtime, unsupported version, bind failure, readiness timeout and early exit, when each launches, then dsh-work remains responsive and shows the corresponding stable code and safe action.
 
 ### AC-029 — External selected DSH runtime and Run context
 
 Given a catalog containing more than one registered DSH runtime, DSH data
 directory and profile, when the user selects one complete Run context and a
-separate Workspace context, then Work verifies the runtime and launches its
+separate Workspace context, then dsh-work verifies the runtime and launches its
 external DSH Web UI with the exact data directory and profile while passing
 the Workspace only to that session or Worker generation. Normal startup
 performs no package installation or profile reconciliation.
@@ -52,25 +52,25 @@ performs no package installation or profile reconciliation.
 ### AC-030 — Separate Settings surface with nested DSH manager
 
 Given the DSH Workspace window is open, when the user chooses a DSH management
-command or Settings, then Work opens or focuses the separate trusted Settings
+command or Settings, then dsh-work opens or focuses the separate trusted Settings
 window without injecting management markup into the DSH document; its rail
 starts with a read-only Overview, has one top-level General page, and exposes
 top-level Notifications plus shallow DSH resource pages for runtimes and DSH
 data directories. `General` shows the current/configured Run context but no
 Workspace selector. The application menu exposes Settings and Help;
-Help contains Check for Updates and About Work.
+Help contains Check for Updates and About dsh-work.
 
 ### AC-034 — DSH-owned appearance
 
 Given the selected DSH data directory stores `ui-theme.preference` as `light`, `dark` or
-`system`, when a trusted Work surface opens, the operating system theme changes,
-or DSH changes the preference while both windows are open, then Work uses that
-preference without presenting or persisting a second Work appearance setting.
+`system`, when a trusted dsh-work surface opens, the operating system theme changes,
+or DSH changes the preference while both windows are open, then dsh-work uses that
+preference without presenting or persisting a second dsh-work appearance setting.
 
-### AC-035 — Work language preference
+### AC-035 — dsh-work language preference
 
-Given Work is open, when the user chooses English, Simplified Chinese or
-Japanese in General, then the choice is persisted and the trusted Work surfaces
+Given dsh-work is open, when the user chooses English, Simplified Chinese or
+Japanese in General, then the choice is persisted and the trusted dsh-work surfaces
 update immediately, including dynamic status, controls, native menu and tray
 labels; the external DSH workspace is not modified.
 
@@ -78,8 +78,8 @@ labels; the external DSH workspace is not modified.
 
 ### AC-036 — Notification preferences are available from first use
 
-Given a new or older Work settings document, when the user opens the top-level
-`Notifications` route, then Work shows the global desktop-notification switch
+Given a new or older dsh-work settings document, when the user opens the top-level
+`Notifications` route, then dsh-work shows the global desktop-notification switch
 and the four class switches with the documented defaults. Missing values are
 defaulted without invalidating unrelated settings, and every switch persists
 immediately without restarting DSH.
@@ -94,29 +94,29 @@ cases, any DSH-owned in-page notice remains available.
 ### AC-038 — Foreground and background delivery
 
 Given the Workspace is active, when a completed or routine lifecycle event
-arrives, then Work does not send a duplicate desktop notification. Given the
+arrives, then dsh-work does not send a duplicate desktop notification. Given the
 Workspace is hidden or unfocused and the relevant preference is enabled, then
-Work sends one eligible desktop notification. Action-required and error events
+dsh-work sends one eligible desktop notification. Action-required and error events
 remain eligible only when their structured event says the DSH context needs
 promotion.
 
 ### AC-039 — DSH contextual notices remain owned by DSH
 
-Given DSH emits a contextual input, queue or message notice, when Work receives
-or displays related state, then Work does not remove, rewrite or duplicate the
-DSH notice. Work's desktop preference affects only Work desktop delivery.
+Given DSH emits a contextual input, queue or message notice, when dsh-work receives
+or displays related state, then dsh-work does not remove, rewrite or duplicate the
+DSH notice. dsh-work's desktop preference affects only dsh-work desktop delivery.
 
 ### AC-040 — Deduplication and safe notification actions
 
-Given the same logical event is received more than once, then Work emits at
-most one desktop delivery per Work session. Given the user clicks that
-notification, then Work focuses the Workspace or a verified target and does not
+Given the same logical event is received more than once, then dsh-work emits at
+most one desktop delivery per dsh-work session. Given the user clicks that
+notification, then dsh-work focuses the Workspace or a verified target and does not
 approve, deny or execute a DSH operation.
 
 ### AC-041 — Localised and bounded notification content
 
-Given Work is set to English, Simplified Chinese or Japanese, when Work creates
-a desktop notification, then all Work-owned copy uses the selected locale.
+Given dsh-work is set to English, Simplified Chinese or Japanese, when dsh-work creates
+a desktop notification, then all dsh-work-owned copy uses the selected locale.
 Given synthetic secrets, raw logs or unbounded agent text in an event, then the
 desktop notification contains none of those values and remains within the
 documented size bound.
@@ -124,13 +124,13 @@ documented size bound.
 ### AC-042 — Delivery failure is contained
 
 Given the operating-system notification adapter is unavailable or rejects a
-delivery, then Work reports a bounded actionable diagnostic while preserving
+delivery, then dsh-work reports a bounded actionable diagnostic while preserving
 the source event outcome and keeping DSH's in-page surface usable.
 
 ### AC-033 — Persisted close policy
 
-Given a user changes the top-level close-to-tray setting, when Work is
-restarted, then the setting is loaded from the versioned Work settings store;
+Given a user changes the top-level close-to-tray setting, when dsh-work is
+restarted, then the setting is loaded from the versioned dsh-work settings store;
 the default for a missing setting is tray, an invalid settings document fails
 closed to the tray-safe default and reports a recoverable Settings error, and
 the setting does not alter the DSH data directory or profile data.
@@ -138,9 +138,9 @@ the setting does not alter the DSH data directory or profile data.
 ### AC-031 — Profile-owned plugin management
 
 Given two DSH data directories or profiles with independent plugin state,
-when the user inspects either profile, then Work uses the exact data directory
+when the user inspects either profile, then dsh-work uses the exact data directory
 and profile reference. The non-current profile is read-only. When the user
-installs or removes a plugin, Work accepts the operation only for the profile
+installs or removes a plugin, dsh-work accepts the operation only for the profile
 in the current `Ready` Run context, delegates composition to the current DSH
 runtime's supported CLI and changes only that profile's association. A
 non-current request, including a request that bypasses the Settings UI, is
@@ -148,16 +148,16 @@ rejected.
 
 ### AC-032 — DSH data directory and runtime data safety
 
-Given a user-owned DSH data directory that does not exist locally, Work
+Given a user-owned DSH data directory that does not exist locally, dsh-work
 refuses to launch or register it and does not create the directory. Given a
-selected or active runtime/data directory, Work refuses removal; catalog
+selected or active runtime/data directory, dsh-work refuses removal; catalog
 removal explicitly states that managed runtime files are retained until a
 future data-management action.
 
 ### AC-043 — Custom profile identity editing
 
 Given an existing custom DSH profile, when the user changes its name from the
-profile detail, then Work renames only the profile directory, preserves the
+profile detail, then dsh-work renames only the profile directory, preserves the
 profile manifest and patch layers, keeps the selected data-directory identity, and
 updates the Configured Run context when it references that profile. Built-in
 or current profiles cannot be renamed while running.
@@ -165,7 +165,7 @@ or current profiles cannot be renamed while running.
 ### AC-044 — Workspace context is independent of the Run context
 
 Given one DSH data directory serves two valid DSH Workspaces, when the user
-selects or creates a Workspace in the DSH Workspace surface, then Work attaches
+selects or creates a Workspace in the DSH Workspace surface, then dsh-work attaches
 that Workspace context to the active session without changing the current or
 Configured Run context. `General` does not offer an editable Workspace path,
 and removing a Workspace registration leaves its directory, files and sessions
@@ -175,7 +175,7 @@ intact.
 
 Given a `Ready` Worker running Run context A, when the user explicitly
 switches the runtime, DSH data directory or profile to a valid Run context B,
-then Work immediately enters `Stopping`, blocks new context/plugin mutations,
+then dsh-work immediately enters `Stopping`, blocks new context/plugin mutations,
 stops and verifies generation A, starts B as a new generation and opens the
 DSH Workspace only after B reaches `Ready`. The complete triple changes as one
 unit; no pending next-launch state or manual second launch is required.
@@ -183,10 +183,10 @@ unit; no pending next-launch state or manual second launch is required.
 ### AC-046 — Failed switch automatically rolls back
 
 Given a known-good Run context A, when candidate Run context B fails
-compatibility, startup or readiness, then Work discards B and automatically
+compatibility, startup or readiness, then dsh-work discards B and automatically
 restarts A. B is never reported as current, the switch returns one terminal
 actionable failure result, and no overlapping Worker is created. If rollback
-also fails, Work enters `Failed`, retains A as the rollback source and offers
+also fails, dsh-work enters `Failed`, retains A as the rollback source and offers
 retryable recovery without silently selecting B.
 
 ### AC-047 — Only the current profile can mutate plugins
@@ -200,7 +200,7 @@ authority and A becomes read-only.
 
 ### AC-007 — Bounded retry
 
-Given a repeatedly crashing Worker, when automatic recovery is attempted, then retries stop at the configured policy boundary and Work offers diagnostics and safe mode instead of looping.
+Given a repeatedly crashing Worker, when automatic recovery is attempted, then retries stop at the configured policy boundary and dsh-work offers diagnostics and safe mode instead of looping.
 
 ## Browser and permissions
 
@@ -210,7 +210,7 @@ Given a Worker plugin with the wrong credential, generation or protocol version,
 
 ### AC-009 — Explicit user-browser connection
 
-Given a supported signed-in browser, Work cannot inspect or control it before the user enables and approves the selected browser-control method; after the user assigns a tab, the task can use its existing authenticated web session without receiving raw cookies or saved passwords.
+Given a supported signed-in browser, dsh-work cannot inspect or control it before the user enables and approves the selected browser-control method; after the user assigns a tab, the task can use its existing authenticated web session without receiving raw cookies or saved passwords.
 
 ### AC-010 — Basic browser workflow
 
@@ -218,7 +218,7 @@ Given the fixed local test site and an approved origin, when DSH requests naviga
 
 ### AC-011 — Sensitive submit approval
 
-Given a filled form, when a high-impact submit is requested, then the Work DSH pre-execute classifier returns `ask`, DSH's official approval UI attaches to the exact Tool call, and denial returns `denied` and sends nothing. Work does not show a duplicate approval dialog.
+Given a filled form, when a high-impact submit is requested, then the dsh-work DSH pre-execute classifier returns `ask`, DSH's official approval UI attaches to the exact Tool call, and denial returns `denied` and sends nothing. dsh-work does not show a duplicate approval dialog.
 
 ### AC-012 — Scope change and redirect
 
@@ -230,11 +230,11 @@ Given a running browser task, when the user cancels it, then no new action begin
 
 ### AC-026 — Detach preserves the user's browser
 
-Given an attached existing-profile tab, when the task completes, its task attachment is released; when the user disconnects or Work exits, the browser-control connection closes. In both cases the browser and tab remain open, login state remains intact, and unrelated tabs were neither projected to DSH nor modified.
+Given an attached existing-profile tab, when the task completes, its task attachment is released; when the user disconnects or dsh-work exits, the browser-control connection closes. In both cases the browser and tab remain open, login state remains intact, and unrelated tabs were neither projected to DSH nor modified.
 
 ### AC-014 — Replay and mutation resistance
 
-Given an approved canonical request, when the request ID is replayed or its target／payload changes, then Work does not execute it a second time and records a redacted rejection event.
+Given an approved canonical request, when the request ID is replayed or its target／payload changes, then dsh-work does not execute it a second time and records a redacted rejection event.
 
 ### AC-015 — Page content has no authority
 
@@ -246,7 +246,7 @@ Given a high-impact browser operation, DSH offers one-time approval only; closin
 
 ### AC-027 — Complete DSH Tool classification
 
-Given every registered Work browser Tool and operation variant, the Work-owned `tools/pre-execute` classifier returns a deterministic `allow`, `ask` or `deny`; unknown or unclaimed Work operations fail closed. An `allowed-once` DSH outcome reaches the Host exactly once without a second Work prompt.
+Given every registered dsh-work browser Tool and operation variant, the dsh-work-owned `tools/pre-execute` classifier returns a deterministic `allow`, `ask` or `deny`; unknown or unclaimed dsh-work operations fail closed. An `allowed-once` DSH outcome reaches the Host exactly once without a second dsh-work prompt.
 
 ### AC-028 — Connection is not action approval
 
@@ -260,7 +260,7 @@ Given a Worker that fails because of an optional integration, when safe mode sta
 
 ### AC-018 — Configuration migration rollback
 
-Given an older supported Host configuration, when migration fails validation or first startup, then the prior configuration remains recoverable and Work reports the failure without partial replacement.
+Given an older supported Host configuration, when migration fails validation or first startup, then the prior configuration remains recoverable and dsh-work reports the failure without partial replacement.
 
 ### AC-019 — Diagnostic export
 
@@ -284,7 +284,7 @@ Given late, duplicate or out-of-order Worker and browser events, each startup an
 
 ### AC-024 — Secret storage
 
-Given a secret that must persist, when Work saves and later reads it, then only the operating-system protected store contains the secret and ordinary configuration, logs and diagnostics do not.
+Given a secret that must persist, when dsh-work saves and later reads it, then only the operating-system protected store contains the secret and ordinary configuration, logs and diagnostics do not.
 
 ### AC-025 — Clean install and uninstall
 

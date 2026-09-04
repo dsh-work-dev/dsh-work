@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -203,7 +203,7 @@ func isTrustedWindow(ctx context.Context, name string) bool {
 func trustedSurfaceRequired(detail string) error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorTrustedSurfaceRequired,
-		Summary:       "This Work control is available only on its trusted surface.",
+		Summary:       "This dsh-work control is available only on its trusted surface.",
 		Detail:        detail,
 		CorrelationID: lifecycle.NewCorrelationID(),
 	}
@@ -212,9 +212,9 @@ func trustedSurfaceRequired(detail string) error {
 func managerUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerStateInvalid,
-		Summary:       "The DSH manager in Work Settings is unavailable.",
+		Summary:       "The DSH manager in dsh-work Settings is unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
-		Detail:        "Restart Work and try again.",
+		Detail:        "Restart dsh-work and try again.",
 	}
 }

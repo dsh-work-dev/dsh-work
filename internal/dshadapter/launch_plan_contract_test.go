@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 func TestBuildLaunchPlanRequiresAnExplicitBootstrapDirectory(t *testing.T) {
@@ -14,7 +14,7 @@ func TestBuildLaunchPlanRequiresAnExplicitBootstrapDirectory(t *testing.T) {
 	_, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID:  "generation",
 		Runtime:       Runtime{Path: `C:\tools\dsh.cmd`, Version: SupportedVersion},
-		DataDirectory: `C:\Users\you\AppData\Local\Work\dsh`,
+		DataDirectory: `C:\Users\you\AppData\Local\dsh-work\dsh`,
 		Profile:       "web",
 		Workspace:     workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
 		Port:          4567,

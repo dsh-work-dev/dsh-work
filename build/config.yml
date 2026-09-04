@@ -1,12 +1,12 @@
 version: '3'
 
 info:
-  companyName: "Work"
-  productName: "Work"
-  productIdentifier: "com.local.work"
+  companyName: "dsh-work"
+  productName: "dsh-work"
+  productIdentifier: "com.local.dsh-work"
   description: "Local-first desktop host for DeepSeek Harness"
-  copyright: "Copyright 2026 Work"
-  comments: "Work desktop foundation"
+  copyright: "Copyright 2026 dsh-work"
+  comments: "dsh-work desktop foundation"
   version: "0.1.0"
 
 dev_mode:

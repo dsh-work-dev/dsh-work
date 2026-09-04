@@ -4,8 +4,8 @@ Status: accepted for the first notification implementation.
 
 ## Product boundary
 
-Work provides desktop notifications for meaningful DSH and Work events. DSH
-continues to render contextual notices inside its own Web UI. The Work setting
+dsh-work provides desktop notifications for meaningful DSH and dsh-work events. DSH
+continues to render contextual notices inside its own Web UI. The dsh-work setting
 controls desktop delivery only; it does not hide DSH feedback.
 
 The first version does not add a notification history view or a separate
@@ -17,8 +17,8 @@ the DSH workspace remains the primary foreground surface.
 | Class | Examples | Default desktop delivery | User can change |
 |---|---|---:|---:|
 | `action-required` | question, approval, confirmation | On | Yes |
-| `completed` | finished reply, completed task | On when Work is not active | Yes |
-| `error` | DSH error, Worker exit, startup or gateway failure | On when Work is not active | Yes |
+| `completed` | finished reply, completed task | On when dsh-work is not active | Yes |
+| `error` | DSH error, Worker exit, startup or gateway failure | On when dsh-work is not active | Yes |
 | `lifecycle` | starting, restarting, stopped | Off | Yes |
 
 Successful settings saves and ordinary progress updates are not notification
@@ -31,7 +31,7 @@ one compact list:
 
 | Label | Default | Effect |
 |---|---:|---|
-| Desktop notifications | On | Enables Work desktop delivery. |
+| Desktop notifications | On | Enables dsh-work desktop delivery. |
 | Task completed | On | Allows `completed` desktop notifications. |
 | Needs attention | On | Allows `action-required` desktop notifications. |
 | Errors | On | Allows `error` desktop notifications. |
@@ -39,7 +39,7 @@ one compact list:
 
 There is no nested notification settings page, separate appearance setting,
 or explanatory paragraph repeating the labels. Sound follows the operating
-system and is not an additional Work preference in this version.
+system and is not an additional dsh-work preference in this version.
 
 ## Behaviour rules
 
@@ -53,13 +53,13 @@ system and is not an additional Work preference in this version.
 5. Turning desktop notifications off never removes an in-page DSH notice.
 6. A preference change applies immediately to future events and does not restart
    DSH.
-7. One logical event produces at most one desktop delivery per Work session.
-8. Notification text is translated using the current Work locale. The DSH
+7. One logical event produces at most one desktop delivery per dsh-work session.
+8. Notification text is translated using the current dsh-work locale. The DSH
    workspace remains under DSH's own language and rendering ownership.
 
 ## Persistence
 
-The preferences are part of the versioned Work settings document:
+The preferences are part of the versioned dsh-work settings document:
 
 ```text
 notifications.enabled
@@ -86,6 +86,6 @@ rest of the settings document recoverable.
 
 ## Internationalisation
 
-Every Work-owned title, body fragment, setting label and accessibility label
+Every dsh-work-owned title, body fragment, setting label and accessibility label
 must exist in English, Simplified Chinese and Japanese before the feature is
-enabled. DSH-provided contextual text is not translated or rewritten by Work.
+enabled. DSH-provided contextual text is not translated or rewritten by dsh-work.

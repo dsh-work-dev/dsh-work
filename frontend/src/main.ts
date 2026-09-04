@@ -1,6 +1,6 @@
 import {Events} from "@wailsio/runtime";
 
-import {HostService} from "../bindings/github.com/local/work/internal/app";
+import {HostService} from "../bindings/github.com/local/dsh-work/internal/app";
 import {viewModel, type LifecycleStatus} from "./lifecycle";
 import {applyLocale, defaultLocale, mountLocale, subscribeLocale, t} from "./i18n";
 import {mountManager} from "./manager";
@@ -10,7 +10,7 @@ const surface = new URLSearchParams(window.location.search).get("surface");
 
 applyLocale(defaultLocale);
 mountLocale();
-document.title = surface === "settings" ? "设置" : "Work";
+document.title = surface === "settings" ? "设置" : "dsh-work";
 
 if (surface === "settings") {
   document.getElementById("host-surface")?.setAttribute("hidden", "true");
@@ -180,7 +180,7 @@ function mountHost() {
     try {
       render(await HostService.GetStatus() as LifecycleStatus);
     } catch (error) {
-      console.error("Could not read Work lifecycle status", error);
+      console.error("Could not read dsh-work lifecycle status", error);
     }
   }
 
@@ -196,7 +196,7 @@ function mountHost() {
     try {
       applyLocale(await HostService.GetLocale());
     } catch (error) {
-      console.error("Could not read Work language", error);
+      console.error("Could not read dsh-work language", error);
     }
   }
 
@@ -206,7 +206,7 @@ function mountHost() {
     try {
       render(await action());
     } catch (error) {
-      console.error("Work host action failed", error);
+      console.error("dsh-work host action failed", error);
     } finally {
       retry.disabled = false;
     }

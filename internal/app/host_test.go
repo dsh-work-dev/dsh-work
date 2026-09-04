@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/work/internal/dshadapter"
-	"github.com/local/work/internal/dshmanager"
-	"github.com/local/work/internal/lifecycle"
-	"github.com/local/work/internal/supervisor"
-	"github.com/local/work/internal/workergateway"
-	"github.com/local/work/internal/workspacecontext"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 type testDSH struct {
@@ -236,13 +236,13 @@ func TestHostUsesManagerRunContextAndClearsCurrentState(t *testing.T) {
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath: filepath.Join(root, "manager.json"),
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
-			ID: "work", Name: "Work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipWork,
+			ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
 			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
 		}},
 		DefaultRunContext: dshmanager.RunContext{
-			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "work", Name: "coding"},
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "coding"},
 		},
 	})
 	if err != nil {
@@ -712,8 +712,8 @@ func newRunContextSwitchFixture(t *testing.T) *runContextSwitchFixture {
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath: filepath.Join(root, "manager.json"),
 		DataDirectories: []dshmanager.DataDirectoryInfo{
-			{ID: "alpha-home", Name: "Alpha DSH", Path: homeAlpha, Ownership: dshmanager.DataDirectoryOwnershipWork},
-			{ID: "beta-home", Name: "Beta DSH", Path: homeBeta, Ownership: dshmanager.DataDirectoryOwnershipWork},
+			{ID: "alpha-home", Name: "Alpha DSH", Path: homeAlpha, Ownership: dshmanager.DataDirectoryOwnershipDSHWork},
+			{ID: "beta-home", Name: "Beta DSH", Path: homeBeta, Ownership: dshmanager.DataDirectoryOwnershipDSHWork},
 		},
 		Runtimes: []dshmanager.RuntimeInfo{
 			{ID: "dsh-alpha", Version: dshadapter.SupportedVersion, Path: runtimeAlpha},
