@@ -557,12 +557,9 @@ func (h *Host) Cancel() lifecycle.Status {
 func (h *Host) InstallPlugin(ctx context.Context, request dshmanager.PluginInstallRequest) (dshmanager.PluginResult, error) {
 	h.workerBoundaryMu.Lock()
 	defer h.workerBoundaryMu.Unlock()
-	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+	manager, failure := h.profilePluginManagerForMutation()
+	if failure != nil {
 		return dshmanager.PluginResult{}, failure
-	}
-	manager, ok := h.deps.Manager.(ProfilePluginManager)
-	if !ok {
-		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not change profile plugins.", true)
 	}
 	return manager.InstallPlugin(ctx, request)
 }
@@ -570,14 +567,22 @@ func (h *Host) InstallPlugin(ctx context.Context, request dshmanager.PluginInsta
 func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemoveRequest) (dshmanager.PluginResult, error) {
 	h.workerBoundaryMu.Lock()
 	defer h.workerBoundaryMu.Unlock()
-	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+	manager, failure := h.profilePluginManagerForMutation()
+	if failure != nil {
 		return dshmanager.PluginResult{}, failure
+	}
+	return manager.RemovePlugin(ctx, request)
+}
+
+func (h *Host) profilePluginManagerForMutation() (ProfilePluginManager, *lifecycle.Failure) {
+	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+		return nil, failure
 	}
 	manager, ok := h.deps.Manager.(ProfilePluginManager)
 	if !ok {
-		return dshmanager.PluginResult{}, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not change profile plugins.", true)
+		return nil, h.failureFor(errors.New("profile plugin manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not change profile plugins.", true)
 	}
-	return manager.RemovePlugin(ctx, request)
+	return manager, nil
 }
 
 func (h *Host) readyWorkerForPluginMutation() *lifecycle.Failure {
