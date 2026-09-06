@@ -1,5 +1,6 @@
 # Local-only project material.
 .research/
+.evolve/
 
 # Generated application and dependency artifacts.
 .task/

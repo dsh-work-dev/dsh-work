@@ -18,3 +18,15 @@
 - Do not expose agent guidance, implementation instructions, product rules, architecture constraints, acceptance criteria, security policy, or internal notes as UI copy.
 - Prefer concise labels and one short sentence where context is needed. Remove explanations that repeat information already visible in the same view.
 - Put detailed rationale, constraints, and operating guidance in project documentation, not in the product UI.
+
+## RED project knowledge
+
+- Use `red.toml` as the authoritative mapping of Research, Evolve and Document.
+- Put decision-blocking unknowns and evidence in `.research/`.
+- Put proposed or active changes in `.evolve/`; Document contains accepted
+  project knowledge and truthful as-built records.
+- Code, tests, configuration and runtime output are implementation evidence. A
+  conflict with Document must be investigated instead of silently choosing one.
+- This repository keeps `.research/` and `.evolve/` local and out of Git. Keep the
+  repository RED Skill and `red.toml` tracked.
+- Run `red check --json` after changing RED configuration or artifacts.

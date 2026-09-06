@@ -1,68 +1,34 @@
 # dsh-work
 
-dsh-work is a local-first desktop host for DeepSeek Harness (DSH). It owns the desktop lifecycle around DSH—startup, shutdown, status, permissions, recovery, and controlled browser automation—while DSH continues to own agent and plugin behaviour.
+dsh-work is a local-first desktop host for
+[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It
+turns a separately managed DSH runtime into a dependable desktop application
+while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 
-The repository is in the PC foundation phase. The shared contracts target Windows, macOS and Linux; native process supervision is delivered Windows-first behind that seam.
+## What it provides
 
-## Project principles
+- a trusted desktop shell and Settings surface;
+- explicit DSH runtime, data-directory and profile management;
+- atomic Run-context switching with known-good rollback;
+- supervised Worker startup, readiness and shutdown;
+- a trusted loopback gateway to the DSH Workspace;
+- persistent locale, close-to-tray and desktop-notification preferences;
+- Windows Job Object ownership for the Worker process tree.
 
-- Keep the desktop host small and focused.
-- Preserve a clear boundary between the host and DSH.
-- Bind local services to loopback by default.
-- Ask before privileged or destructive actions.
-- Fail into a recoverable state with actionable diagnostics.
-- Keep user data local unless the user explicitly chooses otherwise.
+## Project boundary
 
-## Documentation
+dsh-work owns desktop lifecycle, native integration, trusted settings and the
+boundary through which DSH reaches the desktop. DSH owns agent behaviour,
+profiles and plugin composition, Workspace identity, sessions and conversation
+state. dsh-work does not rewrite those systems or inject Host UI into the DSH
+Workspace.
 
-Start with the [documentation index](docs/README.md), then read the [PC scope](docs/01-product/pc/scope.md) and [architecture](docs/03-engineering/pc/architecture.md).
+## Status
 
-## Foundation status
+The Windows foundation is implemented. Shared contracts compile on Windows,
+macOS and Linux, while production process supervision and packaging are still
+Windows-first.
 
-The F0–F3 dsh-work PC foundation is implemented for the primary Windows target:
-
-- Go 1.25.14, Wails CLI v3.0.0-beta.16 and npm 11.19.0 are pinned in [`toolchain.lock.json`](toolchain.lock.json); Node.js 24+ is supported.
-- The shared lifecycle, DSH and process-supervisor contracts compile on Windows, macOS and Linux. Native process supervision is intentionally implemented only by the Windows adapter at this stage.
-- Windows starts the pinned DSH Web profile on an explicit loopback port, validates readiness, hands the authenticated workspace to the Wails WebView, and verifies bounded cleanup through a Job Object.
-- The trusted dsh-work Settings window and its nested DSH manager share one catalog with the `dsh-work` CLI for DSH runtime/data-directory/profile selection. Workspace context is selected separately through DSH, and profile plugin changes are explicit DSH CLI operations that always carry both the DSH data-directory id and profile name.
-
-## Local checks
-
-Install the pinned local DSH runtime once:
-
-```powershell
-wails3 task setup:dsh
-```
-
-Run the non-networked checks and Wails build:
-
-```powershell
-wails3 task verify
-wails3 build
-```
-
-Run the real Windows tracer bullet after DSH is installed:
-
-```powershell
-wails3 task test:windows-real-dsh
-```
-
-The explicit manager CLI can inspect and change the catalog:
-
-```powershell
-bin\dsh-work.exe runtime list
-bin\dsh-work.exe profile list
-bin\dsh-work.exe use --runtime dsh-0.1.2-alpha.3 --data-directory dsh-work --profile web
-bin\dsh-work.exe plugin list --data-directory dsh-work --profile web
-```
-
-The standalone CLI is an offline manager surface: it acquires the dsh-work
-application-data manager lock for each command and reports a busy error while
-the desktop process is running. Use the running dsh-work Settings window for live
-Run context and profile-plugin changes.
-
-`runtime install --version VERSION` is an explicit Windows operation. It
-installs into dsh-work's application-data runtime store through the native command
-adapter; normal dsh-work startup never invokes npm, pnpm, npx or a download.
-
-The real DSH path uses `tools/dsh/run-dsh.cmd` and a dsh-work-owned DSH data directory (`DSH_HOME`). It does not invoke npm or npx during application startup. Later browser automation, permissions and deep UI milestones remain out of scope for this foundation.
+See the [project documentation](docs/README.md) for the accepted product and
+architecture baseline. Build, test and contribution instructions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
