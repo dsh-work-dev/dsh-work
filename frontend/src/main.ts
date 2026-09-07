@@ -31,6 +31,7 @@ function mountHost() {
   const progress = document.getElementById("progress-track") as HTMLDivElement;
   const workspace = document.getElementById("workspace-url") as HTMLElement;
   const cancel = document.getElementById("cancel") as HTMLButtonElement;
+  const openRuntimeSettings = document.getElementById("open-runtime-settings") as HTMLButtonElement;
   const retry = document.getElementById("retry") as HTMLButtonElement;
   const quit = document.getElementById("quit") as HTMLButtonElement;
   const startupOutput = document.getElementById("startup-output") as HTMLPreElement;
@@ -164,6 +165,7 @@ function mountHost() {
       }
     }
     cancel.hidden = !model.showCancel;
+    openRuntimeSettings.hidden = !(status.state === "Failed" && status.error?.code === "DSH_RUNTIME_NOT_FOUND");
     retry.hidden = !model.showRetry;
     cancel.disabled = status.state === "Stopping";
     if (status.state === "Ready" && outputTimer !== undefined) {
@@ -213,6 +215,16 @@ function mountHost() {
   }
 
   cancel.addEventListener("click", () => void invoke(() => HostService.Cancel() as Promise<LifecycleStatus>));
+  openRuntimeSettings.addEventListener("click", () => void (async () => {
+    openRuntimeSettings.disabled = true;
+    try {
+      await HostService.OpenRuntimeSettings();
+    } catch (error) {
+      console.error("Could not open DSH runtime settings", error);
+    } finally {
+      openRuntimeSettings.disabled = false;
+    }
+  })());
   retry.addEventListener("click", () => void invoke(() => HostService.Start() as Promise<LifecycleStatus>));
   quit.addEventListener("click", () => void invoke(() => HostService.Quit() as Promise<LifecycleStatus>));
   copyStartupOutput.addEventListener("click", () => void copyOutput());

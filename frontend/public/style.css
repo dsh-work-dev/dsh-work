@@ -327,6 +327,16 @@ h2 {
 
 .progress-track.failed span { background: var(--danger); }
 
+.progress-track.indeterminate span {
+  width: 36%;
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(390%); }
+}
+
 .workspace-card {
   padding: var(--space-6) 0 var(--space-6) 40px;
 }
@@ -472,6 +482,16 @@ select:focus-visible {
   background: var(--selection);
 }
 
+.button-danger {
+  border-color: color-mix(in srgb, var(--danger) 62%, var(--line-strong));
+  color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
 .button-quiet {
   color: var(--muted);
 }
@@ -597,6 +617,7 @@ select:focus-visible {
 
 .manager-grid label,
 .profile-directory label,
+.profile-editor label,
 .plugin-editor label,
 .data-directory-register-grid label,
 .runtime-install-card label {
@@ -609,9 +630,11 @@ select:focus-visible {
 .manager-grid input,
 .profile-directory select,
 .profile-directory input,
+.profile-editor input,
 .plugin-editor input,
 .data-directory-register-grid input,
-.runtime-install-card input {
+.runtime-install-card input,
+.runtime-install-card select {
   width: 100%;
   min-height: 38px;
   margin-top: 7px;
@@ -627,9 +650,11 @@ select:focus-visible {
 .manager-grid input:hover,
 .profile-directory select:hover,
 .profile-directory input:hover,
+.profile-editor input:hover,
 .plugin-editor input:hover,
 .data-directory-register-grid input:hover,
-.runtime-install-card input:hover { border-color: var(--line-strong); }
+.runtime-install-card input:hover,
+.runtime-install-card select:hover { border-color: var(--line-strong); }
 
 .wide-field { grid-column: 1 / -1; }
 
@@ -711,6 +736,22 @@ select:focus-visible {
   padding: 24px 0 32px;
 }
 
+.profile-current-card {
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-soft);
+}
+
+.profile-current-card .card-label,
+.profile-current-card .selected-profile,
+.profile-current-card .manager-note { margin: 0; }
+
+.profile-current-card .selected-profile { margin-top: 5px; }
+
+.profile-current-card .manager-note { margin-top: 5px; }
+
 .profile-directory {
   min-width: 0;
 }
@@ -734,6 +775,7 @@ select:focus-visible {
   font-size: 11px;
 }
 
+.profile-editor,
 .plugin-editor {
   min-width: 0;
 }
@@ -792,6 +834,12 @@ select:focus-visible {
 .profile-rename-row .button,
 .plugin-install-row .button {
   margin-bottom: 0;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .plugin-management {
@@ -935,12 +983,43 @@ select:focus-visible {
 
 .runtime-install-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: end;
   gap: 13px;
 }
 
+.runtime-install-card.node-install-card { grid-template-columns: auto; }
+
 .runtime-install-card .button { margin-bottom: 0; }
+
+.runtime-subheading { margin-top: 28px; }
+
+.manager-actions { display: flex; gap: 10px; margin-top: 12px; }
+
+.runtime-preparation {
+  margin: 0 0 22px;
+  padding: 14px 0 18px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.runtime-preparation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.runtime-preparation-heading .status-label,
+.runtime-preparation-heading .status-detail { margin: 0; }
+
+.runtime-preparation .progress-track {
+  margin-top: 14px;
+}
+
+.runtime-preparation .manager-note {
+  margin: 10px 0 0;
+}
 
 .manager-section > .manager-list { padding: 0; }
 
@@ -1087,6 +1166,9 @@ select:focus-visible {
   .switch-thumb {
     transition: none;
   }
+  .progress-track.indeterminate span {
+    animation: none;
+  }
 }
 
 @media (max-width: 1020px) {
@@ -1094,6 +1176,7 @@ select:focus-visible {
 
   .profiles-layout { grid-template-columns: 1fr; }
 
+  .profile-editor,
   .plugin-editor {
     margin-top: 24px;
     padding: 24px 0 0;

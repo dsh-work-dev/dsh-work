@@ -4,10 +4,14 @@
 export {
     ErrorCode,
     Phase,
+    RuntimePreparationOperation,
+    RuntimePreparationSource,
+    RuntimePreparationState,
     State
 } from "./models.js";
 
 export type {
     Failure,
+    RuntimePreparation,
     Status
 } from "./models.js";

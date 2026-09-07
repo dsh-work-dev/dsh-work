@@ -1,4 +1,4 @@
-package main
+package nativeui
 
 import (
 	"context"
@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/local/dsh-work/internal/lifecycle"
-	dshworknotifications "github.com/local/dsh-work/internal/notifications"
+	"github.com/local/dsh-work/internal/notifications"
 )
 
-func TestNativeNotificationDeliveryUsesStableFailure(t *testing.T) {
-	err := (nativeNotificationDelivery{}).Send(context.Background(), dshworknotifications.Event{
+func TestNotificationDeliveryUsesStableFailure(t *testing.T) {
+	err := NewNotificationDelivery(nil, nil).Send(context.Background(), notifications.Event{
 		ID:    "event-1",
-		Class: dshworknotifications.ClassError,
+		Class: notifications.ClassError,
 		Title: "Error",
 	})
 	var failure lifecycle.Failure

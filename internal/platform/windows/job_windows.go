@@ -34,12 +34,18 @@ func NewJobObjectAdapter() supervisor.Adapter {
 	return JobObjectAdapter{}
 }
 
-func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
+func (JobObjectAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
 	if err := plan.Validate(); err != nil {
 		return nil, fmt.Errorf("validate launch plan: %w", err)
 	}
 	if err := validateBatchInvocation(plan.Executable, plan.Args); err != nil {
 		return nil, fmt.Errorf("validate batch launch: %w", err)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("start DSH process: %w", err)
 	}
 
 	job, err := win.CreateJobObject(nil, nil)
@@ -139,6 +145,9 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, raw
 	startup.ShowWindow = win.SW_HIDE
 	processInfo := win.ProcessInformation{}
 	creationFlags := uint32(win.CREATE_UNICODE_ENVIRONMENT | win.CREATE_SUSPENDED | win.CREATE_NEW_PROCESS_GROUP | win.CREATE_NO_WINDOW | win.EXTENDED_STARTUPINFO_PRESENT)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("start DSH process: %w", err)
+	}
 	if err := win.CreateProcess(application16, &commandLine16[0], nil, nil, true, creationFlags, &environment16[0], workingDirectory16, &startup.StartupInfo, &processInfo); err != nil {
 		return nil, fmt.Errorf("create DSH process: %w", err)
 	}
@@ -146,11 +155,11 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, raw
 	// The parent never needs the child-side handles. Closing them immediately
 	// also guarantees that EOF is observable once the child exits.
 	closeHandle(stdoutWrite)
+	stdoutWrite = 0
 	closeHandle(stderrWrite)
+	stderrWrite = 0
 	closeHandle(stdin)
-	closeStdout = false
-	closeStderr = false
-	closeStdin = false
+	stdin = 0
 
 	if err := win.AssignProcessToJobObject(job, processInfo.Process); err != nil {
 		_ = win.TerminateProcess(processInfo.Process, 1)
@@ -158,6 +167,13 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, raw
 		closeHandle(processInfo.Thread)
 		closeHandle(processInfo.Process)
 		return nil, fmt.Errorf("assign DSH process to job object: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = win.TerminateJobObject(job, 1)
+		_, _ = win.WaitForSingleObject(processInfo.Process, 5000)
+		closeHandle(processInfo.Thread)
+		closeHandle(processInfo.Process)
+		return nil, fmt.Errorf("start DSH process: %w", err)
 	}
 
 	if resumed, err := win.ResumeThread(processInfo.Thread); err != nil || resumed == ^uint32(0) {
@@ -176,6 +192,7 @@ func (JobObjectAdapter) Start(_ context.Context, plan supervisor.LaunchPlan, raw
 	closeJob = false
 	closeStdout = false
 	closeStderr = false
+	closeStdin = false
 	return worker, nil
 }
 

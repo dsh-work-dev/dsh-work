@@ -7,6 +7,9 @@ import type { Events } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import type * as acquisition$0 from "../../../../local/dsh-work/internal/acquisition/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import type * as lifecycle$0 from "../../../../local/dsh-work/internal/lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -15,6 +18,7 @@ import type * as settings$0 from "../../../../local/dsh-work/internal/settings/m
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "acquisition": acquisition$0.OperationStatus;
             "lifecycle": lifecycle$0.Status;
             "locale": settings$0.Locale;
             "notification-failure": boolean;

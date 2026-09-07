@@ -3,25 +3,45 @@
 
 export {
     DataDirectoryOwnership,
+    NodeOwnership,
+    NodeSelectionKind,
+    PluginSourceKind,
+    PluginUpdateCheck,
     ProfileKind,
+    RollbackOutcome,
+    RuntimeArtifactSource,
     RuntimeSource,
+    RuntimeToolchain,
+    SwitchAttemptStage,
     ThemePreference
 } from "./models.js";
 
 export type {
+    DSHReleaseInfo,
     DataDirectoryInfo,
     LaunchRequest,
+    NodeInstallationInfo,
+    NodeReleaseInfo,
+    NodeSelection,
     PluginInfo,
     PluginInstallRequest,
     PluginListRequest,
     PluginRemoveRequest,
     PluginResult,
     PluginTarget,
+    PluginUpgradeRequest,
+    ProfileBackupRequest,
+    ProfileBackupResult,
+    ProfileCloneRequest,
+    ProfileCloneResult,
+    ProfileDeleteRequest,
     ProfileInfo,
     ProfileRef,
     ProfileRenameRequest,
     ResolvedLaunch,
+    ResolvedNode,
     RunContext,
     RuntimeInfo,
-    Snapshot
+    Snapshot,
+    SwitchAttempt
 } from "./models.js";

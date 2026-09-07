@@ -1,8 +1,7 @@
 # Accepted decisions
 
-This register preserves the architectural decisions that explain the current
-implementation. Detailed historical discussion remains available in Git
-history; this file records only the accepted boundary that is still in force.
+This register states the architectural decisions that govern the current
+implementation and the accepted boundaries that remain in force.
 
 ## ADR-0001 — Go/Wails Host and out-of-process DSH Worker
 
@@ -55,3 +54,19 @@ Changing runtime, DSH data directory or profile replaces the complete Run
 context. The candidate becomes current only after readiness and gateway checks;
 failure restores known-good. Profile mutation is allowed only for the current
 healthy profile, and manager operations are serialized across desktop and CLI.
+
+## ADR-0009 — Field-compatible manager state
+
+The dsh-work manager persistence file has no schema-version marker. The manager
+reads the known State fields, ignores unknown fields, and validates the required
+runtime, data-directory, profile and Node identities before restoring a
+configured Run context. It does not migrate historical field layouts. Atomic
+replacement protects each write from being partially persisted.
+
+This keeps startup focused on whether the selected configuration is usable
+instead of whether a marker matches the running build. Required identity checks
+still prevent an ambiguous or incomplete selection from reaching launch.
+
+This decision applies to the manager State only. Global Host preferences remain
+the separate versioned `internal/settings` contract, and runtime, Node,
+DSH-release and plugin records retain their business version fields.

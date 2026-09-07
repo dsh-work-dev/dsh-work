@@ -18,12 +18,37 @@ export interface WorkspaceContext {
   title?: string;
 }
 
+export interface RuntimePreparation {
+  state: "idle" | "resolving-toolchain" | "acquiring-node" | "acquiring-dsh" | "verifying" | "installed" | "cancelled" | "failed";
+  operation: "none" | "detect-node" | "detect-pnpm" | "detect-npm" | "download-node" | "install-dsh" | "verify" | "cleanup";
+  targetVersion?: string;
+  toolchain?: string;
+  source: "none" | "local" | "official" | "mirror";
+  receivedBytes?: number;
+  totalBytes?: number;
+  hasTotal: boolean;
+  canCancel: boolean;
+  error?: LifecycleFailure;
+  operationId?: string;
+  artifactKind?: "node" | "dsh" | "plugin";
+  attempt?: number;
+  result?: {
+    succeeded: boolean;
+    route?: "official" | "mirror" | "local";
+    failure?: {
+      kind: string;
+      retryable: boolean;
+    };
+  };
+}
+
 export interface LifecycleStatus {
   state: LifecycleState;
   phase: LifecyclePhase;
   generationId?: string;
   workspaceUrl?: string;
   workspace?: WorkspaceContext;
+  runtimePreparation?: RuntimePreparation;
   error?: LifecycleFailure;
   canRetry: boolean;
   canCancel: boolean;
@@ -71,7 +96,7 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 		return {
 			label: copy("status.failed", "Failed"),
 			message: failure?.summary ?? copy("status.failureFallback", "dsh-work could not start the local workspace."),
-			detail: failure?.detail ?? failure?.code ?? "UNKNOWN_FAILURE",
+			detail: failure?.detail ?? copy("status.failureFallback", "dsh-work could not start the local workspace."),
 			tone: "failed",
 			showCancel: false,
 			showRetry: status.canRetry,
@@ -111,10 +136,28 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 			workspace: copy("status.noActiveWorkspace", "No active workspace.")
 		};
 	}
+	const preparation = status.runtimePreparation;
+	const preparationDetail = preparation
+	  ? preparation.state === "acquiring-node"
+	    ? copy("status.downloadingNode", "Downloading the Node.js runtime.")
+	    : preparation.state === "acquiring-dsh"
+	      ? copy("status.downloadingDsh", "Downloading the DSH runtime.")
+	      : preparation.state === "verifying"
+	        ? copy("status.verifyingRuntime", "Verifying the DSH runtime.")
+	        : preparation.state === "installed"
+	          ? copy("status.runtimePrepared", "DSH runtime prepared.")
+	          : preparation.state === "cancelled"
+	            ? copy("status.runtimePreparationCancelled", "Runtime preparation cancelled.")
+	            : preparation.operation === "detect-pnpm"
+	              ? copy("status.detectingPnpm", "Checking for pnpm.")
+	              : preparation.operation === "detect-npm"
+	                ? copy("status.detectingNpm", "Checking for npm.")
+	                : copy("status.preparingRuntime", "Preparing the DSH runtime.")
+	  : copy(phaseLabelKeys[status.phase], phaseLabels[status.phase]);
 	return {
 		label: copy(phaseLabelKeys[status.phase], phaseLabels[status.phase]),
 		message: copy("status.startupMessage", "dsh-work is starting your DSH workspace."),
-		detail: copy("status.waitingDsh", "Waiting for DSH to respond."),
+		detail: preparationDetail,
 		tone: "progress",
 		showCancel: status.canCancel,
 		showRetry: false,

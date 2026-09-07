@@ -12,10 +12,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/local/dsh-work/internal/acquisition"
 	dshworkapp "github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/nativeui"
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
@@ -42,6 +44,7 @@ var dshWorkTrayTemplateIcon []byte
 
 func main() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
+	application.RegisterEvent[acquisition.OperationStatus]("acquisition")
 	application.RegisterEvent[dshworksettings.Locale]("locale")
 	application.RegisterEvent[bool]("notification-failure")
 
@@ -73,6 +76,10 @@ func main() {
 		CommandRunner:    managerRunner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:     platform.NewNodeResolver(runtimeStore),
 		RuntimeVerifier:  dsh,
 		ProfileCatalog:   dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
@@ -84,6 +91,7 @@ func main() {
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-" + runtimeHint.Version,
+			Node:      dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem},
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
 	})
@@ -92,13 +100,16 @@ func main() {
 		manager = nil
 	}
 	gateway := workergateway.New()
+	var automaticRuntimeRollback atomic.Bool
+	automaticRuntimeRollback.Store(true)
 	host := dshworkapp.NewHost(dshworkapp.Dependencies{
-		DSH:           dsh,
-		Manager:       manager,
-		ManagerError:  managerErr,
-		Supervisor:    dependencies.Supervisor,
-		Gateway:       gateway,
-		PlatformError: dependencies.Err,
+		DSH:                      dsh,
+		Manager:                  manager,
+		ManagerError:             managerErr,
+		Supervisor:               dependencies.Supervisor,
+		Gateway:                  gateway,
+		PlatformError:            dependencies.Err,
+		AutomaticRuntimeRollback: automaticRuntimeRollback.Load,
 	}, config)
 	var workspaceTrusted atomic.Bool
 	workspaceTrusted.Store(true)
@@ -117,6 +128,7 @@ func main() {
 		closeToTray = values.CloseToTray
 		localePreference = values.Locale
 		notificationPreference = values.Notifications
+		automaticRuntimeRollback.Store(values.AutomaticRuntimeRollback)
 	}
 	var activeLocale atomic.Value
 	activeLocale.Store(string(localePreference))
@@ -130,9 +142,9 @@ func main() {
 	var quitFlow lifecycle.QuitFlow
 	var applicationShuttingDown atomic.Bool
 	nativeNotification := wailsnotifications.New()
-	nativeNotificationHost := &nativeNotificationService{service: nativeNotification}
+	nativeNotificationHost := nativeui.NewNotificationService(nativeNotification)
 	notificationRouter := dshworknotifications.NewRouter(
-		nativeNotificationDelivery{service: nativeNotification, host: nativeNotificationHost},
+		nativeui.NewNotificationDelivery(nativeNotification, nativeNotificationHost),
 		func() bool {
 			return workspaceWindow != nil && workspaceWindow.IsFocused()
 		},
@@ -147,8 +159,17 @@ func main() {
 			return localePreference
 		}
 		return values.Locale
+	}, func(section string) {
+		if openSettings != nil {
+			openSettings(section)
+		}
 	})
-	managerService := dshworkapp.NewManagerService(manager, host)
+	var desktop *application.App
+	managerService := dshworkapp.NewManagerServiceWithRuntimeProgress(manager, host, func(status acquisition.OperationStatus) {
+		if desktop != nil {
+			desktop.Event.Emit("acquisition", status)
+		}
+	})
 	var publishLocale func(dshworksettings.Locale)
 	settingsService := dshworkapp.NewSettingsService(
 		settingsManager,
@@ -159,10 +180,11 @@ func main() {
 			}
 		},
 		notificationRouter.SetPreferences,
+		automaticRuntimeRollback.Store,
 	)
 	nativeTheme := dshWindowTheme(manager)
 
-	desktop := application.New(application.Options{
+	desktop = application.New(application.Options{
 		Name:        "dsh-work",
 		Description: "A local desktop shell for DSH workspaces.",
 		Icon:        dshWorkAppIcon,
@@ -239,24 +261,24 @@ func main() {
 	} else {
 		tray.SetIcon(dshWorkTrayIcon).SetDarkModeIcon(dshWorkTrayDarkIcon)
 	}
-	initialNative := nativeLocaleCopyFor(localePreference)
-	tray.SetTooltip(initialNative.trayTooltip)
+	initialNative := nativeui.LabelsFor(localePreference)
+	tray.SetTooltip(initialNative.TrayTooltip)
 	trayMenu := desktop.NewMenu()
-	trayStatus := trayMenu.Add(nativeTrayStatus(localePreference, lifecycle.StateStarting)).SetEnabled(false)
-	trayOpenWorkspace := trayMenu.Add(initialNative.openWorkspace).OnClick(func(*application.Context) {
+	trayStatus := trayMenu.Add(nativeui.TrayStatus(localePreference, lifecycle.StateStarting)).SetEnabled(false)
+	trayOpenWorkspace := trayMenu.Add(initialNative.OpenWorkspace).OnClick(func(*application.Context) {
 		showWorkspace()
 	})
-	traySettings := trayMenu.Add(initialNative.settings).OnClick(func(*application.Context) {
+	traySettings := trayMenu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
 	trayMenu.AddSeparator()
-	trayRestartDSH := trayMenu.Add(initialNative.restartDSH).OnClick(func(*application.Context) {
+	trayRestartDSH := trayMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
 		if quitFlow.InProgress() || windowLedger.IsQuitting() {
 			return
 		}
 		host.Restart()
 	})
-	trayQuit := trayMenu.Add(initialNative.quit).OnClick(func(*application.Context) {
+	trayQuit := trayMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
 		host.Quit()
 	})
 	tray.SetMenu(trayMenu).OnClick(func() {
@@ -264,17 +286,17 @@ func main() {
 	})
 
 	menu := desktop.NewMenu()
-	menuSettings := menu.Add(initialNative.settings).OnClick(func(*application.Context) {
+	menuSettings := menu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
-	helpMenu := menu.AddSubmenu(initialNative.help)
-	checkUpdates := helpMenu.Add(initialNative.checkUpdates).OnClick(func(*application.Context) {
-		labels := nativeLocaleCopyFor(loadNativeLocale(&activeLocale))
-		desktop.Dialog.Info().SetTitle(labels.updateTitle).SetMessage(labels.updateMessage).Show()
+	helpMenu := menu.AddSubmenu(initialNative.Help)
+	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
+		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
+		desktop.Dialog.Info().SetTitle(labels.UpdateTitle).SetMessage(labels.UpdateMessage).Show()
 	})
-	aboutDshWork := helpMenu.Add(initialNative.about).OnClick(func(*application.Context) {
-		labels := nativeLocaleCopyFor(loadNativeLocale(&activeLocale))
-		desktop.Dialog.Info().SetTitle(labels.aboutTitle).SetMessage(labels.aboutMessage).Show()
+	aboutDshWork := helpMenu.Add(initialNative.About).OnClick(func(*application.Context) {
+		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
+		desktop.Dialog.Info().SetTitle(labels.AboutTitle).SetMessage(labels.AboutMessage).Show()
 	})
 	desktop.Menu.Set(menu)
 
@@ -283,17 +305,17 @@ func main() {
 			locale = dshworksettings.DefaultLocale
 		}
 		activeLocale.Store(string(locale))
-		labels := nativeLocaleCopyFor(locale)
-		tray.SetTooltip(labels.trayTooltip)
-		trayStatus.SetLabel(nativeTrayStatus(locale, host.Status().State))
-		trayOpenWorkspace.SetLabel(labels.openWorkspace)
-		traySettings.SetLabel(labels.settings)
-		trayRestartDSH.SetLabel(labels.restartDSH)
-		trayQuit.SetLabel(labels.quit)
-		menuSettings.SetLabel(labels.settings)
-		helpMenu.SetLabel(labels.help)
-		checkUpdates.SetLabel(labels.checkUpdates)
-		aboutDshWork.SetLabel(labels.about)
+		labels := nativeui.LabelsFor(locale)
+		tray.SetTooltip(labels.TrayTooltip)
+		trayStatus.SetLabel(nativeui.TrayStatus(locale, host.Status().State))
+		trayOpenWorkspace.SetLabel(labels.OpenWorkspace)
+		traySettings.SetLabel(labels.Settings)
+		trayRestartDSH.SetLabel(labels.RestartDSH)
+		trayQuit.SetLabel(labels.Quit)
+		menuSettings.SetLabel(labels.Settings)
+		helpMenu.SetLabel(labels.Help)
+		checkUpdates.SetLabel(labels.CheckUpdates)
+		aboutDshWork.SetLabel(labels.About)
 	}
 	publishLocale = func(locale dshworksettings.Locale) {
 		updateNativeLocale(locale)
@@ -352,7 +374,7 @@ func main() {
 
 	host.SetPublish(func(status lifecycle.Status) {
 		desktop.Event.Emit("lifecycle", status)
-		trayStatus.SetLabel(nativeTrayStatus(loadNativeLocale(&activeLocale), status.State))
+		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))
 		if status.State == lifecycle.StateStopping && workspaceWindow != nil {
 			workspaceTrusted.Store(true)
 			workspaceWindow.SetURL("/")
@@ -371,24 +393,24 @@ func main() {
 			if status.Error == nil {
 				return
 			}
-			copy := nativeNotificationCopyFor(locale)
+			copy := nativeui.FailureNotification(locale)
 			notification = dshworknotifications.Event{
 				ID:     "dsh-work-host-failure:" + eventID,
 				Class:  dshworknotifications.ClassError,
-				Title:  copy.title,
-				Body:   copy.body,
+				Title:  copy.Title,
+				Body:   copy.Body,
 				Target: "workspace",
 			}
 		default:
-			copy := nativeLifecycleNotificationCopyFor(locale, status.State)
-			if copy.title == "" || copy.body == "" {
+			copy := nativeui.LifecycleNotification(locale, status.State)
+			if copy.Title == "" || copy.Body == "" {
 				return
 			}
 			notification = dshworknotifications.Event{
 				ID:     "dsh-work-host-lifecycle:" + eventID + ":" + string(status.State),
 				Class:  dshworknotifications.ClassLifecycle,
-				Title:  copy.title,
-				Body:   copy.body,
+				Title:  copy.Title,
+				Body:   copy.Body,
 				Target: "workspace",
 			}
 		}
@@ -435,14 +457,14 @@ func main() {
 		}
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		if nativeNotificationHost.startupFailed.Load() {
+		if nativeNotificationHost.Unavailable() {
 			desktop.Event.Emit("notification-failure", true)
 		}
 		host.Start()
 	})
 
 	if err := desktop.Run(); err != nil {
-		log.Fatal(err)
+		log.Printf("dsh-work desktop run: %v", err)
 	}
 }
 
@@ -511,6 +533,19 @@ func settingsURL(manager *dshmanager.Manager, section string) string {
 			if selection != nil {
 				values.Set("data-directory", selection.Profile.DataDirectoryID)
 				values.Set("profile", selection.Profile.Name)
+			}
+			if section == "runtimes" {
+				if selection != nil {
+					for _, runtime := range snapshot.Runtimes {
+						if runtime.ID == selection.RuntimeID {
+							values.Set("version", runtime.Version)
+							break
+						}
+					}
+				}
+				if values.Get("version") == "" && len(snapshot.Runtimes) > 0 {
+					values.Set("version", snapshot.Runtimes[0].Version)
+				}
 			}
 		}
 	}

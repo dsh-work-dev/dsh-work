@@ -1,8 +1,8 @@
 # dsh-work documentation
 
-This directory contains accepted project knowledge. It describes dsh-work as it
-exists and the rules current implementation must preserve; active proposals and
-unresolved research live outside `docs/`.
+This directory contains the accepted project knowledge for dsh-work. It
+describes the product as it exists and the rules current implementation must
+preserve.
 
 ## Reading map
 

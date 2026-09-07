@@ -110,7 +110,7 @@ func (a *Adapter) externalHandler(value string) error {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if a.openExternal == nil {
-		return nil
+		return errors.New("external browser handoff is unavailable")
 	}
 	return a.openExternal(value)
 }
@@ -223,7 +223,7 @@ func (s *gatewaySession) serveHTTP(writer http.ResponseWriter, request *http.Req
 		http.Error(writer, "worker session required", http.StatusUnauthorized)
 		return
 	}
-	if !sameOrigin(s.origin, request.Header.Get("Origin")) {
+	if !validRequestOrigin(s.origin, request.Method, request.Header.Get("Origin")) {
 		http.Error(writer, "untrusted origin", http.StatusForbidden)
 		return
 	}
@@ -244,7 +244,7 @@ func (s *gatewaySession) serveBootstrap(writer http.ResponseWriter, request *htt
 		http.Error(writer, "invalid worker bootstrap", http.StatusNotFound)
 		return
 	}
-	if !sameOrigin(s.origin, request.Header.Get("Origin")) {
+	if !validRequestOrigin(s.origin, request.Method, request.Header.Get("Origin")) {
 		http.Error(writer, "untrusted origin", http.StatusForbidden)
 		return
 	}
@@ -278,7 +278,7 @@ func (s *gatewaySession) serveBootstrap(writer http.ResponseWriter, request *htt
 }
 
 func (s *gatewaySession) serveExternal(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodPost || !s.validSession(request) || !sameOrigin(s.origin, request.Header.Get("Origin")) {
+	if request.Method != http.MethodPost || !s.validSession(request) || request.Header.Get("Origin") != s.origin {
 		http.Error(writer, "external navigation is not available", http.StatusForbidden)
 		return
 	}
@@ -437,8 +437,11 @@ func mustParseURL(value string) *url.URL {
 	return parsed
 }
 
-func sameOrigin(expected, supplied string) bool {
-	return supplied == "" || supplied == expected
+func validRequestOrigin(expected, method, supplied string) bool {
+	if supplied == expected {
+		return true
+	}
+	return supplied == "" && (method == http.MethodGet || method == http.MethodHead)
 }
 
 func setSessionCookie(writer http.ResponseWriter, value string) {
@@ -461,6 +464,9 @@ func randomToken(size int) (string, error) {
 }
 
 func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

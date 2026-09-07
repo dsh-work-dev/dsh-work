@@ -17,6 +17,31 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as dshmanager$0 from "../dshmanager/models.js";
 
+export function BackupProfile(request: dshmanager$0.ProfileBackupRequest): $CancellablePromise<dshmanager$0.ProfileBackupResult> {
+    return $Call.ByID(784966172, request);
+}
+
+export function CancelAcquisition(): $CancellablePromise<void> {
+    return $Call.ByID(2933888802);
+}
+
+/**
+ * CancelRuntime cancels the active explicit runtime pull from the trusted
+ * Settings surface. Cancellation leaves no catalog entry; the installer owns
+ * cleanup of its staging directory.
+ */
+export function CancelRuntime(): $CancellablePromise<void> {
+    return $Call.ByID(656225601);
+}
+
+export function CloneProfile(request: dshmanager$0.ProfileCloneRequest): $CancellablePromise<dshmanager$0.ProfileCloneResult> {
+    return $Call.ByID(3642858027, request);
+}
+
+export function DeleteProfile(request: dshmanager$0.ProfileDeleteRequest): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3806339691, request);
+}
+
 export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3706159683);
 }
@@ -28,6 +53,10 @@ export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
  */
 export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
     return $Call.ByID(500405340);
+}
+
+export function InstallLatestNode(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(1383461839);
 }
 
 export function InstallPlugin(request: dshmanager$0.PluginInstallRequest): $CancellablePromise<dshmanager$0.PluginResult> {
@@ -42,12 +71,24 @@ export function ListPlugins(request: dshmanager$0.PluginListRequest): $Cancellab
     return $Call.ByID(3735864195, request);
 }
 
+export function RefreshDSHReleases(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(1946171845);
+}
+
+export function RefreshLatestNode(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(4253380379);
+}
+
 export function RegisterDataDirectory(dataDirectory: dshmanager$0.DataDirectoryInfo): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(2482295343, dataDirectory);
 }
 
 export function RemoveDataDirectory(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3899737548, id);
+}
+
+export function RemoveNode(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(2034113705, id);
 }
 
 export function RemovePlugin(request: dshmanager$0.PluginRemoveRequest): $CancellablePromise<dshmanager$0.PluginResult> {
@@ -66,6 +107,18 @@ export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $Cancellable
     return $Call.ByID(1114420160, request);
 }
 
+export function RestoreKnownGood(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3365799665);
+}
+
+export function RetryLastSwitch(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(1457349837);
+}
+
 export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(2077442307, target);
+}
+
+export function UpgradePlugin(request: dshmanager$0.PluginUpgradeRequest): $CancellablePromise<dshmanager$0.PluginResult> {
+    return $Call.ByID(157594528, request);
 }

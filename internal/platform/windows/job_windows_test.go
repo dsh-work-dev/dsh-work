@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +12,28 @@ import (
 
 	"github.com/local/dsh-work/internal/supervisor"
 )
+
+func TestJobObjectAdapterHonorsCancelledStartContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	comspec := os.Getenv("ComSpec")
+	if comspec == "" {
+		comspec = "cmd.exe"
+	}
+	plan := supervisor.LaunchPlan{
+		GenerationID:     "windows-cancelled-start-test",
+		Executable:       comspec,
+		Args:             []string{"/d", "/c", "exit 0"},
+		WorkingDirectory: t.TempDir(),
+		ExpectedOrigin:   "http://127.0.0.1:4321",
+		ExpectedHost:     "127.0.0.1",
+		ExpectedPort:     4321,
+	}
+	worker, err := NewJobObjectAdapter().Start(ctx, plan, nil)
+	if worker != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start() = (%#v, %v), want (nil, context.Canceled)", worker, err)
+	}
+}
 
 func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
 	comspec := os.Getenv("ComSpec")

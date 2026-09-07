@@ -13,19 +13,43 @@ import (
 // as fake frontend controls. DSH manager controls share this Settings window
 // but remain a separate service boundary.
 type SettingsService struct {
-	manager                *settings.Manager
-	onCloseToTrayChanged   func(bool)
-	onLocaleChanged        func(settings.Locale)
-	onNotificationsChanged func(notifications.Preferences)
+	manager                  *settings.Manager
+	onCloseToTrayChanged     func(bool)
+	onLocaleChanged          func(settings.Locale)
+	onNotificationsChanged   func(notifications.Preferences)
+	onRuntimeRollbackChanged func(bool)
 }
 
-func NewSettingsService(manager *settings.Manager, onCloseToTrayChanged func(bool), onLocaleChanged func(settings.Locale), onNotificationsChanged func(notifications.Preferences)) *SettingsService {
-	return &SettingsService{
+func NewSettingsService(manager *settings.Manager, onCloseToTrayChanged func(bool), onLocaleChanged func(settings.Locale), onNotificationsChanged func(notifications.Preferences), rollbackChanged ...func(bool)) *SettingsService {
+	service := &SettingsService{
 		manager:                manager,
 		onCloseToTrayChanged:   onCloseToTrayChanged,
 		onLocaleChanged:        onLocaleChanged,
 		onNotificationsChanged: onNotificationsChanged,
 	}
+	if len(rollbackChanged) > 0 {
+		service.onRuntimeRollbackChanged = rollbackChanged[0]
+	}
+	return service
+}
+
+func (s *SettingsService) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	values, err := s.manager.SetAutomaticRuntimeRollback(ctx, enabled)
+	if err != nil {
+		return settings.Values{}, err
+	}
+	if s.onRuntimeRollbackChanged != nil {
+		s.onRuntimeRollbackChanged(values.AutomaticRuntimeRollback)
+	}
+	return values, nil
 }
 
 func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, error) {

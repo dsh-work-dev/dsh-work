@@ -30,6 +30,7 @@ export enum Locale {
 export interface Values {
     "version": number;
     "closeToTray": boolean;
+    "automaticRuntimeRollback": boolean;
     "locale": Locale;
     "notifications": notifications$0.Preferences;
 }

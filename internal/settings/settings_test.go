@@ -19,8 +19,49 @@ func TestSettingsDefaultToKeepingTheAppInTheTray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if !values.CloseToTray || values.Version != stateVersion || values.Locale != DefaultLocale {
+	if !values.CloseToTray || !values.AutomaticRuntimeRollback || values.Version != stateVersion || values.Locale != DefaultLocale {
 		t.Fatalf("default values = %#v, want version %d, closeToTray=true and locale=%q", values, stateVersion, DefaultLocale)
+	}
+}
+
+func TestSettingsVersionOneMigratesAutomaticRuntimeRollbackToEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"closeToTray":false,"locale":"ja-JP"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values.Version != 2 || !values.AutomaticRuntimeRollback || values.CloseToTray || values.Locale != LocaleJapanese {
+		t.Fatalf("migrated settings = %#v", values)
+	}
+}
+
+func TestSettingsPersistAutomaticRuntimeRollback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := manager.SetAutomaticRuntimeRollback(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values.AutomaticRuntimeRollback {
+		t.Fatal("automatic rollback remained enabled")
+	}
+	reloaded, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err = reloaded.Snapshot(context.Background())
+	if err != nil || values.AutomaticRuntimeRollback {
+		t.Fatalf("reloaded settings = %#v error=%v", values, err)
 	}
 }
 

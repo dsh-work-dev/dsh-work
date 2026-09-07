@@ -20,6 +20,8 @@ export function sameRunContext(left: RunContext | null | undefined, right: RunCo
     return left === right;
   }
   return left.runtimeId === right.runtimeId &&
+    left.node.kind === right.node.kind &&
+    (left.node.installationId ?? "") === (right.node.installationId ?? "") &&
     left.profile.dataDirectoryId === right.profile.dataDirectoryId &&
     left.profile.name === right.profile.name;
 }

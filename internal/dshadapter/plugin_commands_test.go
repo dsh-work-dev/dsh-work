@@ -20,6 +20,27 @@ func TestPluginCommandsBuildProfileScopedDSHArguments(t *testing.T) {
 	if got, want := joinArgs(remove), "plugin --profile coding remove @example/plugin"; got != want {
 		t.Fatalf("remove args = %q, want %q", got, want)
 	}
+	list, err := commands.List("coding")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := joinArgs(list), "plugin --profile coding list --depth 0 --json"; got != want {
+		t.Fatalf("list args = %q", got)
+	}
+	outdated, err := commands.Outdated("coding", "https://registry.npmjs.org/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := joinArgs(outdated), "plugin --profile coding outdated --format json --registry https://registry.npmjs.org/"; got != want {
+		t.Fatalf("outdated args = %q", got)
+	}
+	update, err := commands.Update("coding", "@example/plugin", "https://registry.npmmirror.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := joinArgs(update), "plugin --profile coding update @example/plugin --registry https://registry.npmmirror.com/"; got != want {
+		t.Fatalf("update args = %q", got)
+	}
 }
 
 func TestPluginCommandsRejectUnsafeOrAmbiguousArguments(t *testing.T) {

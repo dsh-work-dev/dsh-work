@@ -68,6 +68,15 @@ export function GetWorkspaceStatus(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(2318209329);
 }
 
+/**
+ * OpenRuntimeSettings is the first-use recovery action for a missing local
+ * runtime. It opens the trusted runtime-management surface but never starts an
+ * acquisition itself.
+ */
+export function OpenRuntimeSettings(): $CancellablePromise<void> {
+    return $Call.ByID(933763759);
+}
+
 export function Quit(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(4265271809);
 }

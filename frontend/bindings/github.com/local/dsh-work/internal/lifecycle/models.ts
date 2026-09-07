@@ -36,6 +36,10 @@ export enum ErrorCode {
     ErrorProfileInvalid = "PROFILE_INVALID",
     ErrorProfileInUse = "PROFILE_IN_USE",
     ErrorProfileRenameFailed = "PROFILE_RENAME_FAILED",
+    ErrorProfileCloneFailed = "PROFILE_CLONE_FAILED",
+    ErrorProfileDeleteFailed = "PROFILE_DELETE_FAILED",
+    ErrorProfileBackupFailed = "PROFILE_BACKUP_FAILED",
+    ErrorProfilePreparationFailed = "PROFILE_PREPARATION_FAILED",
     ErrorWorkspaceInvalid = "WORKSPACE_INVALID",
     ErrorRuntimeInUse = "RUNTIME_IN_USE",
     ErrorRuntimeProfileIncompatible = "RUNTIME_PROFILE_INCOMPATIBLE",
@@ -86,6 +90,81 @@ export enum Phase {
 };
 
 /**
+ * RuntimePreparation is a bounded status projection for the trusted Host UI.
+ * TotalBytes is meaningful only when HasTotal is true; zero never means that a
+ * download is complete.
+ */
+export interface RuntimePreparation {
+    "state": RuntimePreparationState;
+    "operation": RuntimePreparationOperation;
+    "targetVersion"?: string;
+    "toolchain"?: string;
+    "source": RuntimePreparationSource;
+    "receivedBytes"?: number;
+    "totalBytes"?: number;
+    "hasTotal": boolean;
+    "canCancel": boolean;
+    "error"?: Failure | null;
+}
+
+/**
+ * RuntimePreparationOperation identifies the user-relevant operation in a
+ * preparation state. The frontend maps these values to localized copy.
+ */
+export enum RuntimePreparationOperation {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    RuntimePreparationOperationNone = "none",
+    RuntimePreparationOperationDetectNode = "detect-node",
+    RuntimePreparationOperationDetectPNPM = "detect-pnpm",
+    RuntimePreparationOperationDetectNPM = "detect-npm",
+    RuntimePreparationOperationDownloadNode = "download-node",
+    RuntimePreparationOperationInstallDSH = "install-dsh",
+    RuntimePreparationOperationVerify = "verify",
+    RuntimePreparationOperationCleanup = "cleanup",
+};
+
+/**
+ * RuntimePreparationSource records which approved source supplied the current
+ * artifact. A mirror is only exposed after the official source was unreachable.
+ */
+export enum RuntimePreparationSource {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    RuntimePreparationSourceNone = "none",
+    RuntimePreparationSourceLocal = "local",
+    RuntimePreparationSourceOfficial = "official",
+    RuntimePreparationSourceMirror = "mirror",
+};
+
+/**
+ * RuntimePreparationState is the safe, typed projection of an explicit or
+ * first-use DSH runtime acquisition. It contains no command lines, paths or
+ * raw package-manager output.
+ */
+export enum RuntimePreparationState {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    RuntimePreparationIdle = "idle",
+    RuntimePreparationResolvingToolchain = "resolving-toolchain",
+    RuntimePreparationAcquiringNode = "acquiring-node",
+    RuntimePreparationAcquiringDSH = "acquiring-dsh",
+    RuntimePreparationVerifying = "verifying",
+    RuntimePreparationInstalled = "installed",
+    RuntimePreparationCancelled = "cancelled",
+    RuntimePreparationFailed = "failed",
+};
+
+/**
  * State is the platform-neutral lifecycle state projected to the trusted UI.
  */
 export enum State {
@@ -110,6 +189,7 @@ export interface Status {
     "generationId"?: string;
     "workspaceUrl"?: string;
     "workspace"?: workspacecontext$0.Context | null;
+    "runtimePreparation"?: RuntimePreparation | null;
     "error"?: Failure | null;
     "canRetry": boolean;
     "canCancel": boolean;

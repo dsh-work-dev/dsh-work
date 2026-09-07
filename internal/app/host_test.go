@@ -45,6 +45,48 @@ func (s testGatewaySession) URL() string    { return s.url }
 func (s testGatewaySession) Origin() string { return s.origin }
 func (testGatewaySession) Close() error     { return nil }
 
+type hostRuntimeInstaller struct {
+	path  string
+	calls int
+}
+
+func (i *hostRuntimeInstaller) Install(ctx context.Context, version string) (dshmanager.RuntimeInfo, error) {
+	return i.InstallWithProgress(ctx, version, nil)
+}
+
+func (i *hostRuntimeInstaller) InstallWithProgress(_ context.Context, version string, observer dshmanager.RuntimeInstallObserver) (dshmanager.RuntimeInfo, error) {
+	i.calls++
+	if observer != nil {
+		observer(lifecycle.RuntimePreparation{
+			State:         lifecycle.RuntimePreparationAcquiringDSH,
+			Operation:     lifecycle.RuntimePreparationOperationInstallDSH,
+			TargetVersion: version,
+			Toolchain:     string(dshmanager.RuntimeToolchainSystemNPM),
+			Source:        lifecycle.RuntimePreparationSourceOfficial,
+			CanCancel:     true,
+		})
+	}
+	if err := os.MkdirAll(filepath.Dir(i.path), 0o700); err != nil {
+		return dshmanager.RuntimeInfo{}, err
+	}
+	if err := os.WriteFile(i.path, []byte("test runtime"), 0o600); err != nil {
+		return dshmanager.RuntimeInfo{}, err
+	}
+	if observer != nil {
+		observer(lifecycle.RuntimePreparation{
+			State:         lifecycle.RuntimePreparationInstalled,
+			TargetVersion: version,
+			Toolchain:     string(dshmanager.RuntimeToolchainSystemNPM),
+			Source:        lifecycle.RuntimePreparationSourceOfficial,
+			CanCancel:     false,
+		})
+	}
+	return dshmanager.RuntimeInfo{
+		ID: "dsh-test", Version: version, Path: i.path,
+		Source: dshmanager.RuntimeSourceManaged, Installed: true, Removable: true,
+	}, nil
+}
+
 func newTestDSH() *testDSH {
 	dsh := &testDSH{server: httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -244,6 +286,56 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	}
 	if supervisorAdapter.worker == nil {
 		t.Fatal("supervisor did not receive a worker start")
+	}
+}
+
+func TestHostDoesNotPullMissingRuntimeDuringStartup(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "managed", "dsh.cmd")
+	installer := &hostRuntimeInstaller{path: runtimePath}
+	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath:        filepath.Join(root, "manager.json"),
+		RuntimeInstaller: installer,
+		DataDirectories: []dshmanager.DataDirectoryInfo{{
+			ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
+		}},
+		Runtimes: []dshmanager.RuntimeInfo{{
+			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+		}},
+		DefaultRunContext: dshmanager.RunContext{
+			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := make(chan lifecycle.Status, 32)
+	host := NewHost(Dependencies{
+		DSH: dsh, Manager: manager,
+		Supervisor: &testSupervisor{}, Gateway: &testGateway{server: dsh.server},
+	}, Config{
+		BootstrapDirectory: t.TempDir(),
+		ReadinessTimeout:   time.Second,
+		ProbeTimeout:       time.Second,
+		EmptyTimeout:       time.Second,
+	})
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	host.Start()
+	failureStatus := waitForStatus(t, statuses, lifecycle.StateFailed)
+	if installer.calls != 0 {
+		t.Fatalf("startup invoked runtime installer %d time(s)", installer.calls)
+	}
+	if failureStatus.Error == nil || failureStatus.Error.Code != lifecycle.ErrorDSHRuntimeNotFound || !failureStatus.CanRetry {
+		t.Fatalf("missing runtime failure = %+v", failureStatus)
+	}
+	if _, err := os.Stat(runtimePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("startup created a runtime file, stat error = %v", err)
 	}
 }
 
@@ -725,11 +817,91 @@ func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
 	assertRunContext(t, snapshot.Current, fixture.target("alpha"), "rolled-back current")
 	assertRunContext(t, snapshot.Configured, fixture.target("alpha"), "rolled-back configured")
 	assertRunContext(t, snapshot.KnownGood, fixture.target("alpha"), "rolled-back known-good")
+	if snapshot.LastSwitchAttempt == nil || snapshot.LastSwitchAttempt.Target != target || snapshot.LastSwitchAttempt.Rollback != dshmanager.RollbackRestored {
+		t.Fatalf("retained failed attempt = %#v", snapshot.LastSwitchAttempt)
+	}
 	if status := fixture.host.Status(); status.State != lifecycle.StateReady {
 		t.Fatalf("host status after successful rollback = %+v, want Ready", status)
 	}
 	fixture.supervisor.assertNoOverlap(t)
 	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta", "start:alpha")
+}
+
+func TestHostRetainsFailedTargetWithoutRollbackWhenPreferenceIsDisabled(t *testing.T) {
+	fixture := newRunContextSwitchFixture(t)
+	defer fixture.close()
+	fixture.host.deps.AutomaticRuntimeRollback = func() bool { return false }
+	fixture.dsh.setFailure("beta", true)
+	fixture.startReady(t)
+
+	target := fixture.target("beta")
+	snapshot, err := fixture.host.SwitchRunContext(context.Background(), target)
+	if err == nil {
+		t.Fatal("SwitchRunContext() error = nil")
+	}
+	if snapshot.Current != nil {
+		t.Fatalf("failed target became current: %#v", snapshot.Current)
+	}
+	assertRunContext(t, snapshot.Configured, target, "configured failed target")
+	assertRunContext(t, snapshot.KnownGood, fixture.target("alpha"), "retained known-good")
+	if snapshot.LastSwitchAttempt == nil || snapshot.LastSwitchAttempt.Rollback != dshmanager.RollbackDisabled || snapshot.LastSwitchAttempt.AutomaticRollback {
+		t.Fatalf("failed attempt = %#v", snapshot.LastSwitchAttempt)
+	}
+	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta")
+
+	restored, err := fixture.host.RestoreKnownGood(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRunContext(t, restored.Current, fixture.target("alpha"), "restored current")
+	if restored.LastSwitchAttempt != nil {
+		t.Fatalf("successful restore retained failure: %#v", restored.LastSwitchAttempt)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if guardErr := fixture.manager.BeginRunContextSwitch(context.Background()); guardErr == nil {
+			if endErr := fixture.manager.EndRunContextSwitch(context.Background()); endErr != nil {
+				t.Fatal(endErr)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("manager switch guard was not released after restore")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	snapshot, err = fixture.host.SwitchRunContext(context.Background(), target)
+	if err == nil || snapshot.LastSwitchAttempt == nil {
+		t.Fatalf("second failed attempt = snapshot %#v error=%v", snapshot, err)
+	}
+	fixture.dsh.setFailure("beta", false)
+	retried, err := fixture.host.RetryLastSwitch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRunContext(t, retried.Current, target, "retried current")
+	if retried.LastSwitchAttempt != nil {
+		t.Fatalf("successful retry retained failure: %#v", retried.LastSwitchAttempt)
+	}
+}
+
+func TestHostKeepsCurrentWhenSwitchTargetFailsResolution(t *testing.T) {
+	fixture := newRunContextSwitchFixture(t)
+	defer fixture.close()
+	fixture.startReady(t)
+	target := fixture.target("beta")
+	target.RuntimeID = "missing"
+
+	snapshot, err := fixture.host.SwitchRunContext(context.Background(), target)
+	if err == nil {
+		t.Fatal("SwitchRunContext() error = nil")
+	}
+	assertRunContext(t, snapshot.Current, fixture.target("alpha"), "current")
+	if snapshot.LastSwitchAttempt == nil || snapshot.LastSwitchAttempt.Stage != dshmanager.SwitchAttemptResolving || snapshot.LastSwitchAttempt.Target != target {
+		t.Fatalf("resolution attempt = %#v", snapshot.LastSwitchAttempt)
+	}
+	fixture.supervisor.assertEventOrder(t, "start:alpha")
 }
 
 func TestHostRollsBackCandidateStartFailureWithoutWorkerOverlap(t *testing.T) {
@@ -881,9 +1053,9 @@ func (f *runContextSwitchFixture) waitForHostState(t *testing.T, state lifecycle
 
 func (f *runContextSwitchFixture) target(profile string) dshmanager.RunContext {
 	if profile == "beta" {
-		return dshmanager.RunContext{RuntimeID: "dsh-beta", Profile: dshmanager.ProfileRef{DataDirectoryID: "beta-home", Name: "beta"}}
+		return dshmanager.RunContext{RuntimeID: "dsh-beta", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "beta-home", Name: "beta"}}
 	}
-	return dshmanager.RunContext{RuntimeID: "dsh-alpha", Profile: dshmanager.ProfileRef{DataDirectoryID: "alpha-home", Name: "alpha"}}
+	return dshmanager.RunContext{RuntimeID: "dsh-alpha", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "alpha-home", Name: "alpha"}}
 }
 
 func (f *runContextSwitchFixture) close() {
@@ -892,6 +1064,18 @@ func (f *runContextSwitchFixture) close() {
 	}
 	if f.dsh != nil && f.dsh.server != nil {
 		f.dsh.server.Close()
+	}
+}
+
+func TestRuntimeAdapterUsesResolvedNodeEnvironmentInsteadOfRuntimeToolchainPath(t *testing.T) {
+	runtime := dshmanager.RuntimeInfo{Path: "dsh.cmd", Version: "1.2.3", ToolchainPath: "legacy-node"}
+	node := dshmanager.ResolvedNode{ChildEnvironment: map[string]string{"PATH": "selected-node", "NODE_OPTIONS": "--fixture"}}
+	adapted := runtimeAdapterValue(runtime, node)
+	if adapted.Env["PATH"] != "selected-node" || adapted.Env["NODE_OPTIONS"] != "--fixture" {
+		t.Fatalf("adapter environment = %#v", adapted.Env)
+	}
+	if adapted.Env["PATH"] == runtime.ToolchainPath {
+		t.Fatal("runtime ToolchainPath still controls launch")
 	}
 }
 

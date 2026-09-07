@@ -1,31 +1,33 @@
 package dshmanager
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-// State is the versioned manager persistence contract. Current and known-good
-// state are intentionally absent because they are only true while a Host
-// Worker is alive. Configured is the single persisted Run context.
+// State is the manager persistence contract. Current and known-good state are
+// intentionally absent because they are only true while a Host Worker is
+// alive. Configured is the single persisted Run context.
 type State struct {
-	Version         int                 `json:"version"`
-	DataDirectories []DataDirectoryInfo `json:"dataDirectories,omitempty"`
-	Runtimes        []RuntimeInfo       `json:"runtimes,omitempty"`
-	Configured      *RunContext         `json:"configured,omitempty"`
+	DataDirectories  []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
+	Runtimes         []RuntimeInfo            `json:"runtimes,omitempty"`
+	Nodes            []NodeInstallationInfo   `json:"nodes,omitempty"`
+	LatestNode       *NodeReleaseInfo         `json:"latestNode,omitempty"`
+	DSHReleases      []DSHReleaseInfo         `json:"dshReleases,omitempty"`
+	PluginProvenance []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	Configured       *RunContext              `json:"configured,omitempty"`
 }
 
-// StateStore isolates persistence and version policy from manager policy. A future
-// platform or encrypted store can implement this contract without changing
-// selection or plugin behavior.
+// StateStore isolates persistence from manager policy. A future platform or
+// encrypted store can implement this contract without changing selection or
+// plugin behavior.
 type StateStore interface {
 	Load(context.Context, string) (*State, error)
 	Save(context.Context, string, State) error
@@ -48,21 +50,58 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 	}
 	state, err := decodeState(data)
 	if err != nil {
-		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted selection has an unsupported format")
+		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted selection is malformed or missing required fields")
 	}
 	return &state, nil
 }
 
+// persistedState is the read contract for the manager file. JSON unknown fields
+// are intentionally ignored so a newer build can add optional catalog metadata
+// without making an older build lose the user's selection.
+type persistedState struct {
+	DataDirectories  []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
+	Runtimes         []RuntimeInfo            `json:"runtimes,omitempty"`
+	Nodes            []NodeInstallationInfo   `json:"nodes,omitempty"`
+	LatestNode       *NodeReleaseInfo         `json:"latestNode,omitempty"`
+	DSHReleases      []DSHReleaseInfo         `json:"dshReleases,omitempty"`
+	PluginProvenance []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	Configured       *RunContext              `json:"configured,omitempty"`
+}
+
 func decodeState(data []byte) (State, error) {
-	var envelope struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
 		return State{}, err
 	}
-	var state State
-	if err := decodeStrict(data, &state); err != nil {
+	if document == nil {
+		return State{}, errors.New("manager state must be a JSON object")
+	}
+	var persisted persistedState
+	if err := json.Unmarshal(data, &persisted); err != nil {
 		return State{}, err
+	}
+	state := State{
+		DataDirectories:  persisted.DataDirectories,
+		Runtimes:         persisted.Runtimes,
+		Nodes:            persisted.Nodes,
+		LatestNode:       persisted.LatestNode,
+		DSHReleases:      persisted.DSHReleases,
+		PluginProvenance: persisted.PluginProvenance,
+		Configured:       persisted.Configured,
+	}
+	for index := range state.Runtimes {
+		normalized, err := normalizeRuntime(state.Runtimes[index])
+		if err != nil {
+			return State{}, err
+		}
+		state.Runtimes[index] = normalized
+	}
+	if state.Configured != nil {
+		selection, err := normalizeNodeSelection(state.Configured.Node)
+		if err != nil {
+			return State{}, err
+		}
+		state.Configured.Node = selection
 	}
 	if err := validateState(state); err != nil {
 		return State{}, err
@@ -70,26 +109,7 @@ func decodeState(data []byte) (State, error) {
 	return state, nil
 }
 
-func decodeStrict(data []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return errors.New("manager state contains multiple documents")
-		}
-		return err
-	}
-	return nil
-}
-
 func validateState(state State) error {
-	if state.Version != stateVersion {
-		return errors.New("unsupported manager state version")
-	}
 	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))
 	for _, dataDirectory := range state.DataDirectories {
 		if err := validateDataDirectory(dataDirectory); err != nil {
@@ -100,9 +120,51 @@ func validateState(state State) error {
 		}
 		seenDataDirectories[dataDirectory.ID] = struct{}{}
 	}
+	seenNodes := make(map[string]struct{}, len(state.Nodes))
+	for _, node := range state.Nodes {
+		if err := validateNodeInstallation(node); err != nil {
+			return err
+		}
+		if _, exists := seenNodes[node.ID]; exists {
+			return errors.New("duplicate Node installation identity")
+		}
+		seenNodes[node.ID] = struct{}{}
+	}
+	if state.LatestNode != nil {
+		if err := validateNodeRelease(*state.LatestNode); err != nil {
+			return err
+		}
+	}
+	seenDSHReleases := make(map[string]struct{}, len(state.DSHReleases))
+	for _, release := range state.DSHReleases {
+		if err := validateDSHRelease(release); err != nil {
+			return err
+		}
+		if _, exists := seenDSHReleases[release.Version]; exists {
+			return errors.New("duplicate DSH release identity")
+		}
+		seenDSHReleases[release.Version] = struct{}{}
+	}
+	if len(state.PluginProvenance) > 256 {
+		return errors.New("plugin provenance exceeds bounded capacity")
+	}
+	for _, record := range state.PluginProvenance {
+		if validateProfileRef(record.Profile) != nil || !validPackageName(record.Package) || record.SourceKind == "" || strings.TrimSpace(record.RecordedAt) == "" {
+			return errors.New("plugin provenance record is invalid")
+		}
+		if record.SuccessfulRoute != "" && record.SuccessfulRoute != RuntimeArtifactSourceNone && record.SuccessfulRoute != RuntimeArtifactSourceOfficial && record.SuccessfulRoute != RuntimeArtifactSourceMirror && record.SuccessfulRoute != RuntimeArtifactSourceLocal {
+			return errors.New("plugin provenance route is invalid")
+		}
+	}
 	if state.Configured != nil {
 		if err := validateRunContext(*state.Configured); err != nil {
 			return err
+		}
+		selection, _ := normalizeNodeSelection(state.Configured.Node)
+		if selection.Kind == NodeSelectionManaged {
+			if _, exists := seenNodes[selection.InstallationID]; !exists {
+				return errors.New("configured managed Node installation is missing")
+			}
 		}
 	}
 	return nil
@@ -111,6 +173,9 @@ func validateState(state State) error {
 func validateRunContext(target RunContext) error {
 	if target.RuntimeID == "" {
 		return errors.New("Run context runtime identity is required")
+	}
+	if _, err := normalizeNodeSelection(target.Node); err != nil {
+		return err
 	}
 	return validateProfileRef(target.Profile)
 }
@@ -183,14 +248,14 @@ func (FileProfileReader) Read(ctx context.Context, profilePath string) ([]Plugin
 		return []PluginInfo{}, nil
 	}
 	if err != nil {
-		return []PluginInfo{}, nil
+		return nil, err
 	}
 	var manifest struct {
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return []PluginInfo{}, nil
+		return nil, err
 	}
 	versions := make(map[string]string, len(manifest.Dependencies)+len(manifest.DevDependencies))
 	for name, spec := range manifest.Dependencies {
@@ -212,9 +277,27 @@ func (FileProfileReader) Read(ctx context.Context, profilePath string) ([]Plugin
 	sort.Strings(names)
 	plugins := make([]PluginInfo, 0, len(names))
 	for _, name := range names {
+		resolvedVersion := installedPackageVersion(profilePath, name)
 		plugins = append(plugins, PluginInfo{
-			Name: name, Package: name, Spec: versions[name], Installed: true,
+			Name: name, Package: name, Spec: versions[name], Version: resolvedVersion, CurrentVersion: resolvedVersion,
+			Installed: true, SourceKind: classifyPluginSource(versions[name]), UpdateCheck: PluginUpdateUnknown,
 		})
 	}
 	return plugins, nil
+}
+
+func installedPackageVersion(profilePath, packageName string) string {
+	parts := strings.Split(filepath.ToSlash(packageName), "/")
+	pathParts := append([]string{profilePath, "node_modules"}, parts...)
+	data, err := os.ReadFile(filepath.Join(append(pathParts, "package.json")...))
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(data, &manifest) != nil || !validRuntimeVersion(manifest.Version) {
+		return ""
+	}
+	return manifest.Version
 }

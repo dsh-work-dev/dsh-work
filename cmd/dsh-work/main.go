@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ func main() {
 	}
 }
 
-func run(args []string, stdout, stderr io.Writer) error {
+func run(args []string, stdout, stderr io.Writer) (runErr error) {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printUsage(stdout)
 		return nil
@@ -33,7 +34,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer managerLock.Close()
+	defer func() {
+		runErr = errors.Join(runErr, managerLock.Close())
+	}()
 	switch args[0] {
 	case "runtime":
 		return runRuntime(manager, args[1:], stdout)
@@ -73,6 +76,10 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		CommandRunner:    runner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:     platform.NewNodeResolver(runtimeStore),
 		RuntimeVerifier:  dsh,
 		ProfileCatalog:   dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
@@ -84,6 +91,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-" + hint.Version,
+			Node:      dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem},
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
 	})

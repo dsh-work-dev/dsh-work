@@ -12,7 +12,7 @@ import (
 	"github.com/local/dsh-work/internal/notifications"
 )
 
-const stateVersion = 1
+const stateVersion = 2
 
 // Locale is the dsh-work-owned language preference. It is deliberately separate
 // from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
@@ -34,19 +34,37 @@ func (l Locale) Valid() bool {
 // CloseToTray is true by default so closing the last window keeps dsh-work and
 // its managed DSH worker available from the notification area.
 type Values struct {
-	Version       int                       `json:"version"`
-	CloseToTray   bool                      `json:"closeToTray"`
-	Locale        Locale                    `json:"locale"`
-	Notifications notifications.Preferences `json:"notifications"`
+	Version                  int                       `json:"version"`
+	CloseToTray              bool                      `json:"closeToTray"`
+	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
+	Locale                   Locale                    `json:"locale"`
+	Notifications            notifications.Preferences `json:"notifications"`
 }
 
 func DefaultValues() Values {
 	return Values{
-		Version:       stateVersion,
-		CloseToTray:   true,
-		Locale:        DefaultLocale,
-		Notifications: notifications.DefaultPreferences(),
+		Version:                  stateVersion,
+		CloseToTray:              true,
+		AutomaticRuntimeRollback: true,
+		Locale:                   DefaultLocale,
+		Notifications:            notifications.DefaultPreferences(),
 	}
+}
+
+func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := m.values
+	next.AutomaticRuntimeRollback = enabled
+	next.Version = stateVersion
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		return Values{}, err
+	}
+	m.values = next
+	return next, nil
 }
 
 // Store owns persistence mechanics. Settings policy remains independent of
@@ -184,21 +202,25 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
-		Version       int             `json:"version"`
-		CloseToTray   *bool           `json:"closeToTray"`
-		Locale        *Locale         `json:"locale"`
-		Notifications json.RawMessage `json:"notifications"`
+		Version                  int             `json:"version"`
+		CloseToTray              *bool           `json:"closeToTray"`
+		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
+		Locale                   *Locale         `json:"locale"`
+		Notifications            json.RawMessage `json:"notifications"`
 	}
-	if err := json.Unmarshal(data, &raw); err != nil || raw.Version != stateVersion {
+	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
-	values.Version = raw.Version
+	values.Version = stateVersion
 	if raw.CloseToTray != nil {
 		values.CloseToTray = *raw.CloseToTray
 	}
 	if raw.Locale != nil && raw.Locale.Valid() {
 		values.Locale = *raw.Locale
+	}
+	if raw.Version >= 2 && raw.AutomaticRuntimeRollback != nil {
+		values.AutomaticRuntimeRollback = *raw.AutomaticRuntimeRollback
 	}
 	if len(raw.Notifications) > 0 && string(raw.Notifications) != "null" {
 		var candidate struct {

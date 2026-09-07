@@ -57,11 +57,12 @@ func main() {
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath:         filepath.Join(root, ".task", "dsh-smoke-manager.json"),
 		PluginCommands:    dshadapter.NewPluginCommands(),
+		NodeResolver:      platform.NewNodeResolver(filepath.Join(root, ".task", "runtimes")),
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
 		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
 		Runtimes:          []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}},
+		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)

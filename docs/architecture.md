@@ -43,6 +43,20 @@ edge. The frontend uses the generated allowlisted Host bindings and has no
 direct process or filesystem authority. Logs and UI projections observe state;
 they do not define lifecycle truth.
 
+## Manager persistence
+
+`internal/dshmanager` persists the configured Run context and its known local
+catalog records in the application-data manager file. This manager State is a
+field-based contract without a schema-version marker. Loading decodes the
+fields this build understands, ignores unknown fields, and validates the
+identities required to use the configuration. It does not translate historical
+file layouts. Runtime, Node, DSH-release and plugin records retain their own
+business version fields; those are data, not the manager State schema.
+
+Saving uses an atomic replace so a completed write contains one complete set of
+known fields. A malformed required identity is reported as invalid manager
+state instead of being used for a launch.
+
 ## Runtime invariants
 
 1. The Host obtains the single-instance and manager locks before exposing

@@ -1,26 +1,28 @@
-package main
+package nativeui
 
 import (
 	"strings"
 
 	"github.com/local/dsh-work/internal/lifecycle"
-	dshworksettings "github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/settings"
 )
 
-type nativeLocaleCopy struct {
-	settings              string
-	openWorkspace         string
-	help                  string
-	checkUpdates          string
-	about                 string
-	restartDSH            string
-	quit                  string
-	trayTooltip           string
+// Labels contains user-facing copy owned by the native desktop shell.
+type Labels struct {
+	Settings      string
+	OpenWorkspace string
+	Help          string
+	CheckUpdates  string
+	About         string
+	RestartDSH    string
+	Quit          string
+	TrayTooltip   string
+	UpdateTitle   string
+	UpdateMessage string
+	AboutTitle    string
+	AboutMessage  string
+
 	trayStatus            string
-	updateTitle           string
-	updateMessage         string
-	aboutTitle            string
-	aboutMessage          string
 	workspaceFailureTitle string
 	workspaceFailureBody  string
 	lifecycleTitles       map[lifecycle.State]string
@@ -28,21 +30,27 @@ type nativeLocaleCopy struct {
 	stateLabels           map[lifecycle.State]string
 }
 
-var nativeLocaleCopies = map[dshworksettings.Locale]nativeLocaleCopy{
-	dshworksettings.LocaleEnglish: {
-		settings:              "Settings",
-		openWorkspace:         "Open workspace",
-		help:                  "Help",
-		checkUpdates:          "Check for Updates…",
-		about:                 "About dsh-work",
-		restartDSH:            "Restart DSH",
-		quit:                  "Quit dsh-work",
-		trayTooltip:           "dsh-work",
+// NotificationCopy is localized native-notification content.
+type NotificationCopy struct {
+	Title string
+	Body  string
+}
+
+var labelsByLocale = map[settings.Locale]Labels{
+	settings.LocaleEnglish: {
+		Settings:              "Settings",
+		OpenWorkspace:         "Open workspace",
+		Help:                  "Help",
+		CheckUpdates:          "Check for Updates…",
+		About:                 "About dsh-work",
+		RestartDSH:            "Restart DSH",
+		Quit:                  "Quit dsh-work",
+		TrayTooltip:           "dsh-work",
 		trayStatus:            "DSH: {state}",
-		updateTitle:           "Check for Updates",
-		updateMessage:         "Update checking is unavailable.",
-		aboutTitle:            "About dsh-work",
-		aboutMessage:          "dsh-work\n\nA local desktop host for DeepSeek Harness.",
+		UpdateTitle:           "Check for Updates",
+		UpdateMessage:         "Update checking is unavailable.",
+		AboutTitle:            "About dsh-work",
+		AboutMessage:          "dsh-work\n\nA local desktop host for DeepSeek Harness.",
 		workspaceFailureTitle: "Workspace needs attention",
 		workspaceFailureBody:  "Open dsh-work to review the DSH workspace.",
 		lifecycleTitles: map[lifecycle.State]string{
@@ -65,20 +73,20 @@ var nativeLocaleCopies = map[dshworksettings.Locale]nativeLocaleCopy{
 			lifecycle.StateFailed:   "Needs attention",
 		},
 	},
-	dshworksettings.LocaleChinese: {
-		settings:              "设置",
-		openWorkspace:         "打开工作区",
-		help:                  "帮助",
-		checkUpdates:          "检查更新…",
-		about:                 "关于 dsh-work",
-		restartDSH:            "重启 DSH",
-		quit:                  "退出 dsh-work",
-		trayTooltip:           "dsh-work",
+	settings.LocaleChinese: {
+		Settings:              "设置",
+		OpenWorkspace:         "打开工作区",
+		Help:                  "帮助",
+		CheckUpdates:          "检查更新…",
+		About:                 "关于 dsh-work",
+		RestartDSH:            "重启 DSH",
+		Quit:                  "退出 dsh-work",
+		TrayTooltip:           "dsh-work",
 		trayStatus:            "DSH：{state}",
-		updateTitle:           "检查更新",
-		updateMessage:         "暂不支持检查更新。",
-		aboutTitle:            "关于 dsh-work",
-		aboutMessage:          "dsh-work\n\nDeepSeek Harness 的本地主机。",
+		UpdateTitle:           "检查更新",
+		UpdateMessage:         "暂不支持检查更新。",
+		AboutTitle:            "关于 dsh-work",
+		AboutMessage:          "dsh-work\n\nDeepSeek Harness 的本地主机。",
 		workspaceFailureTitle: "工作区需要处理",
 		workspaceFailureBody:  "打开 dsh-work 查看 DSH 工作区。",
 		lifecycleTitles: map[lifecycle.State]string{
@@ -101,20 +109,20 @@ var nativeLocaleCopies = map[dshworksettings.Locale]nativeLocaleCopy{
 			lifecycle.StateFailed:   "需要处理",
 		},
 	},
-	dshworksettings.LocaleJapanese: {
-		settings:              "設定",
-		openWorkspace:         "ワークスペースを開く",
-		help:                  "ヘルプ",
-		checkUpdates:          "更新を確認…",
-		about:                 "dsh-work について",
-		restartDSH:            "DSH を再起動",
-		quit:                  "dsh-work を終了",
-		trayTooltip:           "dsh-work",
+	settings.LocaleJapanese: {
+		Settings:              "設定",
+		OpenWorkspace:         "ワークスペースを開く",
+		Help:                  "ヘルプ",
+		CheckUpdates:          "更新を確認…",
+		About:                 "dsh-work について",
+		RestartDSH:            "DSH を再起動",
+		Quit:                  "dsh-work を終了",
+		TrayTooltip:           "dsh-work",
 		trayStatus:            "DSH：{state}",
-		updateTitle:           "更新を確認",
-		updateMessage:         "更新確認は利用できません。",
-		aboutTitle:            "dsh-work について",
-		aboutMessage:          "dsh-work\n\nDeepSeek Harness のローカルデスクトップホストです。",
+		UpdateTitle:           "更新を確認",
+		UpdateMessage:         "更新確認は利用できません。",
+		AboutTitle:            "dsh-work について",
+		AboutMessage:          "dsh-work\n\nDeepSeek Harness のローカルデスクトップホストです。",
 		workspaceFailureTitle: "ワークスペースを確認してください",
 		workspaceFailureBody:  "dsh-work を開いて DSH ワークスペースを確認してください。",
 		lifecycleTitles: map[lifecycle.State]string{
@@ -139,18 +147,28 @@ var nativeLocaleCopies = map[dshworksettings.Locale]nativeLocaleCopy{
 	},
 }
 
-func nativeLocaleCopyFor(locale dshworksettings.Locale) nativeLocaleCopy {
-	if value, ok := nativeLocaleCopies[locale]; ok {
+func LabelsFor(locale settings.Locale) Labels {
+	if value, ok := labelsByLocale[locale]; ok {
 		return value
 	}
-	return nativeLocaleCopies[dshworksettings.DefaultLocale]
+	return labelsByLocale[settings.DefaultLocale]
 }
 
-func nativeTrayStatus(locale dshworksettings.Locale, state lifecycle.State) string {
-	copy := nativeLocaleCopyFor(locale)
-	stateLabel, ok := copy.stateLabels[state]
+func TrayStatus(locale settings.Locale, state lifecycle.State) string {
+	labels := LabelsFor(locale)
+	stateLabel, ok := labels.stateLabels[state]
 	if !ok {
 		stateLabel = string(state)
 	}
-	return strings.Replace(copy.trayStatus, "{state}", stateLabel, 1)
+	return strings.Replace(labels.trayStatus, "{state}", stateLabel, 1)
+}
+
+func FailureNotification(locale settings.Locale) NotificationCopy {
+	labels := LabelsFor(locale)
+	return NotificationCopy{Title: labels.workspaceFailureTitle, Body: labels.workspaceFailureBody}
+}
+
+func LifecycleNotification(locale settings.Locale, state lifecycle.State) NotificationCopy {
+	labels := LabelsFor(locale)
+	return NotificationCopy{Title: labels.lifecycleTitles[state], Body: labels.lifecycleBodies[state]}
 }

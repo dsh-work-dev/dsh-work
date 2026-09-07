@@ -2,9 +2,11 @@
 
 package platform
 
-import "errors"
+import (
+	"errors"
 
-import "github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/dshmanager"
+)
 
 func newDependencies() Dependencies {
 	return Dependencies{
@@ -17,3 +19,11 @@ func newDependencies() Dependencies {
 func NewRuntimeInstaller(string) dshmanager.RuntimeInstaller {
 	return nil
 }
+
+func NewNodeReleaseCatalog(string) dshmanager.NodeReleaseCatalog { return nil }
+
+func NewDSHReleaseCatalog(string) dshmanager.DSHReleaseCatalog { return nil }
+
+func NewNodeInstaller(string) dshmanager.NodeInstaller { return nil }
+
+func NewNodeResolver(string) dshmanager.NodeResolver { return nil }

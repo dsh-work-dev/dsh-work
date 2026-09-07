@@ -22,11 +22,19 @@ type fakeExecutor struct {
 	err    error
 	path   string
 	args   []string
+	env    map[string]string
 }
 
-func (f *fakeExecutor) Run(_ context.Context, path string, args []string, _ map[string]string, _ string) (CommandResult, error) {
+func (f *fakeExecutor) Run(_ context.Context, path string, args []string, env map[string]string, _ string) (CommandResult, error) {
 	f.path = path
 	f.args = append([]string(nil), args...)
+	f.env = nil
+	if env != nil {
+		f.env = make(map[string]string, len(env))
+		for key, value := range env {
+			f.env[key] = value
+		}
+	}
 	return f.result, f.err
 }
 
@@ -51,6 +59,37 @@ func TestDiscoverRequiresExactPinnedVersion(t *testing.T) {
 	var failure lifecycle.Failure
 	if err == nil || !asFailure(err, &failure) || failure.Code != lifecycle.ErrorDSHUnsupportedVersion {
 		t.Fatalf("expected unsupported version failure, got %v", err)
+	}
+}
+
+func TestVerifyWithEnvironmentPassesChildToolchainOverlay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion}}
+	adapter := New(executor, SupportedVersion)
+	if err := adapter.VerifyWithEnvironment(context.Background(), path, SupportedVersion, map[string]string{"PATH": "managed-node"}); err != nil {
+		t.Fatalf("VerifyWithEnvironment() error = %v", err)
+	}
+	if executor.env["PATH"] != "managed-node" {
+		t.Fatalf("verification environment = %#v", executor.env)
+	}
+}
+
+func TestDiscoverSelectedPathUsesCatalogVersionInsteadOfFixtureVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh 2.4.6"}}
+	adapter := New(executor, SupportedVersion)
+	runtime, err := adapter.DiscoverSelectedPathWithEnvironment(context.Background(), path, "2.4.6", map[string]string{"PATH": "managed-node"})
+	if err != nil {
+		t.Fatalf("DiscoverSelectedPathWithEnvironment() error = %v", err)
+	}
+	if runtime.Version != "2.4.6" || executor.env["PATH"] != "managed-node" {
+		t.Fatalf("selected runtime = %#v env=%#v", runtime, executor.env)
 	}
 }
 
@@ -136,6 +175,59 @@ func TestBuildLaunchPlanUsesExplicitLoopbackPortAndDataDirectory(t *testing.T) {
 	}
 	if plan.Env["DSH_HOME"] == "" || plan.Env["DSH_HOME"] != dataDirectory || plan.WorkingDirectory != bootstrapDirectory || plan.ExpectedOrigin != "http://127.0.0.1:4567" {
 		t.Fatalf("unexpected launch plan: %+v", plan)
+	}
+}
+
+func TestBuildLaunchPlanAcceptsSelectedExactRuntimeVersion(t *testing.T) {
+	adapter := New(nil, SupportedVersion)
+	plan, err := adapter.BuildLaunchPlan(LaunchContext{
+		GenerationID: "generation", Runtime: Runtime{Path: `C:\tools\dsh-9.cmd`, Version: "9.8.7"},
+		BootstrapDirectory: t.TempDir(), DataDirectory: t.TempDir(), Profile: "web",
+		Workspace: workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired}, Port: 4567,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Executable != `C:\tools\dsh-9.cmd` {
+		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestVerifyUsesRequestedCatalogVersionRatherThanFixturePin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh 9.8.7"}}
+	adapter := New(executor, SupportedVersion)
+	if err := adapter.Verify(context.Background(), path, "9.8.7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Verify(context.Background(), path, "9.8.6"); err == nil {
+		t.Fatal("Verify() accepted exact version mismatch")
+	}
+}
+
+func TestBuildLaunchPlanCarriesOnlyTheRuntimeToolchainOverlay(t *testing.T) {
+	adapter := New(nil, SupportedVersion)
+	plan, err := adapter.BuildLaunchPlan(LaunchContext{
+		GenerationID: "generation",
+		Runtime: Runtime{
+			Path:    `C:\tools\dsh.cmd`,
+			Version: SupportedVersion,
+			Env:     map[string]string{"PATH": `C:\dsh-work\node`},
+		},
+		BootstrapDirectory: t.TempDir(),
+		DataDirectory:      filepath.Join(t.TempDir(), "dsh-data"),
+		Profile:            "web",
+		Workspace:          workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
+		Port:               4567,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Env["PATH"] != `C:\dsh-work\node` || plan.Env["DSH_HOME"] == "" {
+		t.Fatalf("launch environment = %#v", plan.Env)
 	}
 }
 

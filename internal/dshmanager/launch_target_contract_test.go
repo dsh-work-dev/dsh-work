@@ -2,6 +2,7 @@ package dshmanager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -41,6 +42,7 @@ func TestManagerPersistsOnlyRuntimeDataDirectoryAndProfile(t *testing.T) {
 
 	target := RunContext{
 		RuntimeID: "dsh-test",
+		Node:      NodeSelection{Kind: NodeSelectionSystem},
 		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 	}
 	if _, err := manager.SetConfigured(context.Background(), target); err != nil {
@@ -55,8 +57,15 @@ func TestManagerPersistsOnlyRuntimeDataDirectoryAndProfile(t *testing.T) {
 	if strings.Contains(contents, "workspace") {
 		t.Fatalf("persisted launch target contains workspace state: %s", contents)
 	}
-	if !strings.Contains(contents, "dataDirectoryId") || !strings.Contains(contents, "dataDirectories") {
+	if !strings.Contains(contents, "dataDirectoryId") || !strings.Contains(contents, "dataDirectories") || !strings.Contains(contents, `"version": "0.1.2-alpha.3"`) {
 		t.Fatalf("persisted launch target does not contain the new data-directory shape: %s", contents)
+	}
+	var persisted map[string]json.RawMessage
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("persisted launch target is invalid JSON: %v", err)
+	}
+	if _, exists := persisted["version"]; exists {
+		t.Fatalf("persisted launch target contains a state version: %s", contents)
 	}
 
 	snapshot, err := manager.Snapshot(context.Background())
@@ -68,29 +77,40 @@ func TestManagerPersistsOnlyRuntimeDataDirectoryAndProfile(t *testing.T) {
 	}
 }
 
-func TestFileStateStoreRejectsUnsupportedPreviousStateVersions(t *testing.T) {
+func TestFileStateStoreReadsSelectionWithoutStateVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manager.json")
-	for _, contents := range []string{
-		`{"version":1,"homes":[],"desired":{"runtimeId":"dsh-test","profile":{"homeId":"dsh-work","name":"web"},"workspace":"project"}}`,
-		`{"version":2,"dataDirectories":[{"id":"dsh-work","name":"dsh-work","path":"C:/dsh-work","ownership":"dsh-work"}],"runtimes":[],"desired":{"runtimeId":"dsh-test","profile":{"dataDirectoryId":"dsh-work","name":"web"}}}`,
-	} {
-		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := (FileStateStore{}).Load(context.Background(), path)
-		if err == nil {
-			t.Fatal("Load() error = nil, want unsupported previous state version")
-		}
-		var failure lifecycle.Failure
-		if !errors.As(err, &failure) || failure.Code != lifecycle.ErrorManagerStateInvalid {
-			t.Fatalf("Load() error = %#v, want manager-state-invalid failure", err)
-		}
+	contents := `{"dataDirectories":[{"id":"dsh-work","name":"dsh-work","path":"C:/dsh-work","ownership":"dsh-work","futureDirectoryField":true}],"runtimes":[],"configured":{"runtimeId":"dsh-test","profile":{"dataDirectoryId":"dsh-work","name":"web"},"futureContextField":{"anything":"goes"}},"futureTopLevelField":[1,2,3]}`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := (FileStateStore{}).Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want compatible state", err)
+	}
+	if state == nil || state.Configured == nil || state.Configured.Node.Kind != NodeSelectionSystem {
+		t.Fatalf("loaded state = %#v, want selection and system Node default", state)
+	}
+}
+
+func TestFileStateStoreReadsForwardStateFieldsNeededByTheCurrentCatalog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manager.json")
+	contents := `{"dataDirectories":[{"id":"dsh-work","name":"dsh-work","path":"C:/dsh-work","ownership":"dsh-work"}],"runtimes":[{"id":"dsh-test","version":"0.1.2-alpha.3","path":"C:/dsh.cmd","source":"development-fixture","toolchain":"none","installSource":"none","installed":true,"removable":false}],"nodes":[],"dshReleases":[],"pluginProvenance":[],"configured":{"runtimeId":"dsh-test","node":{"kind":"system"},"profile":{"dataDirectoryId":"dsh-work","name":"web"}}}`
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := (FileStateStore{}).Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want current catalog fields to be readable", err)
+	}
+	if state == nil || len(state.Runtimes) != 1 || state.Runtimes[0].ID != "dsh-test" || state.Configured == nil || state.Configured.Node.Kind != NodeSelectionSystem {
+		t.Fatalf("loaded state = %#v, want runtime and configured selection", state)
 	}
 }
 
 func TestFileStateStoreRejectsAProfileWithoutDataDirectoryIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manager.json")
-	if err := os.WriteFile(path, []byte(`{"version":3,"configured":{"runtimeId":"dsh-test","profile":{"name":"web"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"configured":{"runtimeId":"dsh-test","profile":{"name":"web"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,18 +124,33 @@ func TestFileStateStoreRejectsAProfileWithoutDataDirectoryIdentity(t *testing.T)
 	}
 }
 
-func TestFileStateStoreRejectsWorkspaceFieldsInTheNewStateShape(t *testing.T) {
+func TestFileStateStoreRejectsAConfiguredRuntimeWithoutRequiredIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manager.json")
-	if err := os.WriteFile(path, []byte(`{"version":3,"dataDirectories":[],"workspace":"project"}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"runtimes":[{"id":"dsh-test"}],"configured":{"runtimeId":"dsh-test","node":{"kind":"system"},"profile":{"dataDirectoryId":"dsh-work","name":"web"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := (FileStateStore{}).Load(context.Background(), path)
 	if err == nil {
-		t.Fatal("Load() error = nil, want workspace field rejection")
+		t.Fatal("Load() error = nil, want malformed runtime rejection")
 	}
 	var failure lifecycle.Failure
 	if !errors.As(err, &failure) || failure.Code != lifecycle.ErrorManagerStateInvalid {
 		t.Fatalf("Load() error = %v, want manager state invalid", err)
+	}
+}
+
+func TestFileStateStoreIgnoresUnknownStateFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manager.json")
+	if err := os.WriteFile(path, []byte(`{"version":4,"dataDirectories":[],"workspace":"project","future":{"state":"ignored"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := (FileStateStore{}).Load(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Load() error = %v, want unknown fields to be ignored", err)
+	}
+	if state == nil {
+		t.Fatalf("loaded state = %#v, want readable state", state)
 	}
 }

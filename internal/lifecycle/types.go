@@ -35,6 +35,64 @@ const (
 	PhaseFailed        Phase = "failed"
 )
 
+// RuntimePreparationState is the safe, typed projection of an explicit or
+// first-use DSH runtime acquisition. It contains no command lines, paths or
+// raw package-manager output.
+type RuntimePreparationState string
+
+const (
+	RuntimePreparationIdle               RuntimePreparationState = "idle"
+	RuntimePreparationResolvingToolchain RuntimePreparationState = "resolving-toolchain"
+	RuntimePreparationAcquiringNode      RuntimePreparationState = "acquiring-node"
+	RuntimePreparationAcquiringDSH       RuntimePreparationState = "acquiring-dsh"
+	RuntimePreparationVerifying          RuntimePreparationState = "verifying"
+	RuntimePreparationInstalled          RuntimePreparationState = "installed"
+	RuntimePreparationCancelled          RuntimePreparationState = "cancelled"
+	RuntimePreparationFailed             RuntimePreparationState = "failed"
+)
+
+// RuntimePreparationOperation identifies the user-relevant operation in a
+// preparation state. The frontend maps these values to localized copy.
+type RuntimePreparationOperation string
+
+const (
+	RuntimePreparationOperationNone         RuntimePreparationOperation = "none"
+	RuntimePreparationOperationDetectNode   RuntimePreparationOperation = "detect-node"
+	RuntimePreparationOperationDetectPNPM   RuntimePreparationOperation = "detect-pnpm"
+	RuntimePreparationOperationDetectNPM    RuntimePreparationOperation = "detect-npm"
+	RuntimePreparationOperationDownloadNode RuntimePreparationOperation = "download-node"
+	RuntimePreparationOperationInstallDSH   RuntimePreparationOperation = "install-dsh"
+	RuntimePreparationOperationVerify       RuntimePreparationOperation = "verify"
+	RuntimePreparationOperationCleanup      RuntimePreparationOperation = "cleanup"
+)
+
+// RuntimePreparationSource records which approved source supplied the current
+// artifact. A mirror is only exposed after the official source was unreachable.
+type RuntimePreparationSource string
+
+const (
+	RuntimePreparationSourceNone     RuntimePreparationSource = "none"
+	RuntimePreparationSourceLocal    RuntimePreparationSource = "local"
+	RuntimePreparationSourceOfficial RuntimePreparationSource = "official"
+	RuntimePreparationSourceMirror   RuntimePreparationSource = "mirror"
+)
+
+// RuntimePreparation is a bounded status projection for the trusted Host UI.
+// TotalBytes is meaningful only when HasTotal is true; zero never means that a
+// download is complete.
+type RuntimePreparation struct {
+	State         RuntimePreparationState     `json:"state"`
+	Operation     RuntimePreparationOperation `json:"operation"`
+	TargetVersion string                      `json:"targetVersion,omitempty"`
+	Toolchain     string                      `json:"toolchain,omitempty"`
+	Source        RuntimePreparationSource    `json:"source"`
+	ReceivedBytes int64                       `json:"receivedBytes,omitempty"`
+	TotalBytes    int64                       `json:"totalBytes,omitempty"`
+	HasTotal      bool                        `json:"hasTotal"`
+	CanCancel     bool                        `json:"canCancel"`
+	Error         *Failure                    `json:"error,omitempty"`
+}
+
 // ErrorCode is the stable dsh-work error vocabulary. Dependency-specific detail
 // stays at the Adapter boundary and is never used as a UI control protocol.
 type ErrorCode string
@@ -61,6 +119,10 @@ const (
 	ErrorProfileInvalid             ErrorCode = "PROFILE_INVALID"
 	ErrorProfileInUse               ErrorCode = "PROFILE_IN_USE"
 	ErrorProfileRenameFailed        ErrorCode = "PROFILE_RENAME_FAILED"
+	ErrorProfileCloneFailed         ErrorCode = "PROFILE_CLONE_FAILED"
+	ErrorProfileDeleteFailed        ErrorCode = "PROFILE_DELETE_FAILED"
+	ErrorProfileBackupFailed        ErrorCode = "PROFILE_BACKUP_FAILED"
+	ErrorProfilePreparationFailed   ErrorCode = "PROFILE_PREPARATION_FAILED"
 	ErrorWorkspaceInvalid           ErrorCode = "WORKSPACE_INVALID"
 	ErrorRuntimeInUse               ErrorCode = "RUNTIME_IN_USE"
 	ErrorRuntimeProfileIncompatible ErrorCode = "RUNTIME_PROFILE_INCOMPATIBLE"
@@ -98,15 +160,16 @@ func (f Failure) Error() string {
 
 // Status is the immutable read model consumed by the frontend.
 type Status struct {
-	State         State                     `json:"state"`
-	Phase         Phase                     `json:"phase"`
-	GenerationID  string                    `json:"generationId,omitempty"`
-	WorkspaceURL  string                    `json:"workspaceUrl,omitempty"`
-	Workspace     *workspacecontext.Context `json:"workspace,omitempty"`
-	Error         *Failure                  `json:"error,omitempty"`
-	CanRetry      bool                      `json:"canRetry"`
-	CanCancel     bool                      `json:"canCancel"`
-	CorrelationID string                    `json:"correlationId,omitempty"`
+	State              State                     `json:"state"`
+	Phase              Phase                     `json:"phase"`
+	GenerationID       string                    `json:"generationId,omitempty"`
+	WorkspaceURL       string                    `json:"workspaceUrl,omitempty"`
+	Workspace          *workspacecontext.Context `json:"workspace,omitempty"`
+	RuntimePreparation *RuntimePreparation       `json:"runtimePreparation,omitempty"`
+	Error              *Failure                  `json:"error,omitempty"`
+	CanRetry           bool                      `json:"canRetry"`
+	CanCancel          bool                      `json:"canCancel"`
+	CorrelationID      string                    `json:"correlationId,omitempty"`
 }
 
 // TransitionError identifies an illegal state transition without exposing
@@ -236,7 +299,28 @@ func (m *Machine) MarkReady(generationID, workspaceURL string) (Status, error) {
 	m.status.State = StateReady
 	m.status.Phase = PhaseWorkspace
 	m.status.WorkspaceURL = workspaceURL
+	m.status.RuntimePreparation = nil
 	m.status.CanCancel = true
+	return cloneStatus(m.status), nil
+}
+
+// SetRuntimePreparation updates the typed acquisition projection without
+// allowing the frontend or package-manager output to become lifecycle truth.
+func (m *Machine) SetRuntimePreparation(generationID string, preparation RuntimePreparation) (Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.checkGeneration(generationID); err != nil {
+		return cloneStatus(m.status), err
+	}
+	if m.status.State != StateStarting {
+		return cloneStatus(m.status), &TransitionError{From: m.status.State, To: m.status.State, Why: "runtime preparation is only projected during startup"}
+	}
+	copy := preparation
+	if preparation.Error != nil {
+		failure := *preparation.Error
+		copy.Error = &failure
+	}
+	m.status.RuntimePreparation = &copy
 	return cloneStatus(m.status), nil
 }
 
@@ -305,6 +389,7 @@ func (m *Machine) CompleteStop(generationID string, failure *Failure) (Status, e
 	m.status.Phase = PhaseIdle
 	m.status.WorkspaceURL = ""
 	m.status.Workspace = nil
+	m.status.RuntimePreparation = nil
 	m.status.Error = nil
 	m.status.CanRetry = false
 	m.status.CanCancel = false
@@ -370,6 +455,14 @@ func cloneStatus(status Status) Status {
 	if status.Error != nil {
 		failure := *status.Error
 		copy.Error = &failure
+	}
+	if status.RuntimePreparation != nil {
+		preparation := *status.RuntimePreparation
+		if status.RuntimePreparation.Error != nil {
+			failure := *status.RuntimePreparation.Error
+			preparation.Error = &failure
+		}
+		copy.RuntimePreparation = &preparation
 	}
 	return copy
 }

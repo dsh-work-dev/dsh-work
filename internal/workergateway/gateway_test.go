@@ -82,6 +82,37 @@ func TestGatewayBootstrapsDSHSessionAndProxiesTrustedOrigin(t *testing.T) {
 		t.Fatalf("untrusted origin status = %s, want 403", untrustedResponse.Status)
 	}
 
+	missingOriginProxy, err := http.NewRequest(http.MethodPost, origin+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingOriginProxyResponse, err := client.Do(missingOriginProxy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = missingOriginProxyResponse.Body.Close()
+	if missingOriginProxyResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("missing-origin proxy status = %s, want 403", missingOriginProxyResponse.Status)
+	}
+
+	missingOriginExternal, err := http.NewRequest(http.MethodPost, origin+externalPath+"?url="+url.QueryEscape("https://example.com"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingOriginExternalResponse, err := client.Do(missingOriginExternal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = missingOriginExternalResponse.Body.Close()
+	if missingOriginExternalResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("missing-origin external handoff status = %s, want 403", missingOriginExternalResponse.Status)
+	}
+	select {
+	case value := <-external:
+		t.Fatalf("missing-origin request reached external callback with %q", value)
+	default:
+	}
+
 	externalRequest, err := http.NewRequest(http.MethodPost, origin+externalPath+"?url="+url.QueryEscape("https://example.com"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +146,12 @@ func TestGatewayRejectsInvalidUpstreamLaunchURL(t *testing.T) {
 		if _, err := New().Start(context.Background(), value); err == nil {
 			t.Fatalf("Start(%q) unexpectedly succeeded", value)
 		}
+	}
+}
+
+func TestGatewayReportsUnavailableExternalHandoff(t *testing.T) {
+	if err := New().externalHandler("https://example.com"); err == nil {
+		t.Fatal("externalHandler() error = nil, want unavailable error")
 	}
 }
 

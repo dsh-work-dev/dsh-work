@@ -41,20 +41,20 @@
             </li>
             <li data-startup-step="runtime">
               <span class="step-index">02</span>
-              <span><strong data-i18n="host.checkRuntime">Check DSH runtime</strong><small data-i18n="host.verifyRuntime">Verify the compatible local version.</small></span>
+              <span><strong data-i18n="host.checkRuntime">Check DSH runtime</strong><small data-i18n="host.verifyRuntime">Verify the selected local version.</small></span>
             </li>
-            <li data-startup-step="worker">
-              <span class="step-index">03</span>
-              <span><strong data-i18n="host.startDsh">Start DSH</strong><small data-i18n="host.startSelectedDsh">Start the selected DSH runtime.</small></span>
-            </li>
-            <li data-startup-step="readiness">
-              <span class="step-index">04</span>
-              <span><strong data-i18n="host.waitReadiness">Wait for readiness</strong><small data-i18n="host.waitDsh">Wait for DSH to respond.</small></span>
-            </li>
-            <li data-startup-step="workspace">
-              <span class="step-index">05</span>
-              <span><strong data-i18n="host.openWorkspace">Open workspace</strong><small data-i18n="host.openDshWorkspace">Open the DSH workspace.</small></span>
-            </li>
+          <li data-startup-step="worker">
+            <span class="step-index">03</span>
+            <span><strong data-i18n="host.startDsh">Start DSH</strong><small data-i18n="host.startSelectedDsh">Start the selected DSH runtime.</small></span>
+          </li>
+          <li data-startup-step="readiness">
+            <span class="step-index">04</span>
+            <span><strong data-i18n="host.waitReadiness">Wait for readiness</strong><small data-i18n="host.waitDsh">Wait for DSH to respond.</small></span>
+          </li>
+          <li data-startup-step="workspace">
+            <span class="step-index">05</span>
+            <span><strong data-i18n="host.openWorkspace">Open workspace</strong><small data-i18n="host.openDshWorkspace">Open the DSH workspace.</small></span>
+          </li>
           </ol>
           <div class="progress-track" id="progress-track" role="progressbar" data-i18n-aria-label="host.startupProgress" aria-label="Workspace startup progress" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0" aria-valuetext="Preparing">
             <span></span>
@@ -87,6 +87,7 @@
 
       <footer class="actions" data-i18n-aria-label="host.actions" aria-label="Host actions">
         <button class="button button-secondary" id="cancel" data-i18n="common.cancel" type="button">Cancel</button>
+        <button class="button button-primary" id="open-runtime-settings" data-i18n="action.openRuntimeSettings" type="button" hidden>Open runtime settings</button>
         <button class="button button-primary" id="retry" data-i18n="common.retry" type="button" hidden>Retry</button>
         <button class="button button-quiet" id="quit" data-i18n="common.quit" type="button">Quit</button>
       </footer>
@@ -102,6 +103,7 @@
           <button class="manager-nav-item" data-manager-section="settings" data-i18n="manager.general" type="button">General</button>
           <button class="manager-nav-item" data-manager-section="notifications" data-i18n="manager.notifications" type="button">Notifications</button>
           <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles</button>
+          <button class="manager-nav-item" data-manager-section="plugins" data-i18n="manager.plugins" type="button">Plugins</button>
           <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
           <button class="manager-nav-item" data-manager-section="data-directories" data-i18n="manager.dataDirectories" type="button">DSH data directories</button>
         </nav>
@@ -156,38 +158,76 @@
               </dl>
             </section>
           </div>
+          <section id="manager-switch-failure" class="runtime-preparation" aria-live="polite" hidden>
+            <p class="status-label" data-i18n="recovery.title">Run context needs attention</p>
+            <p id="manager-switch-failure-detail" class="status-detail"></p>
+            <div class="manager-actions">
+              <button id="manager-switch-retry" class="button button-primary" data-i18n="common.retry" type="button">Retry</button>
+              <button id="manager-switch-restore" class="button button-secondary" data-i18n="recovery.restore" type="button">Restore known good</button>
+            </div>
+          </section>
         </section>
 
         <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
+          <section class="profile-current-card" aria-live="polite">
+            <p class="card-label" data-i18n="profiles.current">Current profile</p>
+            <strong id="manager-current-profile-summary" class="selected-profile" data-i18n="profiles.noCurrent">No current profile</strong>
+            <p id="manager-current-profile-status" class="manager-note" data-i18n="profiles.currentHint">The active DSH profile appears here.</p>
+          </section>
           <div class="profiles-layout">
             <div class="profile-directory">
               <div id="manager-profiles" class="manager-list"></div>
             </div>
-            <div class="plugin-editor">
+            <div class="profile-editor">
               <div id="manager-profile-empty" class="profile-empty">
                 <p class="card-label" data-i18n="field.profile">Profile</p>
-                <p class="manager-empty" data-i18n="profiles.choose">Choose a profile to manage its plugins.</p>
+                <p class="manager-empty" data-i18n="profiles.choose">Choose a profile to manage its settings.</p>
               </div>
               <div id="manager-profile-detail" hidden>
                 <div class="profile-detail-heading">
                   <div>
                     <p class="card-label" data-i18n="field.profile">Profile</p>
                     <h2 id="manager-selected-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</h2>
-                    <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile to manage its plugins.</p>
+                    <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile to manage its settings.</p>
                   </div>
                 </div>
                 <div class="profile-rename-row">
                   <label><span data-i18n="profiles.name">Profile name</span><input id="manager-profile-name" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
                   <button class="button button-secondary" id="manager-profile-rename" data-i18n="action.rename" type="button">Rename</button>
                 </div>
-                <div class="plugin-management">
-                  <div class="subheading"><strong data-i18n="profiles.plugins">Plugins</strong></div>
-                  <div id="manager-profile-plugins" class="plugin-list"></div>
-                  <div class="plugin-install-row">
-                    <label><span data-i18n="profiles.addPlugin">Add plugin</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-                    <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
-                  </div>
+                <div class="profile-actions">
+                  <button class="button button-secondary" id="manager-profile-clone" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button>
+                  <button class="button button-secondary" id="manager-profile-backup" data-context-mutation="true" data-i18n="action.backup" type="button">Backup</button>
+                  <button class="button button-danger" id="manager-profile-delete" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="manager-section-plugins" class="manager-section" data-manager-panel="plugins" aria-labelledby="plugins-title" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2 id="plugins-title" data-i18n="manager.plugins">Plugins</h2>
+              <p class="manager-note" data-i18n="profiles.pluginsScope">Plugins are shown for the current profile.</p>
+            </div>
+          </div>
+          <div id="manager-plugin-empty" class="profile-empty">
+            <p class="card-label" data-i18n="field.profile">Profile</p>
+            <p class="manager-empty" data-i18n="profiles.noCurrent">No current profile</p>
+          </div>
+          <div id="manager-plugin-detail" class="plugin-editor" hidden>
+            <div class="profile-detail-heading">
+              <p class="card-label" data-i18n="field.profile">Profile</p>
+              <h2 id="manager-plugin-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</h2>
+              <p id="manager-plugin-scope-note" class="manager-note" data-i18n="profiles.pluginsReadOnly">View plugins only</p>
+            </div>
+            <div class="plugin-management">
+              <div class="subheading"><strong data-i18n="profiles.plugins">Plugins</strong></div>
+              <div id="manager-profile-plugins" class="plugin-list"></div>
+              <div class="plugin-install-row">
+                <label><span data-i18n="profiles.addPlugin">Add plugin</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
+                <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
               </div>
             </div>
           </div>
@@ -196,14 +236,46 @@
         <section id="manager-section-runtimes" class="manager-section" data-manager-panel="runtimes" aria-labelledby="runtimes-title" hidden>
           <div class="panel-heading">
             <div>
-              <h2 id="runtimes-title" data-i18n="runtimes.installedVersions">Installed versions</h2>
+              <h2 id="runtimes-title" data-i18n="runtimes.dsh">DSH runtimes</h2>
             </div>
           </div>
           <div class="runtime-install-card">
-            <label><span data-i18n="field.version">Version</span><input id="manager-runtime-version" data-i18n-placeholder="placeholder.runtimeVersion" type="text" placeholder="0.1.2-alpha.3" autocomplete="off" /></label>
-            <button class="button button-primary" id="manager-runtime-install" data-i18n="action.install" type="button">Install</button>
+            <label><span data-i18n="field.version">Version</span><select id="manager-runtime-version"></select></label>
+            <button class="button button-secondary" id="manager-dsh-refresh" data-i18n="action.refresh" type="button">Refresh</button>
+            <button class="button button-primary" id="manager-runtime-install" data-i18n="action.download" type="button">Download</button>
           </div>
+          <section id="manager-dsh-preparation" class="runtime-preparation" aria-live="polite" aria-atomic="true" hidden>
+            <div class="runtime-preparation-heading">
+              <div>
+                <p class="status-label" data-i18n="runtimes.dshPreparation">DSH download</p>
+                <p id="manager-dsh-preparation-detail" class="status-detail" data-i18n="runtimes.preparing">Preparing the download.</p>
+              </div>
+              <button class="button button-secondary button-compact" id="manager-dsh-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button>
+            </div>
+            <div id="manager-dsh-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing">
+              <span id="manager-dsh-preparation-progress-fill"></span>
+            </div>
+            <p id="manager-dsh-preparation-meta" class="manager-note"></p>
+          </section>
           <div id="manager-runtimes" class="manager-list"></div>
+          <div class="panel-heading runtime-subheading"><div><h2 data-i18n="runtimes.node">Node runtimes</h2></div></div>
+          <div class="runtime-install-card node-install-card">
+            <button class="button button-primary" id="manager-node-install" data-i18n="runtimes.downloadLatestNode" type="button">Download latest stable</button>
+          </div>
+          <section id="manager-node-preparation" class="runtime-preparation" aria-live="polite" aria-atomic="true" hidden>
+            <div class="runtime-preparation-heading">
+              <div>
+                <p class="status-label" data-i18n="runtimes.nodePreparation">Node download</p>
+                <p id="manager-node-preparation-detail" class="status-detail" data-i18n="runtimes.preparing">Preparing the download.</p>
+              </div>
+              <button class="button button-secondary button-compact" id="manager-node-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button>
+            </div>
+            <div id="manager-node-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing">
+              <span id="manager-node-preparation-progress-fill"></span>
+            </div>
+            <p id="manager-node-preparation-meta" class="manager-note"></p>
+          </section>
+          <div id="manager-nodes" class="manager-list"></div>
         </section>
 
         <section id="manager-section-data-directories" class="manager-section" data-manager-panel="data-directories" aria-labelledby="data-directories-title" hidden>
@@ -232,12 +304,17 @@
           <div class="settings-block launch-settings">
             <div class="manager-grid">
               <label><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
+              <label><span data-i18n="field.node">Node</span><select id="manager-node"></select></label>
               <label><span data-i18n="field.dataDirectory">Data directory</span><select id="manager-data-directory"></select></label>
               <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
             </div>
             <p class="manager-note" data-i18n="general.runContextImmediate">Changes restart DSH immediately.</p>
           </div>
           <div class="settings-list">
+            <div class="setting-row">
+              <div class="setting-copy"><strong data-i18n="general.automaticRollback">Automatically restore the last working runtime</strong></div>
+              <div class="setting-control"><label class="switch" for="settings-automatic-runtime-rollback"><input id="settings-automatic-runtime-rollback" type="checkbox" role="switch" /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span></label></div>
+            </div>
             <div class="setting-row">
               <div class="setting-copy">
                 <strong data-i18n="general.closeToTray">Close to tray</strong>

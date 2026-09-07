@@ -21,6 +21,10 @@ export function GetSettings(): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(750465362);
 }
 
+export function SetAutomaticRuntimeRollback(enabled: boolean): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(88395438, enabled);
+}
+
 export function SetCloseToTray(enabled: boolean): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(217614504, enabled);
 }

@@ -22,12 +22,14 @@ function settingsErrorMessage(error: unknown, fallback: string): string {
 
 export function mountSettings(setFeedback: Feedback) {
   const toggle = document.getElementById("settings-close-to-tray") as HTMLInputElement;
+  const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLInputElement;
   const localeSelect = document.getElementById("settings-locale") as HTMLSelectElement;
   const status = document.getElementById("settings-close-to-tray-status") as HTMLParagraphElement;
   let savedLocale = normalizeLocale(localeSelect.value);
 
   function render(values: Values) {
     toggle.checked = values.closeToTray;
+    rollbackToggle.checked = values.automaticRuntimeRollback;
     localeSelect.value = normalizeLocale(values.locale);
     savedLocale = normalizeLocale(values.locale);
     status.textContent = "";
@@ -66,6 +68,20 @@ export function mountSettings(setFeedback: Feedback) {
     } finally {
       toggle.disabled = false;
     }
+  })());
+
+  rollbackToggle.addEventListener("change", () => void (async () => {
+	const previous = !rollbackToggle.checked;
+	rollbackToggle.disabled = true;
+	try {
+		render(await SettingsService.SetAutomaticRuntimeRollback(rollbackToggle.checked));
+		setFeedback("");
+	} catch (error) {
+		rollbackToggle.checked = previous;
+		setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
+	} finally {
+		rollbackToggle.disabled = false;
+	}
   })());
 
   localeSelect.addEventListener("change", () => void (async () => {

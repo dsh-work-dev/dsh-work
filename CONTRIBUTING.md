@@ -89,8 +89,9 @@ bin\dsh-work.exe plugin list --data-directory dsh-work --profile web
 - Give every process, goroutine, timer, subscription and buffer one owner and a
   bounded lifetime.
 - Propagate cancellation and verify cleanup on every terminal path.
-- Preserve user-owned DSH data by default. Version and safely replace persisted
-  dsh-work state.
+- Preserve user-owned DSH data by default. Safely replace persisted dsh-work
+  state; the manager State follows the field-compatible contract in ADR-0009,
+  while global Host preferences remain versioned.
 - Never expose arbitrary native methods to WebView content or log credentials,
   cookies, sensitive form values or full page content.
 - Put platform differences inside platform adapters and report unsupported
@@ -127,6 +128,8 @@ Before review, confirm that:
 - observable behavior and accepted documentation agree;
 - boundary or dependency decisions are reflected in `docs/decisions.md`;
 - cancellation, failure and cleanup paths are tested;
-- persisted or wire-format changes are versioned or explicitly pre-release;
+- persisted or wire-format changes document their compatibility contract;
+  versioned contracts carry a marker, while explicitly field-compatible
+  unversioned contracts are recorded in the decisions register;
 - logs, diagnostics and fixtures contain no sensitive data;
 - the affected platform and interface states have appropriate evidence.

@@ -40,6 +40,7 @@ type WorkerGateway interface {
 // an unexpected process exit cannot race a profile write.
 type ProfilePluginManager interface {
 	InstallPlugin(context.Context, dshmanager.PluginInstallRequest) (dshmanager.PluginResult, error)
+	UpgradePlugin(context.Context, dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error)
 	RemovePlugin(context.Context, dshmanager.PluginRemoveRequest) (dshmanager.PluginResult, error)
 }
 
@@ -60,16 +61,26 @@ type RunContextManager interface {
 	EndRunContextSwitch(context.Context) error
 	CommitCurrent(context.Context, *dshmanager.RunContext) (dshmanager.Snapshot, error)
 	ClearCurrent(context.Context) (dshmanager.Snapshot, error)
+	RecordSwitchAttempt(context.Context, dshmanager.SwitchAttempt, bool) (dshmanager.Snapshot, error)
+	ClearSwitchAttempt(context.Context) (dshmanager.Snapshot, error)
+}
+
+// RunContextPreparer is an optional switch-time seam. A manager may use the
+// resolved DSH runtime and profile to rebuild missing generated dependencies
+// before Host stops the current Worker.
+type RunContextPreparer interface {
+	PrepareRunContext(context.Context, dshmanager.ResolvedLaunch) error
 }
 
 type Dependencies struct {
-	DSH               DSHAdapter
-	Manager           LaunchManager
-	ManagerError      error
-	WorkspaceResolver workspacecontext.Resolver
-	Supervisor        supervisor.Adapter
-	Gateway           WorkerGateway
-	PlatformError     error
+	DSH                      DSHAdapter
+	Manager                  LaunchManager
+	ManagerError             error
+	WorkspaceResolver        workspacecontext.Resolver
+	Supervisor               supervisor.Adapter
+	Gateway                  WorkerGateway
+	PlatformError            error
+	AutomaticRuntimeRollback func() bool
 }
 
 type Config struct {
@@ -382,6 +393,12 @@ func cloneResolvedLaunch(launch *dshmanager.ResolvedLaunch) *dshmanager.Resolved
 		return nil
 	}
 	copy := *launch
+	if launch.Node.ChildEnvironment != nil {
+		copy.Node.ChildEnvironment = make(map[string]string, len(launch.Node.ChildEnvironment))
+		for key, value := range launch.Node.ChildEnvironment {
+			copy.Node.ChildEnvironment[key] = value
+		}
+	}
 	return &copy
 }
 
@@ -574,6 +591,16 @@ func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemove
 	return manager.RemovePlugin(ctx, request)
 }
 
+func (h *Host) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error) {
+	h.workerBoundaryMu.Lock()
+	defer h.workerBoundaryMu.Unlock()
+	manager, failure := h.profilePluginManagerForMutation()
+	if failure != nil {
+		return dshmanager.PluginResult{}, failure
+	}
+	return manager.UpgradePlugin(ctx, request)
+}
+
 func (h *Host) profilePluginManagerForMutation() (ProfilePluginManager, *lifecycle.Failure) {
 	if failure := h.readyWorkerForPluginMutation(); failure != nil {
 		return nil, failure
@@ -671,6 +698,10 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 	}
 	h.switching = true
 	knownGood := h.knownGoodRunContextLocked()
+	automaticRollback := true
+	if h.deps.AutomaticRuntimeRollback != nil {
+		automaticRollback = h.deps.AutomaticRuntimeRollback()
+	}
 	h.mu.Unlock()
 
 	switchTimeout := h.config.ShutdownTimeout +
@@ -706,18 +737,23 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 	}()
 	resolved, err := manager.ResolveLaunch(ctx, dshmanager.LaunchRequest{
 		RuntimeID: target.RuntimeID,
+		Node:      target.Node,
 		Profile:   target.Profile,
 	})
 	if err != nil {
-		snapshot, snapshotErr := manager.Snapshot(context.Background())
-		if snapshotErr != nil {
-			return dshmanager.Snapshot{}, err
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptResolving, err, automaticRollback, dshmanager.RollbackNotNeeded, nil, false)
+	}
+	preparer, hasPreparer := manager.(RunContextPreparer)
+	activeRun := h.activeRun()
+	prepareBeforeStop := activeRun == nil || !activeRun.usesProfile(resolved.Target.Profile)
+	if hasPreparer && prepareBeforeStop {
+		if err := preparer.PrepareRunContext(switchCtx, resolved); err != nil {
+			return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptResolving, err, automaticRollback, dshmanager.RollbackNotNeeded, nil, false)
 		}
-		return snapshot, err
 	}
 
-	if run := h.activeRun(); run != nil {
-		if failure := h.stopRun(switchCtx, run); failure != nil {
+	if activeRun != nil {
+		if failure := h.stopRun(switchCtx, activeRun); failure != nil {
 			snapshot, snapshotErr := manager.Snapshot(context.Background())
 			if snapshotErr != nil {
 				return snapshot, failure
@@ -726,15 +762,25 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 		}
 	}
 
-	candidateStatus, candidateFailure, beginErr := h.runResolvedContext(switchCtx, resolved)
-	if beginErr != nil {
-		// The previous Worker has already been stopped at this point. Treat a
-		// candidate generation-boundary failure exactly like any other
-		// candidate startup failure so the known-good context is restored.
-		candidateFailure = h.failureFor(beginErr, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
+	var candidateStatus lifecycle.Status
+	var candidateFailure *lifecycle.Failure
+	if hasPreparer && !prepareBeforeStop {
+		if preparationErr := preparer.PrepareRunContext(switchCtx, resolved); preparationErr != nil {
+			candidateFailure = h.failureFor(preparationErr, lifecycle.ErrorProfilePreparationFailed, "The candidate DSH profile could not be prepared.", true)
+		}
+	}
+	if candidateFailure == nil {
+		var beginErr error
+		candidateStatus, candidateFailure, beginErr = h.runResolvedContext(switchCtx, resolved)
+		if beginErr != nil {
+			// The previous Worker has already been stopped at this point. Treat a
+			// candidate generation-boundary failure exactly like any other
+			// candidate startup failure so the known-good context is restored.
+			candidateFailure = h.failureFor(beginErr, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
+		}
 	}
 	if candidateFailure == nil && candidateStatus.State == lifecycle.StateReady {
-		snapshot, snapshotErr := manager.Snapshot(context.Background())
+		snapshot, snapshotErr := manager.ClearSwitchAttempt(context.Background())
 		if snapshotErr != nil {
 			return dshmanager.Snapshot{}, snapshotErr
 		}
@@ -743,41 +789,88 @@ func (h *Host) SwitchRunContext(ctx context.Context, target dshmanager.RunContex
 	if candidateFailure == nil {
 		candidateFailure = failureFromStatus(candidateStatus)
 	}
+	if !automaticRollback {
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, true)
+	}
 	if knownGood == nil {
 		knownGood = knownGoodRunContext(manager)
 	}
 	if knownGood == nil {
-		snapshot, snapshotErr := manager.Snapshot(context.Background())
-		if snapshotErr != nil {
-			return snapshot, candidateFailure
-		}
-		return snapshot, candidateFailure
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, true, dshmanager.RollbackUnavailable, nil, false)
 	}
 
 	rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), switchTimeout)
 	defer cancelRollback()
 	rollbackLaunch, rollbackErr := manager.ResolveLaunch(rollbackCtx, dshmanager.LaunchRequest{
 		RuntimeID: knownGood.RuntimeID,
+		Node:      knownGood.Node,
 		Profile:   knownGood.Profile,
 	})
 	if rollbackErr != nil {
+		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, rollbackErr, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, rollbackErr)
 	}
 	rollbackStatus, rollbackFailure, beginErr := h.runResolvedContext(rollbackCtx, rollbackLaunch)
 	if beginErr != nil {
+		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, beginErr, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, beginErr)
 	}
 	if rollbackFailure != nil || rollbackStatus.State != lifecycle.StateReady {
 		if rollbackFailure == nil {
 			rollbackFailure = failureFromStatus(rollbackStatus)
 		}
+		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, rollbackFailure, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, rollbackFailure)
 	}
-	snapshot, snapshotErr := manager.Snapshot(context.Background())
-	if snapshotErr != nil {
-		return snapshot, candidateFailure
+	return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, true, dshmanager.RollbackRestored, nil, false)
+}
+
+func (h *Host) recordSwitchAttempt(manager RunContextManager, target dshmanager.RunContext, stage dshmanager.SwitchAttemptStage, candidateFailure error, automaticRollback bool, rollback dshmanager.RollbackOutcome, rollbackFailure error, configureTarget bool) (dshmanager.Snapshot, error) {
+	failure := h.failureFor(candidateFailure, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
+	attempt := dshmanager.SwitchAttempt{
+		Target: target, Stage: stage, Failure: *failure,
+		AutomaticRollback: automaticRollback, Rollback: rollback,
+		CompletedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	return snapshot, candidateFailure
+	if rollbackFailure != nil {
+		projected := h.failureFor(rollbackFailure, lifecycle.ErrorProcessStartFailed, "dsh-work could not restore the known-good Run context.", true)
+		attempt.RollbackFailure = projected
+	}
+	snapshot, err := manager.RecordSwitchAttempt(context.Background(), attempt, configureTarget)
+	if err != nil {
+		return snapshot, errors.Join(failure, err)
+	}
+	return snapshot, failure
+}
+
+func (h *Host) RetryLastSwitch(ctx context.Context) (dshmanager.Snapshot, error) {
+	manager, ok := h.deps.Manager.(RunContextManager)
+	if !ok {
+		return dshmanager.Snapshot{}, errors.New("Run context manager is unavailable")
+	}
+	snapshot, err := manager.Snapshot(ctx)
+	if err != nil {
+		return snapshot, err
+	}
+	if snapshot.LastSwitchAttempt == nil {
+		return snapshot, lifecycle.Failure{Code: lifecycle.ErrorManagerStateInvalid, Summary: "There is no failed Run context to retry.", CorrelationID: lifecycle.NewCorrelationID()}
+	}
+	return h.SwitchRunContext(ctx, snapshot.LastSwitchAttempt.Target)
+}
+
+func (h *Host) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error) {
+	manager, ok := h.deps.Manager.(RunContextManager)
+	if !ok {
+		return dshmanager.Snapshot{}, errors.New("Run context manager is unavailable")
+	}
+	snapshot, err := manager.Snapshot(ctx)
+	if err != nil {
+		return snapshot, err
+	}
+	if snapshot.KnownGood == nil {
+		return snapshot, lifecycle.Failure{Code: lifecycle.ErrorManagerStateInvalid, Summary: "There is no known-good Run context to restore.", CorrelationID: lifecycle.NewCorrelationID()}
+	}
+	return h.SwitchRunContext(ctx, *snapshot.KnownGood)
 }
 
 func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.ResolvedLaunch) (lifecycle.Status, *lifecycle.Failure, error) {
@@ -1117,7 +1210,7 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 	if prepared != nil {
 		target := prepared.Target
 		return hostLaunch{
-			runtime:       dshadapter.Runtime{Path: prepared.Runtime.Path, Version: prepared.Runtime.Version},
+			runtime:       runtimeAdapterValue(prepared.Runtime, prepared.Node),
 			dataDirectory: prepared.DataDirectory,
 			profile:       target.Profile.Name,
 			resolved:      prepared,
@@ -1135,13 +1228,42 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 	}
 	resolved, err := h.deps.Manager.ResolveLaunch(run.ctx, dshmanager.LaunchRequest{
 		RuntimeID: snapshot.Configured.RuntimeID,
+		Node:      snapshot.Configured.Node,
 		Profile:   snapshot.Configured.Profile,
 	})
 	if err != nil {
 		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not resolve the selected DSH runtime and profile.", false)
 	}
-	runtime := dshadapter.Runtime{Path: resolved.Runtime.Path, Version: resolved.Runtime.Version}
+	runtime := runtimeAdapterValue(resolved.Runtime, resolved.Node)
 	if verifier, ok := h.deps.DSH.(interface {
+		DiscoverSelectedPathWithEnvironment(context.Context, string, string, map[string]string) (dshadapter.Runtime, error)
+	}); ok {
+		verified, verifyErr := verifier.DiscoverSelectedPathWithEnvironment(run.ctx, runtime.Path, resolved.Runtime.Version, runtime.Env)
+		if verifyErr != nil {
+			if run.ctx.Err() != nil {
+				return hostLaunch{}, nil
+			}
+			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not verify the selected DSH runtime.", false)
+		}
+		runtime = dshadapter.Runtime{Path: verified.Path, Version: verified.Version, Env: runtime.Env}
+	} else if verifier, ok := h.deps.DSH.(interface {
+		DiscoverPathWithEnvironment(context.Context, string, map[string]string) (dshadapter.Runtime, error)
+	}); ok {
+		verified, verifyErr := verifier.DiscoverPathWithEnvironment(run.ctx, runtime.Path, runtime.Env)
+		if verifyErr != nil {
+			if run.ctx.Err() != nil {
+				return hostLaunch{}, nil
+			}
+			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not verify the selected DSH runtime.", false)
+		}
+		if verified.Version != resolved.Runtime.Version {
+			return hostLaunch{}, h.failureFor(lifecycle.Failure{
+				Code:    lifecycle.ErrorDSHUnsupportedVersion,
+				Summary: "The selected DSH runtime does not match the catalog.",
+			}, lifecycle.ErrorDSHUnsupportedVersion, "The selected DSH runtime does not match the catalog.", false)
+		}
+		runtime = dshadapter.Runtime{Path: verified.Path, Version: verified.Version, Env: runtime.Env}
+	} else if verifier, ok := h.deps.DSH.(interface {
 		DiscoverPath(context.Context, string) (dshadapter.Runtime, error)
 	}); ok {
 		verified, verifyErr := verifier.DiscoverPath(run.ctx, runtime.Path)
@@ -1157,7 +1279,7 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 				Summary: "The selected DSH runtime does not match the catalog.",
 			}, lifecycle.ErrorDSHUnsupportedVersion, "The selected DSH runtime does not match the catalog.", false)
 		}
-		runtime = verified
+		runtime = dshadapter.Runtime{Path: verified.Path, Version: verified.Version, Env: runtime.Env}
 	}
 	target := resolved.Target
 	return hostLaunch{
@@ -1166,6 +1288,14 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 		profile:       target.Profile.Name,
 		resolved:      &resolved,
 	}, nil
+}
+
+func runtimeAdapterValue(runtime dshmanager.RuntimeInfo, node dshmanager.ResolvedNode) dshadapter.Runtime {
+	env := make(map[string]string, len(node.ChildEnvironment))
+	for key, value := range node.ChildEnvironment {
+		env[key] = value
+	}
+	return dshadapter.Runtime{Path: runtime.Path, Version: runtime.Version, Env: env}
 }
 
 func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
@@ -1691,6 +1821,15 @@ func (r *generationRun) setLaunch(launch *dshmanager.ResolvedLaunch) {
 	r.mu.Unlock()
 }
 
+func (r *generationRun) usesProfile(profile dshmanager.ProfileRef) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.launch != nil {
+		return r.launch.Target.Profile == profile
+	}
+	return r.target != nil && r.target.Profile == profile
+}
+
 func (r *generationRun) setTarget(target *dshmanager.RunContext) {
 	r.mu.Lock()
 	if target == nil {
@@ -1780,6 +1919,7 @@ type HostService struct {
 	host             *Host
 	workspaceTrusted func() bool
 	localeProvider   func() settings.Locale
+	openSettings     func(string)
 }
 
 // StartupOutput is the redacted DSH process output retained by the supervisor
@@ -1790,8 +1930,12 @@ type StartupOutput struct {
 	Stderr string `json:"stderr"`
 }
 
-func NewHostService(host *Host, workspaceTrusted func() bool, localeProvider func() settings.Locale) *HostService {
-	return &HostService{host: host, workspaceTrusted: workspaceTrusted, localeProvider: localeProvider}
+func NewHostService(host *Host, workspaceTrusted func() bool, localeProvider func() settings.Locale, openSettings ...func(string)) *HostService {
+	service := &HostService{host: host, workspaceTrusted: workspaceTrusted, localeProvider: localeProvider}
+	if len(openSettings) > 0 {
+		service.openSettings = openSettings[0]
+	}
+	return service
 }
 
 func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
@@ -1846,6 +1990,26 @@ func (s *HostService) GetStartupOutput(ctx context.Context) StartupOutput {
 	diagnostics := s.host.Diagnostics()
 	return StartupOutput{Stdout: diagnostics.StdoutTail, Stderr: diagnostics.StderrTail}
 }
+
+// OpenRuntimeSettings is the first-use recovery action for a missing local
+// runtime. It opens the trusted runtime-management surface but never starts an
+// acquisition itself.
+func (s *HostService) OpenRuntimeSettings(ctx context.Context) error {
+	if !s.authorized(ctx) {
+		return trustedSurfaceRequired("DSH runtime management is available only from the trusted dsh-work shell.")
+	}
+	if s.openSettings == nil {
+		return lifecycle.Failure{
+			Code:          lifecycle.ErrorManagerStateInvalid,
+			Summary:       "dsh-work Settings is unavailable.",
+			Retryable:     true,
+			CorrelationID: lifecycle.NewCorrelationID(),
+		}
+	}
+	s.openSettings("runtimes")
+	return nil
+}
+
 func (s *HostService) Start(ctx context.Context) lifecycle.Status {
 	if !s.authorized(ctx) {
 		return trustedSurfaceStatus()
