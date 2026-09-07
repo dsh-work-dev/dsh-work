@@ -8,6 +8,7 @@ import type { Events } from "@wailsio/runtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import type * as acquisition$0 from "../../../../local/dsh-work/internal/acquisition/models.js";
+import type * as app$0 from "../../../../local/dsh-work/internal/app/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import type * as lifecycle$0 from "../../../../local/dsh-work/internal/lifecycle/models.js";
@@ -22,6 +23,7 @@ declare module "@wailsio/runtime" {
             "lifecycle": lifecycle$0.Status;
             "locale": settings$0.Locale;
             "notification-failure": boolean;
+            "pet-state": app$0.PetOverlayState;
         }
     }
 }

@@ -7,6 +7,11 @@
     <title>dsh-work</title>
     <link rel="icon" type="image/png" href="/branding/dsh-work-appicon.png" />
     <link rel="apple-touch-icon" href="/branding/dsh-work-appicon-light.png" />
+    <script>
+      if (new URLSearchParams(window.location.search).get("surface") === "pet") {
+        document.documentElement.dataset.surface = "pet";
+      }
+    </script>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -92,6 +97,12 @@
         <button class="button button-quiet" id="quit" data-i18n="common.quit" type="button">Quit</button>
       </footer>
     </main>
+    <main id="pet-surface" class="pet-surface" aria-label="Desktop pet" hidden>
+      <img id="pet-overlay-image" alt="" aria-hidden="true" />
+      <div class="pet-drag-handle" data-i18n-aria-label="pets.dragHandle" aria-label="Move desktop pet">
+        <span aria-hidden="true">⠿</span>
+      </div>
+    </main>
     <main id="manager-surface" class="manager-app" aria-labelledby="manager-title" hidden>
       <aside class="manager-sidebar" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
         <div class="manager-brand">
@@ -102,6 +113,7 @@
           <button class="manager-nav-item is-active" data-manager-section="overview" data-i18n="manager.overview" type="button">Overview</button>
           <button class="manager-nav-item" data-manager-section="settings" data-i18n="manager.general" type="button">General</button>
           <button class="manager-nav-item" data-manager-section="notifications" data-i18n="manager.notifications" type="button">Notifications</button>
+          <button class="manager-nav-item" data-manager-section="pets" data-i18n="manager.pets" type="button">Pets</button>
           <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles</button>
           <button class="manager-nav-item" data-manager-section="plugins" data-i18n="manager.plugins" type="button">Plugins</button>
           <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
@@ -410,6 +422,98 @@
             </div>
           </div>
           <p id="settings-notifications-status" class="sr-only" role="status" aria-live="polite"></p>
+        </section>
+
+        <section id="manager-section-pets" class="manager-section settings-section" data-manager-panel="pets" aria-labelledby="manager-title" hidden>
+          <div class="pets-visibility-row setting-row">
+            <div class="setting-copy">
+              <strong id="pets-visibility-label" data-i18n="pets.visibility.label">Show desktop pet</strong>
+              <span id="pets-visibility-detail" class="setting-detail" data-i18n="pets.visibility.description">Show the current pet on your desktop</span>
+            </div>
+            <div class="setting-control">
+              <label class="switch" for="pets-visibility">
+                <input id="pets-visibility" type="checkbox" role="switch" aria-labelledby="pets-visibility-label" aria-describedby="pets-visibility-detail pets-visibility-status" disabled />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </label>
+            </div>
+          </div>
+          <p id="pets-visibility-status" class="manager-note" role="status" aria-live="polite"></p>
+          <div class="pets-size-row setting-row">
+            <div class="setting-copy">
+              <strong id="pets-size-label" data-i18n="pets.size.label">Pet size</strong>
+              <span id="pets-size-detail" class="setting-detail" data-i18n="pets.size.description">Adjust the desktop pet size</span>
+            </div>
+            <div class="setting-control pets-size-control">
+              <output id="pets-size-value" for="pets-size">100%</output>
+              <div class="pets-size-slider">
+                <input id="pets-size" type="range" min="50" max="300" step="5" value="100" list="pets-size-ticks" aria-labelledby="pets-size-label" aria-describedby="pets-size-detail pets-size-status" disabled />
+                <datalist id="pets-size-ticks">
+                  <option value="50" label="50%"></option>
+                  <option value="75" label="75%"></option>
+                  <option value="100" label="100%"></option>
+                  <option value="125" label="125%"></option>
+                  <option value="150" label="150%"></option>
+                  <option value="200" label="200%"></option>
+                  <option value="250" label="250%"></option>
+                  <option value="300" label="300%"></option>
+                </datalist>
+                <div class="pets-size-ticks" aria-hidden="true">
+                  <span>50%</span>
+                  <span>75%</span>
+                  <span>100%</span>
+                  <span>125%</span>
+                  <span>150%</span>
+                  <span>200%</span>
+                  <span>250%</span>
+                  <span>300%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p id="pets-size-status" class="manager-note" role="status" aria-live="polite"></p>
+
+          <div class="pets-layout">
+            <section class="pets-list-panel" aria-labelledby="pets-list-title">
+              <div class="panel-heading pets-panel-heading">
+                <div>
+                  <h2 id="pets-list-title" data-i18n="pets.list.title">Available pets</h2>
+                  <p id="pets-list-count" class="manager-note" data-i18n="pets.list.count">Available: 0</p>
+                </div>
+                <button class="button button-secondary button-compact" id="pets-refresh" data-i18n="pets.refresh.action" type="button">Refresh</button>
+              </div>
+              <label class="pets-search-label" for="pets-search"><span class="sr-only" data-i18n="pets.search.placeholder">Search pets</span><input id="pets-search" data-i18n-placeholder="pets.search.placeholder" type="search" placeholder="Search pets" autocomplete="off" /></label>
+              <div id="pets-list" class="manager-list pets-list" role="listbox" data-i18n-aria-label="pets.list.title" aria-label="Available pets" aria-orientation="vertical" tabindex="0"></div>
+              <div id="pets-empty" class="manager-empty" hidden>
+                <strong id="pets-empty-title" data-i18n="pets.empty.title">No pets available</strong>
+                <span id="pets-empty-description" class="manager-note" data-i18n="pets.empty.description">Create or install a pet in Codex, then refresh</span>
+              </div>
+              <details id="pets-invalid-issues" class="pets-invalid-issues" hidden>
+                <summary><span id="pets-invalid-summary" data-i18n="pets.invalid.summary">0 pets could not be loaded</span></summary>
+                <div id="pets-invalid-issue-list"></div>
+              </details>
+            </section>
+
+            <section class="pets-preview-panel" aria-labelledby="pets-preview-title">
+              <div class="panel-heading pets-panel-heading">
+                <div>
+                  <h2 id="pets-preview-title" data-i18n="pets.preview.title">Preview</h2>
+                  <p id="pets-preview-status" class="manager-note" role="status" aria-live="polite"></p>
+                </div>
+              </div>
+              <div id="pets-preview-stage" class="pets-preview-stage" aria-live="polite">
+                <div id="pets-preview-placeholder" class="pets-preview-placeholder" data-i18n="pets.preview.choose">Choose a pet to preview</div>
+                <img id="pets-preview-image" alt="" hidden />
+              </div>
+              <h3 id="pets-preview-name" class="pets-preview-name"></h3>
+              <p id="pets-preview-description" class="manager-note"></p>
+              <p id="pets-preview-message" class="manager-note" role="status" aria-live="polite"></p>
+              <div class="button-row pets-preview-actions">
+                <button class="button button-primary" id="pets-use" data-i18n="pets.use.action" type="button" disabled>Use this pet</button>
+                <button class="button button-secondary" id="pets-retry" data-i18n="pets.retry" type="button" hidden>Retry</button>
+                <button class="button button-secondary" id="pets-clear" data-i18n="pets.clear.action" type="button" disabled>Clear selection</button>
+              </div>
+            </section>
+          </div>
         </section>
       </div>
     </main>

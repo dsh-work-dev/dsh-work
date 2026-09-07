@@ -6,8 +6,8 @@ in the documents linked from `docs/README.md`.
 
 ## Bounded contexts
 
-- **dsh-work host** owns the desktop lifecycle, global preferences and desktop
-  delivery of notifications.
+- **dsh-work host** owns the desktop lifecycle, global preferences, Desktop Pet
+  surface and desktop delivery of notifications.
 - **dsh-work run context** owns the runtime, DSH data directory and profile that
   dsh-work is currently running or attempting to run, plus the last known-good
   context used for rollback; it does not own DSH Workspace records.
@@ -20,6 +20,11 @@ in the documents linked from `docs/README.md`.
 
 | Term | Meaning | Not this |
 |---|---|---|
+| Desktop Pet | A dsh-work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
+| Pet catalog | The Host-controlled set of validated Pet assets available for selection. | A package execution environment or a DSH plugin registry. |
+| Pet visibility intent | The user's persisted choice to show or hide the selected Pet. | Proof that a native window is currently visible. |
+| Pet position | A persisted monitor-relative anchor plus native window dimensions and scale. | A DSH Workspace directory or a screen-absolute promise that survives every monitor layout. |
+| Pet preview | A Host-projected frame or safe fallback used by trusted Settings UI. | Direct access by Settings UI to package files. |
 | Notification event | A meaningful occurrence accepted by the dsh-work notification router for possible desktop delivery. | Raw process output or an arbitrary log line. |
 | Desktop notification | A notification delivered through the operating system while dsh-work is not the user's active surface. | A DSH toast or an HTML status message. |
 | In-page notice | Contextual feedback rendered by DSH beside the conversation, composer or DSH-owned surface. | A dsh-work-owned global notification. |
@@ -49,11 +54,13 @@ in the documents linked from `docs/README.md`.
 1. DSH remains the source of truth for DSH conversation and session state.
 2. dsh-work remains the source of truth for desktop notification preferences and
    desktop delivery decisions.
-3. A dsh-work preference may suppress a dsh-work desktop delivery, but it must not
+3. dsh-work remains the source of truth for Pet selection, visibility, size,
+   position and native-window behavior.
+4. A dsh-work preference may suppress a dsh-work desktop delivery, but it must not
    remove or alter an in-page notice that DSH needs for context.
-4. The profile in the current run context is the only DSH profile whose plugin
+5. The profile in the current run context is the only DSH profile whose plugin
    associations dsh-work may modify. Non-current profiles are read-only until the
    user switches the run context to that profile.
-5. A context switch changes the runtime, DSH data directory and profile as one
+6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch restores the known-good run context.

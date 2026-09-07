@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/notifications"
 )
 
 const stateVersion = 2
+
+const petPreferenceVersion = 1
 
 // Locale is the dsh-work-owned language preference. It is deliberately separate
 // from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
@@ -30,6 +35,128 @@ func (l Locale) Valid() bool {
 	return l == LocaleEnglish || l == LocaleChinese || l == LocaleJapanese
 }
 
+// PetVisibilityIntent is the persisted user choice. It is intentionally
+// separate from the runtime's effective visibility, which can be paused when
+// the selected package is unavailable or the platform cannot host an overlay.
+type PetVisibilityIntent string
+
+const (
+	PetVisibilityVisible PetVisibilityIntent = "visible"
+	PetVisibilityHidden  PetVisibilityIntent = "hidden"
+)
+
+func (i PetVisibilityIntent) Valid() bool {
+	return i == PetVisibilityVisible || i == PetVisibilityHidden
+}
+
+// PetPosition stores a monitor-aware logical anchor rather than an absolute
+// screen coordinate. Host policy clamps it to the current work area.
+type PetPosition struct {
+	MonitorID string  `json:"monitorId,omitempty"`
+	AnchorX   float64 `json:"anchorX"`
+	AnchorY   float64 `json:"anchorY"`
+	Width     int     `json:"width"`
+	Height    int     `json:"height"`
+	Scale     float64 `json:"scale"`
+}
+
+func DefaultPetPosition() PetPosition {
+	return PetPosition{AnchorX: 1, AnchorY: 1, Width: 192, Height: 208, Scale: 1}
+}
+
+// PetPreference is the versioned Host-owned Pet preference. A missing
+// selected key is represented by nil and is never replaced by discovery.
+type PetPreference struct {
+	SchemaVersion    int                 `json:"schemaVersion"`
+	SelectedKey      *string             `json:"selectedKey"`
+	VisibilityIntent PetVisibilityIntent `json:"visibilityIntent"`
+	Position         PetPosition         `json:"position"`
+}
+
+func DefaultPetPreference() PetPreference {
+	return PetPreference{
+		SchemaVersion:    petPreferenceVersion,
+		VisibilityIntent: PetVisibilityHidden,
+		Position:         DefaultPetPosition(),
+	}
+}
+
+func clonePetPreference(preference PetPreference) PetPreference {
+	copy := preference
+	if preference.SelectedKey != nil {
+		selected := *preference.SelectedKey
+		copy.SelectedKey = &selected
+	}
+	return copy
+}
+
+func normalizePetPreference(preference PetPreference) PetPreference {
+	defaults := DefaultPetPreference()
+	preference.SchemaVersion = petPreferenceVersion
+	if !preference.VisibilityIntent.Valid() {
+		preference.VisibilityIntent = defaults.VisibilityIntent
+	}
+	if preference.Position.Width <= 0 || preference.Position.Width > 4096 {
+		preference.Position.Width = defaults.Position.Width
+	}
+	if preference.Position.Height <= 0 || preference.Position.Height > 4096 {
+		preference.Position.Height = defaults.Position.Height
+	}
+	if !finite(preference.Position.Scale) || preference.Position.Scale <= 0 || preference.Position.Scale > 8 {
+		preference.Position.Scale = defaults.Position.Scale
+	}
+	if !finite(preference.Position.AnchorX) || preference.Position.AnchorX < 0 || preference.Position.AnchorX > 1 {
+		preference.Position.AnchorX = defaults.Position.AnchorX
+	}
+	if !finite(preference.Position.AnchorY) || preference.Position.AnchorY < 0 || preference.Position.AnchorY > 1 {
+		preference.Position.AnchorY = defaults.Position.AnchorY
+	}
+	if !safeMonitorID(preference.Position.MonitorID) {
+		preference.Position.MonitorID = ""
+	}
+	if preference.SelectedKey != nil {
+		selected := *preference.SelectedKey
+		if !safePreferenceKey(selected) {
+			preference.SelectedKey = nil
+		}
+	}
+	if preference.SelectedKey == nil {
+		preference.VisibilityIntent = PetVisibilityHidden
+	}
+	return clonePetPreference(preference)
+}
+
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func safeMonitorID(value string) bool {
+	if value == "" {
+		return true
+	}
+	if !utf8.ValidString(value) || len([]rune(value)) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func safePreferenceKey(value string) bool {
+	if value == "" || len(value) > 256 || !utf8.ValidString(value) || strings.ContainsAny(value, `/\\`) || strings.Contains(value, "://") {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // Values is the versioned, platform-neutral dsh-work preference contract.
 // CloseToTray is true by default so closing the last window keeps dsh-work and
 // its managed DSH worker available from the notification area.
@@ -39,6 +166,7 @@ type Values struct {
 	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
 	Locale                   Locale                    `json:"locale"`
 	Notifications            notifications.Preferences `json:"notifications"`
+	Pet                      PetPreference             `json:"pet"`
 }
 
 func DefaultValues() Values {
@@ -48,6 +176,7 @@ func DefaultValues() Values {
 		AutomaticRuntimeRollback: true,
 		Locale:                   DefaultLocale,
 		Notifications:            notifications.DefaultPreferences(),
+		Pet:                      DefaultPetPreference(),
 	}
 }
 
@@ -115,6 +244,7 @@ func New(config Config) (*Manager, error) {
 			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
 		}
 		values = *loaded
+		values.Pet = normalizePetPreference(values.Pet)
 		if !values.Locale.Valid() {
 			values.Locale = DefaultLocale
 		}
@@ -128,7 +258,7 @@ func (m *Manager) Snapshot(ctx context.Context) (Values, error) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.values, nil
+	return cloneValues(m.values), nil
 }
 
 func (m *Manager) SetCloseToTray(ctx context.Context, enabled bool) (Values, error) {
@@ -144,7 +274,7 @@ func (m *Manager) SetCloseToTray(ctx context.Context, enabled bool) (Values, err
 		return Values{}, err
 	}
 	m.values = next
-	return next, nil
+	return cloneValues(next), nil
 }
 
 func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) {
@@ -163,7 +293,7 @@ func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) 
 		return Values{}, err
 	}
 	m.values = next
-	return next, nil
+	return cloneValues(next), nil
 }
 
 func (m *Manager) SetNotificationPreference(ctx context.Context, key notifications.PreferenceKey, enabled bool) (Values, error) {
@@ -183,7 +313,32 @@ func (m *Manager) SetNotificationPreference(ctx context.Context, key notificatio
 		return Values{}, err
 	}
 	m.values = next
-	return next, nil
+	return cloneValues(next), nil
+}
+
+// SetPetPreference persists the complete Pet preference as one atomic settings
+// update. Selection transactions use this seam only after their source and
+// renderer preflight has succeeded.
+func (m *Manager) SetPetPreference(ctx context.Context, preference PetPreference) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	preference = normalizePetPreference(preference)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := m.values
+	next.Pet = preference
+	next.Version = stateVersion
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		return Values{}, err
+	}
+	m.values = next
+	return cloneValues(next), nil
+}
+
+func cloneValues(values Values) Values {
+	values.Pet = clonePetPreference(values.Pet)
+	return values
 }
 
 type FileStore struct {
@@ -207,6 +362,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
 		Locale                   *Locale         `json:"locale"`
 		Notifications            json.RawMessage `json:"notifications"`
+		Pet                      json.RawMessage `json:"pet"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
@@ -248,6 +404,12 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 				preferences.Lifecycle = *candidate.Lifecycle
 			}
 			values.Notifications = preferences
+		}
+	}
+	if len(raw.Pet) > 0 && string(raw.Pet) != "null" {
+		var candidate PetPreference
+		if err := json.Unmarshal(raw.Pet, &candidate); err == nil {
+			values.Pet = normalizePetPreference(candidate)
 		}
 	}
 	return &values, nil

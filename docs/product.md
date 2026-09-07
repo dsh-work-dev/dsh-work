@@ -16,6 +16,7 @@ dsh-work owns:
 - Worker process ownership, readiness, restart and cleanup;
 - the trusted gateway between the Workspace WebView and DSH;
 - desktop-notification preferences, routing and delivery.
+- the Desktop Pet catalog, trusted Pet preferences and the native Pet surface.
 
 DSH owns:
 
@@ -45,6 +46,9 @@ silently mutate DSH-owned data.
   Notification preferences do not hide DSH-owned in-page notices.
 - DSH owns the appearance preference; trusted Host surfaces consume it without
   persisting a second theme setting.
+- The Host can display a selected Desktop Pet in a transparent, always-on-top
+  surface outside the Workspace window. Pets Settings exposes discovery,
+  preview, visibility and direct 50%–300% size control.
 - Closing the last window follows the close preference. Explicit Quit owns
   cancellation and managed Worker cleanup.
 - Windows uses a Job Object to own the Worker process tree.
@@ -54,3 +58,8 @@ silently mutate DSH-owned data.
 - Normal startup requires a compatible runtime already registered locally.
 - Native process-supervision and packaging parity for macOS and Linux are not
   implemented.
+- The Pet task-event producer is not present in this repository, so task-driven
+  reactions are not end-to-end complete.
+- Native platform, packaging, visual and accessibility evidence for the Pet has
+  not yet been collected beyond automated checks; Windows is the reference
+  implementation path.

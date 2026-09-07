@@ -70,3 +70,23 @@ still prevent an ambiguous or incomplete selection from reaching launch.
 This decision applies to the manager State only. Global Host preferences remain
 the separate versioned `internal/settings` contract, and runtime, Node,
 DSH-release and plugin records retain their business version fields.
+
+## ADR-0010 — Host-owned Desktop Pet with data-only package adapters
+
+The Desktop Pet is a separate Host-managed native overlay, outside the DSH
+Workspace WebView. dsh-work owns the Pet catalog, package validation,
+selection, visibility, persistence and native-window lifecycle. Supported Codex
+entries, including the `avatars/` compatibility entry, and dsh-native packages
+are adapted as data into one renderer contract;
+pet packages do not execute code or receive Host capabilities. This preserves
+the Host authority boundary while allowing asset formats to change at the
+adapter edge.
+
+## ADR-0011 — Direct Pet scale control and handle-only movement
+
+Pet scaling is a direct trusted Settings slider from 50% to 300%, based on the
+192x208 canonical window at 100%. Native border resize is disabled. The native
+window receives pointer input so the drag affordance can appear on hover, but
+only the explicit handle moves the window. Position is persisted as a
+monitor-relative normalized anchor, and Host resize failure rolls back the
+persisted dimensions.

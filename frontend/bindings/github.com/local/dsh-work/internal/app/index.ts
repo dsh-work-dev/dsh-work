@@ -3,13 +3,18 @@
 
 import * as HostService from "./hostservice.js";
 import * as ManagerService from "./managerservice.js";
+import * as PetSettingsService from "./petsettingsservice.js";
 import * as SettingsService from "./settingsservice.js";
 export {
     HostService,
     ManagerService,
+    PetSettingsService,
     SettingsService
 };
 
 export type {
+    PetOverlayState,
+    PetPanel,
+    PetPreview,
     StartupOutput
 } from "./models.js";

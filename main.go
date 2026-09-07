@@ -19,6 +19,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/nativeui"
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
+	dshworkpet "github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/workergateway"
@@ -42,11 +43,42 @@ var dshWorkTrayDarkIcon []byte
 //go:embed frontend/public/branding/dsh-work-tray-template.png
 var dshWorkTrayTemplateIcon []byte
 
+func petWindowOptions() application.WebviewWindowOptions {
+	return application.WebviewWindowOptions{
+		Name:        "pet",
+		Title:       "dsh-work Pet",
+		Width:       192,
+		Height:      208,
+		AlwaysOnTop: true,
+		Frameless:   true,
+		// The Settings size slider is the sole resize control. Keeping the
+		// native border disabled prevents a second, unsaved resize path.
+		DisableResize:    true,
+		BackgroundType:   application.BackgroundTypeTransparent,
+		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
+		URL:              "/?surface=pet",
+		InitialPosition:  application.WindowXY,
+		X:                0,
+		Y:                0,
+		Hidden:           true,
+		// The overlay must receive hover and drag input for its explicit handle.
+		IgnoreMouseEvents: false,
+		Mac: application.MacWindow{
+			Backdrop: application.MacBackdropTransparent,
+		},
+		Windows: application.WindowsWindow{
+			HiddenOnTaskbar:                   true,
+			DisableFramelessWindowDecorations: true,
+		},
+	}
+}
+
 func main() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
 	application.RegisterEvent[acquisition.OperationStatus]("acquisition")
 	application.RegisterEvent[dshworksettings.Locale]("locale")
 	application.RegisterEvent[bool]("notification-failure")
+	application.RegisterEvent[dshworkapp.PetOverlayState]("pet-state")
 
 	dependencies := platform.New()
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
@@ -130,17 +162,28 @@ func main() {
 		notificationPreference = values.Notifications
 		automaticRuntimeRollback.Store(values.AutomaticRuntimeRollback)
 	}
+	var petCatalog dshworkpet.PetCatalog
+	petCatalogRoot := filepath.Join(filepath.Dir(config.SettingsPath), "pet-cache")
+	if catalog, err := dshworkpet.NewPetCatalog(dshworkpet.CatalogConfig{CacheRoot: petCatalogRoot}); err != nil {
+		log.Printf("dsh-work Pet catalog unavailable: %v", err)
+	} else {
+		petCatalog = catalog
+	}
 	var activeLocale atomic.Value
 	activeLocale.Store(string(localePreference))
 	windowLedger := lifecycle.NewWindowLedger(closeToTray, "workspace", "settings")
 	var workspaceWindow application.Window
 	var settingsWindow application.Window
+	var petWindow application.Window
 	var settingsWindowMu sync.Mutex
+	var petWindowMu sync.Mutex
 	var windowActionsMu sync.Mutex
 	var showWorkspace func()
 	var openSettings func(string)
 	var quitFlow lifecycle.QuitFlow
 	var applicationShuttingDown atomic.Bool
+	var petWindowCloseAllowed atomic.Bool
+	var petWindowRepositioning atomic.Bool
 	nativeNotification := wailsnotifications.New()
 	nativeNotificationHost := nativeui.NewNotificationService(nativeNotification)
 	notificationRouter := dshworknotifications.NewRouter(
@@ -182,6 +225,12 @@ func main() {
 		notificationRouter.SetPreferences,
 		automaticRuntimeRollback.Store,
 	)
+	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
+	dshworkapp.SetPetRendererFactory(petSettingsService, func() dshworkpet.PetRenderer {
+		return dshworkpet.NewRasterRenderer()
+	})
+	petOverlayCapabilities := dshworkpet.CurrentOverlayCapabilities()
+	dshworkapp.SetPetOverlayCapabilities(petSettingsService, petOverlayCapabilities)
 	nativeTheme := dshWindowTheme(manager)
 
 	desktop = application.New(application.Options{
@@ -192,6 +241,7 @@ func main() {
 			application.NewService(hostService),
 			application.NewService(managerService),
 			application.NewService(settingsService),
+			application.NewService(petSettingsService),
 			application.NewService(nativeNotificationHost),
 		},
 		Assets: application.AssetOptions{
@@ -201,6 +251,152 @@ func main() {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
+	var repositionPetWindow func()
+	var persistPetWindowPosition func()
+	if petOverlayCapabilities.Level != dshworkpet.OverlayFallback {
+		petWindow = desktop.Window.NewWithOptions(petWindowOptions())
+		petWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+			if petWindowCloseAllowed.Load() || applicationShuttingDown.Load() {
+				return
+			}
+			event.Cancel()
+			petWindow.Hide()
+		})
+	}
+	repositionPetWindow = func() {
+		petWindowMu.Lock()
+		window := petWindow
+		petWindowMu.Unlock()
+		if window == nil || settingsManager == nil || applicationShuttingDown.Load() {
+			return
+		}
+		values, err := settingsManager.Snapshot(context.Background())
+		if err != nil {
+			return
+		}
+		position := values.Pet.Position
+		screen, screenErr := window.GetScreen()
+		if desktop.Screen != nil && position.MonitorID != "" {
+			if stored := desktop.Screen.GetByID(position.MonitorID); stored != nil {
+				screen = stored
+				screenErr = nil
+			}
+		}
+		if (screenErr != nil || screen == nil) && desktop.Screen != nil {
+			screen = desktop.Screen.GetPrimary()
+		}
+		if screen == nil {
+			return
+		}
+		scale := float64(screen.ScaleFactor)
+		resolved := dshworkpet.ResolvePosition(
+			position.AnchorX,
+			position.AnchorY,
+			position.Width,
+			position.Height,
+			scale,
+			dshworkpet.WorkArea{X: screen.WorkArea.X, Y: screen.WorkArea.Y, Width: screen.WorkArea.Width, Height: screen.WorkArea.Height},
+			12,
+		)
+		petWindowRepositioning.Store(true)
+		defer petWindowRepositioning.Store(false)
+		window.SetSize(resolved.Width, resolved.Height)
+		window.SetPosition(resolved.X, resolved.Y)
+	}
+	persistPetWindowPosition = func() {
+		if petWindowRepositioning.Load() {
+			return
+		}
+		petWindowMu.Lock()
+		window := petWindow
+		petWindowMu.Unlock()
+		if window == nil || settingsManager == nil || applicationShuttingDown.Load() {
+			return
+		}
+		screen, err := window.GetScreen()
+		if err != nil || screen == nil {
+			return
+		}
+		x, y := window.Position()
+		width, height := window.Size()
+		area := dshworkpet.WorkArea{X: screen.WorkArea.X, Y: screen.WorkArea.Y, Width: screen.WorkArea.Width, Height: screen.WorkArea.Height}
+		anchorX, anchorY := dshworkpet.AnchorForPosition(x, y, width, height, area, 12)
+		scale := float64(screen.ScaleFactor)
+		if scale <= 0 {
+			scale = 1
+		}
+		position := dshworksettings.PetPosition{
+			MonitorID: screen.ID,
+			AnchorX:   anchorX,
+			AnchorY:   anchorY,
+			Width:     width,
+			Height:    height,
+			Scale:     scale,
+		}
+		if err := dshworkapp.PersistPetPosition(context.Background(), petSettingsService, position); err != nil {
+			log.Printf("dsh-work Pet position: %v", err)
+		}
+	}
+	dshworkapp.AttachPetOverlayHooks(petSettingsService, dshworkapp.PetOverlayHooks{
+		Show: func() error {
+			petWindowMu.Lock()
+			window := petWindow
+			petWindowMu.Unlock()
+			if window == nil || applicationShuttingDown.Load() {
+				return nil
+			}
+			repositionPetWindow()
+			window.Show()
+			return nil
+		},
+		Hide: func() error {
+			petWindowMu.Lock()
+			defer petWindowMu.Unlock()
+			if petWindow != nil {
+				petWindow.Hide()
+			}
+			return nil
+		},
+		Close: func() error {
+			petWindowMu.Lock()
+			defer petWindowMu.Unlock()
+			if petWindow != nil {
+				petWindowCloseAllowed.Store(true)
+				petWindow.Close()
+			}
+			return nil
+		},
+		Resize: func(width, height int) error {
+			petWindowMu.Lock()
+			window := petWindow
+			petWindowMu.Unlock()
+			if window == nil || applicationShuttingDown.Load() {
+				return errors.New("pet overlay is unavailable")
+			}
+			if width <= 0 || height <= 0 {
+				return errors.New("pet overlay size is invalid")
+			}
+			window.SetSize(width, height)
+			repositionPetWindow()
+			return nil
+		},
+	})
+	if petWindow != nil {
+		for _, eventType := range []events.WindowEventType{events.Common.WindowDidMove, events.Common.WindowDidResize} {
+			petWindow.OnWindowEvent(eventType, func(*application.WindowEvent) {
+				persistPetWindowPosition()
+			})
+		}
+	}
+	handlePetDisplayChange := func(*application.WindowEvent) {
+		repositionPetWindow()
+		_ = dshworkapp.PublishPetEvent(petSettingsService, dshworkpet.PetInputEvent{Type: "display.changed", Source: "host"})
+	}
+	if petWindow != nil {
+		for _, eventType := range []events.WindowEventType{events.Common.WindowDPIChanged, events.Common.WindowFullscreen, events.Common.WindowUnFullscreen} {
+			petWindow.OnWindowEvent(eventType, handlePetDisplayChange)
+		}
+	}
 	gateway.SetOpenExternal(desktop.Browser.OpenURL)
 	notificationRouter.SetDeliveryFailureHandler(func(dshworknotifications.Event) {
 		desktop.Event.Emit("notification-failure", true)
@@ -236,6 +432,11 @@ func main() {
 		if window != nil {
 			window.Hide()
 		}
+		petWindowMu.Lock()
+		if petWindow != nil {
+			petWindow.Hide()
+		}
+		petWindowMu.Unlock()
 	}
 	showWorkspace = func() {
 		windowActionsMu.Lock()
@@ -370,9 +571,15 @@ func main() {
 	workspaceWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		handleWindowClosing("workspace", workspaceWindow, event)
 	})
+	if petWindow != nil {
+		for _, eventType := range []events.WindowEventType{events.Common.WindowDPIChanged, events.Common.WindowFullscreen, events.Common.WindowUnFullscreen} {
+			workspaceWindow.OnWindowEvent(eventType, handlePetDisplayChange)
+		}
+	}
 	windowLedger.SetVisible("workspace", true)
 
 	host.SetPublish(func(status lifecycle.Status) {
+		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))
 		if status.State == lifecycle.StateStopping && workspaceWindow != nil {
@@ -430,7 +637,13 @@ func main() {
 		windowLedger.BeginQuit()
 		quitFlow.Begin(
 			hideDshWorkWindows,
-			host.ShutdownForApp,
+			func() error {
+				petWindowCloseAllowed.Store(true)
+				if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
+					return err
+				}
+				return host.ShutdownForApp()
+			},
 			func() {
 				if !applicationShuttingDown.Load() {
 					desktop.Quit()
@@ -452,6 +665,10 @@ func main() {
 		applicationShuttingDown.Store(true)
 		windowLedger.BeginQuit()
 		hideDshWorkWindows()
+		petWindowCloseAllowed.Store(true)
+		if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
+			log.Printf("dsh-work Pet shutdown: %v", err)
+		}
 		if err := host.ShutdownForApp(); err != nil {
 			log.Printf("dsh-work host shutdown: %v", err)
 		}
@@ -460,6 +677,7 @@ func main() {
 		if nativeNotificationHost.Unavailable() {
 			desktop.Event.Emit("notification-failure", true)
 		}
+		dshworkapp.StartupPetService(petSettingsService)
 		host.Start()
 	})
 

@@ -4,6 +4,7 @@ import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {DataDirectoryOwnership, NodeSelectionKind, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {mountNotifications, mountSettings} from "./settings";
+import {mountPets} from "./pets";
 import {buildOverviewModel, type OverviewLane} from "./overview";
 import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
@@ -202,10 +203,10 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "settings" | "notifications";
+type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "settings" | "notifications" | "pets";
 
 function sectionName(value: string | null): ManagerSection {
-  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications") {
+  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications" || value === "pets") {
     return value;
   }
   return "overview";
@@ -308,7 +309,8 @@ export function mountManager() {
     plugins: {title: "manager.plugins"},
     runtimes: {title: "manager.runtimes"},
     "data-directories": {title: "manager.dataDirectories"},
-    notifications: {title: "manager.notifications"}
+    notifications: {title: "manager.notifications"},
+    pets: {title: "manager.pets"}
   };
 
   function setFeedback(message: string, tone: "neutral" | "success" | "error" = "neutral") {
@@ -319,6 +321,7 @@ export function mountManager() {
 
   const settings = mountSettings(setFeedback);
   const notifications = mountNotifications(setFeedback);
+  const pets = mountPets(setFeedback);
 
   async function syncTheme() {
     if (!themeSyncAvailable) {
@@ -1111,7 +1114,7 @@ export function mountManager() {
       setFeedback(managerErrorMessage(error, "error.loadDshData"), "error");
       console.error("Could not read DSH manager snapshot", error);
     }
-    await Promise.all([settings.refresh(), notifications.refresh()]);
+    await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh()]);
   }
 
   for (const item of navItems) {
@@ -1131,6 +1134,7 @@ export function mountManager() {
     renderProfiles();
     renderRuntimes();
     renderDataDirectories();
+    pets.renderLocale();
   });
 
   dataDirectory.addEventListener("change", () => {

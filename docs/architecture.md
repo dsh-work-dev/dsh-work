@@ -11,6 +11,7 @@ dsh-work Host (Go + Wails)
   |-- Workspace WebView --> trusted loopback gateway --> DSH Worker
   |-- lifecycle and runtime manager --> Supervisor --> platform adapter
   |-- settings and notification policy --> native desktop adapters
+  |-- Pet catalog/runtime/renderer --> transparent Host-owned Pet overlay
   `-- DSH adapter --> versioned DSH commands and readiness
 ```
 
@@ -33,6 +34,7 @@ content cannot grant themselves Host capabilities.
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menu localization and the optional Wails notification adapter |
+| `internal/pet` | data-only Pet catalog adapters, bounded cache, runtime, renderer and overlay projection |
 | `frontend` | trusted Host state projection and interaction |
 
 ## Dependency direction
@@ -57,6 +59,14 @@ Saving uses an atomic replace so a completed write contains one complete set of
 known fields. A malformed required identity is reported as invalid manager
 state instead of being used for a launch.
 
+## Desktop Pet boundary
+
+The Pet follows the same boundary: the Host owns package validation, selection,
+visibility, persistence and the native window; `internal/pet` normalizes
+supported data-only package formats; the trusted frontend only projects state
+and sends allowlisted user intent. Pet package contents cannot create Host
+capabilities.
+
 ## Runtime invariants
 
 1. The Host obtains the single-instance and manager locks before exposing
@@ -72,6 +82,9 @@ state instead of being used for a launch.
    candidate is discarded before bounded rollback.
 8. Explicit Quit cancels owned work and verifies process cleanup before the Host
    reports completion.
+9. Pet size and position changes are applied through the Host. A failed native
+   resize does not leave persisted dimensions claiming a state the native window
+   did not reach.
 
 ## Platform boundary
 

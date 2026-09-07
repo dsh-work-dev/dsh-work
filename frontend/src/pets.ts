@@ -1,0 +1,620 @@
+import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {subscribeLocale, t} from "./i18n";
+
+type FeedbackTone = "neutral" | "success" | "error";
+type Feedback = (message: string, tone?: FeedbackTone) => void;
+type PetPanel = Awaited<ReturnType<typeof PetSettingsService.GetPetPanel>>;
+type PetPreview = Awaited<ReturnType<typeof PetSettingsService.PreviewPet>>;
+type PetItem = NonNullable<PetPanel["snapshot"]["items"]>[number];
+
+const minPetSizePercent = 50;
+const maxPetSizePercent = 300;
+const defaultPetSizePercent = 100;
+
+function errorMessage(_error: unknown, fallback: string): string {
+  // Backend errors may contain implementation or environment details. The
+  // Settings surface presents only the bounded product copy for each action.
+  return fallback;
+}
+
+export function sortPetItems(items: readonly PetItem[]): PetItem[] {
+  return [...items].sort((left, right) => {
+    const name = left.displayName.localeCompare(right.displayName, undefined, {sensitivity: "base"});
+    return name !== 0 ? name : left.stableSourceKey.localeCompare(right.stableSourceKey);
+  });
+}
+
+export function filterPetItems(items: readonly PetItem[], query: string): PetItem[] {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) {
+    return [...items];
+  }
+  return items.filter((item) => `${item.displayName}\n${item.description ?? ""}`.toLocaleLowerCase().includes(needle));
+}
+
+function sourceBadge(item: PetItem): string {
+  if (item.sourceBadge === "dsh-native") {
+    return t("pets.source.dsh");
+  }
+  return t("pets.source.codex");
+}
+
+function issueMessage(code: string): string {
+  if (code.includes("catalog-limit")) {
+    return t("pets.invalid.tooMany");
+  }
+  if (code.includes("manifest")) {
+    return t("pets.invalid.manifest");
+  }
+  if (code.includes("spritesheet") || code.includes("image")) {
+    return t("pets.invalid.spritesheetMissing");
+  }
+  if (code.includes("path") || code.includes("resource") || code.includes("symlink")) {
+    return t("pets.invalid.path");
+  }
+  if (code.includes("large") || code.includes("pixels")) {
+    return t("pets.invalid.tooLarge");
+  }
+  if (code.includes("conflict")) {
+    return t("pets.invalid.conflict");
+  }
+  return t("pets.invalid.manifest");
+}
+
+export function mountPets(setFeedback: Feedback) {
+  const visibility = document.getElementById("pets-visibility") as HTMLInputElement;
+  const visibilityStatus = document.getElementById("pets-visibility-status") as HTMLParagraphElement;
+  const size = document.getElementById("pets-size") as HTMLInputElement;
+  const sizeValue = document.getElementById("pets-size-value") as HTMLOutputElement;
+  const sizeStatus = document.getElementById("pets-size-status") as HTMLParagraphElement;
+  const refreshButton = document.getElementById("pets-refresh") as HTMLButtonElement;
+  const search = document.getElementById("pets-search") as HTMLInputElement;
+  const list = document.getElementById("pets-list") as HTMLDivElement;
+  const listCount = document.getElementById("pets-list-count") as HTMLParagraphElement;
+  const empty = document.getElementById("pets-empty") as HTMLDivElement;
+  const emptyTitle = document.getElementById("pets-empty-title") as HTMLElement;
+  const emptyDescription = document.getElementById("pets-empty-description") as HTMLSpanElement;
+  const invalidIssues = document.getElementById("pets-invalid-issues") as HTMLDetailsElement;
+  const invalidSummary = document.getElementById("pets-invalid-summary") as HTMLSpanElement;
+  const invalidIssueList = document.getElementById("pets-invalid-issue-list") as HTMLDivElement;
+  const previewPlaceholder = document.getElementById("pets-preview-placeholder") as HTMLDivElement;
+  const previewImage = document.getElementById("pets-preview-image") as HTMLImageElement;
+  const previewName = document.getElementById("pets-preview-name") as HTMLHeadingElement;
+  const previewDescription = document.getElementById("pets-preview-description") as HTMLParagraphElement;
+  const previewStatus = document.getElementById("pets-preview-status") as HTMLParagraphElement;
+  const previewMessage = document.getElementById("pets-preview-message") as HTMLParagraphElement;
+  const useButton = document.getElementById("pets-use") as HTMLButtonElement;
+  const retryButton = document.getElementById("pets-retry") as HTMLButtonElement;
+  const clearButton = document.getElementById("pets-clear") as HTMLButtonElement;
+  let panel: PetPanel | undefined;
+  let browseKey: string | undefined;
+  let preview: PetPreview | undefined;
+  let previewDataURL = "";
+  let previewRequest = 0;
+  let previewFailure = "";
+  const thumbnailCache = new Map<string, string | null>();
+  const thumbnailRequests = new Map<string, number>();
+  const maxThumbnailRequests = 4;
+  let thumbnailEpoch = 0;
+  let refreshing = false;
+  let switching = false;
+  let loading = true;
+  let sizeTimer: number | undefined;
+  let sizeRequest = 0;
+  let pendingSize: {request: number; percent: number} | undefined;
+  let sizeCommitInFlight = false;
+
+  function selectedKey(): string | undefined {
+    return panel?.preference.selectedKey ?? undefined;
+  }
+
+  function visibleItems(): PetItem[] {
+    const sorted = sortPetItems(panel?.snapshot.items ?? []);
+    return filterPetItems(sorted, search.value);
+  }
+
+  function renderVisibility() {
+    const preference = panel?.preference;
+    const runtime = panel?.runtime;
+    visibility.checked = preference?.visibilityIntent === "visible";
+    visibility.disabled = !preference?.selectedKey || switching || refreshing;
+    if (!preference?.selectedKey) {
+      visibilityStatus.textContent = t("pets.noSelection.status");
+    } else if (runtime?.effectiveVisibility === "paused") {
+      visibilityStatus.textContent = t("pets.visibility.paused");
+    } else if (visibility.checked) {
+      visibilityStatus.textContent = t("pets.visibility.shown");
+    } else {
+      visibilityStatus.textContent = t("pets.visibility.hidden");
+    }
+  }
+
+  function petSizePercent(value: number | undefined): number {
+    if (!Number.isFinite(value)) {
+      return defaultPetSizePercent;
+    }
+    return Math.min(maxPetSizePercent, Math.max(minPetSizePercent, Math.round(value as number)));
+  }
+
+  function renderSize() {
+    const percent = petSizePercent(panel?.sizePercent);
+    size.value = String(percent);
+    sizeValue.value = `${percent}%`;
+    size.disabled = !selectedKey() || switching || refreshing || loading || panel?.sizeAvailable === false;
+    if (!selectedKey()) {
+      sizeStatus.textContent = t("pets.noSelection.status");
+    } else if (panel?.sizeAvailable === false) {
+      sizeStatus.textContent = t("pets.size.unavailable");
+    } else {
+      sizeStatus.textContent = t("pets.size.status", {percent});
+    }
+  }
+
+  function readSizePercent(): number | undefined {
+    const value = Number(size.value);
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+    return petSizePercent(value);
+  }
+
+  function cancelSizeCommit() {
+    sizeRequest += 1;
+    pendingSize = undefined;
+    if (sizeTimer !== undefined) {
+      window.clearTimeout(sizeTimer);
+      sizeTimer = undefined;
+    }
+  }
+
+  function hasCurrentPendingSize(): boolean {
+    return pendingSize !== undefined && pendingSize.request === sizeRequest;
+  }
+
+  function updateSizeValue() {
+    const percent = readSizePercent();
+    if (percent !== undefined) {
+      sizeValue.value = `${percent}%`;
+    }
+  }
+
+  function renderIssues() {
+    const issues = panel?.snapshot.issues ?? [];
+    const visibleIssues = issues.filter((issue) => issue.severity !== "info");
+    invalidIssues.hidden = visibleIssues.length === 0;
+    invalidSummary.textContent = t("pets.invalid.summary", {count: visibleIssues.length});
+    invalidIssueList.replaceChildren();
+    for (const issue of visibleIssues) {
+      const line = document.createElement("p");
+      line.className = "manager-note";
+      line.textContent = issueMessage(issue.code);
+      invalidIssueList.append(line);
+    }
+  }
+
+  function renderPreview() {
+    const item = (panel?.snapshot.items ?? []).find((candidate) => candidate.stableSourceKey === browseKey);
+    previewName.textContent = item?.displayName ?? preview?.displayName ?? "";
+    previewDescription.textContent = item?.description ?? preview?.description ?? "";
+    previewPlaceholder.hidden = !!previewDataURL;
+    previewImage.hidden = !previewDataURL;
+    if (previewDataURL) {
+      previewImage.src = previewDataURL;
+      previewImage.alt = preview?.displayName ?? "";
+    } else {
+      previewImage.removeAttribute("src");
+      previewImage.alt = "";
+    }
+    previewStatus.textContent = browseKey ? t("pets.preview.status") : "";
+    if (panel?.runtime.selectionStatus === "unavailable" && browseKey === selectedKey()) {
+      previewMessage.textContent = t("pets.selectedUnavailable");
+    } else if (panel?.snapshot.stale) {
+      previewMessage.textContent = t("pets.refresh.staleError");
+    } else if (previewFailure) {
+      previewMessage.textContent = previewFailure;
+    } else {
+      previewMessage.textContent = "";
+    }
+    useButton.disabled = !browseKey || switching || browseKey === selectedKey();
+    retryButton.hidden = !browseKey || !previewFailure || switching;
+    retryButton.disabled = switching;
+    clearButton.disabled = !selectedKey() || switching;
+  }
+
+  function loadThumbnail(key: string) {
+    if (thumbnailCache.has(key) || thumbnailRequests.has(key) || thumbnailRequests.size >= maxThumbnailRequests) {
+      return;
+    }
+    if (document.visibilityState !== "visible" || !document.hasFocus()) {
+      return;
+    }
+    const epoch = thumbnailEpoch;
+    thumbnailRequests.set(key, epoch);
+    void PetSettingsService.PreviewPet(key).then(async (next) => {
+      const dataURL = await PetSettingsService.GetPetPreview(next.previewRef);
+      if (thumbnailRequests.get(key) === epoch) {
+        thumbnailRequests.delete(key);
+      }
+      if (epoch !== thumbnailEpoch) {
+        return;
+      }
+      thumbnailCache.set(key, dataURL || null);
+      renderList();
+    }).catch(() => {
+      if (thumbnailRequests.get(key) === epoch) {
+        thumbnailRequests.delete(key);
+      }
+      if (epoch !== thumbnailEpoch) {
+        return;
+      }
+      thumbnailCache.set(key, null);
+      renderList();
+    });
+  }
+
+  function renderList() {
+    const scanning = loading || (refreshing && panel?.snapshot.scanState === "never-scanned");
+    if (scanning) {
+      list.replaceChildren();
+      listCount.textContent = t("pets.list.count", {count: 0});
+      empty.hidden = false;
+      emptyTitle.textContent = t("pets.loading");
+      emptyDescription.hidden = true;
+      invalidIssues.hidden = true;
+      return;
+    }
+    const items = visibleItems();
+    list.replaceChildren();
+    listCount.textContent = t("pets.list.count", {count: panel?.snapshot.items?.length ?? 0});
+    empty.hidden = items.length > 0;
+    emptyTitle.textContent = search.value.trim() ? t("pets.noSearchResults") : t("pets.empty.title");
+    if (!search.value.trim()) {
+      emptyDescription.hidden = false;
+      emptyDescription.textContent = t("pets.empty.description");
+    } else {
+      emptyDescription.hidden = true;
+    }
+    for (const item of items) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = `manager-list-item pets-list-item${item.stableSourceKey === browseKey ? " is-selected" : ""}`;
+      option.dataset.petKey = item.stableSourceKey;
+      option.setAttribute("role", "option");
+      option.setAttribute("aria-selected", String(item.stableSourceKey === browseKey));
+      option.disabled = switching || refreshing || item.availability !== "ready";
+      const thumbnail = document.createElement("span");
+      thumbnail.className = "pets-thumbnail";
+      thumbnail.setAttribute("aria-hidden", "true");
+      const thumbnailURL = thumbnailCache.get(item.stableSourceKey);
+      if (thumbnailURL) {
+        const image = document.createElement("img");
+        image.src = thumbnailURL;
+        image.alt = "";
+        image.decoding = "async";
+        thumbnail.append(image);
+      } else {
+        thumbnail.classList.add("is-placeholder");
+      }
+      const content = document.createElement("span");
+      content.className = "pets-list-copy";
+      const name = document.createElement("strong");
+      name.textContent = item.displayName;
+      const description = document.createElement("span");
+      description.className = "pets-list-description";
+      description.textContent = item.description ?? "";
+      const detail = document.createElement("span");
+      const status = item.current ? ` · ${t("pets.current.status")}` : "";
+      detail.textContent = `${sourceBadge(item)}${status}`;
+      content.append(name, description, detail);
+      option.append(thumbnail, content);
+      option.addEventListener("click", () => void browse(item.stableSourceKey));
+      list.append(option);
+      if (item.availability === "ready") {
+        loadThumbnail(item.stableSourceKey);
+      }
+    }
+    renderIssues();
+  }
+
+  function render() {
+    renderVisibility();
+    renderSize();
+    renderList();
+    renderPreview();
+    search.disabled = switching || refreshing;
+    refreshButton.disabled = refreshing || switching;
+    refreshButton.textContent = refreshing ? t("pets.refresh.inProgress") : t("pets.refresh.action");
+  }
+
+  async function browse(key: string) {
+    browseKey = key;
+    preview = undefined;
+    previewDataURL = "";
+    previewFailure = "";
+    render();
+    if (document.visibilityState !== "visible" || !document.hasFocus()) {
+      return;
+    }
+    const request = ++previewRequest;
+    try {
+      const next = await PetSettingsService.PreviewPet(key);
+      if (request !== previewRequest || browseKey !== key) {
+        return;
+      }
+      preview = next;
+      renderPreview();
+      try {
+        const dataURL = await PetSettingsService.GetPetPreview(next.previewRef);
+        if (request !== previewRequest || browseKey !== key) {
+          return;
+        }
+        previewDataURL = dataURL;
+        previewFailure = dataURL ? "" : t("pets.preview.unavailable");
+        if (dataURL) {
+          thumbnailCache.set(key, dataURL);
+        }
+      } catch (error) {
+        if (request !== previewRequest || browseKey !== key) {
+          return;
+        }
+        previewFailure = errorMessage(error, t("pets.preview.unavailable"));
+      }
+      renderPreview();
+    } catch (error) {
+      if (request !== previewRequest || browseKey !== key) {
+        return;
+      }
+      previewFailure = errorMessage(error, t("pets.preview.unavailable"));
+      renderPreview();
+    }
+  }
+
+  function applyPanel(next: PetPanel) {
+    panel = next;
+    const committed = selectedKey();
+    if (!browseKey || !(panel.snapshot.items ?? []).some((item) => item.stableSourceKey === browseKey)) {
+      browseKey = committed;
+    }
+    render();
+  }
+
+  async function refreshCatalog() {
+    if (refreshing) {
+      return;
+    }
+    cancelSizeCommit();
+    refreshing = true;
+    thumbnailEpoch += 1;
+    thumbnailCache.clear();
+    thumbnailRequests.clear();
+    preview = undefined;
+    previewDataURL = "";
+    previewFailure = "";
+    setFeedback(t("pets.scan.inProgress"), "neutral");
+    render();
+    try {
+      applyPanel(await PetSettingsService.RefreshPetCatalog());
+      setFeedback(t("pets.refresh.success"), "success");
+      if (browseKey && document.visibilityState === "visible" && document.hasFocus()) {
+        void browse(browseKey);
+      }
+    } catch (error) {
+      const message = errorMessage(error, t("pets.refresh.failed"));
+      previewMessage.textContent = panel?.snapshot.stale ? t("pets.refresh.staleError") : message;
+      setFeedback(message, "error");
+    } finally {
+      refreshing = false;
+      render();
+    }
+  }
+
+  async function refresh(): Promise<boolean> {
+    cancelSizeCommit();
+    loading = true;
+    render();
+    try {
+      const next = await PetSettingsService.GetPetPanel();
+      applyPanel(next);
+      if (next.snapshot.scanState === "never-scanned") {
+        await refreshCatalog();
+      }
+      return true;
+    } catch (error) {
+      const message = errorMessage(error, t("error.loadSettings"));
+      previewMessage.textContent = message;
+      setFeedback(message, "error");
+      return false;
+    } finally {
+      loading = false;
+      render();
+    }
+  }
+
+  async function setVisibility() {
+    const nextValue = visibility.checked;
+    visibility.disabled = true;
+    try {
+      applyPanel(await PetSettingsService.SetPetVisibility(nextValue));
+      setFeedback(nextValue ? t("pets.visibility.shown") : t("pets.visibility.hidden"), "success");
+    } catch (error) {
+      visibility.checked = !nextValue;
+      setFeedback(errorMessage(error, t("error.saveSettings")), "error");
+    } finally {
+      renderVisibility();
+    }
+  }
+
+  async function commitSize() {
+    if (sizeCommitInFlight || !pendingSize) {
+      return;
+    }
+    const request = pendingSize.request;
+    const percent = pendingSize.percent;
+    pendingSize = undefined;
+    if (request !== sizeRequest || size.disabled) {
+      return;
+    }
+    sizeCommitInFlight = true;
+    try {
+      const next = await PetSettingsService.SetPetSize(percent);
+      if (request !== sizeRequest) {
+        return;
+      }
+      applyPanel(next);
+      setFeedback(t("pets.size.changed", {percent}), "success");
+    } catch (error) {
+      if (request !== sizeRequest) {
+        return;
+      }
+      renderSize();
+      setFeedback(errorMessage(error, t("pets.size.failed")), "error");
+    } finally {
+      sizeCommitInFlight = false;
+      if (hasCurrentPendingSize()) {
+        void commitSize();
+      }
+    }
+  }
+
+  function scheduleSizeCommit(immediate = false) {
+    const percent = readSizePercent();
+    cancelSizeCommit();
+    updateSizeValue();
+    if (percent === undefined || size.disabled) {
+      renderSize();
+      return;
+    }
+    const request = sizeRequest;
+    pendingSize = {request, percent};
+    if (immediate) {
+      void commitSize();
+      return;
+    }
+    sizeTimer = window.setTimeout(() => {
+      sizeTimer = undefined;
+      void commitSize();
+    }, 160);
+  }
+
+  async function selectPet() {
+    if (!browseKey) {
+      setFeedback(t("pets.selectFirst"), "error");
+      return;
+    }
+    cancelSizeCommit();
+    switching = true;
+    render();
+    try {
+      applyPanel(await PetSettingsService.SelectPet(browseKey));
+      setFeedback(t("pets.switch.success", {name: preview?.displayName ?? browseKey}), "success");
+    } catch (error) {
+      setFeedback(errorMessage(error, t("pets.switchFailed")), "error");
+    } finally {
+      switching = false;
+      render();
+    }
+  }
+
+  async function clearSelection() {
+    cancelSizeCommit();
+    switching = true;
+    render();
+    try {
+      applyPanel(await PetSettingsService.ClearPetSelection());
+      browseKey = undefined;
+      preview = undefined;
+      previewDataURL = "";
+      previewFailure = "";
+      setFeedback(t("pets.clear.success"), "success");
+    } catch (error) {
+      setFeedback(errorMessage(error, t("error.saveSettings")), "error");
+    } finally {
+      switching = false;
+      render();
+    }
+  }
+
+  function moveBrowse(delta: number, boundary?: "start" | "end") {
+    const items = visibleItems().filter((item) => item.availability === "ready");
+    if (items.length === 0) {
+      return;
+    }
+    const currentIndex = items.findIndex((item) => item.stableSourceKey === browseKey);
+    const index = boundary === "start"
+      ? 0
+      : boundary === "end"
+        ? items.length - 1
+        : (currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex) + delta;
+    const next = items[(index + items.length) % items.length];
+    if (next) {
+      void browse(next.stableSourceKey);
+      const option = list.querySelector<HTMLButtonElement>(`[data-pet-key="${CSS.escape(next.stableSourceKey)}"]`);
+      option?.focus();
+    }
+  }
+
+  refreshButton.addEventListener("click", () => void refreshCatalog());
+  search.addEventListener("input", () => renderList());
+  visibility.addEventListener("change", () => void setVisibility());
+  size.addEventListener("input", () => scheduleSizeCommit());
+  size.addEventListener("change", () => scheduleSizeCommit(true));
+  useButton.addEventListener("click", () => void selectPet());
+  retryButton.addEventListener("click", () => {
+    if (browseKey) {
+      void browse(browseKey);
+    }
+  });
+  clearButton.addEventListener("click", () => void clearSelection());
+  list.addEventListener("keydown", (event) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        moveBrowse(1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        moveBrowse(-1);
+        break;
+      case "Home":
+        event.preventDefault();
+        moveBrowse(0, "start");
+        break;
+      case "End":
+        event.preventDefault();
+        moveBrowse(0, "end");
+        break;
+      case "Enter":
+      case " ":
+        if (document.activeElement instanceof HTMLButtonElement && document.activeElement.dataset.petKey) {
+          event.preventDefault();
+          void browse(document.activeElement.dataset.petKey);
+        }
+        break;
+    }
+  });
+  function pausePreview() {
+    previewRequest += 1;
+    thumbnailEpoch += 1;
+    previewDataURL = "";
+    previewStatus.textContent = "";
+    renderPreview();
+  }
+
+  window.addEventListener("blur", pausePreview);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") {
+      pausePreview();
+    }
+  });
+  window.addEventListener("focus", () => {
+    if (browseKey) {
+      void browse(browseKey);
+    }
+  });
+  subscribeLocale(() => {
+    render();
+  });
+
+  render();
+  return {refresh, renderLocale: render};
+}

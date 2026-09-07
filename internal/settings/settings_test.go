@@ -65,6 +65,88 @@ func TestSettingsPersistAutomaticRuntimeRollback(t *testing.T) {
 	}
 }
 
+func TestSettingsPetDefaultsStartHiddenWithoutASelection(t *testing.T) {
+	manager, err := New(Config{Path: filepath.Join(t.TempDir(), "settings.json")})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if values.Pet.SchemaVersion != petPreferenceVersion || values.Pet.SelectedKey != nil || values.Pet.VisibilityIntent != PetVisibilityHidden {
+		t.Fatalf("default Pet preference = %#v, want schema %d, no selection and hidden", values.Pet, petPreferenceVersion)
+	}
+}
+
+func TestSettingsPetPreferenceNormalizesAndPreservesUnavailableSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	data := []byte(`{"version":1,"closeToTray":true,"locale":"zh-CN","pet":{"schemaVersion":99,"selectedKey":"codex:pets:missing","visibilityIntent":"visible","position":{"anchorX":-2,"anchorY":3,"width":0,"height":99999,"scale":0}}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if values.Pet.SelectedKey == nil || *values.Pet.SelectedKey != "codex:pets:missing" || values.Pet.VisibilityIntent != PetVisibilityVisible {
+		t.Fatalf("normalized unavailable selection = %#v, want key and visible intent preserved", values.Pet)
+	}
+	defaults := DefaultPetPosition()
+	if values.Pet.SchemaVersion != petPreferenceVersion || values.Pet.Position != defaults {
+		t.Fatalf("normalized position/schema = %#v, want %#v and schema %d", values.Pet.Position, defaults, petPreferenceVersion)
+	}
+}
+
+func TestSettingsPetPreferenceRejectsPathLikeSelectionAndForcesHidden(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"pet":{"selectedKey":"C:\\outside","visibilityIntent":"visible"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if values.Pet.SelectedKey != nil || values.Pet.VisibilityIntent != PetVisibilityHidden {
+		t.Fatalf("unsafe selection = %#v, want nil/hidden", values.Pet)
+	}
+}
+
+func TestSettingsPetPreferencePersistsAsOneVersionedValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	selected := "codex:pets:chosen"
+	preference := DefaultPetPreference()
+	preference.SelectedKey = &selected
+	preference.VisibilityIntent = PetVisibilityVisible
+	preference.Position.MonitorID = "display-2"
+	if _, err := manager.SetPetPreference(context.Background(), preference); err != nil {
+		t.Fatalf("SetPetPreference() error = %v", err)
+	}
+	reloaded, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatalf("reload New() error = %v", err)
+	}
+	values, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("reload Snapshot() error = %v", err)
+	}
+	if values.Pet.SelectedKey == nil || *values.Pet.SelectedKey != selected || values.Pet.VisibilityIntent != PetVisibilityVisible || values.Pet.Position.MonitorID != "display-2" {
+		t.Fatalf("reloaded Pet preference = %#v", values.Pet)
+	}
+}
+
 func TestSettingsPersistClosePolicy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})

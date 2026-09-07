@@ -23,6 +23,45 @@ export enum Locale {
 };
 
 /**
+ * PetPosition stores a monitor-aware logical anchor rather than an absolute
+ * screen coordinate. Host policy clamps it to the current work area.
+ */
+export interface PetPosition {
+    "monitorId"?: string;
+    "anchorX": number;
+    "anchorY": number;
+    "width": number;
+    "height": number;
+    "scale": number;
+}
+
+/**
+ * PetPreference is the versioned Host-owned Pet preference. A missing
+ * selected key is represented by nil and is never replaced by discovery.
+ */
+export interface PetPreference {
+    "schemaVersion": number;
+    "selectedKey": string | null;
+    "visibilityIntent": PetVisibilityIntent;
+    "position": PetPosition;
+}
+
+/**
+ * PetVisibilityIntent is the persisted user choice. It is intentionally
+ * separate from the runtime's effective visibility, which can be paused when
+ * the selected package is unavailable or the platform cannot host an overlay.
+ */
+export enum PetVisibilityIntent {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    PetVisibilityVisible = "visible",
+    PetVisibilityHidden = "hidden",
+};
+
+/**
  * Values is the versioned, platform-neutral dsh-work preference contract.
  * CloseToTray is true by default so closing the last window keeps dsh-work and
  * its managed DSH worker available from the notification area.
@@ -33,4 +72,5 @@ export interface Values {
     "automaticRuntimeRollback": boolean;
     "locale": Locale;
     "notifications": notifications$0.Preferences;
+    "pet": PetPreference;
 }
