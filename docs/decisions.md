@@ -82,6 +82,10 @@ pet packages do not execute code or receive Host capabilities. This preserves
 the Host authority boundary while allowing asset formats to change at the
 adapter edge.
 
+The Codex `pets/<id>/pet.json` and `avatars/<id>/avatar.json` entries share the
+same manifest, profile, geometry and track rules. The `avatars/` path is kept
+for Codex compatibility and is not exposed as a separate source format.
+
 ## ADR-0011 — Direct Pet scale control and handle-only movement
 
 Pet scaling is a direct trusted Settings slider from 50% to 300%, based on the

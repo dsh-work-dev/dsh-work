@@ -39,6 +39,9 @@ the feature can be described as release-complete.
 
 The catalog accepts Codex v1/v2 packages from the `pets/` entry and the
 `avatars/` compatibility entry, plus dsh-native raster/track packages.
+Both Codex entries use the same `id`, `displayName`, `spritesheetPath`,
+version-geometry and track rules; `avatars/` is a path compatibility entry,
+not a separate source format or UI source badge.
 Package adapters normalize those inputs into the renderer contract; they do
 not expose arbitrary package code to the Host or WebView.
 
@@ -93,12 +96,8 @@ are restored and the error is returned to the caller.
 
 The implementation has passed:
 
-- `go test . ./cmd/... ./internal/...`
+- `go test ./...`
 - `go vet ./...`
-- `go build -trimpath -buildvcs=false -o bin/dsh-work.exe .`
 - `npm run typecheck`
-- `npm test` (6/6)
-- `npm run build`
-- `node scripts/check-public-content.mjs`
-- `node scripts/check-wails-dev.mjs`
+- `npm test` (14/14)
 - `git diff --check`
