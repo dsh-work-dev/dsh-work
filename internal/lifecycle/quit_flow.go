@@ -11,8 +11,32 @@ import "sync"
 // duplicate suppression, while the application edge owns windows, workers
 // and the native application object.
 type QuitFlow struct {
-	mu         sync.Mutex
-	inProgress bool
+	mu           sync.Mutex
+	inProgress   bool
+	stateChanged func()
+}
+
+// SetStateChanged installs a short, synchronous observer for quit-flow state
+// changes. The observer runs after the flow releases its mutex.
+func (f *QuitFlow) SetStateChanged(observer func()) {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	f.stateChanged = observer
+	f.mu.Unlock()
+}
+
+func (f *QuitFlow) notifyStateChanged() {
+	if f == nil {
+		return
+	}
+	f.mu.Lock()
+	observer := f.stateChanged
+	f.mu.Unlock()
+	if observer != nil {
+		observer()
+	}
 }
 
 // Begin accepts one quit request. hide is run before Begin returns; cleanup
@@ -34,6 +58,7 @@ func (f *QuitFlow) Begin(
 	}
 	f.inProgress = true
 	f.mu.Unlock()
+	f.notifyStateChanged()
 
 	if hide != nil {
 		hide()
@@ -50,6 +75,7 @@ func (f *QuitFlow) Begin(
 			f.mu.Lock()
 			f.inProgress = false
 			f.mu.Unlock()
+			f.notifyStateChanged()
 			return
 		}
 		if quit != nil {

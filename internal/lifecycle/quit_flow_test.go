@@ -100,6 +100,40 @@ func TestQuitFlowSuppressesDuplicateRequestsAndRecoversAfterFailure(t *testing.T
 	}
 }
 
+func TestQuitFlowNotifiesAfterRecoveryStateIsReleased(t *testing.T) {
+	flow := &QuitFlow{}
+	releaseShutdown := make(chan struct{})
+	stateChanges := make(chan bool, 2)
+	flow.SetStateChanged(func() {
+		stateChanges <- flow.InProgress()
+	})
+
+	if !flow.Begin(
+		nil,
+		func() error {
+			<-releaseShutdown
+			return errors.New("cleanup failed")
+		},
+		nil,
+		nil,
+	) {
+		t.Fatal("Begin() rejected the quit request")
+	}
+	if active := <-stateChanges; !active {
+		t.Fatal("start notification reported an inactive quit flow")
+	}
+
+	close(releaseShutdown)
+	select {
+	case active := <-stateChanges:
+		if active {
+			t.Fatal("recovery notification arrived before the quit flow was released")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery notification was not published")
+	}
+}
+
 func TestQuitFlowDoesNotLetRecoveryRaceWithRetry(t *testing.T) {
 	flow := &QuitFlow{}
 	releaseShutdown := make(chan struct{})

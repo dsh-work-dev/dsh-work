@@ -9,6 +9,7 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
+	Actions             string
 	Settings            string
 	ShowPet             string
 	OpenWorkspace       string
@@ -39,6 +40,7 @@ type NotificationCopy struct {
 
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
+		Actions:               "Actions",
 		Settings:              "Settings",
 		ShowPet:               "Show desktop pet",
 		OpenWorkspace:         "Open workspace",
@@ -76,6 +78,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleChinese: {
+		Actions:               "操作",
 		Settings:              "设置",
 		ShowPet:               "显示桌面宠物",
 		OpenWorkspace:         "打开工作区",
@@ -113,6 +116,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleJapanese: {
+		Actions:               "操作",
 		Settings:              "設定",
 		ShowPet:               "デスクトップペットを表示",
 		OpenWorkspace:         "ワークスペースを開く",

@@ -189,8 +189,10 @@ func main() {
 	var showWorkspace func()
 	var openSettings func(string)
 	var refreshPetMenu func(context.Context)
+	var refreshLifecycleMenu func()
 	var quitFlow lifecycle.QuitFlow
 	var applicationShuttingDown atomic.Bool
+	var restartActionBusy atomic.Bool
 	var petWindowCloseAllowed atomic.Bool
 	var petWindowRepositioning atomic.Bool
 	var petWindowPositionRestored atomic.Bool
@@ -491,6 +493,33 @@ func main() {
 	}
 	initialNative := nativeui.LabelsFor(localePreference)
 	tray.SetTooltip(initialNative.TrayTooltip)
+	restartSettled := func(status lifecycle.Status) bool {
+		return status.State == lifecycle.StateReady || status.State == lifecycle.StateFailed || status.State == lifecycle.StateStopped
+	}
+	restartDSH := func() {
+		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() || !restartActionBusy.CompareAndSwap(false, true) {
+			return
+		}
+		if refreshLifecycleMenu != nil {
+			refreshLifecycleMenu()
+		}
+		status := host.Restart()
+		if restartSettled(status) {
+			restartActionBusy.Store(false)
+		}
+		if refreshLifecycleMenu != nil {
+			refreshLifecycleMenu()
+		}
+	}
+	quitDSHWork := func() {
+		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
+			return
+		}
+		host.Quit()
+		if refreshLifecycleMenu != nil {
+			refreshLifecycleMenu()
+		}
+	}
 	trayMenu := desktop.NewMenu()
 	trayStatus := trayMenu.Add(nativeui.TrayStatus(localePreference, lifecycle.StateStarting)).SetEnabled(false)
 	trayOpenWorkspace := trayMenu.Add(initialNative.OpenWorkspace).OnClick(func(*application.Context) {
@@ -501,23 +530,41 @@ func main() {
 	})
 	trayMenu.AddSeparator()
 	trayRestartDSH := trayMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
-		if quitFlow.InProgress() || windowLedger.IsQuitting() {
-			return
-		}
-		host.Restart()
+		restartDSH()
 	})
 	trayQuit := trayMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
-		host.Quit()
+		quitDSHWork()
 	})
 	tray.SetMenu(trayMenu).OnClick(func() {
 		showWorkspace()
 	})
 
 	menu := desktop.NewMenu()
+	actionsMenu := menu.AddSubmenu(initialNative.Actions)
+	menuPetVisibility := actionsMenu.AddCheckbox(initialNative.ShowPet, false).SetEnabled(false)
+	actionsMenu.AddSeparator()
+	appMenuRestartDSH := actionsMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
+		restartDSH()
+	})
+	appMenuQuit := actionsMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
+		quitDSHWork()
+	})
+	refreshLifecycleMenu = func() {
+		enabled := !applicationShuttingDown.Load() && !quitFlow.InProgress() && !windowLedger.IsQuitting() && !restartActionBusy.Load()
+		trayRestartDSH.SetEnabled(enabled)
+		trayQuit.SetEnabled(enabled)
+		appMenuRestartDSH.SetEnabled(enabled)
+		appMenuQuit.SetEnabled(enabled)
+	}
+	refreshLifecycleMenu()
+	quitFlow.SetStateChanged(func() {
+		if refreshLifecycleMenu != nil {
+			refreshLifecycleMenu()
+		}
+	})
 	menuSettings := menu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
-	menuPetVisibility := menu.AddCheckbox(initialNative.ShowPet, false).SetEnabled(false)
 	menuPetVisibility.OnClick(func(ctx *application.Context) {
 		requested := ctx.IsChecked()
 		if applicationShuttingDown.Load() || !petMenuActionBusy.CompareAndSwap(false, true) {
@@ -605,8 +652,11 @@ func main() {
 		traySettings.SetLabel(labels.Settings)
 		trayRestartDSH.SetLabel(labels.RestartDSH)
 		trayQuit.SetLabel(labels.Quit)
+		actionsMenu.SetLabel(labels.Actions)
 		menuSettings.SetLabel(labels.Settings)
 		menuPetVisibility.SetLabel(labels.ShowPet)
+		appMenuRestartDSH.SetLabel(labels.RestartDSH)
+		appMenuQuit.SetLabel(labels.Quit)
 		helpMenu.SetLabel(labels.Help)
 		checkUpdates.SetLabel(labels.CheckUpdates)
 		aboutDshWork.SetLabel(labels.About)
@@ -675,6 +725,12 @@ func main() {
 		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))
+		if restartActionBusy.Load() && restartSettled(status) {
+			restartActionBusy.Store(false)
+		}
+		if refreshLifecycleMenu != nil {
+			refreshLifecycleMenu()
+		}
 		if status.State == lifecycle.StateStopping && workspaceWindow != nil {
 			workspaceTrusted.Store(true)
 			workspaceWindow.SetURL("/")
