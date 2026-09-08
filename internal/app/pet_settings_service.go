@@ -79,10 +79,11 @@ type PetOverlayState struct {
 // after the Wails window exists; the Settings method below can request only
 // the allow-listed size operation and never receives a native handle.
 type PetOverlayHooks struct {
-	Show   func() error
-	Hide   func() error
-	Close  func() error
-	Resize func(width, height int) error
+	AlwaysOnTop func(bool) error
+	Show        func() error
+	Hide        func() error
+	Close       func() error
+	Resize      func(width, height int) error
 	// StateChanged must return quickly and must not call back into the service.
 	StateChanged func()
 }
@@ -692,9 +693,41 @@ func (s *PetSettingsService) SelectPet(ctx context.Context, stableSourceKey stri
 	return panel, nil
 }
 
-// SetPetVisibility changes only persisted visibility intent. An unavailable
-// selected key may still change intent; runtime projection maps visible intent
-// to paused until discovery makes the key available again.
+// SetPetAlwaysOnTop applies and persists the Settings-owned window preference.
+func (s *PetSettingsService) SetPetAlwaysOnTop(ctx context.Context, enabled bool) (PetPanel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	operation, cancel, err := s.beginOperation(ctx)
+	if err != nil {
+		return PetPanel{}, err
+	}
+	defer cancel()
+	snapshot, err := s.catalog.Snapshot(operation)
+	if err != nil {
+		return PetPanel{}, safePetCatalogError(err)
+	}
+	current, err := s.manager.Snapshot(operation)
+	if err != nil {
+		return PetPanel{}, err
+	}
+	next := copyPetPreference(current.Pet)
+	next.AlwaysOnTop = enabled
+	if s.overlayHooks.AlwaysOnTop != nil {
+		if err := s.overlayHooks.AlwaysOnTop(enabled); err != nil {
+			return PetPanel{}, petRendererFailure()
+		}
+	}
+	values, err := s.manager.SetPetPreference(operation, next)
+	if err != nil {
+		if s.overlayHooks.AlwaysOnTop != nil {
+			_ = s.overlayHooks.AlwaysOnTop(current.Pet.AlwaysOnTop)
+		}
+		return PetPanel{}, err
+	}
+	return s.projectPanel(snapshot, values.Pet), nil
+}
+
+// SetPetVisibility persists visibility intent, including while a pet is unavailable.
 func (s *PetSettingsService) SetPetVisibility(ctx context.Context, visible bool) (PetPanel, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -947,6 +980,12 @@ func (s *PetSettingsService) shutdown(ctx context.Context) error {
 
 func (s *PetSettingsService) applyOverlayVisibilityLocked(preference settings.PetPreference) {
 	defer s.notifyStateChangedLocked()
+	if s.overlayHooks.AlwaysOnTop != nil {
+		if err := s.overlayHooks.AlwaysOnTop(preference.AlwaysOnTop); err != nil {
+			s.overlayFailure = true
+			return
+		}
+	}
 	hadFailure := s.overlayFailure
 	if s.overlayHooks.Show == nil && s.overlayHooks.Hide == nil {
 		if s.activeRuntime != nil {

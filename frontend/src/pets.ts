@@ -64,6 +64,8 @@ export function mountPets() {
   let visibilityFailure = "";
   let sizeFailure = "";
   const visibility = document.getElementById("pets-visibility") as HTMLInputElement;
+  const alwaysOnTop = document.getElementById("pets-always-on-top") as HTMLInputElement;
+  const alwaysOnTopStatus = document.getElementById("pets-always-on-top-status")!;
   const visibilityStatus = document.getElementById("pets-visibility-status") as HTMLParagraphElement;
   const size = document.getElementById("pets-size") as HTMLInputElement;
   const sizeValue = document.getElementById("pets-size-value") as HTMLOutputElement;
@@ -118,6 +120,8 @@ export function mountPets() {
     const preference = panel?.preference;
     const runtime = panel?.runtime;
     visibility.checked = preference?.visibilityIntent === "visible";
+    alwaysOnTop.checked = preference?.alwaysOnTop ?? false;
+    alwaysOnTop.disabled = !preference || switching || refreshing;
     visibility.disabled = !preference?.selectedKey || switching || refreshing;
     if (visibilityFailure) {
       visibilityStatus.textContent = visibilityFailure;
@@ -583,6 +587,14 @@ export function mountPets() {
   refreshButton.addEventListener("click", () => void refreshCatalog());
   search.addEventListener("input", () => renderList());
   visibility.addEventListener("change", () => void setVisibility());
+  alwaysOnTop.addEventListener("change", async () => {
+    const nextValue=alwaysOnTop.checked;
+    const finish=beginControlUpdate(alwaysOnTop);
+    alwaysOnTopStatus.textContent="";
+    try { applyPanel(await PetSettingsService.SetPetAlwaysOnTop(nextValue)); }
+    catch(error) { alwaysOnTopStatus.textContent=errorMessage(error,t("error.saveSettings")); }
+    finally { finish();renderVisibility(); }
+  });
   size.addEventListener("input", () => scheduleSizeCommit());
   size.addEventListener("change", () => scheduleSizeCommit(true));
   useButton.addEventListener("click", () => void selectPet());

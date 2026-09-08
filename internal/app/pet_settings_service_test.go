@@ -26,6 +26,29 @@ func TestPetSettingsServiceRequiresTrustedSettingsSurface(t *testing.T) {
 	}
 }
 
+func TestPetAlwaysOnTopDefaultsOffAppliesAndSurvivesReload(t *testing.T) {
+	store := &petServiceStore{}
+	manager := newPetServiceManagerWithStore(t, store, settings.DefaultValues())
+	service := newTrustedPetSettingsService(manager, &petServiceCatalog{}, nil)
+	var native bool
+	service.overlayHooks.AlwaysOnTop = func(value bool) error { native = value; return nil }
+	initial, err := manager.Snapshot(context.Background())
+	if err != nil || initial.Pet.AlwaysOnTop {
+		t.Fatalf("default preference: %+v, %v", initial.Pet, err)
+	}
+	for _, enabled := range []bool{true, false} {
+		panel, err := service.SetPetAlwaysOnTop(context.Background(), enabled)
+		if err != nil || panel.Preference.AlwaysOnTop != enabled || native != enabled {
+			t.Fatalf("toggle %v: %+v, native=%v, err=%v", enabled, panel.Preference, native, err)
+		}
+		reloaded := newPetServiceManagerWithStore(t, store, settings.DefaultValues())
+		values, err := reloaded.Snapshot(context.Background())
+		if err != nil || values.Pet.AlwaysOnTop != enabled {
+			t.Fatalf("reload %v: %+v, %v", enabled, values.Pet, err)
+		}
+	}
+}
+
 func TestPetVisibilityFromHostSharesTheSettingsTransaction(t *testing.T) {
 	key := "codex:pets:host-menu"
 	manager := newPetServiceManager(t, petServiceValues(key, settings.PetVisibilityVisible))

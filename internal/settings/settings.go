@@ -70,6 +70,7 @@ type PetPreference struct {
 	SchemaVersion    int                 `json:"schemaVersion"`
 	SelectedKey      *string             `json:"selectedKey"`
 	VisibilityIntent PetVisibilityIntent `json:"visibilityIntent"`
+	AlwaysOnTop      bool                `json:"alwaysOnTop"`
 	Position         PetPosition         `json:"position"`
 }
 

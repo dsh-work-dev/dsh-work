@@ -85,6 +85,13 @@ export function SelectPet(stableSourceKey: string): $CancellablePromise<$models.
 }
 
 /**
+ * SetPetAlwaysOnTop applies and persists the Settings-owned window preference.
+ */
+export function SetPetAlwaysOnTop(enabled: boolean): $CancellablePromise<$models.PetPanel> {
+    return $Call.ByID(1179487238, enabled);
+}
+
+/**
  * SetPetReducedMotion records the operating-system accessibility signal sent
  * by the app-owned overlay surface. It is not a package-controlled setting;
  * the Host applies it to the active Runtime and carries it across activation.
@@ -104,9 +111,7 @@ export function SetPetSize(percent: number): $CancellablePromise<$models.PetPane
 }
 
 /**
- * SetPetVisibility changes only persisted visibility intent. An unavailable
- * selected key may still change intent; runtime projection maps visible intent
- * to paused until discovery makes the key available again.
+ * SetPetVisibility persists visibility intent, including while a pet is unavailable.
  */
 export function SetPetVisibility(visible: boolean): $CancellablePromise<$models.PetPanel> {
     return $Call.ByID(302323867, visible);

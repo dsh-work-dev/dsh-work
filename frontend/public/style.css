@@ -1106,21 +1106,21 @@ select:focus-visible {
 .pet-activity-list span { font-size: 12px; }
 .pet-sprite-stage { position: absolute; }
 /* Fixed two-line bubble; its visibility never changes the sprite's bounds. */
-.pet-sprite-stage { inset: 80px 0 8px; display: block; min-height: 0; }
+.pet-sprite-stage { inset: 60px 0 4px; display: block; min-height: 0; }
 .pet-sprite-stage img { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%; aspect-ratio: auto; object-fit: contain; }
-.pet-activity { height: 64px; padding: 10px 20px; border: 1px solid #e1e3e6; border-radius: 32px; background: #ffffff; color: #202124; box-shadow: 0 2px 8px #00000014; overflow: hidden; }
-.pet-activity-toolbar { position: absolute; top: 18px; right: 12px; }
-.pet-activity-toolbar button { width: 28px; height: 28px; padding: 0; text-align: center; color: #727579; opacity: 0; }
+.pet-activity { inset: 6px 8px auto; margin-inline: auto; max-width: 224px; height: 48px; padding: 6px 12px; border: 1px solid #dfd6c8; border-radius: 16px; background: #fffaf1; color: #40382f; box-shadow: 0 2px 6px #493c2014; overflow: hidden; }
+.pet-activity-toolbar { position: absolute; top: 11px; right: 7px; }
+.pet-activity-toolbar button { width: 24px; height: 24px; padding: 0; text-align: center; color: #87775f; opacity: 0; }
 .pet-activity:hover .pet-activity-toolbar button, .pet-activity:focus-within .pet-activity-toolbar button { opacity: 1; }
-.pet-activity button:hover { background: #f1f3f5; }
-.pet-activity-primary { margin: 0; padding: 0 28px 0 0; gap: 1px; line-height: 21px; }
-.pet-activity-primary strong { font-size: 14px; }
-.pet-activity-primary span { display: block; white-space: nowrap; text-overflow: ellipsis; color: #70757a; }
+.pet-activity button:hover { background: #f5ebda; }
+.pet-activity-primary { margin: 0; padding: 0 18px 0 0; gap: 0; line-height: 17px; }
+.pet-activity-primary strong { font-size: 12px; }
+.pet-activity-primary span { display: block; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: #8a775e; }
 #pet-activity-detail { display: none; }
 #pet-activity-error { position: absolute; bottom: 0; left: 20px; margin: 0; color: #b3261e; background: white; }
-.pet-activity-list { height: 42px; margin: 0 24px 0 0; }
+.pet-activity-list { height: 34px; margin: 0 20px 0 0; }
 .pet-activity-list button { margin: 0 0 4px; padding: 0; }
-.pet-activity-list span { color: #70757a; }
+.pet-activity-list span { color: #8a775e; }
 
 .pets-layout {
   display: grid;

@@ -8,6 +8,9 @@ import (
 
 func TestPetWindowOptionsUseTransparentWindowAndSliderResize(t *testing.T) {
 	options := petWindowOptions()
+	if options.AlwaysOnTop {
+		t.Fatal("pet must not be always on top by default")
+	}
 	if options.BackgroundType != application.BackgroundTypeTransparent {
 		t.Fatalf("BackgroundType = %v, want transparent", options.BackgroundType)
 	}

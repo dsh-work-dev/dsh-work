@@ -48,9 +48,9 @@ func petWindowOptions() application.WebviewWindowOptions {
 	return application.WebviewWindowOptions{
 		Name:        "pet",
 		Title:       "dsh-work Pet",
-		Width:       320,
-		Height:      296,
-		AlwaysOnTop: true,
+		Width:       240,
+		Height:      220,
+		AlwaysOnTop: false,
 		Frameless:   true,
 		// The Settings size slider is the sole resize control. Keeping the
 		// native border disabled prevents a second, unsaved resize path.
@@ -375,6 +375,14 @@ func main() {
 		}
 	}
 	dshworkapp.AttachPetOverlayHooks(petSettingsService, dshworkapp.PetOverlayHooks{
+		AlwaysOnTop: func(enabled bool) error {
+			petWindowMu.Lock()
+			defer petWindowMu.Unlock()
+			if petWindow != nil {
+				petWindow.SetAlwaysOnTop(enabled)
+			}
+			return nil
+		},
 		Show: func() error {
 			petWindowMu.Lock()
 			window := petWindow

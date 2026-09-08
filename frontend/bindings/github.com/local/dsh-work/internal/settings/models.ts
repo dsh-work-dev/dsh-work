@@ -43,6 +43,7 @@ export interface PetPreference {
     "schemaVersion": number;
     "selectedKey": string | null;
     "visibilityIntent": PetVisibilityIntent;
+    "alwaysOnTop": boolean;
     "position": PetPosition;
 }
 
