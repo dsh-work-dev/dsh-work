@@ -1,14 +1,13 @@
 import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
 import {subscribeLocale, t} from "./i18n";
+import {beginControlUpdate} from "./ui/pending-control";
 
-type FeedbackTone = "neutral" | "success" | "error";
-type Feedback = (message: string, tone?: FeedbackTone) => void;
 type PetPanel = Awaited<ReturnType<typeof PetSettingsService.GetPetPanel>>;
 type PetPreview = Awaited<ReturnType<typeof PetSettingsService.PreviewPet>>;
 type PetItem = NonNullable<PetPanel["snapshot"]["items"]>[number];
 
 const minPetSizePercent = 50;
-const maxPetSizePercent = 300;
+const maxPetSizePercent = 200;
 const defaultPetSizePercent = 100;
 
 function errorMessage(_error: unknown, fallback: string): string {
@@ -61,7 +60,9 @@ function issueMessage(code: string): string {
   return t("pets.invalid.manifest");
 }
 
-export function mountPets(setFeedback: Feedback) {
+export function mountPets() {
+  let visibilityFailure = "";
+  let sizeFailure = "";
   const visibility = document.getElementById("pets-visibility") as HTMLInputElement;
   const visibilityStatus = document.getElementById("pets-visibility-status") as HTMLParagraphElement;
   const size = document.getElementById("pets-size") as HTMLInputElement;
@@ -81,7 +82,6 @@ export function mountPets(setFeedback: Feedback) {
   const previewImage = document.getElementById("pets-preview-image") as HTMLImageElement;
   const previewName = document.getElementById("pets-preview-name") as HTMLHeadingElement;
   const previewDescription = document.getElementById("pets-preview-description") as HTMLParagraphElement;
-  const previewStatus = document.getElementById("pets-preview-status") as HTMLParagraphElement;
   const previewMessage = document.getElementById("pets-preview-message") as HTMLParagraphElement;
   const useButton = document.getElementById("pets-use") as HTMLButtonElement;
   const retryButton = document.getElementById("pets-retry") as HTMLButtonElement;
@@ -92,6 +92,7 @@ export function mountPets(setFeedback: Feedback) {
   let previewDataURL = "";
   let previewRequest = 0;
   let previewFailure = "";
+  let previewLoading = false;
   const thumbnailCache = new Map<string, string | null>();
   const thumbnailRequests = new Map<string, number>();
   const maxThumbnailRequests = 4;
@@ -118,14 +119,14 @@ export function mountPets(setFeedback: Feedback) {
     const runtime = panel?.runtime;
     visibility.checked = preference?.visibilityIntent === "visible";
     visibility.disabled = !preference?.selectedKey || switching || refreshing;
-    if (!preference?.selectedKey) {
+    if (visibilityFailure) {
+      visibilityStatus.textContent = visibilityFailure;
+    } else if (!preference?.selectedKey) {
       visibilityStatus.textContent = t("pets.noSelection.status");
     } else if (runtime?.effectiveVisibility === "paused") {
       visibilityStatus.textContent = t("pets.visibility.paused");
-    } else if (visibility.checked) {
-      visibilityStatus.textContent = t("pets.visibility.shown");
     } else {
-      visibilityStatus.textContent = t("pets.visibility.hidden");
+      visibilityStatus.textContent = "";
     }
   }
 
@@ -141,12 +142,14 @@ export function mountPets(setFeedback: Feedback) {
     size.value = String(percent);
     sizeValue.value = `${percent}%`;
     size.disabled = !selectedKey() || switching || refreshing || loading || panel?.sizeAvailable === false;
-    if (!selectedKey()) {
-      sizeStatus.textContent = t("pets.noSelection.status");
+    if (sizeFailure) {
+      sizeStatus.textContent = sizeFailure;
+    } else if (!selectedKey()) {
+      sizeStatus.textContent = "";
     } else if (panel?.sizeAvailable === false) {
       sizeStatus.textContent = t("pets.size.unavailable");
     } else {
-      sizeStatus.textContent = t("pets.size.status", {percent});
+      sizeStatus.textContent = "";
     }
   }
 
@@ -205,7 +208,7 @@ export function mountPets(setFeedback: Feedback) {
       previewImage.removeAttribute("src");
       previewImage.alt = "";
     }
-    previewStatus.textContent = browseKey ? t("pets.preview.status") : "";
+    previewPlaceholder.textContent = t(previewLoading ? "pets.preview.loading" : previewFailure ? "pets.preview.unavailable" : "pets.preview.choose");
     if (panel?.runtime.selectionStatus === "unavailable" && browseKey === selectedKey()) {
       previewMessage.textContent = t("pets.selectedUnavailable");
     } else if (panel?.snapshot.stale) {
@@ -253,6 +256,10 @@ export function mountPets(setFeedback: Feedback) {
   }
 
   function renderList() {
+    const activeElement = document.activeElement;
+    const focusedKey = activeElement instanceof HTMLButtonElement && list.contains(activeElement)
+      ? activeElement.dataset.petKey
+      : undefined;
     const scanning = loading || (refreshing && panel?.snapshot.scanState === "never-scanned");
     if (scanning) {
       list.replaceChildren();
@@ -264,6 +271,9 @@ export function mountPets(setFeedback: Feedback) {
       return;
     }
     const items = visibleItems();
+    const keyboardKey = items.find((item) => item.stableSourceKey === browseKey && item.availability === "ready")?.stableSourceKey
+      ?? items.find((item) => item.availability === "ready")?.stableSourceKey;
+    list.tabIndex = keyboardKey ? -1 : 0;
     list.replaceChildren();
     listCount.textContent = t("pets.list.count", {count: panel?.snapshot.items?.length ?? 0});
     empty.hidden = items.length > 0;
@@ -279,6 +289,7 @@ export function mountPets(setFeedback: Feedback) {
       option.type = "button";
       option.className = `manager-list-item pets-list-item${item.stableSourceKey === browseKey ? " is-selected" : ""}`;
       option.dataset.petKey = item.stableSourceKey;
+      option.tabIndex = item.stableSourceKey === keyboardKey ? 0 : -1;
       option.setAttribute("role", "option");
       option.setAttribute("aria-selected", String(item.stableSourceKey === browseKey));
       option.disabled = switching || refreshing || item.availability !== "ready";
@@ -313,6 +324,13 @@ export function mountPets(setFeedback: Feedback) {
         loadThumbnail(item.stableSourceKey);
       }
     }
+    // Selection and asynchronous thumbnails rebuild rows. Keep keyboard focus
+    // on the same pet without moving the outer Settings scroll position.
+    if (focusedKey) {
+      const replacement = list.querySelector<HTMLButtonElement>(`[data-pet-key="${CSS.escape(focusedKey)}"]`);
+      if (replacement && !replacement.disabled) replacement.focus({preventScroll: true});
+      else list.focus({preventScroll: true});
+    }
     renderIssues();
   }
 
@@ -331,11 +349,12 @@ export function mountPets(setFeedback: Feedback) {
     preview = undefined;
     previewDataURL = "";
     previewFailure = "";
+    const request = ++previewRequest;
+    previewLoading = document.visibilityState === "visible" && document.hasFocus();
     render();
-    if (document.visibilityState !== "visible" || !document.hasFocus()) {
+    if (!previewLoading) {
       return;
     }
-    const request = ++previewRequest;
     try {
       const next = await PetSettingsService.PreviewPet(key);
       if (request !== previewRequest || browseKey !== key) {
@@ -366,6 +385,11 @@ export function mountPets(setFeedback: Feedback) {
       }
       previewFailure = errorMessage(error, t("pets.preview.unavailable"));
       renderPreview();
+    } finally {
+      if (request === previewRequest) {
+        previewLoading = false;
+        renderPreview();
+      }
     }
   }
 
@@ -390,18 +414,16 @@ export function mountPets(setFeedback: Feedback) {
     preview = undefined;
     previewDataURL = "";
     previewFailure = "";
-    setFeedback(t("pets.scan.inProgress"), "neutral");
     render();
     try {
       applyPanel(await PetSettingsService.RefreshPetCatalog());
-      setFeedback(t("pets.refresh.success"), "success");
       if (browseKey && document.visibilityState === "visible" && document.hasFocus()) {
         void browse(browseKey);
       }
     } catch (error) {
       const message = errorMessage(error, t("pets.refresh.failed"));
       previewMessage.textContent = panel?.snapshot.stale ? t("pets.refresh.staleError") : message;
-      setFeedback(message, "error");
+      previewFailure = message;
     } finally {
       refreshing = false;
       render();
@@ -417,12 +439,14 @@ export function mountPets(setFeedback: Feedback) {
       applyPanel(next);
       if (next.snapshot.scanState === "never-scanned") {
         await refreshCatalog();
+      } else if (browseKey) {
+        void browse(browseKey);
       }
       return true;
     } catch (error) {
       const message = errorMessage(error, t("error.loadSettings"));
       previewMessage.textContent = message;
-      setFeedback(message, "error");
+      previewFailure = message;
       return false;
     } finally {
       loading = false;
@@ -431,15 +455,16 @@ export function mountPets(setFeedback: Feedback) {
   }
 
   async function setVisibility() {
+    visibilityFailure = "";
     const nextValue = visibility.checked;
-    visibility.disabled = true;
+    const finishUpdate = beginControlUpdate(visibility);
     try {
       applyPanel(await PetSettingsService.SetPetVisibility(nextValue));
-      setFeedback(nextValue ? t("pets.visibility.shown") : t("pets.visibility.hidden"), "success");
     } catch (error) {
       visibility.checked = !nextValue;
-      setFeedback(errorMessage(error, t("error.saveSettings")), "error");
+      visibilityFailure = errorMessage(error, t("error.saveSettings"));
     } finally {
+      finishUpdate();
       renderVisibility();
     }
   }
@@ -461,13 +486,12 @@ export function mountPets(setFeedback: Feedback) {
         return;
       }
       applyPanel(next);
-      setFeedback(t("pets.size.changed", {percent}), "success");
     } catch (error) {
       if (request !== sizeRequest) {
         return;
       }
+      sizeFailure = errorMessage(error, t("pets.size.failed"));
       renderSize();
-      setFeedback(errorMessage(error, t("pets.size.failed")), "error");
     } finally {
       sizeCommitInFlight = false;
       if (hasCurrentPendingSize()) {
@@ -477,6 +501,8 @@ export function mountPets(setFeedback: Feedback) {
   }
 
   function scheduleSizeCommit(immediate = false) {
+    sizeFailure = "";
+    sizeStatus.textContent = "";
     const percent = readSizePercent();
     cancelSizeCommit();
     updateSizeValue();
@@ -497,8 +523,10 @@ export function mountPets(setFeedback: Feedback) {
   }
 
   async function selectPet() {
+    previewFailure = "";
     if (!browseKey) {
-      setFeedback(t("pets.selectFirst"), "error");
+      previewFailure = t("pets.selectFirst");
+      renderPreview();
       return;
     }
     cancelSizeCommit();
@@ -506,9 +534,8 @@ export function mountPets(setFeedback: Feedback) {
     render();
     try {
       applyPanel(await PetSettingsService.SelectPet(browseKey));
-      setFeedback(t("pets.switch.success", {name: preview?.displayName ?? browseKey}), "success");
     } catch (error) {
-      setFeedback(errorMessage(error, t("pets.switchFailed")), "error");
+      previewFailure = errorMessage(error, t("pets.switchFailed"));
     } finally {
       switching = false;
       render();
@@ -516,6 +543,7 @@ export function mountPets(setFeedback: Feedback) {
   }
 
   async function clearSelection() {
+    previewFailure = "";
     cancelSizeCommit();
     switching = true;
     render();
@@ -525,9 +553,8 @@ export function mountPets(setFeedback: Feedback) {
       preview = undefined;
       previewDataURL = "";
       previewFailure = "";
-      setFeedback(t("pets.clear.success"), "success");
     } catch (error) {
-      setFeedback(errorMessage(error, t("error.saveSettings")), "error");
+      previewFailure = errorMessage(error, t("error.saveSettings"));
     } finally {
       switching = false;
       render();
@@ -594,9 +621,9 @@ export function mountPets(setFeedback: Feedback) {
   });
   function pausePreview() {
     previewRequest += 1;
+    previewLoading = false;
     thumbnailEpoch += 1;
     previewDataURL = "";
-    previewStatus.textContent = "";
     renderPreview();
   }
 

@@ -233,6 +233,11 @@ export enum SourceKind {
     $zero = "",
 
     SourceCodexPets = "codex-pets",
+
+    /**
+     * SourceCodexAvatars is the Codex compatibility root. It uses the same
+     * Codex manifest and atlas contract as SourceCodexPets.
+     */
     SourceCodexAvatars = "codex-avatars",
     SourceDshPets = "dsh-pets",
     SourceCodexHome = "codex-home",

@@ -8,11 +8,13 @@
     <link rel="icon" type="image/png" href="/branding/dsh-work-appicon.png" />
     <link rel="apple-touch-icon" href="/branding/dsh-work-appicon-light.png" />
     <script>
-      if (new URLSearchParams(window.location.search).get("surface") === "pet") {
-        document.documentElement.dataset.surface = "pet";
+      const surface = new URLSearchParams(window.location.search).get("surface");
+      if (surface === "pet" || surface === "settings") {
+        document.documentElement.dataset.surface = surface;
       }
     </script>
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/src/ui/settings.css" />
   </head>
   <body>
     <main id="host-surface" class="shell" aria-labelledby="app-title">
@@ -104,29 +106,37 @@
       </div>
     </main>
     <main id="manager-surface" class="manager-app" aria-labelledby="manager-title" hidden>
+      <a class="settings-skip-link" href="#manager-content" data-i18n="manager.skipToContent">Skip to settings</a>
       <aside class="manager-sidebar" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-        <div class="manager-brand">
-          <img class="brand-mark" src="/branding/dsh-work-mark.png" alt="" aria-hidden="true" />
-          <strong class="brand-name">dsh-work</strong>
-        </div>
+        <select id="manager-section-select" class="manager-section-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+          <option value="overview" data-i18n="manager.overview">Overview</option>
+          <option value="settings" data-i18n="manager.general">General</option>
+          <option value="notifications" data-i18n="manager.notifications">Notifications</option>
+          <option value="pets" data-i18n="manager.pets">Pets</option>
+          <option value="profiles" data-i18n="manager.profiles">Profiles</option>
+          <option value="plugins" data-i18n="manager.plugins">Plugins</option>
+          <option value="runtimes" data-i18n="manager.runtimes">Runtimes</option>
+          <option value="data-directories" data-i18n="manager.dataDirectories">DSH data directories</option>
+          <option value="about" data-i18n="manager.about">About</option>
+        </select>
         <nav class="manager-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-          <button class="manager-nav-item is-active" data-manager-section="overview" data-i18n="manager.overview" type="button">Overview</button>
-          <button class="manager-nav-item" data-manager-section="settings" data-i18n="manager.general" type="button">General</button>
-          <button class="manager-nav-item" data-manager-section="notifications" data-i18n="manager.notifications" type="button">Notifications</button>
-          <button class="manager-nav-item" data-manager-section="pets" data-i18n="manager.pets" type="button">Pets</button>
-          <button class="manager-nav-item" data-manager-section="profiles" data-i18n="manager.profiles" type="button">Profiles</button>
-          <button class="manager-nav-item" data-manager-section="plugins" data-i18n="manager.plugins" type="button">Plugins</button>
-          <button class="manager-nav-item" data-manager-section="runtimes" data-i18n="manager.runtimes" type="button">Runtimes</button>
-          <button class="manager-nav-item" data-manager-section="data-directories" data-i18n="manager.dataDirectories" type="button">DSH data directories</button>
+          <button class="manager-nav-item is-active" data-manager-section="overview" type="button"><span data-i18n="manager.overview">Overview</span></button>
+          <button class="manager-nav-item" data-manager-section="settings" type="button"><span data-i18n="manager.general">General</span></button>
+          <button class="manager-nav-item" data-manager-section="notifications" type="button"><span data-i18n="manager.notifications">Notifications</span></button>
+          <button class="manager-nav-item" data-manager-section="pets" type="button"><span data-i18n="manager.pets">Pets</span></button>
+          <button class="manager-nav-item" data-manager-section="profiles" type="button"><span data-i18n="manager.profiles">Profiles</span></button>
+          <button class="manager-nav-item" data-manager-section="plugins" type="button"><span data-i18n="manager.plugins">Plugins</span></button>
+          <button class="manager-nav-item" data-manager-section="runtimes" type="button"><span data-i18n="manager.runtimes">Runtimes</span></button>
+          <button class="manager-nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
+          <button class="manager-nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span></button>
         </nav>
       </aside>
 
-      <div class="manager-main">
+      <div class="manager-main" id="manager-content" tabindex="-1">
         <header class="manager-topbar">
           <h1 id="manager-title" data-i18n="manager.overview">Overview</h1>
         </header>
 
-        <p id="manager-feedback" class="manager-feedback" role="status" aria-live="polite" hidden></p>
 
         <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
           <div class="panel-heading">
@@ -158,17 +168,14 @@
                 <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
               </dl>
             </section>
-            <section id="manager-known-good-context" class="overview-context" aria-labelledby="overview-known-good-title" hidden>
-              <div class="overview-context-heading">
-                <h3 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h3>
-                <span class="overview-state" data-i18n="value.knownGood">Known good</span>
-              </div>
+            <details id="manager-known-good-context" class="overview-context" aria-labelledby="overview-known-good-title" hidden>
+              <summary id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</summary>
               <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
                 <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
                 <div><dt data-i18n="field.dataDirectory">Data directory</dt><dd id="manager-known-good-data-directory" data-i18n="value.noDataDirectory">No data directory selected</dd></div>
                 <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
               </dl>
-            </section>
+            </details>
           </div>
           <section id="manager-switch-failure" class="runtime-preparation" aria-live="polite" hidden>
             <p class="status-label" data-i18n="recovery.title">Run context needs attention</p>
@@ -217,13 +224,7 @@
           </div>
         </section>
 
-        <section id="manager-section-plugins" class="manager-section" data-manager-panel="plugins" aria-labelledby="plugins-title" hidden>
-          <div class="panel-heading">
-            <div>
-              <h2 id="plugins-title" data-i18n="manager.plugins">Plugins</h2>
-              <p class="manager-note" data-i18n="profiles.pluginsScope">Plugins are shown for the current profile.</p>
-            </div>
-          </div>
+        <section id="manager-section-plugins" class="manager-section" data-manager-panel="plugins" aria-labelledby="manager-title" hidden>
           <div id="manager-plugin-empty" class="profile-empty">
             <p class="card-label" data-i18n="field.profile">Profile</p>
             <p class="manager-empty" data-i18n="profiles.noCurrent">No current profile</p>
@@ -323,22 +324,8 @@
             <p class="manager-note" data-i18n="general.runContextImmediate">Changes restart DSH immediately.</p>
           </div>
           <div class="settings-list">
-            <div class="setting-row">
-              <div class="setting-copy"><strong data-i18n="general.automaticRollback">Automatically restore the last working runtime</strong></div>
-              <div class="setting-control"><label class="switch" for="settings-automatic-runtime-rollback"><input id="settings-automatic-runtime-rollback" type="checkbox" role="switch" /><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span></label></div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong data-i18n="general.closeToTray">Close to tray</strong>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-close-to-tray">
-                  <span class="sr-only" data-i18n="general.closeDshWorkToTray">Close dsh-work to tray</span>
-                  <input id="settings-close-to-tray" type="checkbox" role="switch" aria-describedby="settings-close-to-tray-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
+            <div data-setting-switch="settings-automatic-runtime-rollback" data-label="general.automaticRollback" data-status="settings-close-to-tray-status"></div>
+            <div data-setting-switch="settings-close-to-tray" data-label="general.closeToTray" data-status="settings-close-to-tray-status"></div>
             <div class="setting-row">
               <div class="setting-copy">
                 <strong data-i18n="general.language">Language</strong>
@@ -360,112 +347,40 @@
 
         <section id="manager-section-notifications" class="manager-section settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>
           <div class="settings-list">
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong id="notifications-desktop-label" data-i18n="notifications.desktop">Desktop notifications</strong>
-                <span id="notifications-desktop-detail" class="setting-detail" data-i18n="notifications.desktopDetail">Show selected DSH and dsh-work events when the workspace is hidden.</span>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-notifications-enabled">
-                  <input id="settings-notifications-enabled" type="checkbox" role="switch" aria-labelledby="notifications-desktop-label" aria-describedby="notifications-desktop-detail settings-notifications-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong id="notifications-completed-label" data-i18n="notifications.completed">Task completed</strong>
-                <span id="notifications-completed-detail" class="setting-detail" data-i18n="notifications.completedDetail">A DSH task finishes successfully or with an error.</span>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-notifications-completed">
-                  <input id="settings-notifications-completed" type="checkbox" role="switch" aria-labelledby="notifications-completed-label" aria-describedby="notifications-completed-detail settings-notifications-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong id="notifications-interaction-required-label" data-i18n="notifications.interactionRequired">Needs attention</strong>
-                <span id="notifications-interaction-required-detail" class="setting-detail" data-i18n="notifications.interactionRequiredDetail">DSH asks a question or waits for an approval.</span>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-notifications-interaction-required">
-                  <input id="settings-notifications-interaction-required" type="checkbox" role="switch" aria-labelledby="notifications-interaction-required-label" aria-describedby="notifications-interaction-required-detail settings-notifications-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong id="notifications-errors-label" data-i18n="notifications.errors">Errors</strong>
-                <span id="notifications-errors-detail" class="setting-detail" data-i18n="notifications.errorsDetail">Startup fails or DSH cannot reach the runtime or workspace.</span>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-notifications-errors">
-                  <input id="settings-notifications-errors" type="checkbox" role="switch" aria-labelledby="notifications-errors-label" aria-describedby="notifications-errors-detail settings-notifications-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <strong id="notifications-lifecycle-label" data-i18n="notifications.lifecycle">DSH status</strong>
-                <span id="notifications-lifecycle-detail" class="setting-detail" data-i18n="notifications.lifecycleDetail">DSH starts, becomes ready, or stops.</span>
-              </div>
-              <div class="setting-control">
-                <label class="switch" for="settings-notifications-lifecycle">
-                  <input id="settings-notifications-lifecycle" type="checkbox" role="switch" aria-labelledby="notifications-lifecycle-label" aria-describedby="notifications-lifecycle-detail settings-notifications-status" />
-                  <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                </label>
-              </div>
-            </div>
+            <div data-setting-switch="settings-notifications-enabled" data-label="notifications.desktop" data-status="settings-notifications-status" data-detail="notifications.desktopDetail"></div>
+            <div data-setting-switch="settings-notifications-completed" data-label="notifications.completed" data-status="settings-notifications-status" data-detail="notifications.completedDetail"></div>
+            <div data-setting-switch="settings-notifications-interaction-required" data-label="notifications.interactionRequired" data-status="settings-notifications-status" data-detail="notifications.interactionRequiredDetail"></div>
+            <div data-setting-switch="settings-notifications-errors" data-label="notifications.errors" data-status="settings-notifications-status" data-detail="notifications.errorsDetail"></div>
+            <div data-setting-switch="settings-notifications-lifecycle" data-label="notifications.lifecycle" data-status="settings-notifications-status" data-detail="notifications.lifecycleDetail"></div>
           </div>
           <p id="settings-notifications-status" class="sr-only" role="status" aria-live="polite"></p>
         </section>
 
         <section id="manager-section-pets" class="manager-section settings-section" data-manager-panel="pets" aria-labelledby="manager-title" hidden>
-          <div class="pets-visibility-row setting-row">
-            <div class="setting-copy">
-              <strong id="pets-visibility-label" data-i18n="pets.visibility.label">Show desktop pet</strong>
-              <span id="pets-visibility-detail" class="setting-detail" data-i18n="pets.visibility.description">Show the current pet on your desktop</span>
-            </div>
-            <div class="setting-control">
-              <label class="switch" for="pets-visibility">
-                <input id="pets-visibility" type="checkbox" role="switch" aria-labelledby="pets-visibility-label" aria-describedby="pets-visibility-detail pets-visibility-status" disabled />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              </label>
-            </div>
-          </div>
+          <div data-setting-switch="pets-visibility" data-label="pets.visibility.label" data-status="pets-visibility-status" data-disabled></div>
           <p id="pets-visibility-status" class="manager-note" role="status" aria-live="polite"></p>
           <div class="pets-size-row setting-row">
             <div class="setting-copy">
               <strong id="pets-size-label" data-i18n="pets.size.label">Pet size</strong>
-              <span id="pets-size-detail" class="setting-detail" data-i18n="pets.size.description">Adjust the desktop pet size</span>
             </div>
             <div class="setting-control pets-size-control">
               <output id="pets-size-value" for="pets-size">100%</output>
               <div class="pets-size-slider">
-                <input id="pets-size" type="range" min="50" max="300" step="5" value="100" list="pets-size-ticks" aria-labelledby="pets-size-label" aria-describedby="pets-size-detail pets-size-status" disabled />
+                <input id="pets-size" type="range" min="50" max="200" step="5" value="100" list="pets-size-ticks" aria-labelledby="pets-size-label" aria-describedby="pets-size-status" disabled />
                 <datalist id="pets-size-ticks">
                   <option value="50" label="50%"></option>
                   <option value="75" label="75%"></option>
                   <option value="100" label="100%"></option>
                   <option value="125" label="125%"></option>
                   <option value="150" label="150%"></option>
+                  <option value="175" label="175%"></option>
                   <option value="200" label="200%"></option>
-                  <option value="250" label="250%"></option>
-                  <option value="300" label="300%"></option>
                 </datalist>
                 <div class="pets-size-ticks" aria-hidden="true">
                   <span>50%</span>
-                  <span>75%</span>
                   <span>100%</span>
-                  <span>125%</span>
                   <span>150%</span>
                   <span>200%</span>
-                  <span>250%</span>
-                  <span>300%</span>
                 </div>
               </div>
             </div>
@@ -497,11 +412,10 @@
               <div class="panel-heading pets-panel-heading">
                 <div>
                   <h2 id="pets-preview-title" data-i18n="pets.preview.title">Preview</h2>
-                  <p id="pets-preview-status" class="manager-note" role="status" aria-live="polite"></p>
                 </div>
               </div>
               <div id="pets-preview-stage" class="pets-preview-stage" aria-live="polite">
-                <div id="pets-preview-placeholder" class="pets-preview-placeholder" data-i18n="pets.preview.choose">Choose a pet to preview</div>
+                <div id="pets-preview-placeholder" class="pets-preview-placeholder" role="status" data-i18n="pets.preview.choose">Choose a pet to preview</div>
                 <img id="pets-preview-image" alt="" hidden />
               </div>
               <h3 id="pets-preview-name" class="pets-preview-name"></h3>
@@ -514,6 +428,10 @@
               </div>
             </section>
           </div>
+        </section>
+        <section class="manager-section about-section" aria-labelledby="manager-title" data-manager-panel="about" hidden>
+          <div class="about-brand"><img class="brand-mark" src="/branding/dsh-work-mark-black.png" alt="" /><h2>dsh-work</h2></div>
+          <p data-i18n="about.description">dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It makes a versioned external DSH runtime startable, observable, and recoverable.</p>
         </section>
       </div>
     </main>

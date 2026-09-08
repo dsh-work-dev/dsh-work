@@ -102,6 +102,26 @@ func TestSettingsPetPreferenceNormalizesAndPreservesUnavailableSelection(t *test
 	}
 }
 
+func TestSettingsMigratesLegacyPetScaleBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	data := []byte(`{"version":1,"pet":{"schemaVersion":1,"position":{"anchorX":0.4,"anchorY":0.6,"width":192,"height":208,"scale":2}}}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	position := values.Pet.Position
+	if values.Pet.SchemaVersion != petPreferenceVersion || position.Width != 144 || position.Height != 156 || position.AnchorX != 0.4 || position.AnchorY != 0.6 || position.Scale != 2 {
+		t.Fatalf("migrated Pet preference = %#v, want version %d and 144x156 at the same anchor", values.Pet, petPreferenceVersion)
+	}
+}
+
 func TestSettingsPetPreferenceRejectsPathLikeSelectionAndForcesHidden(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(path, []byte(`{"version":1,"pet":{"selectedKey":"C:\\outside","visibilityIntent":"visible"}}`), 0o600); err != nil {

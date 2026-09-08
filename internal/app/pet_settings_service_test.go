@@ -26,6 +26,32 @@ func TestPetSettingsServiceRequiresTrustedSettingsSurface(t *testing.T) {
 	}
 }
 
+func TestPersistPetPositionSurvivesReloadWithoutWindowActions(t *testing.T) {
+	store := &petServiceStore{}
+	manager := newPetServiceManagerWithStore(t, store, settings.DefaultValues())
+	service := newTrustedPetSettingsService(manager, &petServiceCatalog{}, nil)
+	windowActions := 0
+	service.overlayHooks = PetOverlayHooks{
+		Show: func() error { windowActions++; return nil },
+		Hide: func() error { windowActions++; return nil },
+	}
+	position := settings.PetPosition{MonitorID: "monitor-2", AnchorX: .65, AnchorY: .4, Width: 192, Height: 208, Scale: 2}
+	if err := PersistPetPosition(context.Background(), service, position); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := newPetServiceManagerWithStore(t, store, settings.DefaultValues())
+	values, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values.Pet.Position != position {
+		t.Fatalf("reloaded position = %+v, want %+v", values.Pet.Position, position)
+	}
+	if windowActions != 0 {
+		t.Fatalf("persisting a move triggered %d window actions", windowActions)
+	}
+}
+
 func TestPetSettingsServiceSetPetSizePersistsAndResizes(t *testing.T) {
 	key := "codex:pets:size"
 	store := &petServiceStore{}
@@ -41,12 +67,12 @@ func TestPetSettingsServiceSetPetSizePersistsAndResizes(t *testing.T) {
 		return nil
 	}})
 
-	panel, err := service.SetPetSize(context.Background(), 150)
+	panel, err := service.SetPetSize(context.Background(), 200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if panel.SizePercent != 150 || !panel.SizeAvailable {
-		t.Fatalf("size projection = %+v, want 150%% and available", panel)
+	if panel.SizePercent != 200 || !panel.SizeAvailable {
+		t.Fatalf("size projection = %+v, want 200%% and available", panel)
 	}
 	if panel.Preference.Position.Width != 288 || panel.Preference.Position.Height != 312 {
 		t.Fatalf("persisted size = %+v, want 288x312", panel.Preference.Position)
@@ -68,7 +94,7 @@ func TestPetSettingsServiceSetPetSizeRejectsOutOfRange(t *testing.T) {
 		resizes++
 		return nil
 	}})
-	for _, percent := range []int{301, 51} {
+	for _, percent := range []int{201, 51} {
 		if _, err := service.SetPetSize(context.Background(), percent); err == nil || !strings.Contains(err.Error(), "percent is invalid") {
 			t.Fatalf("invalid size %d error = %v", percent, err)
 		}
