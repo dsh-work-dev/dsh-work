@@ -178,8 +178,17 @@ func main() {
 	var settingsWindowMu sync.Mutex
 	var petWindowMu sync.Mutex
 	var windowActionsMu sync.Mutex
+	var petMenuUpdateMu sync.Mutex
+	petMenuRefreshRequests := make(chan struct{}, 1)
+	petMenuActionRequests := make(chan bool, 1)
+	petMenuRefreshStop := make(chan struct{})
+	var petMenuRefreshWG sync.WaitGroup
+	var stopPetMenuRefresh func()
+	var stopPetMenuRefreshOnce sync.Once
+	var petMenuActionBusy atomic.Bool
 	var showWorkspace func()
 	var openSettings func(string)
+	var refreshPetMenu func(context.Context)
 	var quitFlow lifecycle.QuitFlow
 	var applicationShuttingDown atomic.Bool
 	var petWindowCloseAllowed atomic.Bool
@@ -392,6 +401,12 @@ func main() {
 			repositionPetWindow()
 			return nil
 		},
+		StateChanged: func() {
+			select {
+			case petMenuRefreshRequests <- struct{}{}:
+			default:
+			}
+		},
 	})
 	if petWindow != nil {
 		for _, eventType := range []events.WindowEventType{events.Common.WindowDidMove, events.Common.WindowDidResize} {
@@ -502,16 +517,81 @@ func main() {
 	menuSettings := menu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
+	menuPetVisibility := menu.AddCheckbox(initialNative.ShowPet, false).SetEnabled(false)
+	menuPetVisibility.OnClick(func(ctx *application.Context) {
+		requested := ctx.IsChecked()
+		if applicationShuttingDown.Load() || !petMenuActionBusy.CompareAndSwap(false, true) {
+			return
+		}
+		menuPetVisibility.SetEnabled(false)
+		select {
+		case petMenuActionRequests <- requested:
+		case <-petMenuRefreshStop:
+			petMenuActionBusy.Store(false)
+		}
+	})
 	helpMenu := menu.AddSubmenu(initialNative.Help)
 	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
 		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
 		desktop.Dialog.Info().SetTitle(labels.UpdateTitle).SetMessage(labels.UpdateMessage).Show()
 	})
 	aboutDshWork := helpMenu.Add(initialNative.About).OnClick(func(*application.Context) {
-		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
-		desktop.Dialog.Info().SetTitle(labels.AboutTitle).SetMessage(labels.AboutMessage).Show()
+		openSettings("about")
 	})
 	desktop.Menu.Set(menu)
+
+	refreshPetMenu = func(ctx context.Context) {
+		petMenuUpdateMu.Lock()
+		defer petMenuUpdateMu.Unlock()
+		if applicationShuttingDown.Load() {
+			return
+		}
+		if petWindow == nil || petOverlayCapabilities.Level != dshworkpet.OverlayFull {
+			menuPetVisibility.SetChecked(false).SetEnabled(false)
+			return
+		}
+		panel, err := dshworkapp.GetPetPanelFromHost(ctx, petSettingsService)
+		if err != nil {
+			menuPetVisibility.SetChecked(false).SetEnabled(false)
+			return
+		}
+		menuPetVisibility.SetChecked(panel.Runtime.EffectiveVisibility == dshworkpet.VisibilityVisible)
+		menuPetVisibility.SetEnabled(!petMenuActionBusy.Load() && panel.Runtime.SelectionStatus == dshworkpet.SelectionReady)
+	}
+	refreshPetMenu(context.Background())
+	menuRefreshContext, cancelMenuRefresh := context.WithCancel(context.Background())
+	petMenuRefreshWG.Add(1)
+	go func() {
+		defer petMenuRefreshWG.Done()
+		for {
+			select {
+			case requested := <-petMenuActionRequests:
+				_, err := dshworkapp.SetPetVisibilityFromHost(menuRefreshContext, petSettingsService, requested)
+				if err != nil && !applicationShuttingDown.Load() {
+					log.Printf("dsh-work Pet menu visibility: %v", err)
+					labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
+					desktop.Dialog.Info().SetTitle(labels.PetMenuErrorTitle).SetMessage(labels.PetMenuErrorMessage).Show()
+				}
+				petMenuActionBusy.Store(false)
+				if refreshPetMenu != nil {
+					refreshPetMenu(menuRefreshContext)
+				}
+			case <-petMenuRefreshRequests:
+				if refreshPetMenu != nil {
+					refreshPetMenu(menuRefreshContext)
+				}
+			case <-petMenuRefreshStop:
+				return
+			}
+		}
+	}()
+	stopPetMenuRefresh = func() {
+		stopPetMenuRefreshOnce.Do(func() {
+			cancelMenuRefresh()
+			close(petMenuRefreshStop)
+			petMenuRefreshWG.Wait()
+		})
+	}
 
 	updateNativeLocale := func(locale dshworksettings.Locale) {
 		if !locale.Valid() {
@@ -526,6 +606,7 @@ func main() {
 		trayRestartDSH.SetLabel(labels.RestartDSH)
 		trayQuit.SetLabel(labels.Quit)
 		menuSettings.SetLabel(labels.Settings)
+		menuPetVisibility.SetLabel(labels.ShowPet)
 		helpMenu.SetLabel(labels.Help)
 		checkUpdates.SetLabel(labels.CheckUpdates)
 		aboutDshWork.SetLabel(labels.About)
@@ -675,6 +756,9 @@ func main() {
 	})
 	desktop.OnShutdown(func() {
 		applicationShuttingDown.Store(true)
+		if stopPetMenuRefresh != nil {
+			stopPetMenuRefresh()
+		}
 		windowLedger.BeginQuit()
 		hideDshWorkWindows()
 		petWindowCloseAllowed.Store(true)
@@ -695,6 +779,9 @@ func main() {
 
 	if err := desktop.Run(); err != nil {
 		log.Printf("dsh-work desktop run: %v", err)
+	}
+	if stopPetMenuRefresh != nil {
+		stopPetMenuRefresh()
 	}
 }
 

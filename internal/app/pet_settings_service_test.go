@@ -26,6 +26,37 @@ func TestPetSettingsServiceRequiresTrustedSettingsSurface(t *testing.T) {
 	}
 }
 
+func TestPetVisibilityFromHostSharesTheSettingsTransaction(t *testing.T) {
+	key := "codex:pets:host-menu"
+	manager := newPetServiceManager(t, petServiceValues(key, settings.PetVisibilityVisible))
+	catalog := &petServiceCatalog{
+		snapshot: pet.CatalogSnapshot{
+			Revision:  1,
+			ScanState: pet.ScanReady,
+			Items:     []pet.PetListItem{{StableSourceKey: key, DisplayName: "Host menu", Availability: pet.AvailabilityReady}},
+		},
+	}
+	service := NewPetSettingsService(manager, catalog)
+
+	if _, err := service.SetPetVisibility(context.Background(), false); err == nil || !strings.Contains(err.Error(), "TRUSTED_SURFACE_REQUIRED") {
+		t.Fatalf("SetPetVisibility() error = %v, want trusted-surface failure", err)
+	}
+	panel, err := GetPetPanelFromHost(context.Background(), service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Preference.VisibilityIntent != settings.PetVisibilityVisible {
+		t.Fatalf("host panel visibility = %q, want visible", panel.Preference.VisibilityIntent)
+	}
+	panel, err = SetPetVisibilityFromHost(context.Background(), service, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Preference.VisibilityIntent != settings.PetVisibilityHidden || panel.Runtime.EffectiveVisibility != pet.VisibilityHidden {
+		t.Fatalf("host menu panel = %+v, want hidden visibility", panel)
+	}
+}
+
 func TestPersistPetPositionSurvivesReloadWithoutWindowActions(t *testing.T) {
 	store := &petServiceStore{}
 	manager := newPetServiceManagerWithStore(t, store, settings.DefaultValues())

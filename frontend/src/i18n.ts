@@ -351,8 +351,6 @@ const messages: Record<Locale, Record<string, string>> = {
     "native.trayStatus": "DSH: {state}",
     "native.updateTitle": "Check for Updates",
     "native.updateMessage": "Update checking is unavailable.",
-    "native.aboutTitle": "About dsh-work",
-    "native.aboutMessage": "dsh-work\n\nA local desktop host for DeepSeek Harness."
   },
   "zh-CN": {
     "manager.about": "关于",
@@ -698,8 +696,6 @@ const messages: Record<Locale, Record<string, string>> = {
     "native.trayStatus": "DSH：{state}",
     "native.updateTitle": "检查更新",
     "native.updateMessage": "暂不支持检查更新。",
-    "native.aboutTitle": "关于 dsh-work",
-    "native.aboutMessage": "dsh-work\n\nDeepSeek Harness 的本地主机。"
   },
   "ja-JP": {
     "manager.about": "このアプリについて",
@@ -1045,8 +1041,6 @@ const messages: Record<Locale, Record<string, string>> = {
     "native.trayStatus": "DSH：{state}",
     "native.updateTitle": "更新を確認",
     "native.updateMessage": "更新確認は利用できません。",
-    "native.aboutTitle": "dsh-work について",
-    "native.aboutMessage": "dsh-work\n\nDeepSeek Harness のローカルデスクトップホストです。"
   }
 };
 

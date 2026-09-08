@@ -9,18 +9,19 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
-	Settings      string
-	OpenWorkspace string
-	Help          string
-	CheckUpdates  string
-	About         string
-	RestartDSH    string
-	Quit          string
-	TrayTooltip   string
-	UpdateTitle   string
-	UpdateMessage string
-	AboutTitle    string
-	AboutMessage  string
+	Settings            string
+	ShowPet             string
+	OpenWorkspace       string
+	Help                string
+	CheckUpdates        string
+	About               string
+	RestartDSH          string
+	Quit                string
+	TrayTooltip         string
+	UpdateTitle         string
+	UpdateMessage       string
+	PetMenuErrorTitle   string
+	PetMenuErrorMessage string
 
 	trayStatus            string
 	workspaceFailureTitle string
@@ -39,6 +40,7 @@ type NotificationCopy struct {
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
 		Settings:              "Settings",
+		ShowPet:               "Show desktop pet",
 		OpenWorkspace:         "Open workspace",
 		Help:                  "Help",
 		CheckUpdates:          "Check for Updates…",
@@ -49,8 +51,8 @@ var labelsByLocale = map[settings.Locale]Labels{
 		trayStatus:            "DSH: {state}",
 		UpdateTitle:           "Check for Updates",
 		UpdateMessage:         "Update checking is unavailable.",
-		AboutTitle:            "About dsh-work",
-		AboutMessage:          "dsh-work\n\nA local desktop host for DeepSeek Harness.",
+		PetMenuErrorTitle:     "Desktop pet unavailable",
+		PetMenuErrorMessage:   "The desktop pet could not be updated. Review Pet settings and try again.",
 		workspaceFailureTitle: "Workspace needs attention",
 		workspaceFailureBody:  "Open dsh-work to review the DSH workspace.",
 		lifecycleTitles: map[lifecycle.State]string{
@@ -75,6 +77,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 	},
 	settings.LocaleChinese: {
 		Settings:              "设置",
+		ShowPet:               "显示桌面宠物",
 		OpenWorkspace:         "打开工作区",
 		Help:                  "帮助",
 		CheckUpdates:          "检查更新…",
@@ -85,8 +88,8 @@ var labelsByLocale = map[settings.Locale]Labels{
 		trayStatus:            "DSH：{state}",
 		UpdateTitle:           "检查更新",
 		UpdateMessage:         "暂不支持检查更新。",
-		AboutTitle:            "关于 dsh-work",
-		AboutMessage:          "dsh-work\n\nDeepSeek Harness 的本地主机。",
+		PetMenuErrorTitle:     "桌面宠物不可用",
+		PetMenuErrorMessage:   "无法更新桌面宠物。请打开宠物设置再试。",
 		workspaceFailureTitle: "工作区需要处理",
 		workspaceFailureBody:  "打开 dsh-work 查看 DSH 工作区。",
 		lifecycleTitles: map[lifecycle.State]string{
@@ -111,6 +114,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 	},
 	settings.LocaleJapanese: {
 		Settings:              "設定",
+		ShowPet:               "デスクトップペットを表示",
 		OpenWorkspace:         "ワークスペースを開く",
 		Help:                  "ヘルプ",
 		CheckUpdates:          "更新を確認…",
@@ -121,8 +125,8 @@ var labelsByLocale = map[settings.Locale]Labels{
 		trayStatus:            "DSH：{state}",
 		UpdateTitle:           "更新を確認",
 		UpdateMessage:         "更新確認は利用できません。",
-		AboutTitle:            "dsh-work について",
-		AboutMessage:          "dsh-work\n\nDeepSeek Harness のローカルデスクトップホストです。",
+		PetMenuErrorTitle:     "デスクトップペットを利用できません",
+		PetMenuErrorMessage:   "デスクトップペットを更新できませんでした。ペット設定を確認して、もう一度お試しください。",
 		workspaceFailureTitle: "ワークスペースを確認してください",
 		workspaceFailureBody:  "dsh-work を開いて DSH ワークスペースを確認してください。",
 		lifecycleTitles: map[lifecycle.State]string{

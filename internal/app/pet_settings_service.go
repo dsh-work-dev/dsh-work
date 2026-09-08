@@ -81,6 +81,8 @@ type PetOverlayHooks struct {
 	Hide   func() error
 	Close  func() error
 	Resize func(width, height int) error
+	// StateChanged must return quickly and must not call back into the service.
+	StateChanged func()
 }
 
 // PetSettingsService is the trusted Settings-window boundary for Pet
@@ -365,6 +367,24 @@ func (s *PetSettingsService) GetPetPanel(ctx context.Context) (PetPanel, error) 
 	return s.panel(operation)
 }
 
+// GetPetPanelFromHost returns the same safe Pet projection for trusted Host
+// composition code, such as the native application menu. It intentionally
+// bypasses the WebView surface check because the caller is already inside the
+// Host process and cannot be reached through an untrusted WebView.
+func GetPetPanelFromHost(ctx context.Context, service *PetSettingsService) (PetPanel, error) {
+	if service == nil {
+		return PetPanel{}, petSettingsUnavailable()
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	operation, cancel, err := service.beginHostOperation(ctx)
+	if err != nil {
+		return PetPanel{}, err
+	}
+	defer cancel()
+	return service.panel(operation)
+}
+
 // GetPetOverlay returns the latest normalized runtime frame for the separate
 // Pet window. The overlay surface is read-only; state changes still enter
 // through the Host-owned lifecycle and Settings seams.
@@ -637,7 +657,27 @@ func (s *PetSettingsService) SetPetVisibility(ctx context.Context, visible bool)
 		return PetPanel{}, err
 	}
 	defer cancel()
+	return s.setPetVisibilityLocked(operation, visible)
+}
 
+// SetPetVisibilityFromHost applies the same visibility transaction for trusted
+// native Host controls. It keeps menu actions on the Host side while sharing
+// the persistence and overlay lifecycle with Settings.
+func SetPetVisibilityFromHost(ctx context.Context, service *PetSettingsService, visible bool) (PetPanel, error) {
+	if service == nil {
+		return PetPanel{}, petSettingsUnavailable()
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	operation, cancel, err := service.beginHostOperation(ctx)
+	if err != nil {
+		return PetPanel{}, err
+	}
+	defer cancel()
+	return service.setPetVisibilityLocked(operation, visible)
+}
+
+func (s *PetSettingsService) setPetVisibilityLocked(operation context.Context, visible bool) (PetPanel, error) {
 	snapshot, err := s.catalog.Snapshot(operation)
 	if err != nil {
 		return PetPanel{}, safePetCatalogError(err)
@@ -859,6 +899,7 @@ func (s *PetSettingsService) shutdown(ctx context.Context) error {
 }
 
 func (s *PetSettingsService) applyOverlayVisibilityLocked(preference settings.PetPreference) {
+	defer s.notifyStateChangedLocked()
 	hadFailure := s.overlayFailure
 	if s.overlayHooks.Show == nil && s.overlayHooks.Hide == nil {
 		if s.activeRuntime != nil {
@@ -892,6 +933,12 @@ func (s *PetSettingsService) applyOverlayVisibilityLocked(preference settings.Pe
 	}
 	if !hadFailure {
 		s.overlayFailure = false
+	}
+}
+
+func (s *PetSettingsService) notifyStateChangedLocked() {
+	if s.overlayHooks.StateChanged != nil {
+		s.overlayHooks.StateChanged()
 	}
 }
 
@@ -1016,6 +1063,17 @@ func (s *PetSettingsService) setGenerationLocked(generation string) {
 
 func (s *PetSettingsService) beginOperation(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	return s.beginOperationForSurface(ctx, "settings")
+}
+
+func (s *PetSettingsService) beginHostOperation(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if s == nil || s.manager == nil || s.catalog == nil {
+		return nil, nil, petSettingsUnavailable()
+	}
+	if s.closed {
+		return nil, nil, petSettingsUnavailable()
+	}
+	operation, cancel := managerContext(ctx)
+	return operation, cancel, nil
 }
 
 func (s *PetSettingsService) projectPanel(snapshot pet.CatalogSnapshot, preference settings.PetPreference) PetPanel {
