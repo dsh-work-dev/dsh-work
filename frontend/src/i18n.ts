@@ -8,6 +8,20 @@ export const defaultLocale: Locale = "zh-CN";
 
 const messages: Record<Locale, Record<string, string>> = {
   en: {
+    "manager.about": "About",
+    "about.description": "dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It makes a versioned external DSH runtime startable, observable, and recoverable.",
+
+    "manager.settingsTitle": "Settings",
+    "manager.skipToContent": "Skip to settings",
+    "manager.description.overview": "Your current DSH session and run context.",
+    "manager.description.settings": "Choose how DSH starts and how dsh-work behaves.",
+    "manager.description.notifications": "Choose which events reach your desktop.",
+    "manager.description.pets": "Choose a companion for your desktop.",
+    "manager.description.profiles": "Manage your DSH profiles.",
+    "manager.description.plugins": "Manage extensions for the current profile.",
+    "manager.description.runtimes": "Install and manage DSH and Node versions.",
+    "manager.description.data-directories": "Connect and manage your DSH data directories.",
+
     "host.brandContext": "Local DSH host",
     "status.preparing": "Preparing",
     "host.startupEyebrow": "Workspace startup",
@@ -230,6 +244,7 @@ const messages: Record<Locale, Record<string, string>> = {
     "pets.preview.title": "Preview",
     "pets.preview.choose": "Choose a pet to preview",
     "pets.preview.status": "Previewing",
+    "pets.preview.loading": "Loading preview…",
     "pets.preview.unavailable": "Preview unavailable",
     "pets.use.action": "Use this pet",
     "pets.current.status": "In use",
@@ -340,6 +355,20 @@ const messages: Record<Locale, Record<string, string>> = {
     "native.aboutMessage": "dsh-work\n\nA local desktop host for DeepSeek Harness."
   },
   "zh-CN": {
+    "manager.about": "关于",
+    "about.description": "dsh-work 为 DeepSeek Harness 提供可信的桌面生命周期管理，让独立版本的 DSH 运行时可启动、可观测、可恢复。",
+
+    "manager.settingsTitle": "设置",
+    "manager.skipToContent": "跳至设置内容",
+    "manager.description.overview": "查看当前 DSH 会话与运行环境。",
+    "manager.description.settings": "选择运行环境，调整启动与窗口行为。",
+    "manager.description.notifications": "选择需要接收的桌面通知。",
+    "manager.description.pets": "为桌面选择一个伙伴。",
+    "manager.description.profiles": "管理你的 DSH 配置。",
+    "manager.description.plugins": "管理当前配置使用的插件。",
+    "manager.description.runtimes": "安装和管理 DSH 与 Node 版本。",
+    "manager.description.data-directories": "添加和管理 DSH 数据目录。",
+
     "host.brandContext": "本地 DSH 主机",
     "status.preparing": "准备中",
     "host.startupEyebrow": "工作区启动",
@@ -562,6 +591,7 @@ const messages: Record<Locale, Record<string, string>> = {
     "pets.preview.title": "预览",
     "pets.preview.choose": "选择一个宠物查看预览",
     "pets.preview.status": "预览中",
+    "pets.preview.loading": "正在加载预览…",
     "pets.preview.unavailable": "预览不可用",
     "pets.use.action": "使用此宠物",
     "pets.current.status": "正在使用",
@@ -672,6 +702,20 @@ const messages: Record<Locale, Record<string, string>> = {
     "native.aboutMessage": "dsh-work\n\nDeepSeek Harness 的本地主机。"
   },
   "ja-JP": {
+    "manager.about": "このアプリについて",
+    "about.description": "dsh-work は DeepSeek Harness のデスクトップライフサイクルを管理し、バージョン固定の DSH ランタイムを起動、監視、復旧できるようにします。",
+
+    "manager.settingsTitle": "設定",
+    "manager.skipToContent": "設定内容にスキップ",
+    "manager.description.overview": "現在の DSH セッションと実行環境を確認します。",
+    "manager.description.settings": "実行環境とウィンドウの動作を設定します。",
+    "manager.description.notifications": "受け取るデスクトップ通知を選択します。",
+    "manager.description.pets": "デスクトップのパートナーを選びます。",
+    "manager.description.profiles": "DSH プロファイルを管理します。",
+    "manager.description.plugins": "現在のプロファイルのプラグインを管理します。",
+    "manager.description.runtimes": "DSH と Node のバージョンを管理します。",
+    "manager.description.data-directories": "DSH データディレクトリを追加・管理します。",
+
     "host.brandContext": "ローカル DSH ホスト",
     "status.preparing": "準備中",
     "host.startupEyebrow": "ワークスペースの起動",
@@ -894,6 +938,7 @@ const messages: Record<Locale, Record<string, string>> = {
     "pets.preview.title": "プレビュー",
     "pets.preview.choose": "ペットを選んでプレビュー",
     "pets.preview.status": "プレビュー中",
+    "pets.preview.loading": "プレビューを読み込み中…",
     "pets.preview.unavailable": "プレビューを利用できません",
     "pets.use.action": "このペットを使う",
     "pets.current.status": "使用中",

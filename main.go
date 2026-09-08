@@ -184,6 +184,7 @@ func main() {
 	var applicationShuttingDown atomic.Bool
 	var petWindowCloseAllowed atomic.Bool
 	var petWindowRepositioning atomic.Bool
+	var petWindowPositionRestored atomic.Bool
 	nativeNotification := wailsnotifications.New()
 	nativeNotificationHost := nativeui.NewNotificationService(nativeNotification)
 	notificationRouter := dshworknotifications.NewRouter(
@@ -276,6 +277,11 @@ func main() {
 		}
 		position := values.Pet.Position
 		screen, screenErr := window.GetScreen()
+		if screen == nil && screenErr == nil {
+			// Wails has not created the native window yet; SetPosition would
+			// be a no-op. Show retries restoration after native creation.
+			return
+		}
 		if desktop.Screen != nil && position.MonitorID != "" {
 			if stored := desktop.Screen.GetByID(position.MonitorID); stored != nil {
 				screen = stored
@@ -302,9 +308,12 @@ func main() {
 		defer petWindowRepositioning.Store(false)
 		window.SetSize(resolved.Width, resolved.Height)
 		window.SetPosition(resolved.X, resolved.Y)
+		// Native creation emits move/resize events at the temporary (0, 0)
+		// position. Accept persistence only after restoring the saved anchor.
+		petWindowPositionRestored.Store(true)
 	}
 	persistPetWindowPosition = func() {
-		if petWindowRepositioning.Load() {
+		if !petWindowPositionRestored.Load() || petWindowRepositioning.Load() {
 			return
 		}
 		petWindowMu.Lock()
@@ -347,6 +356,9 @@ func main() {
 			}
 			repositionPetWindow()
 			window.Show()
+			if !petWindowPositionRestored.Load() {
+				repositionPetWindow()
+			}
 			return nil
 		},
 		Hide: func() error {

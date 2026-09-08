@@ -17,7 +17,7 @@ import (
 
 const stateVersion = 2
 
-const petPreferenceVersion = 1
+const petPreferenceVersion = 2
 
 // Locale is the dsh-work-owned language preference. It is deliberately separate
 // from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
@@ -61,7 +61,7 @@ type PetPosition struct {
 }
 
 func DefaultPetPosition() PetPosition {
-	return PetPosition{AnchorX: 1, AnchorY: 1, Width: 192, Height: 208, Scale: 1}
+	return PetPosition{AnchorX: 1, AnchorY: 1, Width: 144, Height: 156, Scale: 1}
 }
 
 // PetPreference is the versioned Host-owned Pet preference. A missing
@@ -92,6 +92,16 @@ func clonePetPreference(preference PetPreference) PetPreference {
 
 func normalizePetPreference(preference PetPreference) PetPreference {
 	defaults := DefaultPetPreference()
+	if preference.SchemaVersion == 1 {
+		// Version 1 used 192x208 as 100%. Keep an existing user's chosen
+		// visual size while moving the baseline to 75% of that window.
+		if preference.Position.Width > 0 && preference.Position.Width <= 4096 {
+			preference.Position.Width = minDimension(int(math.Round(float64(preference.Position.Width)*0.75)), defaults.Position.Width*2)
+		}
+		if preference.Position.Height > 0 && preference.Position.Height <= 4096 {
+			preference.Position.Height = minDimension(int(math.Round(float64(preference.Position.Height)*0.75)), defaults.Position.Height*2)
+		}
+	}
 	preference.SchemaVersion = petPreferenceVersion
 	if !preference.VisibilityIntent.Valid() {
 		preference.VisibilityIntent = defaults.VisibilityIntent
@@ -124,6 +134,13 @@ func normalizePetPreference(preference PetPreference) PetPreference {
 		preference.VisibilityIntent = PetVisibilityHidden
 	}
 	return clonePetPreference(preference)
+}
+
+func minDimension(value, maximum int) int {
+	if value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func finite(value float64) bool {

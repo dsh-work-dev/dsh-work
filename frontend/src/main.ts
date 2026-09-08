@@ -1,3 +1,5 @@
+import {mountSettingSwitches} from "./ui/setting-switch";
+
 import {Events} from "@wailsio/runtime";
 
 import {HostService} from "../bindings/github.com/local/dsh-work/internal/app";
@@ -9,6 +11,8 @@ import {applyTheme, mountTheme} from "./theme";
 
 const surface = new URLSearchParams(window.location.search).get("surface");
 document.documentElement.dataset.surface = surface ?? "host";
+
+if (surface === "settings") mountSettingSwitches(document);
 
 applyLocale(defaultLocale);
 mountLocale();

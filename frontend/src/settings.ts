@@ -3,6 +3,7 @@ import {Events} from "@wailsio/runtime";
 import {SettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
 import type {Values} from "../bindings/github.com/local/dsh-work/internal/settings";
 import {applyLocale, normalizeLocale, subscribeLocale, t} from "./i18n";
+import {beginControlUpdate} from "./ui/pending-control";
 
 type FeedbackTone = "neutral" | "success" | "error";
 type Feedback = (message: string, tone?: FeedbackTone) => void;
@@ -56,7 +57,7 @@ export function mountSettings(setFeedback: Feedback) {
 
   toggle.addEventListener("change", () => void (async () => {
     const previous = !toggle.checked;
-    toggle.disabled = true;
+    const finishUpdate = beginControlUpdate(toggle);
     try {
       render(await SettingsService.SetCloseToTray(toggle.checked));
       setFeedback("");
@@ -66,13 +67,13 @@ export function mountSettings(setFeedback: Feedback) {
       setFeedback(status.textContent, "error");
       console.error("Could not update dsh-work close behavior", error);
     } finally {
-      toggle.disabled = false;
+      finishUpdate();
     }
   })());
 
   rollbackToggle.addEventListener("change", () => void (async () => {
 	const previous = !rollbackToggle.checked;
-	rollbackToggle.disabled = true;
+	const finishUpdate = beginControlUpdate(rollbackToggle);
 	try {
 		render(await SettingsService.SetAutomaticRuntimeRollback(rollbackToggle.checked));
 		setFeedback("");
@@ -80,13 +81,13 @@ export function mountSettings(setFeedback: Feedback) {
 		rollbackToggle.checked = previous;
 		setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
 	} finally {
-		rollbackToggle.disabled = false;
+		finishUpdate();
 	}
   })());
 
   localeSelect.addEventListener("change", () => void (async () => {
     const previous = savedLocale;
-    localeSelect.disabled = true;
+    const finishUpdate = beginControlUpdate(localeSelect);
     try {
       const values = await SettingsService.SetLocale(normalizeLocale(localeSelect.value));
       applyLocale(values.locale);
@@ -97,7 +98,7 @@ export function mountSettings(setFeedback: Feedback) {
       setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
       console.error("Could not update dsh-work language", error);
     } finally {
-      localeSelect.disabled = false;
+      finishUpdate();
     }
   })());
 
@@ -155,7 +156,7 @@ export function mountNotifications(setFeedback: Feedback) {
   for (const [key, toggle] of Object.entries(toggles) as Array<[NotificationPreferenceKey, HTMLInputElement]>) {
     toggle.addEventListener("change", () => void (async () => {
       const previous = !toggle.checked;
-      toggle.disabled = true;
+      const finishUpdate = beginControlUpdate(toggle);
       try {
         render(await SettingsService.SetNotificationPreference(key, toggle.checked));
         setFeedback("");
@@ -166,7 +167,7 @@ export function mountNotifications(setFeedback: Feedback) {
         setFeedback(message, "error");
         console.error("Could not update dsh-work notification settings", error);
       } finally {
-        toggle.disabled = false;
+        finishUpdate();
       }
     })());
   }

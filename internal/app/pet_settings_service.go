@@ -26,7 +26,7 @@ const (
 	maxPetPreviewRefs     = 256
 	petPreviewRefLifetime = 10 * time.Minute
 	minPetSizePercent     = 50
-	maxPetSizePercent     = 300
+	maxPetSizePercent     = 200
 )
 
 type petPreviewRefEntry struct {
@@ -233,12 +233,10 @@ func PersistPetPosition(ctx context.Context, service *PetSettingsService, positi
 	}
 	next := copyPetPreference(values.Pet)
 	next.Position = position
-	values, err = service.manager.SetPetPreference(ctx, next)
-	if err != nil {
-		return err
-	}
-	service.applyOverlayVisibilityLocked(values.Pet)
-	return nil
+	// This records a native move. Reapplying visibility would call Show and
+	// reposition the window again, feeding more events back into persistence.
+	_, err = service.manager.SetPetPreference(ctx, next)
+	return err
 }
 
 // StartupPetService performs the background scan and restores the persisted
