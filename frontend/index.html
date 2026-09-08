@@ -100,9 +100,9 @@
       </footer>
     </main>
     <main id="pet-surface" class="pet-surface" aria-label="Desktop pet" hidden>
-      <section id="pet-activity" class="pet-activity" aria-label="Conversation activity">
-        <div class="pet-activity-toolbar"><span id="pet-activity-status" role="status" aria-live="polite"></span><button id="pet-activity-toggle" type="button" aria-expanded="false" aria-controls="pet-activity-list"></button></div>
-        <button id="pet-activity-primary" class="pet-activity-primary" type="button"><strong id="pet-activity-title"></strong><span id="pet-activity-text"></span></button>
+      <section id="pet-activity" class="pet-activity" aria-label="Conversation activity" hidden>
+        <div class="pet-activity-toolbar"><button id="pet-activity-toggle" type="button" aria-expanded="false" aria-controls="pet-activity-list"></button></div>
+        <button id="pet-activity-primary" class="pet-activity-primary" type="button"><strong id="pet-activity-title"></strong><span id="pet-activity-status" role="status" aria-live="polite"></span><span id="pet-activity-text" hidden></span></button>
         <p id="pet-activity-detail"></p>
         <p id="pet-activity-error" role="alert" hidden></p>
         <div id="pet-activity-list" class="pet-activity-list" hidden></div>

@@ -35,6 +35,8 @@ function activityDetails(a:Activity):string {
   return parts.join(" · ");
 }
 export function mountPetActivity() {
+  const panel=document.getElementById("pet-activity")!;
+  const surface=document.getElementById("pet-surface")!;
   const status=document.getElementById("pet-activity-status")!;
   const primary=document.getElementById("pet-activity-primary") as HTMLButtonElement;
   const title=document.getElementById("pet-activity-title")!;
@@ -44,22 +46,44 @@ export function mountPetActivity() {
   const list=document.getElementById("pet-activity-list")!;
   const error=document.getElementById("pet-activity-error")!;
   let latest:ActivitySnapshot={connected:false}, expanded=false, signature="", opening=false, openFailed=false;
+  let notificationKey="", transient=false, hovered=false, hideTimer:ReturnType<typeof setTimeout>|undefined;
+  function syncVisibility() {
+    const focused=panel.contains(document.activeElement);
+    panel.hidden=!(transient || expanded || openFailed || latest.navigationError || ((hovered || focused) && !!latest.sessions?.length));
+  }
+  function showBriefly() {
+    transient=true;clearTimeout(hideTimer);
+    hideTimer=setTimeout(()=>{transient=false;syncVisibility();},8000);
+  }
+  surface.addEventListener("pointerenter",()=>{hovered=true;syncVisibility();});
+  surface.addEventListener("pointerleave",()=>{hovered=false;syncVisibility();});
+  panel.addEventListener("focusout",()=>queueMicrotask(syncVisibility));
+  surface.addEventListener("keydown",event=>{if(event.key==="Escape"){expanded=false;transient=false;hovered=false;(document.activeElement as HTMLElement)?.blur();signature="";render();}});
   async function open(id:string) {
     if(opening)return;opening=true;openFailed=false;error.hidden=true;
     try {await PetSettingsService.OpenPetActivity(id);} catch {openFailed=true;error.textContent=label("openError");error.hidden=false;}
-    finally {opening=false;}
+    finally {opening=false;syncVisibility();}
   }
   primary.addEventListener("click",()=>{const first=latest.sessions?.[0];if(first && latest.connected)void open(first.sessionId);});
   toggle.addEventListener("click",()=>{expanded=!expanded;signature="";render();});
   function render() {
     const rows=latest.sessions ?? [], first=rows[0];
+    const activityKey=JSON.stringify([latest.connected,first?.sessionId,first?.state,first?.outcome,first?.interaction,first?.summary,first && activityDetails(first)]);
+    if(activityKey!==notificationKey){
+      notificationKey=activityKey;
+      if(latest.connected && first && first.state!=="idle")showBriefly();
+      else {transient=false;clearTimeout(hideTimer);}
+    }
+    syncVisibility();
     const next=JSON.stringify([latest,getLocale(),expanded]);if(next===signature)return;signature=next;
     status.textContent=latest.connected ? label(first?.state ?? "idle") : label("offline");
     title.textContent=first?.title ?? label("empty");text.textContent=first ? activityText(first) : "";
     primary.disabled=!latest.connected || !first;
     detail.textContent=first ? activityDetails(first) : "";detail.title=detail.textContent;
     primary.title=first ? `${first.title}\n${activityText(first)}\n${detail.textContent}` : "";
-    toggle.textContent=`${label(expanded?"close":"list")} ${rows.length || ""}`;
+    toggle.textContent=expanded?"⌃":"⌄";
+    toggle.title=`${label(expanded?"close":"list")} ${rows.length || ""}`;
+    toggle.setAttribute("aria-label",toggle.title);
     toggle.setAttribute("aria-expanded",String(expanded));list.hidden=!expanded;
     primary.hidden=expanded;detail.hidden=expanded;
     error.hidden=!latest.navigationError && !openFailed;
@@ -82,6 +106,6 @@ export function mountPetActivity() {
     }
   }
   const unsubscribe=subscribeLocale(()=>{signature="";render();});
-  window.addEventListener("unload",unsubscribe);render();
+  window.addEventListener("unload",()=>{unsubscribe();clearTimeout(hideTimer);});render();
   return (snapshot:ActivitySnapshot)=>{latest=snapshot;render();};
 }

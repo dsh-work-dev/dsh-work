@@ -49,7 +49,7 @@ func petWindowOptions() application.WebviewWindowOptions {
 		Name:        "pet",
 		Title:       "dsh-work Pet",
 		Width:       320,
-		Height:      392,
+		Height:      296,
 		AlwaysOnTop: true,
 		Frameless:   true,
 		// The Settings size slider is the sole resize control. Keeping the
