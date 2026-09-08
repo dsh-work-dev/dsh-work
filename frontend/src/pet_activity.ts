@@ -47,15 +47,16 @@ export function mountPetActivity() {
   const error=document.getElementById("pet-activity-error")!;
   let latest:ActivitySnapshot={connected:false}, expanded=false, signature="", opening=false, openFailed=false;
   let notificationKey="", transient=false, hovered=false, hideTimer:ReturnType<typeof setTimeout>|undefined;
+  let idleDismissed=false;
   function syncVisibility() {
     const focused=panel.contains(document.activeElement);
-    panel.hidden=!(transient || expanded || openFailed || latest.navigationError || ((hovered || focused) && !!latest.sessions?.length));
+    panel.hidden=idleDismissed || !(transient || expanded || openFailed || latest.navigationError || ((hovered || focused) && !!latest.sessions?.length));
   }
   function showBriefly() {
     transient=true;clearTimeout(hideTimer);
     hideTimer=setTimeout(()=>{transient=false;syncVisibility();},8000);
   }
-  surface.addEventListener("pointerenter",()=>{hovered=true;syncVisibility();});
+  surface.addEventListener("pointerenter",()=>{hovered=true;idleDismissed=false;syncVisibility();});
   surface.addEventListener("pointerleave",()=>{hovered=false;syncVisibility();});
   panel.addEventListener("focusout",()=>queueMicrotask(syncVisibility));
   surface.addEventListener("keydown",event=>{if(event.key==="Escape"){expanded=false;transient=false;hovered=false;(document.activeElement as HTMLElement)?.blur();signature="";render();}});
@@ -71,8 +72,13 @@ export function mountPetActivity() {
     const activityKey=JSON.stringify([latest.connected,first?.sessionId,first?.state,first?.outcome,first?.interaction,first?.summary,first && activityDetails(first)]);
     if(activityKey!==notificationKey){
       notificationKey=activityKey;
-      if(latest.connected && first && first.state!=="idle")showBriefly();
-      else {transient=false;clearTimeout(hideTimer);}
+      if(latest.connected && first && first.state!=="idle"){
+        idleDismissed=false;showBriefly();
+      } else {
+        transient=false;clearTimeout(hideTimer);
+        idleDismissed=true;expanded=false;
+        if(panel.contains(document.activeElement))(document.activeElement as HTMLElement)?.blur();
+      }
     }
     syncVisibility();
     const next=JSON.stringify([latest,getLocale(),expanded]);if(next===signature)return;signature=next;
