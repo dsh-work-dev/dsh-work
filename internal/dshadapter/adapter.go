@@ -71,7 +71,11 @@ type Adapter struct {
 	executableOverride string
 	discoveryRoot      string
 	client             *http.Client
+	launchPatch        func(string) (string, error)
 }
+
+// SetLaunchPatch installs a Host-owned, ephemeral overlay for each Worker.
+func (a *Adapter) SetLaunchPatch(prepare func(string) (string, error)) { a.launchPatch = prepare }
 
 func New(executor CommandExecutor, expectedVersion string) *Adapter {
 	if expectedVersion == "" {
@@ -279,6 +283,13 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		ExpectedOrigin:   origin,
 		ExpectedHost:     "127.0.0.1",
 		ExpectedPort:     launch.Port,
+	}
+	if a.launchPatch != nil {
+		patch, err := a.launchPatch(launch.GenerationID)
+		if err != nil {
+			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH activity bridge: %w", err)
+		}
+		plan.Args = append([]string{"--patch", patch}, plan.Args...)
 	}
 	if err := plan.Validate(); err != nil {
 		return supervisor.LaunchPlan{}, err

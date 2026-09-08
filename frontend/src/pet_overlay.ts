@@ -1,8 +1,10 @@
 import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {mountPetActivity} from "./pet_activity";
 
 const refreshIntervalMs = 96;
 
 export function mountPetOverlay() {
+	const updateActivity = mountPetActivity();
   const image = document.getElementById("pet-overlay-image") as HTMLImageElement;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   let timer: number | undefined;
@@ -19,6 +21,7 @@ export function mountPetOverlay() {
     refreshInFlight = true;
     try {
       const state = await PetSettingsService.GetPetOverlay();
+	  updateActivity(state.activity);
       const dataUrl = state.dataUrl;
       const visible = state.runtime?.effectiveVisibility === "visible" && !!dataUrl;
       if (visible) {

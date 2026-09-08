@@ -36,8 +36,17 @@ type Session interface {
 // Adapter owns the local gateway boundary. It has no operating-system or
 // browser-automation knowledge and can be shared by all native supervisors.
 type Adapter struct {
-	mu           sync.RWMutex
-	openExternal func(string) error
+	mu            sync.RWMutex
+	openExternal  func(string) error
+	observeWorker func(context.Context, string)
+}
+
+// SetWorkerObserver attaches a read-only observer to the authenticated Worker.
+// The observer's lifetime follows the generation context.
+func (a *Adapter) SetWorkerObserver(fn func(context.Context, string)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.observeWorker = fn
 }
 
 func New() *Adapter { return &Adapter{} }
@@ -103,6 +112,12 @@ func (a *Adapter) Start(ctx context.Context, upstreamAuthURL string) (Session, e
 			// observes cleanup errors through the Session contract.
 		}
 	}()
+	a.mu.RLock()
+	observer := a.observeWorker
+	a.mu.RUnlock()
+	if observer != nil {
+		observer(ctx, upstreamAuthURL)
+	}
 	return session, nil
 }
 

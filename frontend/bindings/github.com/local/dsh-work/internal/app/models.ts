@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as dshactivity$0 from "../dshactivity/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as pet$0 from "../pet/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -18,6 +21,7 @@ export interface PetOverlayState {
     "snapshot": pet$0.PetRuntimeSnapshot;
     "preview": PetPreview;
     "dataUrl"?: string;
+    "activity": dshactivity$0.Snapshot;
 }
 
 /**

@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/settings"
@@ -71,6 +72,7 @@ type PetOverlayState struct {
 	Snapshot pet.PetRuntimeSnapshot `json:"snapshot"`
 	Preview  PetPreview             `json:"preview"`
 	DataURL  string                 `json:"dataUrl,omitempty"`
+	Activity dshactivity.Snapshot   `json:"activity"`
 }
 
 // PetOverlayHooks are composition-edge effects. They are attached by main
@@ -90,7 +92,11 @@ type PetOverlayHooks struct {
 // SetPetPreference. Selection is serialized here and commits only after the
 // catalog has revalidated the source and the renderer has passed preflight.
 type PetSettingsService struct {
-	mu sync.Mutex
+	activity        *dshactivity.Bridge
+	activityRuntime *pet.Runtime
+	activityKey     string
+	openWorkspace   func()
+	mu              sync.Mutex
 
 	manager             *settings.Manager
 	catalog             pet.PetCatalog
@@ -117,6 +123,36 @@ type PetSettingsService struct {
 	// production constructor always uses the existing Wails Settings-window
 	// check.
 	trustedSurface func(context.Context) bool
+}
+
+// SetPetActivity connects Host-owned conversation observation and navigation.
+func SetPetActivity(s *PetSettingsService, bridge *dshactivity.Bridge, openWorkspace func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activity = bridge
+	s.openWorkspace = openWorkspace
+}
+
+// OpenPetActivity returns to an existing DSH conversation from the pet surface.
+func (s *PetSettingsService) OpenPetActivity(ctx context.Context, sessionID string) error {
+	s.mu.Lock()
+	operation, cancel, err := s.beginOperationForSurface(ctx, "pet")
+	bridge, open := s.activity, s.openWorkspace
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	if bridge == nil {
+		return errors.New("conversation activity is unavailable")
+	}
+	if err := bridge.Open(operation, sessionID); err != nil {
+		return err
+	}
+	if open != nil {
+		open()
+	}
+	return nil
 }
 
 // AttachPetOverlayHooks connects the app service to the independently-owned
@@ -408,6 +444,17 @@ func (s *PetSettingsService) GetPetOverlay(ctx context.Context) (PetOverlayState
 	}
 	panel := s.projectPanel(snapshot, preference.Pet)
 	state := PetOverlayState{Runtime: panel.Runtime}
+	if s.activity != nil {
+		state.Activity = s.activity.Snapshot()
+		if s.activeRuntime != nil && state.Activity.Generation == s.generation {
+			kind, key := dshactivity.AnimationIntent(state.Activity)
+			key = s.generation + ":" + key
+			if s.activityRuntime != s.activeRuntime || s.activityKey != key {
+				_ = s.activeRuntime.Dispatch(pet.PetInputEvent{Type: kind, Generation: s.generation, Source: "dsh"})
+				s.activityRuntime, s.activityKey = s.activeRuntime, key
+			}
+		}
+	}
 	if panel.Runtime.EffectiveVisibility != pet.VisibilityVisible && !s.rendererFailure {
 		return state, nil
 	}

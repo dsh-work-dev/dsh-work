@@ -14,6 +14,7 @@ import (
 
 	"github.com/local/dsh-work/internal/acquisition"
 	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -47,8 +48,8 @@ func petWindowOptions() application.WebviewWindowOptions {
 	return application.WebviewWindowOptions{
 		Name:        "pet",
 		Title:       "dsh-work Pet",
-		Width:       192,
-		Height:      208,
+		Width:       320,
+		Height:      392,
 		AlwaysOnTop: true,
 		Frameless:   true,
 		// The Settings size slider is the sole resize control. Keeping the
@@ -98,6 +99,9 @@ func main() {
 	}()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
+	petActivity := dshactivity.New(filepath.Join(filepath.Dir(config.SettingsPath), "pet-activity-bridge"))
+	defer petActivity.Close()
+	dsh.SetLaunchPatch(petActivity.Prepare)
 	runtimeHint := dsh.RuntimeHint()
 	var managerRunner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
@@ -132,6 +136,7 @@ func main() {
 		manager = nil
 	}
 	gateway := workergateway.New()
+	gateway.SetWorkerObserver(petActivity.Start)
 	var automaticRuntimeRollback atomic.Bool
 	automaticRuntimeRollback.Store(true)
 	host := dshworkapp.NewHost(dshworkapp.Dependencies{
@@ -238,6 +243,11 @@ func main() {
 		automaticRuntimeRollback.Store,
 	)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
+	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
+		if showWorkspace != nil {
+			showWorkspace()
+		}
+	})
 	dshworkapp.SetPetRendererFactory(petSettingsService, func() dshworkpet.PetRenderer {
 		return dshworkpet.NewRasterRenderer()
 	})
@@ -306,11 +316,12 @@ func main() {
 			return
 		}
 		scale := float64(screen.ScaleFactor)
+		windowWidth, windowHeight := petActivityWindowSize(position.Width, position.Height)
 		resolved := dshworkpet.ResolvePosition(
 			position.AnchorX,
 			position.AnchorY,
-			position.Width,
-			position.Height,
+			windowWidth,
+			windowHeight,
 			scale,
 			dshworkpet.WorkArea{X: screen.WorkArea.X, Y: screen.WorkArea.Y, Width: screen.WorkArea.Width, Height: screen.WorkArea.Height},
 			12,
@@ -352,6 +363,12 @@ func main() {
 			Width:     width,
 			Height:    height,
 			Scale:     scale,
+		}
+		// Persist the user's sprite size; activity chrome has a fixed readable area.
+		if values, err := settingsManager.Snapshot(context.Background()); err == nil {
+			position.Width, position.Height = values.Pet.Position.Width, values.Pet.Position.Height
+		} else {
+			return
 		}
 		if err := dshworkapp.PersistPetPosition(context.Background(), petSettingsService, position); err != nil {
 			log.Printf("dsh-work Pet position: %v", err)
@@ -399,7 +416,8 @@ func main() {
 			if width <= 0 || height <= 0 {
 				return errors.New("pet overlay size is invalid")
 			}
-			window.SetSize(width, height)
+			windowWidth, windowHeight := petActivityWindowSize(width, height)
+			window.SetSize(windowWidth, windowHeight)
 			repositionPetWindow()
 			return nil
 		},

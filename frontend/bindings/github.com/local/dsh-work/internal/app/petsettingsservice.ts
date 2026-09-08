@@ -51,6 +51,13 @@ export function GetPetPreview(previewRef: string): $CancellablePromise<string> {
 }
 
 /**
+ * OpenPetActivity returns to an existing DSH conversation from the pet surface.
+ */
+export function OpenPetActivity(sessionID: string): $CancellablePromise<void> {
+    return $Call.ByID(1561219750, sessionID);
+}
+
+/**
  * PreviewPet resolves the selected key through PetCatalog and returns only
  * bounded metadata plus an opaque Host-owned preview handle. It deliberately
  * does not change the persisted selection or visibility intent.

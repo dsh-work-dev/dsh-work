@@ -284,7 +284,7 @@ func (r *Runtime) Dispatch(event PetInputEvent) error {
 		r.action = ""
 	case "task.started", "task.working":
 		r.setBaseLocked(BaseWorking, now)
-	case "task.waiting":
+	case "task.waiting", "task.blocked", "task.limited":
 		if r.setBaseLocked(BaseWaiting, now) {
 			r.triggerActionLocked("attention", now)
 		}
@@ -306,7 +306,7 @@ func (r *Runtime) Dispatch(event PetInputEvent) error {
 				r.action = ""
 			}
 		}
-	case "task.cancelled":
+	case "task.cancelled", "task.interrupted":
 		r.setBaseLocked(BaseIdle, now)
 		r.action = ""
 	case "task.progress":
