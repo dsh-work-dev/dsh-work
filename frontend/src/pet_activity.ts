@@ -40,17 +40,13 @@ export function mountPetActivity() {
   const status=document.getElementById("pet-activity-status")!;
   const primary=document.getElementById("pet-activity-primary") as HTMLButtonElement;
   const title=document.getElementById("pet-activity-title")!;
-  const text=document.getElementById("pet-activity-text")!;
-  const detail=document.getElementById("pet-activity-detail")!;
-  const toggle=document.getElementById("pet-activity-toggle") as HTMLButtonElement;
-  const list=document.getElementById("pet-activity-list")!;
   const error=document.getElementById("pet-activity-error")!;
-  let latest:ActivitySnapshot={connected:false}, expanded=false, signature="", opening=false, openFailed=false;
+  let latest:ActivitySnapshot={connected:false}, signature="", opening=false, openFailed=false;
   let notificationKey="", transient=false, hovered=false, hideTimer:ReturnType<typeof setTimeout>|undefined;
   let idleDismissed=false;
   function syncVisibility() {
     const focused=panel.contains(document.activeElement);
-    panel.hidden=idleDismissed || !(transient || expanded || openFailed || latest.navigationError || ((hovered || focused) && !!latest.sessions?.length));
+    panel.hidden=idleDismissed || !(transient || openFailed || latest.navigationError || ((hovered || focused) && !!latest.sessions?.length));
   }
   function showBriefly() {
     transient=true;clearTimeout(hideTimer);
@@ -59,14 +55,13 @@ export function mountPetActivity() {
   surface.addEventListener("pointerenter",()=>{hovered=true;idleDismissed=false;syncVisibility();});
   surface.addEventListener("pointerleave",()=>{hovered=false;syncVisibility();});
   panel.addEventListener("focusout",()=>queueMicrotask(syncVisibility));
-  surface.addEventListener("keydown",event=>{if(event.key==="Escape"){expanded=false;transient=false;hovered=false;(document.activeElement as HTMLElement)?.blur();signature="";render();}});
+  surface.addEventListener("keydown",event=>{if(event.key==="Escape"){transient=false;hovered=false;(document.activeElement as HTMLElement)?.blur();signature="";render();}});
   async function open(id:string) {
     if(opening)return;opening=true;openFailed=false;error.hidden=true;
     try {await PetSettingsService.OpenPetActivity(id);} catch {openFailed=true;error.textContent=label("openError");error.hidden=false;}
     finally {opening=false;syncVisibility();}
   }
   primary.addEventListener("click",()=>{const first=latest.sessions?.[0];if(first && latest.connected)void open(first.sessionId);});
-  toggle.addEventListener("click",()=>{expanded=!expanded;signature="";render();});
   function render() {
     const rows=latest.sessions ?? [], first=rows[0];
     const activityKey=JSON.stringify([latest.connected,first?.sessionId,first?.state,first?.outcome,first?.interaction,first?.summary,first && activityDetails(first)]);
@@ -76,40 +71,19 @@ export function mountPetActivity() {
         idleDismissed=false;showBriefly();
       } else {
         transient=false;clearTimeout(hideTimer);
-        idleDismissed=true;expanded=false;
+        idleDismissed=true;
         if(panel.contains(document.activeElement))(document.activeElement as HTMLElement)?.blur();
       }
     }
     syncVisibility();
-    const next=JSON.stringify([latest,getLocale(),expanded]);if(next===signature)return;signature=next;
-    status.textContent=latest.connected ? label(first?.state ?? "idle") : label("offline");
-    title.textContent=first?.title ?? label("empty");text.textContent=first ? activityText(first) : "";
+    const next=JSON.stringify([latest,getLocale()]);if(next===signature)return;signature=next;
+    status.textContent=latest.connected ? (first ? activityText(first) : label("idle")) : label("offline");
+    title.textContent=first?.title ?? label("empty");
     primary.disabled=!latest.connected || !first;
-    detail.textContent=first ? activityDetails(first) : "";detail.title=detail.textContent;
-    primary.title=first ? `${first.title}\n${activityText(first)}\n${detail.textContent}` : "";
-    toggle.textContent=expanded?"⌃":"⌄";
-    toggle.title=`${label(expanded?"close":"list")} ${rows.length || ""}`;
-    toggle.setAttribute("aria-label",toggle.title);
-    toggle.setAttribute("aria-expanded",String(expanded));list.hidden=!expanded;
-    primary.hidden=expanded;detail.hidden=expanded;
+    primary.setAttribute("aria-label",first ? `${first.title} · ${activityText(first)}` : label("empty"));
+    primary.setAttribute("aria-description",first ? activityDetails(first) : "");
     error.hidden=!latest.navigationError && !openFailed;
     if(!error.hidden)error.textContent=label("openError");
-    if(expanded) {
-      const focused=(document.activeElement as HTMLElement)?.dataset.session;
-      list.replaceChildren(...rows.map(a=>{
-        const button=document.createElement("button");button.type="button";button.dataset.session=a.sessionId;
-        button.disabled=!latest.connected;
-        const heading=document.createElement("strong");heading.textContent=`${a.parentSessionId ? "↳ " : ""}${a.title}`;
-        const body=document.createElement("span"), summary=activityText(a);
-        body.textContent=summary.startsWith(label(a.state)) ? summary : `${label(a.state)} · ${summary}`;
-        button.append(heading,body);
-        const details=activityDetails(a);
-        if(details){const line=document.createElement("span");line.textContent=details;button.append(line);}
-        button.title=`${a.title}\n${body.textContent}\n${details}`;
-        button.addEventListener("click",()=>void open(a.sessionId));return button;
-      }));
-      if(focused)Array.from(list.querySelectorAll("button")).find(b=>b.dataset.session===focused)?.focus({preventScroll:true});
-    }
   }
   const unsubscribe=subscribeLocale(()=>{signature="";render();});
   window.addEventListener("unload",()=>{unsubscribe();clearTimeout(hideTimer);});render();

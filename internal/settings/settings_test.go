@@ -117,8 +117,8 @@ func TestSettingsMigratesLegacyPetScaleBaseline(t *testing.T) {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
 	position := values.Pet.Position
-	if values.Pet.SchemaVersion != petPreferenceVersion || position.Width != 144 || position.Height != 156 || position.AnchorX != 0.4 || position.AnchorY != 0.6 || position.Scale != 2 {
-		t.Fatalf("migrated Pet preference = %#v, want version %d and 144x156 at the same anchor", values.Pet, petPreferenceVersion)
+	if values.Pet.SchemaVersion != petPreferenceVersion || position.Width != 96 || position.Height != 104 || position.AnchorX != 0.4 || position.AnchorY != 0.6 || position.Scale != 2 {
+		t.Fatalf("migrated Pet preference = %#v, want version %d and 96x104 at the same anchor", values.Pet, petPreferenceVersion)
 	}
 }
 
@@ -137,6 +137,23 @@ func TestSettingsPetPreferenceRejectsPathLikeSelectionAndForcesHidden(t *testing
 	}
 	if values.Pet.SelectedKey != nil || values.Pet.VisibilityIntent != PetVisibilityHidden {
 		t.Fatalf("unsafe selection = %#v, want nil/hidden", values.Pet)
+	}
+}
+
+func TestPet75PercentBaselineMigratesOnceToHalfSize(t *testing.T) {
+	for _, percent := range []int{50, 100, 200} {
+		preference := DefaultPetPreference()
+		preference.SchemaVersion = 2
+		preference.Position.Width = 144 * percent / 100
+		preference.Position.Height = 156 * percent / 100
+		preference.AlwaysOnTop = true
+		migrated := normalizePetPreference(preference)
+		if migrated.Position.Width != 96*percent/100 || migrated.Position.Height != 104*percent/100 || !migrated.AlwaysOnTop {
+			t.Fatalf("migration at %d%%: %+v", percent, migrated)
+		}
+		if again := normalizePetPreference(migrated); again != migrated {
+			t.Fatalf("migration applied twice: %+v", again)
+		}
 	}
 }
 

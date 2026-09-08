@@ -128,11 +128,11 @@ func TestPetSettingsServiceSetPetSizePersistsAndResizes(t *testing.T) {
 	if panel.SizePercent != 200 || !panel.SizeAvailable {
 		t.Fatalf("size projection = %+v, want 200%% and available", panel)
 	}
-	if panel.Preference.Position.Width != 288 || panel.Preference.Position.Height != 312 {
-		t.Fatalf("persisted size = %+v, want 288x312", panel.Preference.Position)
+	if panel.Preference.Position.Width != 192 || panel.Preference.Position.Height != 208 {
+		t.Fatalf("persisted size = %+v, want 192x208", panel.Preference.Position)
 	}
-	if len(resized) != 1 || resized[0] != [2]int{288, 312} {
-		t.Fatalf("resize calls = %v, want 288x312", resized)
+	if len(resized) != 1 || resized[0] != [2]int{192, 208} {
+		t.Fatalf("resize calls = %v, want 192x208", resized)
 	}
 	if store.saves != 1 {
 		t.Fatalf("size persisted %d times, want once", store.saves)
