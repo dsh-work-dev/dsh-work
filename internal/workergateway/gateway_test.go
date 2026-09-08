@@ -136,6 +136,55 @@ func TestGatewayBootstrapsDSHSessionAndProxiesTrustedOrigin(t *testing.T) {
 	}
 }
 
+func TestGatewayWaitsForDirectoryPicker(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/directoryPicker/pick" {
+			select {
+			case <-time.After(2500 * time.Millisecond):
+			case <-r.Context().Done():
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"path":"C:/workspace"}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	session, err := New().Start(context.Background(), upstream.URL+"/?token=picker-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar, Timeout: 5 * time.Second}
+	response, err := client.Get(session.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	request, err := http.NewRequest(http.MethodPost, session.Origin()+"api/directoryPicker/pick", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Origin", strings.TrimSuffix(session.Origin(), "/"))
+	response, err = client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != `{"path":"C:/workspace"}` {
+		t.Fatalf("directory picker: status=%d body=%q", response.StatusCode, body)
+	}
+}
+
 func TestGatewayRejectsInvalidUpstreamLaunchURL(t *testing.T) {
 	for _, value := range []string{
 		"http://localhost:4321/?token=value",

@@ -2,6 +2,10 @@
 .research/
 .evolve/
 
+# Local browser verification artifacts.
+.playwright-cli/
+output/playwright/
+
 # Generated application and dependency artifacts.
 .task/
 bin/

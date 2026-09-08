@@ -81,13 +81,15 @@ func (a *Adapter) Start(ctx context.Context, upstreamAuthURL string) (Session, e
 	}
 	proxy := &httputil.ReverseProxy{}
 	proxy.Transport = &http.Transport{
-		Proxy:                 nil,
-		DialContext:           (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
-		ForceAttemptHTTP2:     false,
-		MaxIdleConns:          16,
-		MaxIdleConnsPerHost:   8,
-		IdleConnTimeout:       30 * time.Second,
-		ResponseHeaderTimeout: 2 * time.Second,
+		Proxy:               nil,
+		DialContext:         (&net.Dialer{Timeout: 2 * time.Second}).DialContext,
+		ForceAttemptHTTP2:   false,
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     30 * time.Second,
+		// Worker requests may wait for user input (for example a directory
+		// picker). Their lifetime follows the downstream request context and
+		// gateway session rather than the startup handshake timeout.
 	}
 	session := &gatewaySession{
 		origin:          origin,
