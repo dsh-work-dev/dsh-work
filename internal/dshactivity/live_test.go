@@ -44,12 +44,16 @@ ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/__dshwork/test',handl
 if(req.headers['x-dsh-work-token']!==config.token){res.writeHead(403);res.end();return;}
 let session=ctx.sessions.get('pet-live-fixture');if(!session)session=ctx.sessions.create('pet-live-fixture',{meta:{cwd:config.cwd}});
 const action=new URL(req.url,'http://localhost').searchParams.get('action');
-if(action==='answer') {resolve?.({answers:[]});pending?.abort();}
+try {if(action==='phase-thinking') {session.append('turn/start',{turn:2});session.append('step/start',{turn:2,step:1});}
+else if(action==='phase-tools') {session.append('tool/call',{turn:2,step:1,callId:'a',name:'read_file',arguments:'{}'});session.append('tool/call',{turn:2,step:1,callId:'b',name:'apply_patch',arguments:'{}'});}
+else if(action==='phase-one-result') {session.append('tool/result',{turn:2,step:1,message:{id:'result-a',role:'user',source:{kind:'tool',callId:'a'},content:[{type:'tool-result',toolCallId:'a',content:[],isError:true}]},error:{code:'RECOVERABLE',message:'retry'}},{surfaceOp:'append'});}
+else if(action==='phase-last-result') {session.append('tool/result',{turn:2,step:1,message:{id:'result-b',role:'user',source:{kind:'tool',callId:'b'},content:[{type:'tool-result',toolCallId:'b',content:[]}]}},{surfaceOp:'append'});}
+else if(action==='answer') {resolve?.({answers:[]});pending?.abort();}
 else if(action==='question'||action==='approval'||action==='plan-review') {
 pending=new AbortController();const request={agent:{id:session.id},signal:pending.signal,toolName:'fixture',reason:'Allow fixture?',questions:[{id:'q',question:'Choose a format',...(action==='plan-review'?{intent:{kind:'plan-review'}}:{})}]};
 void ctx.waterfall(action==='approval'?'approval/request':'user-questions/request',request,()=>new Promise(r=>{resolve=r;})).then(value=>{answered=value;});
 } else {session.append('turn/start',{turn:1});session.append('turn/end',{turn:1,reason:{kind:action||'completed'}});}
-res.writeHead(200);res.end(JSON.stringify({answered}));}}));}`
+res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHead(500);res.end(String(error));}}}));}`
 	if err = os.WriteFile(fixture, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -165,9 +169,10 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}}));}`
 		if err != nil {
 			t.Fatal(err)
 		}
+		responseBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != 200 {
-			t.Fatalf("fixture %s: %d", action, resp.StatusCode)
+			t.Fatalf("fixture %s: %d %s", action, resp.StatusCode, responseBody)
 		}
 	}
 	waitFor := func(check func(Activity) bool) {
@@ -181,6 +186,16 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}}));}`
 		}
 		t.Fatalf("expected activity not received: %+v", b.Snapshot())
 	}
+	request("phase-thinking")
+	waitFor(func(a Activity) bool { return a.WorkPhase == "thinking" && a.Running })
+	request("phase-tools")
+	waitFor(func(a Activity) bool { return a.WorkPhase == "working" && a.ToolActivity == "editing" })
+	request("phase-one-result")
+	waitFor(func(a Activity) bool {
+		return a.WorkPhase == "working" && a.ToolActivity == "editing" && a.Outcome == ""
+	})
+	request("phase-last-result")
+	waitFor(func(a Activity) bool { return a.WorkPhase == "result" && a.Running })
 	for _, kind := range []string{"question", "approval", "plan-review"} {
 		request(kind)
 		waitFor(func(a Activity) bool {

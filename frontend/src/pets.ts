@@ -10,6 +10,26 @@ const minPetSizePercent = 50;
 const maxPetSizePercent = 200;
 const defaultPetSizePercent = 100;
 
+// Decode one local video frame for the same static thumbnail UI used by atlases.
+async function getPreviewImage(ref:string):Promise<string>{
+ const url=await PetSettingsService.GetPetPreview(ref);
+ if(!url.startsWith("/__pet_media/"))return url;
+ return new Promise((resolve,reject)=>{
+  const video=document.createElement("video");video.muted=true;video.preload="auto";
+  const cleanup=()=>{clearTimeout(timer);video.onloadeddata=null;video.onerror=null;video.pause();video.removeAttribute("src");video.load();};
+  const timer=setTimeout(()=>{cleanup();reject(new Error("Preview timed out"));},8000);
+  video.onerror=()=>{cleanup();reject(new Error("Preview unavailable"));};
+  video.onloadeddata=()=>{
+   if(!video.videoWidth||!video.videoHeight||video.videoWidth>4096||video.videoHeight>4096){cleanup();reject(new Error("Invalid preview"));return;}
+   const canvas=document.createElement("canvas"),scale=Math.min(1,384/video.videoWidth);
+   canvas.width=video.videoWidth*scale;canvas.height=video.videoHeight*scale;
+   canvas.getContext("2d")!.drawImage(video,0,0,canvas.width,canvas.height);
+   const data=canvas.toDataURL("image/png");cleanup();resolve(data);
+  };
+  video.src=url;
+ });
+}
+
 function errorMessage(_error: unknown, fallback: string): string {
   // Backend errors may contain implementation or environment details. The
   // Settings surface presents only the bounded product copy for each action.
@@ -238,7 +258,7 @@ export function mountPets() {
     const epoch = thumbnailEpoch;
     thumbnailRequests.set(key, epoch);
     void PetSettingsService.PreviewPet(key).then(async (next) => {
-      const dataURL = await PetSettingsService.GetPetPreview(next.previewRef);
+      const dataURL = await getPreviewImage(next.previewRef);
       if (thumbnailRequests.get(key) === epoch) {
         thumbnailRequests.delete(key);
       }
@@ -367,7 +387,7 @@ export function mountPets() {
       preview = next;
       renderPreview();
       try {
-        const dataURL = await PetSettingsService.GetPetPreview(next.previewRef);
+        const dataURL = await getPreviewImage(next.previewRef);
         if (request !== previewRequest || browseKey !== key) {
           return;
         }

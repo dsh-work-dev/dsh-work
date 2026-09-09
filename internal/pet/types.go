@@ -48,6 +48,7 @@ const (
 	// SourceCodexAvatars is the Codex compatibility root. It uses the same
 	// Codex manifest and atlas contract as SourceCodexPets.
 	SourceCodexAvatars SourceKind = "codex-avatars"
+	SourceCommunity    SourceKind = "dsh-community"
 	SourceDshPets      SourceKind = "dsh-pets"
 	SourceCodexHome    SourceKind = "codex-home"
 	SourceUnknown      SourceKind = "unknown"
@@ -283,6 +284,9 @@ func StableSourceKey(kind SourceKind, folder string) string {
 	prefix := "codex"
 	if kind == SourceCodexAvatars {
 		root = "avatars"
+	} else if kind == SourceCommunity {
+		root = "community-pets"
+		prefix = "dsh"
 	} else if kind == SourceDshPets {
 		root = "native-pets"
 		prefix = "dsh"
@@ -438,6 +442,7 @@ func (p *DirectionProfile) clone() *DirectionProfile {
 // Codex row/column knowledge is converted to frame indexes and does not cross
 // this boundary.
 type PetDefinition struct {
+	Behavior     *Behavior             `json:"behavior,omitempty"`
 	Identity     Identity              `json:"identity"`
 	Source       SourceInfo            `json:"source"`
 	Geometry     Geometry              `json:"geometry"`
@@ -458,6 +463,12 @@ type PetDefinition struct {
 
 func (d PetDefinition) clone() PetDefinition {
 	copy := d
+	if d.Behavior != nil {
+		b := *d.Behavior
+		b.Idle = append([]WeightedAction(nil), b.Idle...)
+		b.Clicks = append([]string(nil), b.Clicks...)
+		copy.Behavior = &b
+	}
 	copy.Capabilities = append([]string(nil), d.Capabilities...)
 	copy.Assets = make([]Asset, len(d.Assets))
 	for index, asset := range d.Assets {

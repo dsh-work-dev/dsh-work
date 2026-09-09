@@ -25,7 +25,7 @@ export function apply(ctx, config) {
         rows.delete(old.sessionId);
       }
       rows.set(id, {sessionId: id, title: '', parentSessionId: '', seq: -1, turn: 0, running: false,
-        outcome: '', summary: '', completedSeq: -1, readSeq: -1, updatedAt: Date.now(), pending: new Map()});
+        workPhase: '', tools: new Map(), toolActivity: '', outcome: '', summary: '', completedSeq: -1, readSeq: -1, updatedAt: Date.now(), pending: new Map()});
     }
     return rows.get(id);
   }
@@ -35,12 +35,31 @@ export function apply(ctx, config) {
     r.seq = event.seq;
     const data = event.data ?? {};
     switch (event.type) {
-      case 'turn/start': r.running = true; r.turn = data.turn; r.outcome = ''; r.summary = ''; break;
+      case 'turn/start': r.running = true; r.turn = data.turn; r.outcome = ''; r.summary = ''; r.tools.clear(); r.workPhase = 'thinking'; r.toolActivity = ''; break;
       case 'turn/end':
-        r.running = false; r.outcome = data.reason?.kind ?? 'interrupted';
+        r.tools.clear(); r.workPhase = ''; r.toolActivity = ''; r.running = false; r.outcome = data.reason?.kind ?? 'interrupted';
         if (r.outcome === 'completed') r.completedSeq = event.seq;
         if (r.outcome === 'error') r.summary = text(data.reason?.error?.message);
         break;
+      case 'step/start':
+        if (r.running && !r.tools.size) r.workPhase = 'thinking';
+        break;
+      case 'tool/call': {
+        if (!r.running) break;
+        const id = text(data.callId,256), name = text(data.name,120);
+        if (id && r.tools.size < 128) r.tools.set(id,name);
+        r.workPhase = 'working'; r.toolActivity = classifyTool(name); break;
+      }
+      case 'tool/result': {
+        if (!r.running) break;
+        const m=data.message;
+        const id=text(m?.source?.callId ?? m?.content?.find?.(b=>b.toolCallId)?.toolCallId ?? m?.toolCallId ?? m?.callId ?? data.callId,256);
+        // An unidentified result cannot prove other concurrent calls have finished.
+        if (id) r.tools.delete(id);
+        r.workPhase = r.tools.size ? 'working' : 'result';
+        r.toolActivity = r.tools.size ? classifyTool(r.tools.values().next().value) : '';
+        break;
+      }
       case 'assistant/message': if (!data.interrupted) r.summary = plain(data.message?.content); break;
       case 'session/title': r.title = text(data.title, 120); break;
       default: return;
@@ -127,7 +146,7 @@ export function apply(ctx, config) {
       const pending = [...r.pending.values()].at(-1);
       sessions.push({sessionId: r.sessionId, title: r.title || text(values.title?.title || values.title, 120) || r.sessionId,
         parentSessionId: r.parentSessionId, seq: r.seq, turn: r.turn, running: r.running,
-        outcome: r.outcome, summary: r.summary, unread: r.completedSeq > r.readSeq,
+        workPhase: r.running ? r.workPhase : '', toolActivity: r.running ? r.toolActivity : '', outcome: r.outcome, summary: r.summary, unread: r.completedSeq > r.readSeq,
         updatedAt: r.updatedAt, interaction: pending ?? null,
         goal: goal ? {phase: text(goal.phase, 32), objective: text(goal.objective), reason: text(goal.blockedReason?.message),
           rounds: values.goal.roundsStarted ?? 0, maxRounds: goal.maxGoalRounds ?? 0} : null,
@@ -182,4 +201,13 @@ export function apply(ctx, config) {
       reply(res, 200, {navigation});
     } catch { reply(res, 400, {}); }
   }}));
+}
+
+function classifyTool(name) {
+ const tokens=String(name??'').toLowerCase().split(/[^a-z0-9]+/);
+ if(tokens.some(t=>['test','check','lint','build','verify'].includes(t))) return 'testing';
+ if(tokens.some(t=>['write','edit','patch','replace','create','move','delete'].includes(t))) return 'editing';
+ if(tokens.some(t=>['search','grep','find','glob','web','read','fetch','open'].includes(t))) return 'searching';
+ if(tokens.some(t=>['shell','bash','exec','command','terminal','powershell','pwsh'].includes(t))) return 'commanding';
+ return 'using-tool';
 }

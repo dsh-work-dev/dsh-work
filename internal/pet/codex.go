@@ -619,7 +619,7 @@ func defaultStates(tracks map[string]TrackSpec) map[string]StateSpec {
 		if _, ok := tracks[track]; !ok {
 			track = "idle"
 		}
-		states[state] = StateSpec{Track: track, Loop: tracks[track].Loop, Fallback: tracks[track].Fallback}
+		states[state] = StateSpec{Track: track, Loop: tracks[track].Loop || state == "working" || state == "waiting" || state == "reviewing", Fallback: tracks[track].Fallback}
 	}
 	return states
 }

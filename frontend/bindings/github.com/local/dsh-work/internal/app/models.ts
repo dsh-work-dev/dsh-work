@@ -11,12 +11,20 @@ import * as pet$0 from "../pet/models.js";
 // @ts-ignore: Unused imports
 import * as settings$0 from "../settings/models.js";
 
+export interface PetHitRegion {
+    "x": number;
+    "y": number;
+    "width": number;
+    "height": number;
+}
+
 /**
  * PetOverlayState is the read-only projection consumed by the independent
  * overlay page. The frame is a Host-rendered data URL; it is never a source
  * path or a frontend-composed resource URL.
  */
 export interface PetOverlayState {
+    "playbackKey": string;
     "runtime": pet$0.RuntimeState;
     "snapshot": pet$0.PetRuntimeSnapshot;
     "preview": PetPreview;

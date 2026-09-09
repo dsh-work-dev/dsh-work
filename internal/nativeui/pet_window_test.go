@@ -1,4 +1,4 @@
-package main
+package nativeui
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestPetWindowOptionsUseTransparentWindowAndSliderResize(t *testing.T) {
-	options := petWindowOptions()
+	options := PetWindowOptions()
 	if options.AlwaysOnTop {
 		t.Fatal("pet must not be always on top by default")
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,8 @@ const (
 	BaseStarting  BaseState = "starting"
 	BaseIdle      BaseState = "idle"
 	BaseWorking   BaseState = "working"
+	BaseThinking  BaseState = "thinking"
+	BaseResult    BaseState = "result"
 	BaseWaiting   BaseState = "waiting"
 	BaseReviewing BaseState = "reviewing"
 	BaseCompleted BaseState = "completed"
@@ -91,6 +94,10 @@ type LookSnapshot struct {
 // PetRuntimeSnapshot is a read-only projection consumed by a renderer or the
 // overlay. It contains no source-format row/column knowledge.
 type PetRuntimeSnapshot struct {
+	ElapsedMS           int64               `json:"elapsedMs"`
+	Loop                bool                `json:"loop"`
+	RepeatCount         int                 `json:"repeatCount"`
+	PlaybackID          int64               `json:"playbackId"`
 	BaseState           BaseState           `json:"baseState"`
 	Action              string              `json:"action,omitempty"`
 	BaseTrackID         string              `json:"baseTrackId,omitempty"`
@@ -123,6 +130,7 @@ type RuntimeState struct {
 }
 
 type RuntimeConfig struct {
+	Random     func() float64
 	Clock      func() time.Time
 	Generation string
 	Deadzone   float64
@@ -140,6 +148,10 @@ type PetRuntime interface {
 type Runtime struct {
 	mu             sync.RWMutex
 	clock          func() time.Time
+	random         func() float64
+	nextIdle       time.Time
+	lastIdle       string
+	playful        bool
 	generation     string
 	deadzone       float64
 	definition     *PetDefinition
@@ -173,7 +185,11 @@ func NewRuntime(config RuntimeConfig) *Runtime {
 		deadzone = 8
 	}
 	generation, _ := safeString(strings.TrimSpace(config.Generation), 128)
+	if config.Random == nil {
+		config.Random = rand.Float64
+	}
 	return &Runtime{
+		random:     config.Random,
 		clock:      clock,
 		generation: generation,
 		deadzone:   deadzone,
@@ -282,6 +298,10 @@ func (r *Runtime) Dispatch(event PetInputEvent) error {
 	case "host.offline":
 		r.setBaseLocked(BaseOffline, now)
 		r.action = ""
+	case "task.thinking":
+		r.setBaseLocked(BaseThinking, now)
+	case "task.result":
+		r.setBaseLocked(BaseResult, now)
 	case "task.started", "task.working":
 		r.setBaseLocked(BaseWorking, now)
 	case "task.waiting", "task.blocked", "task.limited":
@@ -323,7 +343,11 @@ func (r *Runtime) Dispatch(event PetInputEvent) error {
 		if value, ok := event.Payload["visible"].(bool); ok {
 			r.setHiddenLocked(!value, now)
 		}
-	case "display.changed", "pointer.down", "pointer.up", "click", "drag.start", "drag.move", "drag.end":
+	case "click":
+		if !r.hidden && !r.reduced {
+			r.playActionLocked(now)
+		}
+	case "display.changed", "pointer.down", "pointer.up", "drag.start", "drag.move", "drag.end":
 		// These events are valid at the port boundary. Their window policy is
 		// owned by the overlay; they do not alter task truth by themselves.
 	default:
@@ -346,6 +370,9 @@ func (r *Runtime) Snapshot(at time.Time) PetRuntimeSnapshot {
 	}
 	if !r.hidden {
 		r.finishTransientLocked(at)
+		if !r.reduced && r.base == BaseIdle && r.action == "" {
+			r.idleVariationLocked(at)
+		}
 	}
 	baseTrackID := r.baseTrackLocked()
 	baseTrack := r.trackSpecLocked(baseTrackID)
@@ -385,7 +412,18 @@ func (r *Runtime) Snapshot(at time.Time) PetRuntimeSnapshot {
 		effectiveVisibility = VisibilityHidden
 		overlayStatus = OverlayHidden
 	}
+	since := r.baseSince
+	visualTrack := r.trackSpecLocked(visualTrackID)
+	if actionTrackID != "" {
+		since = r.actionSince
+	}
+	looping := visualTrack.Loop
+	if lookTrackID != "" && actionTrackID == "" {
+		looping = false
+		since = at
+	}
 	return PetRuntimeSnapshot{
+		ElapsedMS: max(int64(0), at.Sub(since).Milliseconds()), Loop: looping, RepeatCount: max(1, visualTrack.RepeatCount), PlaybackID: since.UnixMilli(),
 		BaseState:           r.base,
 		Action:              r.action,
 		BaseTrackID:         baseTrackID,
@@ -474,6 +512,8 @@ func (r *Runtime) setBaseLocked(state BaseState, now time.Time) bool {
 	}
 	if r.base != state {
 		r.base = state
+		r.nextIdle = time.Time{}
+		r.playful = false
 		r.baseOverride = ""
 		r.baseSince = now
 		if state != BaseCompleted && state != BaseFailed {
@@ -492,6 +532,8 @@ func (r *Runtime) setHiddenLocked(hidden bool, now time.Time) {
 	if !hidden {
 		// Restart the current channel from its first frame. This preserves the
 		// latest normalized state without replaying time spent while hidden.
+		r.action = ""
+		r.nextIdle = time.Time{}
 		r.actionSince = now
 		r.baseSince = now
 	}
@@ -526,7 +568,16 @@ func (r *Runtime) baseTrackLocked() string {
 			return r.baseOverride
 		}
 	}
-	if state, ok := r.definition.States[string(r.base)]; ok {
+	stateName := string(r.base)
+	if _, ok := r.definition.States[stateName]; !ok {
+		if r.base == BaseThinking {
+			stateName = "waiting"
+		}
+		if r.base == BaseResult {
+			stateName = "reviewing"
+		}
+	}
+	if state, ok := r.definition.States[stateName]; ok {
 		if _, trackOK := r.definition.Tracks[state.Track]; trackOK {
 			return state.Track
 		}
@@ -541,8 +592,20 @@ func (r *Runtime) baseTrackLocked() string {
 
 func (r *Runtime) trackSpecLocked(trackID string) TrackSpec {
 	track := r.definition.Tracks[trackID]
+	if r.playful && r.action != "" {
+		track.Loop = false
+	}
 	if r.action == "" {
-		if state, ok := r.definition.States[string(r.base)]; ok && state.Track == trackID {
+		stateName := string(r.base)
+		if _, ok := r.definition.States[stateName]; !ok {
+			if r.base == BaseThinking {
+				stateName = "waiting"
+			}
+			if r.base == BaseResult {
+				stateName = "reviewing"
+			}
+		}
+		if state, ok := r.definition.States[stateName]; ok && state.Track == trackID {
 			track.Loop = state.Loop
 			if state.Fallback != "" {
 				track.Fallback = state.Fallback
@@ -553,7 +616,7 @@ func (r *Runtime) trackSpecLocked(trackID string) TrackSpec {
 }
 
 func (r *Runtime) lookFrameLocked() (string, int) {
-	if r.look.Mode == "neutral" || r.hidden || r.reduced {
+	if r.look.Mode == "neutral" || r.hidden || r.reduced || r.base != BaseIdle {
 		return "", -1
 	}
 	if r.definition.Directions != nil && r.look.Direction >= 0 && r.look.Direction < len(r.definition.Directions.Directions) {
@@ -594,7 +657,7 @@ func (r *Runtime) finishTransientLocked(at time.Time) {
 		if ok && trackOK {
 			if track.TimeoutMS > 0 {
 				duration = time.Duration(track.TimeoutMS) * time.Millisecond
-			} else if !track.Loop {
+			} else if !track.Loop || r.playful {
 				duration = trackDuration(track) * time.Duration(maxInt(track.RepeatCount, 1))
 			}
 		}
@@ -603,6 +666,11 @@ func (r *Runtime) finishTransientLocked(at time.Time) {
 			fallback := spec.Fallback
 			if fallback == "" {
 				fallback = track.Fallback
+			}
+			if r.playful {
+				fallback = ""
+				r.baseOverride = ""
+				r.playful = false
 			}
 			if fallback != "" {
 				if _, fallbackOK := r.definition.Tracks[fallback]; fallbackOK {
@@ -620,6 +688,12 @@ func (r *Runtime) finishTransientLocked(at time.Time) {
 				duration = time.Duration(track.TimeoutMS) * time.Millisecond
 			}
 			if duration > 0 && at.Sub(r.baseSince) >= duration {
+				if r.definition.Source.Profile == RendererWebM && (r.base == BaseCompleted || r.base == BaseFailed) {
+					r.base = BaseIdle
+					r.baseOverride = ""
+					r.baseSince = at
+					return
+				}
 				fallback := track.Fallback
 				if fallback == "" {
 					fallback = r.definition.Fallback.Idle
@@ -631,7 +705,7 @@ func (r *Runtime) finishTransientLocked(at time.Time) {
 			}
 		}
 	}
-	if (r.base == BaseCompleted || r.base == BaseFailed) && r.action == "" {
+	if r.definition.Source.Profile != RendererWebM && (r.base == BaseCompleted || r.base == BaseFailed) && r.action == "" {
 		hold := 1500 * time.Millisecond
 		if r.base == BaseFailed {
 			hold = 2500 * time.Millisecond
@@ -735,7 +809,7 @@ func (r *Runtime) addDiagnosticLocked(code string, severity IssueSeverity, retry
 
 func knownBaseState(state BaseState) bool {
 	switch state {
-	case BaseStarting, BaseIdle, BaseWorking, BaseWaiting, BaseReviewing, BaseCompleted, BaseFailed, BaseOffline:
+	case BaseStarting, BaseIdle, BaseThinking, BaseResult, BaseWorking, BaseWaiting, BaseReviewing, BaseCompleted, BaseFailed, BaseOffline:
 		return true
 	default:
 		return false
@@ -839,4 +913,80 @@ func maxInt(left, right int) int {
 		return left
 	}
 	return right
+}
+
+// Flavor actions never change task truth. They return to the current base state.
+func (r *Runtime) playActionLocked(now time.Time) {
+	if r.playful {
+		r.action = ""
+	}
+	if b := r.definition.Behavior; b != nil && len(b.Clicks) > 0 {
+		name := b.Clicks[min(len(b.Clicks)-1, int(r.random()*float64(len(b.Clicks))))]
+		if r.triggerActionLocked(name, now) {
+			r.playful = true
+		}
+		return
+	}
+	for _, name := range []string{"click", "wave", "bounce"} {
+		if _, ok := r.definition.Actions[name]; ok && r.triggerActionLocked(name, now) {
+			r.playful = true
+			return
+		}
+	}
+}
+func (r *Runtime) idleVariationLocked(now time.Time) {
+	if b := r.definition.Behavior; b != nil && len(b.Idle) > 0 {
+		r.communityIdleLocked(now, b)
+		return
+	}
+	if r.nextIdle.IsZero() {
+		r.nextIdle = now.Add(time.Duration(8+r.random()*12) * time.Second)
+		return
+	}
+	if now.Before(r.nextIdle) {
+		return
+	}
+	r.nextIdle = now.Add(time.Duration(8+r.random()*12) * time.Second)
+	// Idle is deliberately the most frequent choice; only bounded, declared actions qualify.
+	names := []string{"", "", ""}
+	for _, name := range []string{"wave", "bounce"} {
+		if a, ok := r.definition.Actions[name]; ok && name != r.lastIdle && !r.definition.Tracks[a.Track].Loop {
+			names = append(names, name)
+		}
+	}
+	name := names[min(len(names)-1, int(r.random()*float64(len(names))))]
+	if name != "" && r.triggerActionLocked(name, now) {
+		r.playful = true
+		r.lastIdle = name
+	}
+}
+
+func (r *Runtime) communityIdleLocked(now time.Time, b *Behavior) {
+	track := r.trackSpecLocked(r.baseTrackLocked())
+	if now.Sub(r.baseSince) < trackDuration(track) {
+		return
+	}
+	total := 0.0
+	for _, a := range b.Idle {
+		if a.Track != r.lastIdle {
+			total += a.Weight
+		}
+	}
+	if total <= 0 {
+		r.baseSince = now
+		return
+	}
+	roll := r.random() * total
+	for _, a := range b.Idle {
+		if a.Track == r.lastIdle || a.Weight <= 0 {
+			continue
+		}
+		roll -= a.Weight
+		if roll <= 0 {
+			r.baseOverride = a.Track
+			r.baseSince = now
+			r.lastIdle = a.Track
+			return
+		}
+	}
 }

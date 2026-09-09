@@ -21,7 +21,7 @@ const (
 	// forever.
 	maxDigestCacheEntries = 8
 	maxDigestCacheBytes   = 8 * MaxPackageBytes
-	maxDigestCacheNodes   = MaxPackageFiles * 4
+	maxDigestCacheNodes   = MaxCommunityFiles * 4
 	maxDigestCacheScan    = maxDigestCacheEntries + MaxPackageFiles
 )
 
@@ -282,7 +282,7 @@ func digestCacheTreeSize(cacheRoot, entryRoot string) (int64, bool) {
 			return errors.New("non-regular digest cache entry")
 		}
 		info, err := entry.Info()
-		if err != nil || info.Size() < 0 || info.Size() > MaxPackageBytes || total > MaxPackageBytes-info.Size() {
+		if err != nil || info.Size() < 0 || info.Size() > MaxPackageBytes || total > MaxCommunityBytes-info.Size() {
 			return errors.New("unbounded digest cache entry")
 		}
 		total += info.Size()

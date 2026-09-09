@@ -1639,3 +1639,11 @@ select:focus-visible {
   .actions .button { flex: 1 1 110px; }
 
 }
+
+.pet-sprite-stage canvas { width:100%; height:100%; object-fit:contain; pointer-events:none; }
+.pet-touch { position:fixed; padding:0; border:0; background:transparent; border-radius:25%; cursor:pointer; --wails-draggable:no-drag; }
+.pet-touch:focus-visible { outline:2px solid #8a775e; outline-offset:-2px; }
+.pet-touch:hover { background:transparent; }
+@media(prefers-reduced-motion:reduce) { .pet-drag-handle { transition:none; } }
+
+#pet-playback-error { position:absolute; inset:0; margin:0; display:grid; place-items:center; color:#a84930; font-size:12px; }

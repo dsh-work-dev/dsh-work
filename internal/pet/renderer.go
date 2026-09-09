@@ -50,6 +50,9 @@ func (r *RasterRenderer) Probe(ctx context.Context, definition PetDefinition) er
 	if err := rendererContextError(ctx); err != nil {
 		return err
 	}
+	if definition.Source.Profile == RendererWebM {
+		return probeVideoDefinition(ctx, definition)
+	}
 	if len(definition.Assets) == 0 {
 		return rendererIssue(IssueInvalidSpritesheet, "asset")
 	}
@@ -118,6 +121,9 @@ func (r *RasterRenderer) Load(ctx context.Context, definition PetDefinition) err
 	}
 	images := make(map[string]image.Image, len(definition.Assets))
 	for _, asset := range definition.Assets {
+		if asset.Format == "webm" {
+			continue
+		}
 		decoded, _, err := decodeRaster(asset.Data)
 		if err != nil {
 			return rendererIssue(IssueInvalidSpritesheet, "asset")

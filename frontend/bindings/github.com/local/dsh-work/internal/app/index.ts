@@ -13,6 +13,7 @@ export {
 };
 
 export type {
+    PetHitRegion,
     PetOverlayState,
     PetPanel,
     PetPreview,

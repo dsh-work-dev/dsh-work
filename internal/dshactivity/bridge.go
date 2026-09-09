@@ -47,6 +47,8 @@ type Job struct {
 	Detail string `json:"detail"`
 }
 type Activity struct {
+	WorkPhase       string       `json:"workPhase"`
+	ToolActivity    string       `json:"toolActivity"`
 	SessionID       string       `json:"sessionId"`
 	ParentSessionID string       `json:"parentSessionId,omitempty"`
 	Title           string       `json:"title"`
@@ -339,6 +341,16 @@ func normalize(s *Snapshot) bool {
 		ids[a.SessionID] = true
 		a.Title = clean(a.Title, 120)
 		a.Summary = clean(a.Summary, 240)
+		switch a.WorkPhase {
+		case "thinking", "working", "result":
+		default:
+			a.WorkPhase = ""
+		}
+		switch a.ToolActivity {
+		case "searching", "editing", "testing", "commanding", "using-tool":
+		default:
+			a.ToolActivity = ""
+		}
 		a.ParentSessionID = clean(a.ParentSessionID, 256)
 		a.Queued = min(max(a.Queued, 0), 10000)
 		a.Steering = min(max(a.Steering, 0), 10000)
@@ -459,6 +471,12 @@ func AnimationIntent(s Snapshot) (kind, key string) {
 	case "ready":
 		return "task.completed", key
 	case "running":
+		if a.WorkPhase == "thinking" {
+			return "task.thinking", key + ":thinking"
+		}
+		if a.WorkPhase == "result" {
+			return "task.result", key + ":result"
+		}
 		return "task.working", key
 	}
 	if a.Outcome == "aborted" {

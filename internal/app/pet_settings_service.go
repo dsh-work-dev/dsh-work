@@ -68,11 +68,12 @@ type PetPreview struct {
 // overlay page. The frame is a Host-rendered data URL; it is never a source
 // path or a frontend-composed resource URL.
 type PetOverlayState struct {
-	Runtime  pet.RuntimeState       `json:"runtime"`
-	Snapshot pet.PetRuntimeSnapshot `json:"snapshot"`
-	Preview  PetPreview             `json:"preview"`
-	DataURL  string                 `json:"dataUrl,omitempty"`
-	Activity dshactivity.Snapshot   `json:"activity"`
+	PlaybackKey string                 `json:"playbackKey"`
+	Runtime     pet.RuntimeState       `json:"runtime"`
+	Snapshot    pet.PetRuntimeSnapshot `json:"snapshot"`
+	Preview     PetPreview             `json:"preview"`
+	DataURL     string                 `json:"dataUrl,omitempty"`
+	Activity    dshactivity.Snapshot   `json:"activity"`
 }
 
 // PetOverlayHooks are composition-edge effects. They are attached by main
@@ -93,11 +94,16 @@ type PetOverlayHooks struct {
 // SetPetPreference. Selection is serialized here and commits only after the
 // catalog has revalidated the source and the renderer has passed preflight.
 type PetSettingsService struct {
-	activity        *dshactivity.Bridge
-	activityRuntime *pet.Runtime
-	activityKey     string
-	openWorkspace   func()
-	mu              sync.Mutex
+	previewMedia       map[string]pet.Asset
+	hitRegions         []PetHitRegion
+	hitUpdated         time.Time
+	playbackToken      string
+	playbackDefinition *pet.PetDefinition
+	activity           *dshactivity.Bridge
+	activityRuntime    *pet.Runtime
+	activityKey        string
+	openWorkspace      func()
+	mu                 sync.Mutex
 
 	manager             *settings.Manager
 	catalog             pet.PetCatalog
@@ -426,6 +432,15 @@ func GetPetPanelFromHost(ctx context.Context, service *PetSettingsService) (PetP
 // Pet window. The overlay surface is read-only; state changes still enter
 // through the Host-owned lifecycle and Settings seams.
 func (s *PetSettingsService) GetPetOverlay(ctx context.Context) (PetOverlayState, error) {
+	return s.getPetOverlay(ctx, true)
+}
+
+// GetPetPresentation returns the timeline without encoding or transferring frames.
+func (s *PetSettingsService) GetPetPresentation(ctx context.Context) (PetOverlayState, error) {
+	return s.getPetOverlay(ctx, false)
+}
+
+func (s *PetSettingsService) getPetOverlay(ctx context.Context, render bool) (PetOverlayState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -465,6 +480,10 @@ func (s *PetSettingsService) GetPetOverlay(ctx context.Context) (PetOverlayState
 
 	runtimeSnapshot := s.activeRuntime.Snapshot(time.Now())
 	state.Snapshot = runtimeSnapshot
+	state.PlaybackKey = s.playbackKeyLocked()
+	if !render {
+		return state, nil
+	}
 	state.Runtime = panel.Runtime
 	preview := s.projectPetPreviewLocked(s.activeKey, *s.activeDefinition)
 	state.Preview = preview
@@ -570,6 +589,28 @@ func (s *PetSettingsService) GetPetPreview(ctx context.Context, previewRef strin
 	definition, err := s.catalog.Resolve(operation, key)
 	if err != nil {
 		return "", safePetCatalogError(err)
+	}
+	if definition.Source.Profile == pet.RendererWebM {
+		t := definition.Tracks[definition.Fallback.Idle]
+		if len(t.Frames) == 0 {
+			return "", petRendererFailure()
+		}
+		for _, a := range definition.Assets {
+			if a.ID == t.Frames[0].AssetID {
+				if s.previewMedia == nil {
+					s.previewMedia = map[string]pet.Asset{}
+				}
+				if len(s.previewMedia) >= 8 {
+					for old := range s.previewMedia {
+						delete(s.previewMedia, old)
+						break
+					}
+				}
+				s.previewMedia[previewRef] = a
+				return "/__pet_media/" + previewRef + "/preview", nil
+			}
+		}
+		return "", petRendererFailure()
 	}
 	dataURL, err := pet.PreviewDataURL(operation, definition)
 	if err != nil {
@@ -946,6 +987,8 @@ func (s *PetSettingsService) shutdown(ctx context.Context) error {
 	s.activeRenderer = nil
 	s.activeRuntime = nil
 	s.activeDefinition = nil
+	s.playbackDefinition = nil
+	s.playbackToken = ""
 	s.activeKey = ""
 	s.overlayFrameKey = ""
 	s.overlayDataURL = ""
@@ -1405,6 +1448,7 @@ func (s *PetSettingsService) prunePreviewRefsLocked(now time.Time) {
 }
 
 func (s *PetSettingsService) revokePreviewRefsLocked() {
+	s.previewMedia = nil
 	s.previewRefs = make(map[string]petPreviewRefEntry)
 }
 

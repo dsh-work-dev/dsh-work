@@ -44,36 +44,6 @@ var dshWorkTrayDarkIcon []byte
 //go:embed frontend/public/branding/dsh-work-tray-template.png
 var dshWorkTrayTemplateIcon []byte
 
-func petWindowOptions() application.WebviewWindowOptions {
-	return application.WebviewWindowOptions{
-		Name:        "pet",
-		Title:       "dsh-work Pet",
-		Width:       240,
-		Height:      168,
-		AlwaysOnTop: false,
-		Frameless:   true,
-		// The Settings size slider is the sole resize control. Keeping the
-		// native border disabled prevents a second, unsaved resize path.
-		DisableResize:    true,
-		BackgroundType:   application.BackgroundTypeTransparent,
-		BackgroundColour: application.NewRGBA(0, 0, 0, 0),
-		URL:              "/?surface=pet",
-		InitialPosition:  application.WindowXY,
-		X:                0,
-		Y:                0,
-		Hidden:           true,
-		// The overlay must receive hover and drag input for its explicit handle.
-		IgnoreMouseEvents: false,
-		Mac: application.MacWindow{
-			Backdrop: application.MacBackdropTransparent,
-		},
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar:                   true,
-			DisableFramelessWindowDecorations: true,
-		},
-	}
-}
-
 func main() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
 	application.RegisterEvent[acquisition.OperationStatus]("acquisition")
@@ -169,7 +139,7 @@ func main() {
 	}
 	var petCatalog dshworkpet.PetCatalog
 	petCatalogRoot := filepath.Join(filepath.Dir(config.SettingsPath), "pet-cache")
-	if catalog, err := dshworkpet.NewPetCatalog(dshworkpet.CatalogConfig{CacheRoot: petCatalogRoot}); err != nil {
+	if catalog, err := dshworkpet.NewPetCatalog(dshworkpet.CatalogConfig{CacheRoot: petCatalogRoot, CommunityHome: dshworkpet.CommunityHome()}); err != nil {
 		log.Printf("dsh-work Pet catalog unavailable: %v", err)
 	} else {
 		petCatalog = catalog
@@ -267,7 +237,7 @@ func main() {
 			application.NewService(nativeNotificationHost),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
+			Handler: dshworkapp.PetMediaHandler(petSettingsService, application.AssetFileServerFS(assets)),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -276,7 +246,7 @@ func main() {
 	var repositionPetWindow func()
 	var persistPetWindowPosition func()
 	if petOverlayCapabilities.Level != dshworkpet.OverlayFallback {
-		petWindow = desktop.Window.NewWithOptions(petWindowOptions())
+		petWindow = desktop.Window.NewWithOptions(nativeui.PetWindowOptions())
 		petWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 			if petWindowCloseAllowed.Load() || applicationShuttingDown.Load() {
 				return
@@ -316,7 +286,7 @@ func main() {
 			return
 		}
 		scale := float64(screen.ScaleFactor)
-		windowWidth, windowHeight := petActivityWindowSize(position.Width, position.Height)
+		windowWidth, windowHeight := nativeui.PetActivityWindowSize(position.Width, position.Height)
 		resolved := dshworkpet.ResolvePosition(
 			position.AnchorX,
 			position.AnchorY,
@@ -424,7 +394,7 @@ func main() {
 			if width <= 0 || height <= 0 {
 				return errors.New("pet overlay size is invalid")
 			}
-			windowWidth, windowHeight := petActivityWindowSize(width, height)
+			windowWidth, windowHeight := nativeui.PetActivityWindowSize(width, height)
 			window.SetSize(windowWidth, windowHeight)
 			repositionPetWindow()
 			return nil
@@ -836,7 +806,9 @@ func main() {
 			},
 		)
 	})
+	petInputContext, stopPetInput := context.WithCancel(context.Background())
 	desktop.OnShutdown(func() {
+		stopPetInput()
 		applicationShuttingDown.Store(true)
 		if stopPetMenuRefresh != nil {
 			stopPetMenuRefresh()
@@ -854,6 +826,11 @@ func main() {
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		if nativeNotificationHost.Unavailable() {
 			desktop.Event.Emit("notification-failure", true)
+		}
+		if petWindow != nil {
+			nativeui.StartPetPointer(petInputContext, petWindow, func(x, y float64) bool {
+				return dshworkapp.PetPointerHit(petSettingsService, x, y)
+			})
 		}
 		dshworkapp.StartupPetService(petSettingsService)
 		host.Start()

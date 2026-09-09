@@ -114,7 +114,9 @@ func normalizePackageSource(source PackageSource) (PackageSource, string, error)
 		entry = source.Entry
 	}
 	if entry == "" {
-		if source.Kind == SourceDshPets || strings.EqualFold(filepath.Base(source.Root), "dsh-pet.json") {
+		if source.Kind == SourceCommunity || strings.EqualFold(filepath.Base(source.Root), "config.jsonc") {
+			entry = "config.jsonc"
+		} else if source.Kind == SourceDshPets || strings.EqualFold(filepath.Base(source.Root), "dsh-pet.json") {
 			entry = "dsh-pet.json"
 		} else if source.Kind == SourceCodexAvatars || strings.EqualFold(filepath.Base(source.Root), "avatar.json") {
 			entry = "avatar.json"
@@ -123,7 +125,9 @@ func normalizePackageSource(source PackageSource) (PackageSource, string, error)
 		}
 	}
 	if source.Kind == "" {
-		if strings.EqualFold(filepath.Base(entry), "dsh-pet.json") {
+		if strings.EqualFold(filepath.Base(entry), "config.jsonc") {
+			source.Kind = SourceCommunity
+		} else if strings.EqualFold(filepath.Base(entry), "dsh-pet.json") {
 			source.Kind = SourceDshPets
 		} else if strings.EqualFold(filepath.Base(entry), "avatar.json") {
 			source.Kind = SourceCodexAvatars
@@ -131,7 +135,7 @@ func normalizePackageSource(source PackageSource) (PackageSource, string, error)
 			source.Kind = SourceCodexPets
 		}
 	}
-	if source.Kind != SourceCodexPets && source.Kind != SourceCodexAvatars && source.Kind != SourceDshPets {
+	if source.Kind != SourceCodexPets && source.Kind != SourceCodexAvatars && source.Kind != SourceDshPets && source.Kind != SourceCommunity {
 		return PackageSource{}, "", packageError(source, IssueManifestInvalid, SeverityError, false, nil)
 	}
 
@@ -152,7 +156,7 @@ func normalizePackageSource(source PackageSource) (PackageSource, string, error)
 	if !rootInfo.IsDir() {
 		// The adapter also accepts an explicit manifest path as a convenience
 		// seam. It still canonicalizes the containing directory before reading.
-		if rootInfo.Mode().IsRegular() && (strings.EqualFold(filepath.Base(root), "pet.json") || strings.EqualFold(filepath.Base(root), "avatar.json") || strings.EqualFold(filepath.Base(root), "dsh-pet.json")) {
+		if rootInfo.Mode().IsRegular() && (strings.EqualFold(filepath.Base(root), "pet.json") || strings.EqualFold(filepath.Base(root), "avatar.json") || strings.EqualFold(filepath.Base(root), "dsh-pet.json") || strings.EqualFold(filepath.Base(root), "config.jsonc")) {
 			entry = filepath.Base(root)
 			root = filepath.Dir(root)
 			rootInfo, err = os.Lstat(root)
@@ -226,6 +230,10 @@ func inspectPackage(ctx context.Context, source PackageSource) (packageInventory
 		CanonicalRoot: canonicalRoot,
 		Files:         make(map[string]packageFile),
 	}
+	maxBytes, maxFiles := MaxPackageBytes, MaxPackageFiles
+	if normalized.Kind == SourceCommunity {
+		maxBytes, maxFiles = MaxCommunityBytes, MaxCommunityFiles
+	}
 	var totalBytes int64
 	walkErr := filepath.WalkDir(inventory.Root, func(path string, entry os.DirEntry, walkErr error) error {
 		if err := contextErr(ctx); err != nil {
@@ -273,7 +281,7 @@ func inspectPackage(ctx context.Context, source PackageSource) (packageInventory
 			}
 			return packageError(normalized, IssuePackageReadFailed, SeverityError, true, nil)
 		}
-		if len(inventory.Files) >= MaxPackageFiles {
+		if len(inventory.Files) >= maxFiles {
 			return packageError(normalized, IssueFileCountExceeded, SeverityError, false, nil)
 		}
 		if info.Size() < 0 || info.Size() > MaxPackageBytes {
@@ -282,7 +290,7 @@ func inspectPackage(ctx context.Context, source PackageSource) (packageInventory
 		if relative == normalized.ManifestPath && info.Size() > MaxManifestBytes {
 			return packageError(normalized, IssueManifestTooLarge, SeverityError, false, nil)
 		}
-		if totalBytes > MaxPackageBytes-info.Size() {
+		if totalBytes > maxBytes-info.Size() {
 			return packageError(normalized, IssuePackageTooLarge, SeverityError, false, nil)
 		}
 		if unsafeFileName(relative) {

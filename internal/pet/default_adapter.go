@@ -15,6 +15,10 @@ func NewDefaultAdapter() DefaultAdapter {
 }
 
 func (a DefaultAdapter) Probe(ctx context.Context, source PackageSource) (ProbeResult, error) {
+	if source.Kind == SourceCommunity {
+		d, e := a.Load(ctx, source)
+		return ProbeResult{Source: d.Source, Geometry: d.Geometry}, e
+	}
 	if source.Kind == SourceDshPets || source.Entry == "dsh-pet.json" || source.ManifestPath == "dsh-pet.json" {
 		return a.Native.Probe(ctx, source)
 	}
@@ -22,6 +26,14 @@ func (a DefaultAdapter) Probe(ctx context.Context, source PackageSource) (ProbeR
 }
 
 func (a DefaultAdapter) Load(ctx context.Context, source PackageSource) (PetDefinition, error) {
+	if source.Kind == SourceCommunity {
+		in, e := inspectPackage(ctx, source)
+		if e != nil {
+			return PetDefinition{}, e
+		}
+		d, _, e := loadCommunity(ctx, in)
+		return d, e
+	}
 	if source.Kind == SourceDshPets || source.Entry == "dsh-pet.json" || source.ManifestPath == "dsh-pet.json" {
 		return a.Native.Load(ctx, source)
 	}
@@ -29,6 +41,9 @@ func (a DefaultAdapter) Load(ctx context.Context, source PackageSource) (PetDefi
 }
 
 func (a DefaultAdapter) loadFromInventory(ctx context.Context, inventory packageInventory) (PetDefinition, packageInventory, error) {
+	if inventory.Source.Kind == SourceCommunity {
+		return loadCommunity(ctx, inventory)
+	}
 	if inventory.Source.Kind == SourceDshPets || inventory.Source.Entry == "dsh-pet.json" || inventory.Source.ManifestPath == "dsh-pet.json" {
 		return a.Native.loadFromInventory(ctx, inventory)
 	}

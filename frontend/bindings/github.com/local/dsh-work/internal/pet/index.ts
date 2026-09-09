@@ -18,9 +18,11 @@ export {
 export type {
     CatalogRoot,
     CatalogSnapshot,
+    FrameRef,
     Issue,
     LookSnapshot,
     PetListItem,
     PetRuntimeSnapshot,
+    Playback,
     RuntimeState
 } from "./models.js";

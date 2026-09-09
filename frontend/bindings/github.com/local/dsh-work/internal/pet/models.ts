@@ -20,6 +20,8 @@ export enum BaseState {
     BaseStarting = "starting",
     BaseIdle = "idle",
     BaseWorking = "working",
+    BaseThinking = "thinking",
+    BaseResult = "result",
     BaseWaiting = "waiting",
     BaseReviewing = "reviewing",
     BaseCompleted = "completed",
@@ -60,6 +62,16 @@ export enum EffectiveVisibility {
     VisibilityHidden = "hidden",
     VisibilityPaused = "paused",
 };
+
+export interface FrameRef {
+    "index": number;
+    "durationMs": number;
+    "assetId"?: string;
+    "x"?: number;
+    "y"?: number;
+    "width"?: number;
+    "height"?: number;
+}
 
 /**
  * Issue is a bounded, safe diagnostic. Args may contain only safe, truncated
@@ -127,6 +139,10 @@ export interface PetListItem {
  * overlay. It contains no source-format row/column knowledge.
  */
 export interface PetRuntimeSnapshot {
+    "elapsedMs": number;
+    "loop": boolean;
+    "repeatCount": number;
+    "playbackId": number;
     "baseState": BaseState;
     "action"?: string;
     "baseTrackId"?: string;
@@ -145,6 +161,18 @@ export interface PetRuntimeSnapshot {
     "reducedMotion": boolean;
     "diagnostics"?: Issue[] | null;
     "at": number;
+}
+
+/**
+ * Playback contains only validated media coordinates and opaque Host URLs.
+ * Resource paths and source package metadata never cross this boundary.
+ */
+export interface Playback {
+    "video": boolean;
+    "key": string;
+    "assets": { [_ in string]?: string } | null;
+    "tracks": { [_ in string]?: FrameRef[] | null } | null;
+    "look": { [_ in `${number}`]?: FrameRef } | null;
 }
 
 /**
@@ -239,6 +267,7 @@ export enum SourceKind {
      * Codex manifest and atlas contract as SourceCodexPets.
      */
     SourceCodexAvatars = "codex-avatars",
+    SourceCommunity = "dsh-community",
     SourceDshPets = "dsh-pets",
     SourceCodexHome = "codex-home",
     SourceUnknown = "unknown",

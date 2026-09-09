@@ -17,11 +17,12 @@ import (
 // CodexHome, HomeDir, and Env are test seams; production callers normally
 // leave them empty so the process environment and user home are used.
 type CatalogConfig struct {
-	CodexHome string
-	CacheRoot string
-	Adapter   PetAdapter
-	HomeDir   func() (string, error)
-	Env       func(string) string
+	CommunityHome string
+	CodexHome     string
+	CacheRoot     string
+	Adapter       PetAdapter
+	HomeDir       func() (string, error)
+	Env           func(string) string
 }
 
 // PetCatalog is the Host-facing P1 catalog boundary. It exposes snapshots and
@@ -350,6 +351,12 @@ func (c *Catalog) scan(ctx context.Context) scanResult {
 		}
 		return scanResult{roots: roots, issues: issues, err: stableScanError(issues)}
 	}
+	if c.config.CommunityHome != "" {
+		more, status, notes, _ := discoverRoot(ctx, c.config.CommunityHome, "pets", SourceCommunity, "config.jsonc")
+		candidates = append(candidates, more...)
+		issues = append(issues, notes...)
+		roots = append(roots, CatalogRoot{Kind: RootKind("dsh-community"), Status: status})
+	}
 	entries := make([]catalogEntry, 0, len(candidates))
 	for _, candidate := range candidates {
 		if err := contextErr(ctx); err != nil {
@@ -575,6 +582,10 @@ func discoverRoot(ctx context.Context, home, name string, sourceKind SourceKind,
 			}
 		}
 		source := NewCodexPackageSource(packageRoot, candidateKind, folder)
+		if candidateKind == SourceCommunity {
+			source.ManifestPath = "config.jsonc"
+			source.Entry = "config.jsonc"
+		}
 		if candidateKind == SourceDshPets {
 			source = NewDshNativePackageSource(packageRoot, folder)
 		}

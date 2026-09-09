@@ -5,6 +5,8 @@ go 1.25.0
 toolchain go1.25.14
 
 require (
+	github.com/at-wat/ebml-go v0.19.2
+	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	golang.org/x/image v0.41.0
 	golang.org/x/sys v0.46.0

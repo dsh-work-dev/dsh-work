@@ -15,6 +15,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as pet$0 from "../pet/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -42,6 +46,20 @@ export function GetPetPanel(): $CancellablePromise<$models.PetPanel> {
 }
 
 /**
+ * GetPetPlayback fetches a selection's immutable media plan only when it changes.
+ */
+export function GetPetPlayback(known: string): $CancellablePromise<pet$0.Playback | null> {
+    return $Call.ByID(3723972374, known);
+}
+
+/**
+ * GetPetPresentation returns the timeline without encoding or transferring frames.
+ */
+export function GetPetPresentation(): $CancellablePromise<$models.PetOverlayState> {
+    return $Call.ByID(1204963475);
+}
+
+/**
  * GetPetPreview resolves an opaque preview handle and renders only the
  * validated idle frame. The handle is the sole frontend capability: callers
  * cannot turn a stable key or package path into a resource URL themselves.
@@ -55,6 +73,13 @@ export function GetPetPreview(previewRef: string): $CancellablePromise<string> {
  */
 export function OpenPetActivity(sessionID: string): $CancellablePromise<void> {
     return $Call.ByID(1561219750, sessionID);
+}
+
+/**
+ * PetGesture accepts a fixed gesture vocabulary, never task or window commands.
+ */
+export function PetGesture(kind: string, x: number, y: number): $CancellablePromise<void> {
+    return $Call.ByID(728301918, kind, x, y);
 }
 
 /**
@@ -89,6 +114,13 @@ export function SelectPet(stableSourceKey: string): $CancellablePromise<$models.
  */
 export function SetPetAlwaysOnTop(enabled: boolean): $CancellablePromise<$models.PetPanel> {
     return $Call.ByID(1179487238, enabled);
+}
+
+/**
+ * SetPetHitRegions reports normalized regions in the trusted pet viewport.
+ */
+export function SetPetHitRegions(regions: $models.PetHitRegion[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3364393621, regions);
 }
 
 /**
