@@ -1,3 +1,4 @@
+import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
@@ -263,6 +264,7 @@ export function mountManager() {
   const setFeedback = feedbackFor("overview");
   const settingsFeedback = feedbackFor("settings");
   const profilesFeedback = feedbackFor("profiles");
+  const versionPoints = mountRestorePoints(document.getElementById("version-restore-points")!, next => {snapshot=next;renderSelection();renderOverview();renderProfiles();renderRuntimes();});
   const recovery = mountRecovery((next, restored) => {
     snapshot = next;
     if (restored) { managedProfile = {...restored}; renameControls.hidden = true; }
@@ -436,6 +438,7 @@ export function mountManager() {
 
   function renderOverview() {
     recovery.render(snapshot, mutationBlocked());
+    versionPoints.render(snapshot, mutationBlocked());
     if (!snapshot) {
       return;
     }

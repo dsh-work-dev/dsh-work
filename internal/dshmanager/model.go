@@ -345,10 +345,13 @@ type ResolvedNode struct {
 // adapter, so it does not reconstruct data-directory/profile relationships
 // itself.
 type ResolvedLaunch struct {
-	Target        RunContext        `json:"target"`
-	Runtime       RuntimeInfo       `json:"runtime"`
-	Node          ResolvedNode      `json:"node"`
-	DataDirectory DataDirectoryInfo `json:"dataDirectory"`
+	VersionUninitialized bool                `json:"-"`
+	VersionSeed          *storedRestorePoint `json:"-"`
+	VersionError         string              `json:"-"`
+	Target               RunContext          `json:"target"`
+	Runtime              RuntimeInfo         `json:"runtime"`
+	Node                 ResolvedNode        `json:"node"`
+	DataDirectory        DataDirectoryInfo   `json:"dataDirectory"`
 }
 
 type SwitchAttemptStage string
@@ -382,6 +385,7 @@ type SwitchAttempt struct {
 }
 
 type Snapshot struct {
+	RestorePoints     *RestorePointsView     `json:"restorePoints,omitempty"`
 	SafeMode          *SafeModeState         `json:"safeMode,omitempty"`
 	Runtimes          []RuntimeInfo          `json:"runtimes"`
 	DSHReleases       []DSHReleaseInfo       `json:"dshReleases"`

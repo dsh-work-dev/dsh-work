@@ -25,6 +25,10 @@ export function CancelAcquisition(): $CancellablePromise<void> {
     return $Call.ByID(2933888802);
 }
 
+export function CancelRestore(): $CancellablePromise<void> {
+    return $Call.ByID(3248845655);
+}
+
 /**
  * CancelRuntime cancels the active explicit runtime pull from the trusted
  * Settings surface. Cancellation leaves no catalog entry; the installer owns
@@ -44,6 +48,10 @@ export function DeleteProfile(request: dshmanager$0.ProfileDeleteRequest): $Canc
 
 export function DeleteProfileBackup(ref: dshmanager$0.ProfileRef, fileName: string): $CancellablePromise<void> {
     return $Call.ByID(856008297, ref, fileName);
+}
+
+export function DeleteRestorePoint(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(816226698, id);
 }
 
 export function EnterSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
@@ -99,6 +107,10 @@ export function OpenProfileBackups(ref: dshmanager$0.ProfileRef): $CancellablePr
     return $Call.ByID(3482533913, ref);
 }
 
+export function PreviewRestorePoint(id: string): $CancellablePromise<dshmanager$0.RestorePoint> {
+    return $Call.ByID(3894557475, id);
+}
+
 export function RefreshDSHReleases(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(1946171845);
 }
@@ -131,6 +143,10 @@ export function RenameProfile(request: dshmanager$0.ProfileRenameRequest): $Canc
     return $Call.ByID(2984344992, request);
 }
 
+export function RenameRestorePoint(id: string, label: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(442631375, id, label);
+}
+
 export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $CancellablePromise<dshmanager$0.ResolvedLaunch> {
     return $Call.ByID(1114420160, request);
 }
@@ -139,12 +155,20 @@ export function RestoreKnownGood(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3365799665);
 }
 
+export function RestorePoint(id: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(2272363761, id);
+}
+
 export function RestoreProfileBackup(request: dshmanager$0.ProfileRestoreRequest): $CancellablePromise<dshmanager$0.ProfileCloneResult> {
     return $Call.ByID(291893256, request);
 }
 
 export function RetryLastSwitch(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(1457349837);
+}
+
+export function SaveRestorePoint(label: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3594135168, label);
 }
 
 export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {

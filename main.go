@@ -111,16 +111,17 @@ func main() {
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, managerErr := dshmanager.New(dshmanager.Config{
-		DisableHealthSnapshots: true,
-		CommandRunner:          managerRunner,
-		PluginCommands:         dshadapter.NewPluginCommands(),
-		RuntimeInstaller:       platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:             platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:            platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:          platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:           platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:        dsh,
-		ProfileCatalog:         dsh,
+		DisableHealthSnapshots:     true,
+		EnableVersionRestorePoints: true,
+		CommandRunner:              managerRunner,
+		PluginCommands:             dshadapter.NewPluginCommands(),
+		RuntimeInstaller:           platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:                 platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:                platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:              platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:               platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:            dsh,
+		ProfileCatalog:             dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

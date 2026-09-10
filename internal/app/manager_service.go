@@ -18,6 +18,7 @@ import (
 // profile-plugin operations; profile composition and plugin mutation still go
 // through DSH's public CLI seam, never direct file edits.
 type ManagerService struct {
+	restoreCancel      restoreCancellation
 	chooseBackup       func() (string, error)
 	chooseExport       func(string) (string, error)
 	openBackups        func(string) error

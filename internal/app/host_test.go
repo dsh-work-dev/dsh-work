@@ -976,7 +976,7 @@ type runContextSwitchFixture struct {
 	statuses   chan lifecycle.Status
 }
 
-func newRunContextSwitchFixture(t *testing.T) *runContextSwitchFixture {
+func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Config)) *runContextSwitchFixture {
 	t.Helper()
 	root := t.TempDir()
 	dsh := newSwitchTestDSH()
@@ -996,7 +996,7 @@ func newRunContextSwitchFixture(t *testing.T) *runContextSwitchFixture {
 			t.Fatal(err)
 		}
 	}
-	manager, err := dshmanager.New(dshmanager.Config{
+	managerConfig := dshmanager.Config{
 		StatePath: filepath.Join(root, "manager.json"),
 		DataDirectories: []dshmanager.DataDirectoryInfo{
 			{ID: "alpha-home", Name: "Alpha DSH", Path: homeAlpha, Ownership: dshmanager.DataDirectoryOwnershipDSHWork},
@@ -1010,7 +1010,11 @@ func newRunContextSwitchFixture(t *testing.T) *runContextSwitchFixture {
 			RuntimeID: "dsh-alpha",
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "alpha-home", Name: "alpha"},
 		},
-	})
+	}
+	for _, apply := range configure {
+		apply(&managerConfig)
+	}
+	manager, err := dshmanager.New(managerConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -385,3 +385,14 @@ html[data-surface="settings"] #host-surface { display: none; }
   .manager-app .runtime-install-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .manager-app .runtime-install-card > label { grid-column: 1 / -1; }
 }
+
+.restore-points-panel { margin-block: 20px; padding-block: 16px; border-top: 1px solid var(--line); }
+.restore-points-panel h3 { margin: 0 0 8px; font-size: 14px; }
+.restore-point-list { display: grid; gap: 8px; margin-top: 12px; max-height: 420px; overflow: auto; }
+.restore-point-list .backup-row { align-items: start; gap: 16px; }
+.restore-point-list .backup-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.restore-point-list pre, .restore-point-preview pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.restore-point-preview { width: min(560px, calc(100vw - 40px)); max-height: 80vh; overflow: auto; background: var(--surface); color: var(--text); border: 1px solid var(--line-strong); padding: 24px; }
+.restore-point-preview::backdrop { background: #0006; }
+.restore-point-preview input { box-sizing: border-box; width: 100%; margin-block: 8px 16px; padding: 8px; }
+@media (max-width: 600px) { .restore-point-list .backup-row { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }

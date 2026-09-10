@@ -29,6 +29,7 @@
       <div id="startup-progress" hidden><p id="startup-progress-message" role="status"></p><progress id="startup-progress-bar" data-i18n-aria-label="host.startupProgress"></progress></div>
       <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
       <div class="startup-actions"><button id="retry" class="startup-primary" type="button" hidden>重试</button><button id="startup-safe-mode" type="button" data-i18n="safe.enter" hidden>安全模式启动</button><button id="cancel" type="button" data-i18n="common.cancel" hidden>取消</button></div>
+      <section id="startup-restore-points" class="restore-points-panel" hidden></section>
       <footer class="startup-footer"><button id="show-startup-log" type="button" data-i18n="startup.log">日志</button><button id="open-runtime-settings" type="button" data-i18n="startup.settings">设置</button><button id="copy-startup-output" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button><span id="diagnostic-copy-status" role="status"></span><button id="quit" type="button" data-i18n="common.quit">退出</button></footer>
 
       <section id="startup-diagnostics" class="startup-diagnostics" hidden>
@@ -132,6 +133,7 @@
             <button id="manager-safe-mode" class="button button-secondary" data-i18n="safe.enter" type="button">Start in safe mode</button>
             <p id="safe-feedback" class="manager-note" role="status"></p>
           </div>
+          <section id="version-restore-points" class="restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
           <section id="manager-switch-failure" class="runtime-preparation" aria-live="polite" hidden>
             <p class="status-label" data-i18n="recovery.title">Run context needs attention</p>
             <p id="manager-switch-failure-detail" class="status-detail"></p>
@@ -306,7 +308,7 @@
 
         <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
           <div class="settings-list">
-            <div data-setting-switch="settings-automatic-runtime-rollback" data-label="general.automaticRollback" data-status="settings-close-to-tray-status"></div>
+            <div class="setting-row"><div class="setting-copy"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p class="manager-note" data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div>
             <div data-setting-switch="settings-close-to-tray" data-label="general.closeToTray" data-status="settings-close-to-tray-status"></div>
             <div class="setting-row">
               <div class="setting-copy">

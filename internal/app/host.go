@@ -184,6 +184,7 @@ type Host struct {
 	switchMu             sync.Mutex
 	workerBoundaryMu     sync.Mutex
 	switching            bool
+	versionCancel        context.CancelFunc
 	managerSwitchGuarded bool
 	shutdownRequested    bool
 	current              *generationRun
@@ -571,7 +572,17 @@ func (h *Host) finishContextSwitchFailure(manager RunContextManager, candidateFa
 	return snapshot, failure
 }
 
+func (h *Host) cancelVersionOperation() {
+	h.mu.Lock()
+	cancel := h.versionCancel
+	h.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (h *Host) Cancel() lifecycle.Status {
+	h.cancelVersionOperation()
 	return h.requestStop(false)
 }
 
@@ -720,6 +731,15 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	}
 	h.switching = true
 	knownGood := h.knownGoodRunContextLocked()
+	pointID := ""
+	versions, versioned := manager.(versionRecoveryManager)
+	versioned = versioned && versions.VersionPointsEnabled()
+	if versioned {
+		pointID = versions.RecoveryPointID(target, startupFailure != nil)
+		if selected, _ := ctx.Value(restorePointKey{}).(string); selected != "" {
+			pointID = selected
+		}
+	}
 	automaticRollback := true
 	if h.deps.AutomaticRuntimeRollback != nil {
 		automaticRollback = h.deps.AutomaticRuntimeRollback()
@@ -728,7 +748,16 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 
 	switchTimeout := h.config.ShutdownTimeout +
 		2*(h.config.ReadinessTimeout+h.config.GracefulStopTimeout+h.config.ForceStopTimeout+h.config.EmptyTimeout)
+	if versioned {
+		switchTimeout = 15 * time.Minute
+	}
 	switchCtx, cancelSwitch := context.WithTimeout(ctx, switchTimeout)
+	if versioned {
+		h.mu.Lock()
+		h.versionCancel = cancelSwitch
+		h.mu.Unlock()
+		defer func() { h.mu.Lock(); h.versionCancel = nil; h.mu.Unlock() }()
+	}
 	defer cancelSwitch()
 	if err := manager.BeginRunContextSwitch(switchCtx); err != nil {
 		h.setSwitching(false)
@@ -782,7 +811,13 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 		}
 	}
 	if candidateFailure == nil && restore {
-		if recovery, ok := manager.(interface {
+		if versioned {
+			var err error
+			resolved, err = versions.RecoverVersionPoint(switchCtx, pointID)
+			if err != nil {
+				candidateFailure = h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The version snapshot could not be restored.", true)
+			}
+		} else if recovery, ok := manager.(interface {
 			RestoreHealthy(context.Context) (dshmanager.ResolvedLaunch, error)
 		}); ok {
 			var err error
@@ -832,8 +867,23 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	if candidateFailure == nil {
 		candidateFailure = failureFromStatus(candidateStatus)
 	}
+	if versioned && (ctx.Err() != nil || target.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID) {
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, false)
+	}
+	if restore && versioned {
+		versions.FailVersionRecovery(context.Background())
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, false, dshmanager.RollbackFailed, candidateFailure, false)
+	}
+	if versioned && startupFailure != nil {
+		if pending := versions.PendingVersionRecovery(); pending != nil && pending.Status != "completed" {
+			return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, false, dshmanager.RollbackFailed, nil, false)
+		}
+	}
 	if !automaticRollback {
 		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, true)
+	}
+	if versioned && pointID == "" {
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, true, dshmanager.RollbackUnavailable, nil, false)
 	}
 	if knownGood == nil {
 		knownGood = knownGoodRunContext(manager)
@@ -847,11 +897,18 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	}
 	rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), switchTimeout)
 	defer cancelRollback()
+	if versioned {
+		h.mu.Lock()
+		h.versionCancel = cancelRollback
+		h.mu.Unlock()
+	}
 	dshadapter.ReportCommandOutput(rollbackCtx, "Candidate failed: "+candidateFailure.Summary)
 	dshadapter.ReportCommandOutput(rollbackCtx, "Restoring the previous healthy environment…")
 	var rollbackLaunch dshmanager.ResolvedLaunch
 	var rollbackErr error
-	if recovery, ok := manager.(interface {
+	if versioned {
+		rollbackLaunch, rollbackErr = versions.RecoverVersionPoint(rollbackCtx, pointID)
+	} else if recovery, ok := manager.(interface {
 		RestoreHealthy(context.Context) (dshmanager.ResolvedLaunch, error)
 	}); ok {
 		rollbackLaunch, rollbackErr = recovery.RestoreHealthy(rollbackCtx)
@@ -868,6 +925,9 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 		return h.finishContextSwitchFailure(manager, candidateFailure, beginErr)
 	}
 	if rollbackFailure != nil || rollbackStatus.State != lifecycle.StateReady {
+		if versioned {
+			versions.FailVersionRecovery(context.Background())
+		}
 		if rollbackFailure == nil {
 			rollbackFailure = failureFromStatus(rollbackStatus)
 		}
@@ -920,6 +980,17 @@ func (h *Host) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error
 	if err != nil {
 		return snapshot, err
 	}
+	if versions, ok := manager.(versionRecoveryManager); ok && versions.VersionPointsEnabled() {
+		target := snapshot.Configured
+		if target == nil {
+			return snapshot, errors.New("select an environment first")
+		}
+		id := versions.RecoveryPointID(*target, false)
+		if snapshot.RestorePoints != nil && snapshot.RestorePoints.Operation != nil && snapshot.RestorePoints.Operation.Status != "completed" {
+			id = snapshot.RestorePoints.Operation.PointID
+		}
+		return h.RestoreVersionPoint(ctx, id)
+	}
 	if snapshot.KnownGood == nil {
 		return snapshot, lifecycle.Failure{Code: lifecycle.ErrorManagerStateInvalid, Summary: "There is no known-good Run context to restore.", CorrelationID: lifecycle.NewCorrelationID()}
 	}
@@ -942,6 +1013,7 @@ func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.Resol
 
 func (h *Host) Quit() lifecycle.Status {
 	h.setShutdownRequested(true)
+	h.cancelVersionOperation()
 	h.switchMu.Lock()
 	status := h.requestStop(true)
 	h.switchMu.Unlock()
@@ -1191,6 +1263,12 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		return nil, failure
 	}
 	if launch.resolved != nil {
+		if recorder, ok := h.deps.Manager.(interface {
+			CaptureLaunchVersions(context.Context, dshmanager.ResolvedLaunch) dshmanager.ResolvedLaunch
+		}); ok {
+			captured := recorder.CaptureLaunchVersions(run.ctx, *launch.resolved)
+			launch.resolved = &captured
+		}
 		run.setLaunch(launch.resolved)
 		if status, err := h.machine.SetLaunchSelection(run.generation, launchSelection(*launch.resolved)); err == nil {
 			h.emit(status)
@@ -1313,6 +1391,21 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 		}, nil
 	}
 	if recovery, ok := h.deps.Manager.(interface {
+		VersionPointsEnabled() bool
+		ResumeVersionRecovery(context.Context, bool) (*dshmanager.ResolvedLaunch, error)
+	}); ok && recovery.VersionPointsEnabled() {
+		automatic := true
+		if h.deps.AutomaticRuntimeRollback != nil {
+			automatic = h.deps.AutomaticRuntimeRollback()
+		}
+		restored, err := recovery.ResumeVersionRecovery(run.ctx, automatic)
+		if err != nil {
+			return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The interrupted recovery needs attention.", true)
+		}
+		if restored != nil {
+			return hostLaunch{runtime: runtimeAdapterValue(restored.Runtime, restored.Node), dataDirectory: restored.DataDirectory, profile: restored.Target.Profile.Name, resolved: restored}, nil
+		}
+	} else if recovery, ok := h.deps.Manager.(interface {
 		ResumeRecovery(context.Context) (*dshmanager.ResolvedLaunch, error)
 	}); ok {
 		restored, err := recovery.ResumeRecovery(run.ctx)

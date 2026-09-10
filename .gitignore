@@ -10,6 +10,7 @@ output/playwright/
 .task/
 bin/
 .npm-cache/
+.pnpm-store/
 frontend/dist/
 frontend/node_modules/
 tools/dsh/node_modules/

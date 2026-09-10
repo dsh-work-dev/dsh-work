@@ -29,27 +29,28 @@ const (
 // session surface and is resolved per Worker generation.
 type Config struct {
 	// Snapshot capture is deferred while the startup flow is being validated.
-	DisableHealthSnapshots bool
-	StatePath              string
-	DataDirectories        []DataDirectoryInfo
-	Runtimes               []RuntimeInfo
-	DSHReleases            []DSHReleaseInfo
-	Nodes                  []NodeInstallationInfo
-	DefaultRunContext      RunContext
-	CommandRunner          CommandRunner
-	PluginCommands         PluginCommandBuilder
-	RuntimeInstaller       RuntimeInstaller
-	NodeCatalog            NodeReleaseCatalog
-	NodeInstaller          NodeInstaller
-	NodeResolver           NodeResolver
-	DSHCatalog             DSHReleaseCatalog
-	RuntimeVerifier        RuntimeVerifier
-	StateStore             StateStore
-	ProfileCatalog         ProfileCatalog
-	ProfileReader          ProfileReader
-	ThemeReader            ThemeReader
-	PluginOfficialRegistry string
-	PluginMirrorRegistry   string
+	DisableHealthSnapshots     bool
+	EnableVersionRestorePoints bool
+	StatePath                  string
+	DataDirectories            []DataDirectoryInfo
+	Runtimes                   []RuntimeInfo
+	DSHReleases                []DSHReleaseInfo
+	Nodes                      []NodeInstallationInfo
+	DefaultRunContext          RunContext
+	CommandRunner              CommandRunner
+	PluginCommands             PluginCommandBuilder
+	RuntimeInstaller           RuntimeInstaller
+	NodeCatalog                NodeReleaseCatalog
+	NodeInstaller              NodeInstaller
+	NodeResolver               NodeResolver
+	DSHCatalog                 DSHReleaseCatalog
+	RuntimeVerifier            RuntimeVerifier
+	StateStore                 StateStore
+	ProfileCatalog             ProfileCatalog
+	ProfileReader              ProfileReader
+	ThemeReader                ThemeReader
+	PluginOfficialRegistry     string
+	PluginMirrorRegistry       string
 }
 
 // CommandRunner is the narrow seam for invoking the selected DSH public CLI.
@@ -176,6 +177,9 @@ type Manager struct {
 	current           *RunContext
 	knownGood         *RunContext
 	healthy           *HealthySnapshot
+	versionRecovery   *VersionRecoveryState
+	verifiedPoint     *storedRestorePoint
+	restoreSaveError  string
 	recoveryPending   bool
 	safeMode          *SafeModeState
 	latestNode        *NodeReleaseInfo
@@ -448,6 +452,12 @@ func New(config Config) (*Manager, error) {
 	manager.config = normalized
 	if state != nil {
 		manager.healthy = state.Healthy
+		manager.versionRecovery = cloneVersionRecovery(state.VersionRecovery)
+		if normalized.EnableVersionRestorePoints {
+			if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
+				manager.knownGood = cloneRunContext(&p.Target)
+			}
+		}
 		manager.safeMode = cloneSafeMode(state.SafeMode)
 		manager.recoveryPending = state.RecoveryPending
 		manager.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
@@ -849,6 +859,7 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	dshReleases := cloneDSHReleases(m.dshReleases)
 	lastSwitchAttempt := cloneSwitchAttempt(m.lastSwitchAttempt)
 	safeMode := cloneSafeMode(m.safeMode)
+	versionPoints := m.versionViewLocked()
 	m.mu.RUnlock()
 
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader, current, configured, knownGood, lastSwitchAttempt)
@@ -869,6 +880,7 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	return Snapshot{
 		SafeMode:          safeMode,
+		RestorePoints:     versionPoints,
 		Runtimes:          refreshRuntimes(config.Runtimes),
 		DSHReleases:       dshReleases,
 		Nodes:             refreshNodes(config.Nodes),
@@ -1013,21 +1025,35 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 
 	configuredChanged := configured != nil && configured.Profile == request.Profile
 	knownGoodChanged := knownGood != nil && knownGood.Profile == request.Profile
+	state := m.stateLocked()
 	if configuredChanged {
 		configured.Profile.Name = newName
-		state := m.stateLocked()
 		state.Configured = cloneRunContext(configured)
-		statePath := m.config.StatePath
-		if err := m.store.Save(ctx, statePath, state); err != nil {
-			rollbackErr := os.Rename(newPath, oldPath)
-			m.mu.Unlock()
-			if rollbackErr != nil {
-				return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileRenameFailed, "the DSH profile rename is only partially complete", "the profile directory changed but the launch selection could not be saved", true, true)
-			}
-			return Snapshot{}, err
+	}
+	if state.VersionRecovery != nil {
+		oldKey := profilePointKey(request.Profile)
+		newRef := request.Profile
+		newRef.Name = newName
+		if id := state.VersionRecovery.LastByProfile[oldKey]; id != "" {
+			delete(state.VersionRecovery.LastByProfile, oldKey)
+			state.VersionRecovery.LastByProfile[profilePointKey(newRef)] = id
 		}
+		for i := range state.VersionRecovery.Points {
+			if state.VersionRecovery.Points[i].Target.Profile == request.Profile {
+				state.VersionRecovery.Points[i].Target.Profile = newRef
+			}
+		}
+	}
+	if err := m.store.Save(ctx, m.config.StatePath, state); err != nil {
+		rollbackErr := os.Rename(newPath, oldPath)
+		m.mu.Unlock()
+		return Snapshot{}, errors.Join(err, rollbackErr)
+	}
+	m.versionRecovery = state.VersionRecovery
+	if configuredChanged {
 		m.configured = cloneRunContext(configured)
 	}
+
 	if knownGoodChanged {
 		knownGood.Profile.Name = newName
 		m.knownGood = cloneRunContext(knownGood)
@@ -1615,6 +1641,9 @@ func (m *Manager) CommitCurrent(ctx context.Context, target *RunContext) (Snapsh
 // CommitHealthy uses the exact launch that passed readiness, including pinned
 // recovery executables. It never re-resolves a floating system Node at commit.
 func (m *Manager) CommitHealthy(ctx context.Context, resolved ResolvedLaunch) (Snapshot, error) {
+	if m.config.EnableVersionRestorePoints {
+		return m.commitVersionHealthy(ctx, resolved)
+	}
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -2126,8 +2155,9 @@ func (m *Manager) acquireOperation(ctx context.Context) (func(), error) {
 
 func (m *Manager) stateLocked() State {
 	return State{
-		SafeMode: cloneSafeMode(m.safeMode),
-		Healthy:  m.healthy, LastSwitchAttempt: cloneSwitchAttempt(m.lastSwitchAttempt), RecoveryPending: m.recoveryPending,
+		SafeMode:        cloneSafeMode(m.safeMode),
+		VersionRecovery: cloneVersionRecovery(m.versionRecovery),
+		Healthy:         m.healthy, LastSwitchAttempt: cloneSwitchAttempt(m.lastSwitchAttempt), RecoveryPending: m.recoveryPending,
 		DataDirectories:  cloneDataDirectories(m.config.DataDirectories),
 		Runtimes:         cloneRuntimes(m.config.Runtimes),
 		Nodes:            cloneNodes(m.config.Nodes),

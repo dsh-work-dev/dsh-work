@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,7 @@ import (
 // State persists the desired selection and the last verified recovery files.
 // Current remains process-local; persisted health is not a claim of a live Worker.
 type State struct {
+	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
 	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
 	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
@@ -40,16 +42,23 @@ type StateStore interface {
 // private temporary file and replaces the state atomically.
 type FileStateStore struct{}
 
+const maxManagerStateBytes = 64 << 20
+
 func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be read", "the persisted selection is unavailable")
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxManagerStateBytes+1))
+	if err != nil || len(data) > maxManagerStateBytes {
+		return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be read", "the persisted state exceeds its size limit")
 	}
 	state, err := decodeState(data)
 	if err != nil {
@@ -62,6 +71,7 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 // are intentionally ignored so a newer build can add optional catalog metadata
 // without making an older build lose the user's selection.
 type persistedState struct {
+	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
 	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
 	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
@@ -88,8 +98,9 @@ func decodeState(data []byte) (State, error) {
 		return State{}, err
 	}
 	state := State{
-		SafeMode: persisted.SafeMode,
-		Healthy:  persisted.Healthy, LastSwitchAttempt: persisted.LastSwitchAttempt, RecoveryPending: persisted.RecoveryPending,
+		SafeMode:        persisted.SafeMode,
+		VersionRecovery: persisted.VersionRecovery,
+		Healthy:         persisted.Healthy, LastSwitchAttempt: persisted.LastSwitchAttempt, RecoveryPending: persisted.RecoveryPending,
 		DataDirectories:  persisted.DataDirectories,
 		Runtimes:         persisted.Runtimes,
 		Nodes:            persisted.Nodes,
@@ -118,7 +129,42 @@ func decodeState(data []byte) (State, error) {
 	return state, nil
 }
 
+func validateVersionRecovery(s *VersionRecoveryState) error {
+	if s != nil {
+		if s.SchemaVersion != 1 || len(s.Points) > 1024 {
+			return errors.New("unsupported version snapshot state")
+		}
+		seen := map[string]bool{}
+		total := 0
+		for _, p := range s.Points {
+			total += len(p.Input.Manifest) + len(p.Input.Lock) + len(p.Input.Workspace)
+			if total > 32<<20 {
+				return errors.New("version snapshot inputs exceed the total size limit")
+			}
+			if p.ID == "" || seen[p.ID] || validateRunContext(p.Target) != nil || len(p.Input.Manifest)+len(p.Input.Lock)+len(p.Input.Workspace) > 12<<20 {
+				return errors.New("invalid version snapshot record")
+			}
+			seen[p.ID] = true
+		}
+		for _, id := range s.LastByProfile {
+			if !seen[id] {
+				return errors.New("missing last-successful snapshot")
+			}
+		}
+		if s.LastRunning != "" && !seen[s.LastRunning] {
+			return errors.New("missing last-running snapshot")
+		}
+		if s.Pending != nil && (!seen[s.Pending.PointID] || s.Pending.ResumeCount < 0) {
+			return errors.New("invalid pending snapshot recovery")
+		}
+	}
+	return nil
+}
+
 func validateState(state State) error {
+	if err := validateVersionRecovery(state.VersionRecovery); err != nil {
+		return err
+	}
 	if state.SafeMode != nil {
 		if err := validateRunContext(state.SafeMode.ReturnTo); err != nil {
 			return err
@@ -212,9 +258,15 @@ func (FileStateStore) Save(ctx context.Context, path string, state State) error 
 	if err := contextError(ctx); err != nil {
 		return err
 	}
+	if err := validateVersionRecovery(state.VersionRecovery); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be encoded", "the configured Run context could not be persisted")
+	}
+	if len(data) > maxManagerStateBytes {
+		return errors.New("manager state exceeds its size limit")
 	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {

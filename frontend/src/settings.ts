@@ -23,7 +23,7 @@ function settingsErrorMessage(error: unknown, fallback: string): string {
 
 export function mountSettings(setFeedback: Feedback) {
   const toggle = document.getElementById("settings-close-to-tray") as HTMLInputElement;
-  const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLInputElement;
+  const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLSelectElement;
   const localeSelect = document.getElementById("settings-locale") as HTMLSelectElement;
   const status = document.getElementById("settings-close-to-tray-status") as HTMLParagraphElement;
   const controls = [toggle, rollbackToggle, localeSelect];
@@ -37,7 +37,7 @@ export function mountSettings(setFeedback: Feedback) {
     form.hidden = false;
     controls.forEach(control => control.disabled = false);
     toggle.checked = values.closeToTray;
-    rollbackToggle.checked = values.automaticRuntimeRollback;
+    rollbackToggle.value = values.automaticRuntimeRollback ? "automatic" : "choose";
     localeSelect.value = normalizeLocale(values.locale);
     savedLocale = normalizeLocale(values.locale);
     status.textContent = "";
@@ -89,13 +89,13 @@ export function mountSettings(setFeedback: Feedback) {
   })());
 
   rollbackToggle.addEventListener("change", () => void (async () => {
-	const previous = !rollbackToggle.checked;
+	const previous = rollbackToggle.value === "automatic" ? "choose" : "automatic";
 	const finishUpdate = beginControlUpdate(rollbackToggle);
 	try {
-		render(await SettingsService.SetAutomaticRuntimeRollback(rollbackToggle.checked));
+		render(await SettingsService.SetAutomaticRuntimeRollback(rollbackToggle.value === "automatic"));
 		setFeedback("");
 	} catch (error) {
-		rollbackToggle.checked = previous;
+		rollbackToggle.value = previous;
 		setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
 	} finally {
 		finishUpdate();

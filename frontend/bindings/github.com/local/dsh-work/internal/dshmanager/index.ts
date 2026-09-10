@@ -39,11 +39,15 @@ export type {
     ProfileRef,
     ProfileRenameRequest,
     ProfileRestoreRequest,
+    RecoveryOperation,
     ResolvedLaunch,
     ResolvedNode,
+    RestorePoint,
+    RestorePointsView,
     RunContext,
     RuntimeInfo,
     SafeModeState,
     Snapshot,
-    SwitchAttempt
+    SwitchAttempt,
+    VersionPlugin
 } from "./models.js";

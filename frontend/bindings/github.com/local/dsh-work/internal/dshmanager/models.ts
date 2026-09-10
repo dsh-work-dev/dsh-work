@@ -283,6 +283,14 @@ export interface ProfileRestoreRequest {
     "profileName": string;
 }
 
+export interface RecoveryOperation {
+    "pointId": string;
+    "stage": string;
+    "status": string;
+    "error"?: string;
+    "resumeCount": number;
+}
+
 /**
  * ResolvedLaunch carries the validated catalog records alongside the
  * normalized target. Host uses this as one immutable handoff into the DSH
@@ -303,6 +311,31 @@ export interface ResolvedNode {
     "npmPath"?: string;
     "pnpmPath"?: string;
     "childEnvironment"?: { [_ in string]?: string } | null;
+}
+
+export interface RestorePoint {
+    "id": string;
+    "kind": string;
+    "label": string;
+    "createdAt": string;
+    "lastVerifiedAt": string;
+    "target": RunContext;
+    "dshVersion": string;
+    "nodeVersion": string;
+    "packageManager": string;
+    "platform": string;
+    "plugins": VersionPlugin[] | null;
+    "digest": string;
+    "unavailable"?: string;
+}
+
+export interface RestorePointsView {
+    "points": RestorePoint[] | null;
+    "lastByProfile": { [_ in string]?: string } | null;
+    "lastRunning": string;
+    "saveError"?: string;
+    "operation"?: RecoveryOperation | null;
+    "canSave": boolean;
 }
 
 export enum RollbackOutcome {
@@ -399,6 +432,7 @@ export interface SafeModeState {
 }
 
 export interface Snapshot {
+    "restorePoints"?: RestorePointsView | null;
     "safeMode"?: SafeModeState | null;
     "runtimes": RuntimeInfo[] | null;
     "dshReleases": DSHReleaseInfo[] | null;
@@ -453,3 +487,9 @@ export enum ThemePreference {
     ThemePreferenceDark = "dark",
     ThemePreferenceSystem = "system",
 };
+
+export interface VersionPlugin {
+    "name": string;
+    "version": string;
+    "source": string;
+}

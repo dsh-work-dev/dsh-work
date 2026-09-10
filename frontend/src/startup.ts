@@ -1,3 +1,4 @@
+import {mountRestorePoints} from "./restore-points";
 import {Events} from "@wailsio/runtime";
 import {safeModeActive} from "./recovery";
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
@@ -47,6 +48,7 @@ export function mountHost() {
   const selectedVersion = () => snapshot?.runtimes?.find(r => r.id === selectedRuntime)?.version ?? snapshot?.dshReleases?.find(r => `dsh-${r.version}` === selectedRuntime)?.version;
   const active = () => status.state === "Starting" || status.state === "Stopping" || status.state === "Ready";
 
+  const versionPoints = mountRestorePoints(element("startup-restore-points"), next => {snapshot=next;renderEnvironment();}, true);
   function render() {
     const launch = runningLaunchSelection(status);
     if (launch && !acquiring) {
@@ -90,6 +92,8 @@ export function mountHost() {
     downloadDsh.disabled = busy || active() || !downloadableVersion() || !!installedRuntime();
     const safe = element<HTMLButtonElement>("startup-safe-mode");
     safe.hidden = !failed && !stopped;
+    element("startup-restore-points").hidden = !failed && !stopped && snapshot?.restorePoints?.operation?.status !== "running";
+    versionPoints.render(snapshot, busy || active());
     safe.disabled = busy || active() || !snapshot?.configured || !installedRuntime() || !installedNode();
     safe.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
     retry.disabled = busy || active() || !snapshot || !selectedVersion();
@@ -312,7 +316,7 @@ export function mountHost() {
       const text = [!busy && status.error && [status.error.code, status.error.summary, status.error.detail].filter(Boolean).join("\n"), lastError, logs.node.text(), logs.dsh.text(), data.stdout && `[stdout]\n${data.stdout}`, data.stderr && `[stderr]\n${data.stderr}`].filter(Boolean).join("\n\n");
       const follows = output.scrollHeight - output.scrollTop - output.clientHeight < 32;
       if (output.textContent !== text) { output.textContent = text || t("host.noOutput"); if (follows) output.scrollTop = output.scrollHeight; }
-
+      await refreshEnvironment();
     } catch (error) { console.error("Startup output unavailable", error); }
     finally { polling = false; }
   }

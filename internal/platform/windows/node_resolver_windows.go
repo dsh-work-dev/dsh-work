@@ -102,6 +102,11 @@ func validateManagedNodeInstallation(storeRoot string, node dshmanager.NodeInsta
 	if filepath.Clean(node.NodePath) != filepath.Join(installationRoot, "node.exe") || filepath.Clean(node.NPMPath) != filepath.Join(installationRoot, "npm.cmd") {
 		return errors.New("managed Node executable paths do not match the installation layout")
 	}
+	// Managed Node archives supply npm. Resolve optional pnpm through the system
+	// toolchain instead of accepting an executable path from persisted metadata.
+	if node.PNPMPath != "" {
+		return errors.New("managed Node installation contains an unverified pnpm executable")
+	}
 	resolvedManagedRoot, err := filepath.EvalSymlinks(managedRoot)
 	if err != nil {
 		return err
