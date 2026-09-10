@@ -396,3 +396,6 @@ html[data-surface="settings"] #host-surface { display: none; }
 .restore-point-preview::backdrop { background: #0006; }
 .restore-point-preview input { box-sizing: border-box; width: 100%; margin-block: 8px 16px; padding: 8px; }
 @media (max-width: 600px) { .restore-point-list .backup-row { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } }
+
+#version-restore-points { border-top: 0; }
+#safe-feedback:empty { display: none; }

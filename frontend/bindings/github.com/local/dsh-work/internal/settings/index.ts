@@ -9,5 +9,6 @@ export {
 export type {
     PetPosition,
     PetPreference,
-    Values
+    Values,
+    WindowGeometry
 } from "./models.js";

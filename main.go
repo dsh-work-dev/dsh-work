@@ -708,7 +708,7 @@ func main() {
 		settingsWindowMu.Lock()
 		window := settingsWindow
 		if window == nil {
-			window = desktop.Window.NewWithOptions(application.WebviewWindowOptions{
+			options := nativeui.RestoreWindowGeometry(application.WebviewWindowOptions{
 				Name:               "settings",
 				Title:              "设置",
 				Width:              980,
@@ -721,7 +721,10 @@ func main() {
 				InitialPosition:    application.WindowCentered,
 				Hidden:             true,
 				UseApplicationMenu: false,
-			})
+			}, settingsManager)
+			window = desktop.Window.NewWithOptions(options)
+			flushGeometry := nativeui.RememberWindowGeometry(window, options, settingsManager)
+			desktop.OnShutdown(flushGeometry)
 			window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 				handleWindowClosing("settings", window, event)
 			})
@@ -731,7 +734,7 @@ func main() {
 		window.SetURL(settingsURL(manager, section)).Show().Focus()
 	}
 
-	workspaceWindow = desktop.Window.NewWithOptions(application.WebviewWindowOptions{
+	workspaceOptions := nativeui.RestoreWindowGeometry(application.WebviewWindowOptions{
 		Name:               "workspace",
 		Title:              "dsh-work",
 		Width:              1180,
@@ -743,7 +746,10 @@ func main() {
 		URL:                "/",
 		InitialPosition:    application.WindowCentered,
 		UseApplicationMenu: true,
-	})
+	}, settingsManager)
+	workspaceWindow = desktop.Window.NewWithOptions(workspaceOptions)
+	flushWorkspaceGeometry := nativeui.RememberWindowGeometry(workspaceWindow, workspaceOptions, settingsManager)
+	desktop.OnShutdown(flushWorkspaceGeometry)
 	workspaceWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		handleWindowClosing("workspace", workspaceWindow, event)
 	})

@@ -68,10 +68,21 @@ export enum PetVisibilityIntent {
  * its managed DSH worker available from the notification area.
  */
 export interface Values {
+    "workspaceWindow": WindowGeometry;
+    "settingsWindow": WindowGeometry;
     "version": number;
     "closeToTray": boolean;
     "automaticRuntimeRollback": boolean;
     "locale": Locale;
     "notifications": notifications$0.Preferences;
     "pet": PetPreference;
+}
+
+/**
+ * Width and Height are logical normal-window dimensions, independent of maximisation.
+ */
+export interface WindowGeometry {
+    "width": number;
+    "height": number;
+    "maximised": boolean;
 }

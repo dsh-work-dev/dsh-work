@@ -17,7 +17,6 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   const openButton = document.getElementById("backup-open") as HTMLButtonElement;
   const refreshButton = document.getElementById("backup-refresh") as HTMLButtonElement;
   const safeButton = document.getElementById("manager-safe-mode") as HTMLButtonElement;
-  const safeStatus = document.getElementById("manager-safe-mode-status")!;
   const safeFeedback = document.getElementById("safe-feedback")!;
   const backupResult = document.getElementById("profile-backup-result")!;
   const backupMessage = document.getElementById("profile-backup-message")!;
@@ -36,7 +35,6 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     backupOpen.disabled = busy || !createdBackup;
     safeButton.classList.toggle("button-primary", !!snapshot?.lastSwitchAttempt);
     safeButton.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
-    safeStatus.textContent = t(safeModeActive(snapshot) ? "safe.active" : "safe.description");
   }
 
   async function refresh() {

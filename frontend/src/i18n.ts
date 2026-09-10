@@ -565,7 +565,7 @@ const messages: Record<Locale, Record<string, string>> = {
     "backup.listError": "无法读取备份列表。",
     "backup.restoreError": "无法还原，请检查文件是否为有效的 dsh-work 档案 ZIP 备份。",
     "backup.openError": "无法打开备份文件夹。",
-    "safe.enter": "安全模式启动",
+    "safe.enter": "启动安全模式",
     "safe.exit": "返回原环境",
     "safe.active": "安全模式运行中，原环境已保留。",
     "safe.description": "使用干净环境排查插件问题。",

@@ -183,6 +183,8 @@ func safePreferenceKey(value string) bool {
 // CloseToTray is true by default so closing the last window keeps dsh-work and
 // its managed DSH worker available from the notification area.
 type Values struct {
+	WorkspaceWindow          WindowGeometry            `json:"workspaceWindow"`
+	SettingsWindow           WindowGeometry            `json:"settingsWindow"`
 	Version                  int                       `json:"version"`
 	CloseToTray              bool                      `json:"closeToTray"`
 	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
@@ -379,6 +381,8 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
+		WorkspaceWindow          WindowGeometry  `json:"workspaceWindow"`
+		SettingsWindow           WindowGeometry  `json:"settingsWindow"`
 		Version                  int             `json:"version"`
 		CloseToTray              *bool           `json:"closeToTray"`
 		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
@@ -390,6 +394,8 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
+	values.WorkspaceWindow = raw.WorkspaceWindow
+	values.SettingsWindow = raw.SettingsWindow
 	values.Version = stateVersion
 	if raw.CloseToTray != nil {
 		values.CloseToTray = *raw.CloseToTray

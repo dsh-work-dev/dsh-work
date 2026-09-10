@@ -118,7 +118,11 @@
               </dl>
             </section>
           </div>
-          <button id="environment-edit" class="button button-secondary" data-i18n="environment.edit" type="button">Switch environment</button>
+          <div class="manager-actions">
+            <button id="environment-edit" class="button button-secondary" data-i18n="environment.edit" type="button">Switch environment</button>
+            <button id="manager-safe-mode" class="button button-secondary" data-i18n="safe.enter" type="button">启动安全模式</button>
+          </div>
+          <p id="safe-feedback" class="manager-note" role="status"></p>
           <div id="environment-editor" class="settings-block launch-settings" hidden>
             <div class="manager-grid">
               <label><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
@@ -127,11 +131,6 @@
               <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
             </div>
             <div class="manager-actions"><button id="environment-apply" class="button button-primary" data-i18n="environment.apply" type="button">Switch and restart</button><button id="environment-cancel" class="button button-secondary" data-i18n="common.cancel" type="button">Cancel</button></div>
-          </div>
-          <div class="safe-mode-row">
-            <p id="manager-safe-mode-status" class="manager-note" data-i18n="safe.description">Start a clean environment to troubleshoot plugins.</p>
-            <button id="manager-safe-mode" class="button button-secondary" data-i18n="safe.enter" type="button">Start in safe mode</button>
-            <p id="safe-feedback" class="manager-note" role="status"></p>
           </div>
           <section id="version-restore-points" class="restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
           <section id="manager-switch-failure" class="runtime-preparation" aria-live="polite" hidden>
