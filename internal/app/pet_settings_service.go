@@ -212,7 +212,7 @@ func SetPetOverlayCapabilities(service *PetSettingsService, capabilities pet.Ove
 	service.mu.Lock()
 	service.overlayCapabilities = capabilities
 	if service.overlayCapabilities.Level == "" {
-		service.overlayCapabilities = pet.CapabilitiesFor("windows")
+		service.overlayCapabilities = pet.CurrentOverlayCapabilities()
 	}
 	var preference settings.PetPreference
 	if service.manager != nil {

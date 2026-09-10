@@ -23,6 +23,7 @@ type packageManagerAcquisitionAdapter struct {
 }
 
 func (a packageManagerAcquisitionAdapter) Attempt(ctx context.Context, request acquisition.AttemptRequest) (acquisition.AttemptResult, error) {
+	dshadapter.ReportCommandOutput(ctx, "Installing @deepseek-ai/dsh@"+a.version+" from "+request.Candidate.Location)
 	result, err := a.executor.Run(
 		ctx,
 		a.toolchain.packageManagerPath,
@@ -31,6 +32,7 @@ func (a packageManagerAcquisitionAdapter) Attempt(ctx context.Context, request a
 		request.StagingPath,
 	)
 	if err != nil {
+		dshadapter.ReportCommandOutput(ctx, "Package installation failed: "+err.Error())
 		return acquisition.AttemptResult{}, classifyPackageManagerFailure(result, err)
 	}
 	return acquisition.AttemptResult{
@@ -49,14 +51,17 @@ type nodeArchiveAcquisitionAdapter struct {
 
 func (a nodeArchiveAcquisitionAdapter) Attempt(ctx context.Context, request acquisition.AttemptRequest) (acquisition.AttemptResult, error) {
 	destination := filepath.Join(request.StagingPath, request.Identity.Filename)
+	dshadapter.ReportCommandOutput(ctx, "Downloading "+request.Candidate.Location)
 	err := a.downloader.Download(ctx, request.Candidate.Location, destination, a.sha256, func(received, total int64, hasTotal bool) {
 		if a.report != nil {
 			a.report(request.Candidate.Route, received, total, hasTotal)
 		}
 	})
 	if err != nil {
+		dshadapter.ReportCommandOutput(ctx, "Download failed: "+err.Error())
 		return acquisition.AttemptResult{}, classifyHTTPFailure(err)
 	}
+	dshadapter.ReportCommandOutput(ctx, "Download complete; SHA-256 verified.")
 	return acquisition.AttemptResult{
 		ResolvedIdentity: request.Identity,
 		PayloadPath:      destination,

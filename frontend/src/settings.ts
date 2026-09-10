@@ -26,9 +26,16 @@ export function mountSettings(setFeedback: Feedback) {
   const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLInputElement;
   const localeSelect = document.getElementById("settings-locale") as HTMLSelectElement;
   const status = document.getElementById("settings-close-to-tray-status") as HTMLParagraphElement;
+  const controls = [toggle, rollbackToggle, localeSelect];
+  controls.forEach(control => control.disabled = true);
   let savedLocale = normalizeLocale(localeSelect.value);
 
+  const form = status.closest("section")!.querySelector<HTMLElement>(".settings-list")!;
+  form.hidden = true; status.className = "manager-note"; status.textContent = t("view.loading");
+
   function render(values: Values) {
+    form.hidden = false;
+    controls.forEach(control => control.disabled = false);
     toggle.checked = values.closeToTray;
     rollbackToggle.checked = values.automaticRuntimeRollback;
     localeSelect.value = normalizeLocale(values.locale);
@@ -41,18 +48,28 @@ export function mountSettings(setFeedback: Feedback) {
     savedLocale = locale;
   });
 
+  const retry = document.createElement("button");
+  retry.type = "button"; retry.className = "button button-secondary"; retry.textContent = t("common.retry"); retry.hidden = true;
+  status.before(retry);
+  subscribeLocale(() => { retry.textContent = t("common.retry"); });
+  retry.addEventListener("click", () => void refresh());
   async function refresh(): Promise<boolean> {
+    retry.disabled = true;
     try {
       const values = await SettingsService.GetSettings();
       applyLocale(values.locale);
       render(values);
+      if (!retry.hidden) setFeedback("");
+      retry.hidden = true;
       return true;
     } catch (error) {
-      status.textContent = settingsErrorMessage(error, t("error.loadSettings"));
-      setFeedback(status.textContent, "error");
+      status.textContent = "";
+      setFeedback(settingsErrorMessage(error, t("error.loadSettings")), "error");
+
       console.error("Could not read dsh-work settings", error);
+      retry.hidden = false;
       return false;
-    }
+    } finally { retry.disabled = false; }
   }
 
   toggle.addEventListener("change", () => void (async () => {
@@ -63,8 +80,8 @@ export function mountSettings(setFeedback: Feedback) {
       setFeedback("");
     } catch (error) {
       toggle.checked = previous;
-      status.textContent = settingsErrorMessage(error, t("error.saveSettings"));
-      setFeedback(status.textContent, "error");
+      setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
+
       console.error("Could not update dsh-work close behavior", error);
     } finally {
       finishUpdate();
@@ -124,8 +141,15 @@ export function mountNotifications(setFeedback: Feedback) {
     ])
   ) as Record<NotificationPreferenceKey, HTMLInputElement>;
 
+  Object.values(toggles).forEach(control => control.disabled = true);
+
+  const form = status.closest("section")!.querySelector<HTMLElement>(".settings-list")!;
+  form.hidden = true; status.className = "manager-note"; status.textContent = t("view.loading");
+
   function render(values: Values) {
+    form.hidden = false;
     const preferences = values.notifications;
+    for (const [key, control] of Object.entries(toggles)) control.disabled = key !== "enabled" && !preferences.enabled;
     toggles.enabled.checked = preferences.enabled;
     toggles.completed.checked = preferences.completed;
     toggles.interactionRequired.checked = preferences.interactionRequired;
@@ -136,21 +160,31 @@ export function mountNotifications(setFeedback: Feedback) {
 
   Events.On("notification-failure", () => {
     const message = t("error.notificationsUnavailable");
-    status.textContent = message;
+
     setFeedback(message, "error");
   });
 
+  const retry = document.createElement("button");
+  retry.type = "button"; retry.className = "button button-secondary"; retry.textContent = t("common.retry"); retry.hidden = true;
+  status.before(retry);
+  subscribeLocale(() => { retry.textContent = t("common.retry"); });
+  retry.addEventListener("click", () => void refresh());
   async function refresh(): Promise<boolean> {
+    retry.disabled = true;
     try {
       render(await SettingsService.GetSettings());
+      if (!retry.hidden) setFeedback("");
+      retry.hidden = true;
       return true;
     } catch (error) {
+      status.textContent = "";
       const message = settingsErrorMessage(error, t("error.loadSettings"));
-      status.textContent = message;
+
       setFeedback(message, "error");
       console.error("Could not read dsh-work notification settings", error);
+      retry.hidden = false;
       return false;
-    }
+    } finally { retry.disabled = false; }
   }
 
   for (const [key, toggle] of Object.entries(toggles) as Array<[NotificationPreferenceKey, HTMLInputElement]>) {
@@ -163,7 +197,7 @@ export function mountNotifications(setFeedback: Feedback) {
       } catch (error) {
         toggle.checked = previous;
         const message = settingsErrorMessage(error, t("error.saveSettings"));
-        status.textContent = message;
+
         setFeedback(message, "error");
         console.error("Could not update dsh-work notification settings", error);
       } finally {

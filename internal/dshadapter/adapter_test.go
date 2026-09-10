@@ -250,6 +250,24 @@ func TestVerifyProfileValidatesTheRuntimeProfilePair(t *testing.T) {
 	}
 }
 
+func TestDesktopRejectsNonWebBuiltInProfiles(t *testing.T) {
+	runtimePath := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("placeholder"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := New(nil, SupportedVersion)
+	for _, name := range []string{"headless", "sdk", "sdk-minimal", "acp"} {
+		err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), name)
+		var failure lifecycle.Failure
+		if !asFailure(err, &failure) || failure.Code != lifecycle.ErrorRuntimeProfileIncompatible || failure.Retryable {
+			t.Errorf("%s: want non-retryable incompatibility before launch, got %v", name, err)
+		}
+	}
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "my-web"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProbeRequiresHTMLAtTheExpectedOrigin(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

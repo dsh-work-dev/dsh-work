@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/acquisition"
+	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -17,11 +18,15 @@ import (
 // profile-plugin operations; profile composition and plugin mutation still go
 // through DSH's public CLI seam, never direct file edits.
 type ManagerService struct {
+	chooseBackup       func() (string, error)
+	chooseExport       func(string) (string, error)
+	openBackups        func(string) error
 	manager            *dshmanager.Manager
 	host               *Host
 	publishAcquisition func(acquisition.OperationStatus)
 	runtimeMu          sync.Mutex
 	runtimeCancel      context.CancelFunc
+	startupTrusted     func() bool
 }
 
 const managerOperationTimeout = 2 * time.Minute
@@ -38,15 +43,19 @@ func NewManagerService(manager *dshmanager.Manager, host ...*Host) *ManagerServi
 // NewManagerServiceWithRuntimeProgress keeps the Wails event publisher at the
 // trusted desktop composition boundary. The manager binding still returns the
 // durable snapshot; this callback only projects acquisition progress.
-func NewManagerServiceWithRuntimeProgress(manager *dshmanager.Manager, host *Host, publish func(acquisition.OperationStatus)) *ManagerService {
-	return &ManagerService{manager: manager, host: host, publishAcquisition: publish}
+func NewManagerServiceWithRuntimeProgress(manager *dshmanager.Manager, host *Host, publish func(acquisition.OperationStatus), startupTrusted ...func() bool) *ManagerService {
+	service := &ManagerService{manager: manager, host: host, publishAcquisition: publish}
+	if len(startupTrusted) > 0 {
+		service.startupTrusted = startupTrusted[0]
+	}
+	return service
 }
 
 func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, cancel := managerContext(ctx)
@@ -74,11 +83,12 @@ func (s *ManagerService) SetRunContext(ctx context.Context, target dshmanager.Ru
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
-	ctx, cancel := managerContext(ctx)
+	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
+	ctx = s.commandLogContext(ctx, lifecycle.NewCorrelationID(), acquisition.ArtifactIdentity{Kind: acquisition.ArtifactDSH, Name: "@deepseek-ai/dsh"})
 	if s.host != nil {
 		return s.host.SwitchRunContext(ctx, target)
 	}
@@ -113,7 +123,7 @@ func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (ds
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
 	}
 	ctx, finish, err := s.beginRuntimeOperation(ctx, "A DSH runtime preparation is already in progress.")
@@ -123,6 +133,7 @@ func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (ds
 	defer finish()
 	operationID := lifecycle.NewCorrelationID()
 	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactDSH, Name: "@deepseek-ai/dsh", Version: version}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
 	var lastPreparation lifecycle.RuntimePreparation
 	snapshot, err := s.manager.InstallRuntimeWithProgress(ctx, version, func(preparation lifecycle.RuntimePreparation) {
 		s.publishObservedPreparation(operationID, artifact, &lastPreparation, preparation)
@@ -147,11 +158,14 @@ func (s *ManagerService) RefreshDSHReleases(ctx context.Context) (dshmanager.Sna
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH release refresh is available only in the Settings window.")
 	}
-	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
-	defer cancel()
+	ctx, finish, err := s.beginRuntimeOperation(ctx, "An acquisition is already in progress.")
+	if err != nil {
+		return dshmanager.Snapshot{}, err
+	}
+	defer finish()
 	return s.manager.RefreshDSHReleases(ctx)
 }
 
@@ -159,7 +173,7 @@ func (s *ManagerService) InstallLatestNode(ctx context.Context) (dshmanager.Snap
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node installation is available only in the Settings window.")
 	}
 	ctx, finish, err := s.beginRuntimeOperation(ctx, "An acquisition is already in progress.")
@@ -169,6 +183,7 @@ func (s *ManagerService) InstallLatestNode(ctx context.Context) (dshmanager.Snap
 	defer finish()
 	operationID := lifecycle.NewCorrelationID()
 	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactNode, Name: "node"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
 	var lastPreparation lifecycle.RuntimePreparation
 	snapshot, err := s.manager.InstallLatestNode(ctx, func(preparation lifecycle.RuntimePreparation) {
 		s.publishObservedPreparation(operationID, artifact, &lastPreparation, preparation)
@@ -336,7 +351,7 @@ func (s *ManagerService) CancelRuntime(ctx context.Context) error {
 	if s == nil || s.manager == nil {
 		return managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !s.runtimeSurfaceAuthorized(ctx) {
 		return trustedSurfaceRequired("DSH runtime cancellation is available only in the Settings window.")
 	}
 	s.runtimeMu.Lock()
@@ -412,7 +427,7 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	return s.manager.ListPlugins(ctx, request)
 }
 
-func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.PluginInstallRequest) (dshmanager.PluginResult, error) {
+func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.PluginInstallRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
@@ -421,13 +436,20 @@ func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.P
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
+	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
+	defer func() {
+		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+	}()
 	if s.host != nil {
 		return s.host.InstallPlugin(ctx, request)
 	}
 	return s.manager.InstallPlugin(ctx, request)
 }
 
-func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.PluginRemoveRequest) (dshmanager.PluginResult, error) {
+func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.PluginRemoveRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
@@ -436,13 +458,20 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
+	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
+	defer func() {
+		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+	}()
 	if s.host != nil {
 		return s.host.RemovePlugin(ctx, request)
 	}
 	return s.manager.RemovePlugin(ctx, request)
 }
 
-func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error) {
+func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
@@ -451,6 +480,13 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
+	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
+	defer func() {
+		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+	}()
 	if s.host != nil {
 		return s.host.UpgradePlugin(ctx, request)
 	}
@@ -541,4 +577,18 @@ func managerUnavailable() error {
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Restart dsh-work and try again.",
 	}
+}
+
+func (s *ManagerService) commandLogContext(ctx context.Context, operationID string, artifact acquisition.ArtifactIdentity) context.Context {
+	return dshadapter.WithCommandOutput(ctx, func(line string) {
+		if s.publishAcquisition != nil {
+			s.publishAcquisition(acquisition.OperationStatus{OperationID: operationID, Artifact: artifact, State: acquisition.OperationActive, Step: "output", Log: line})
+		}
+	})
+}
+
+// Only the local startup shell and Settings may acquire or select runtimes.
+// The workspace window keeps its name after navigation, so origin trust is required.
+func (s *ManagerService) runtimeSurfaceAuthorized(ctx context.Context) bool {
+	return isTrustedWindow(ctx, "settings") || (isTrustedWindow(ctx, "workspace") && s.startupTrusted != nil && s.startupTrusted())
 }

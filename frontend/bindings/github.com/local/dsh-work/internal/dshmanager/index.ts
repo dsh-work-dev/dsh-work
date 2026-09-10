@@ -38,10 +38,12 @@ export type {
     ProfileInfo,
     ProfileRef,
     ProfileRenameRequest,
+    ProfileRestoreRequest,
     ResolvedLaunch,
     ResolvedNode,
     RunContext,
     RuntimeInfo,
+    SafeModeState,
     Snapshot,
     SwitchAttempt
 } from "./models.js";

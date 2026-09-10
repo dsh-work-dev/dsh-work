@@ -12,6 +12,7 @@ export {
 
 export type {
     Failure,
+    LaunchSelection,
     RuntimePreparation,
     Status
 } from "./models.js";

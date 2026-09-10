@@ -38,7 +38,16 @@ func (JobObjectAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, r
 	if err := plan.Validate(); err != nil {
 		return nil, fmt.Errorf("validate launch plan: %w", err)
 	}
-	if err := validateBatchInvocation(plan.Executable, plan.Args); err != nil {
+	worker, err := startJobCommand(ctx, plan.Executable, plan.Args, plan.Env, plan.WorkingDirectory, rawHandler)
+	if err != nil {
+		return nil, err
+	}
+	return worker, nil
+}
+
+// Both Workers and short-lived commands must own descendants before execution.
+func startJobCommand(ctx context.Context, executable string, args []string, env map[string]string, dir string, rawHandler supervisor.RawOutputHandler) (*jobWorker, error) {
+	if err := validateBatchInvocation(executable, args); err != nil {
 		return nil, fmt.Errorf("validate batch launch: %w", err)
 	}
 	if ctx == nil {
@@ -100,7 +109,7 @@ func (JobObjectAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, r
 		}
 	}()
 
-	application, argv := processCommand(plan.Executable, plan.Args)
+	application, argv := processCommand(executable, args)
 	application16, err := win.UTF16PtrFromString(application)
 	if err != nil {
 		return nil, fmt.Errorf("encode DSH executable: %w", err)
@@ -109,11 +118,17 @@ func (JobObjectAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, r
 	if err != nil {
 		return nil, fmt.Errorf("encode DSH command line: %w", err)
 	}
-	environment16, err := environmentBlock(plan.Env)
+	environment16, err := environmentBlock(env)
 	if err != nil {
 		return nil, fmt.Errorf("encode DSH environment: %w", err)
 	}
-	workingDirectory16, err := win.UTF16PtrFromString(filepath.Clean(plan.WorkingDirectory))
+	if dir == "" {
+		dir, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+	workingDirectory16, err := win.UTF16PtrFromString(filepath.Clean(dir))
 	if err != nil {
 		return nil, fmt.Errorf("encode DSH working directory: %w", err)
 	}

@@ -1,5 +1,5 @@
-/* Settings tokens are scoped to the trusted Settings window. DSH owns theme. */
-:root[data-surface="settings"] {
+/* Shared tokens for the trusted Settings and startup surfaces. DSH owns theme. */
+:root:is([data-surface="settings"], [data-surface="host"]) {
   --canvas: #ffffff;
   --sidebar: #ffffff;
   --surface: #ffffff;
@@ -32,7 +32,7 @@
   --page-gutter: clamp(24px, 3vw, 48px);
 }
 
-:root[data-surface="settings"][data-theme="dark"] {
+:root:is([data-surface="settings"], [data-surface="host"])[data-theme="dark"] {
   --canvas: #000000;
   --sidebar: #000000;
   --surface: #000000;
@@ -51,5 +51,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :root[data-surface="settings"] { --motion-fast: 0ms; }
+  :root:is([data-surface="settings"], [data-surface="host"]) { --motion-fast: 0ms; }
 }

@@ -45,6 +45,7 @@ export enum ErrorCode {
     ErrorRuntimeProfileIncompatible = "RUNTIME_PROFILE_INCOMPATIBLE",
     ErrorManagerOperationBusy = "MANAGER_OPERATION_BUSY",
     ErrorManagerStateInvalid = "MANAGER_STATE_INVALID",
+    ErrorRecoveryPointSaveFailed = "RECOVERY_POINT_SAVE_FAILED",
     ErrorSettingsStateInvalid = "SETTINGS_STATE_INVALID",
     ErrorSettingsUnavailable = "SETTINGS_UNAVAILABLE",
     ErrorNotificationDeliveryFailed = "NOTIFICATION_DELIVERY_FAILED",
@@ -71,6 +72,20 @@ export interface Failure {
 }
 
 /**
+ * LaunchSelection identifies the executables actually selected for this attempt.
+ */
+export interface LaunchSelection {
+    "runtimeVersion"?: string;
+    "runtimePath"?: string;
+    "nodeVersion"?: string;
+    "nodePath"?: string;
+    "dataDirectoryPath"?: string;
+    "profileName": string;
+    "runtimeId": string;
+    "nodeId": string;
+}
+
+/**
  * Phase identifies the bounded startup or shutdown step currently in progress.
  */
 export enum Phase {
@@ -82,8 +97,11 @@ export enum Phase {
     PhaseIdle = "idle",
     PhaseConfiguration = "configuration",
     PhaseRuntime = "runtime",
+    PhaseNode = "node",
+    PhaseProfile = "profile",
     PhaseWorker = "worker",
     PhaseReadiness = "readiness",
+    PhaseCheckpoint = "checkpoint",
     PhaseWorkspace = "workspace",
     PhaseStopping = "stopping",
     PhaseFailed = "failed",
@@ -184,6 +202,7 @@ export enum State {
  * Status is the immutable read model consumed by the frontend.
  */
 export interface Status {
+    "launchSelection"?: LaunchSelection | null;
     "state": State;
     "phase": Phase;
     "generationId"?: string;

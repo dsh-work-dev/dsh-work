@@ -16,6 +16,7 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/platform"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 func main() {
@@ -59,6 +60,21 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		return nil, nil, fmt.Errorf("resolve DSH discovery root: %w", err)
 	}
 	config := dshworkapp.DefaultConfig(discoveryRoot)
+	locator := filepath.Join(filepath.Dir(filepath.Dir(config.SettingsPath)), "dsh-work-location", "locations.json")
+	locationLock, err := dshworkapp.AcquireManagerProcessLock(locator)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer locationLock.Close()
+	locations, err := storagepaths.Open(locator, filepath.Dir(config.SettingsPath))
+	if err != nil {
+		return nil, nil, err
+	}
+	current := locations.Snapshot().Current
+	config.SettingsPath = filepath.Join(current.Root, "settings.json")
+	config.DSHDataDirectory = filepath.Join(current.Root, "environment")
+	config.BootstrapDirectory = filepath.Join(current.Root, "bootstrap")
+
 	managerLock, err := dshworkapp.AcquireManagerProcessLock(config.SettingsPath)
 	if err != nil {
 		return nil, nil, err

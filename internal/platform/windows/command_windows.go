@@ -3,23 +3,21 @@
 package windows
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"sort"
 	"strings"
-	"syscall"
+	"time"
 
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/supervisor"
 	win "golang.org/x/sys/windows"
 )
 
-const commandOutputLimit = 64 * 1024
-
 type CommandExecutor struct{}
+
+func terminateCommandJob(worker *jobWorker) error {
+	return win.TerminateJobObject(worker.job, 1)
+}
 
 func NewCommandExecutor() dshadapter.CommandExecutor {
 	return CommandExecutor{}
@@ -27,40 +25,52 @@ func NewCommandExecutor() dshadapter.CommandExecutor {
 
 func (CommandExecutor) Run(ctx context.Context, executable string, args []string, env map[string]string, dir string) (dshadapter.CommandResult, error) {
 	if err := validateBatchInvocation(executable, args); err != nil {
+		dshadapter.ReportCommandOutput(ctx, "Command could not start ("+executable+"): "+err.Error())
 		return dshadapter.CommandResult{}, err
 	}
-	command, commandArgs := commandFor(executable, args)
-	cmd := exec.CommandContext(ctx, command, commandArgs...)
-	cmd.Dir = dir
-	cmd.Env = mergedEnvironment(env)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: win.CREATE_NO_WINDOW,
+	worker, err := startJobCommand(ctx, executable, args, env, dir, func(_ supervisor.OutputStream, line string) {
+		dshadapter.ReportCommandOutput(ctx, line)
+	})
+	if err != nil {
+		dshadapter.ReportCommandOutput(ctx, "Command could not start ("+executable+"): "+err.Error())
+		return dshadapter.CommandResult{}, err
 	}
-
-	stdout := &boundedBuffer{limit: commandOutputLimit}
-	stderr := &boundedBuffer{limit: commandOutputLimit}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	err := cmd.Run()
-	return dshadapter.CommandResult{
-		Stdout: supervisor.Redact(stdout.String()),
-		Stderr: supervisor.Redact(stderr.String()),
-	}, err
-}
-
-func commandFor(executable string, args []string) (string, []string) {
-	if isBatchFile(executable) {
-		comspec := os.Getenv("ComSpec")
-		if comspec == "" {
-			comspec = "cmd.exe"
+	defer worker.Close()
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+		// Terminate the job even if its root has exited but descendants remain.
+		if stopErr := terminateCommandJob(worker); stopErr != nil {
+			err = fmt.Errorf("%w: %v", err, stopErr)
 		}
-		commandArgs := make([]string, 0, len(args)+4)
-		commandArgs = append(commandArgs, "/d", "/s", "/c", executable)
-		commandArgs = append(commandArgs, args...)
-		return comspec, commandArgs
+	case <-worker.Exited():
+		if result := worker.ExitResult(); result.Code != 0 || result.Err != "" {
+			err = fmt.Errorf("command exited with code %d: %s", result.Code, result.Err)
+		}
+		if stopErr := terminateCommandJob(worker); err == nil {
+			err = stopErr
+		}
 	}
-	return executable, append([]string(nil), args...)
+	cleanup, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if cleanupErr := worker.WaitEmpty(cleanup); err == nil {
+		err = cleanupErr
+	}
+	select {
+	case <-worker.readersDone:
+	case <-cleanup.Done():
+		if err == nil {
+			err = cleanup.Err()
+		}
+	}
+	diagnostics := worker.Diagnostics()
+	if err != nil {
+		dshadapter.ReportCommandOutput(ctx, "Command failed: "+err.Error())
+	}
+	return dshadapter.CommandResult{
+		Stdout: diagnostics.StdoutTail,
+		Stderr: diagnostics.StderrTail,
+	}, err
 }
 
 func isBatchFile(executable string) bool {
@@ -88,48 +98,4 @@ func validateBatchInvocation(executable string, args []string) error {
 
 func containsBatchMeta(value string) bool {
 	return strings.ContainsAny(value, "&|<>()^%!\"\r\n")
-}
-
-func mergedEnvironment(overrides map[string]string) []string {
-	entries := make(map[string]string)
-	for _, entry := range os.Environ() {
-		key, _, ok := strings.Cut(entry, "=")
-		if ok {
-			entries[strings.ToLower(key)] = entry
-		}
-	}
-	for key, value := range overrides {
-		entries[strings.ToLower(key)] = key + "=" + value
-	}
-
-	result := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		result = append(result, entry)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		left, _, _ := strings.Cut(result[i], "=")
-		right, _, _ := strings.Cut(result[j], "=")
-		return strings.ToLower(left) < strings.ToLower(right)
-	})
-	return result
-}
-
-type boundedBuffer struct {
-	limit int
-	data  []byte
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if b.limit <= 0 {
-		return len(p), nil
-	}
-	b.data = append(b.data, p...)
-	if len(b.data) > b.limit {
-		b.data = bytes.Clone(b.data[len(b.data)-b.limit:])
-	}
-	return len(p), nil
-}
-
-func (b *boundedBuffer) String() string {
-	return string(b.data)
 }

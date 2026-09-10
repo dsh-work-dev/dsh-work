@@ -23,6 +23,7 @@ import (
 	dshworkpet "github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/workergateway"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -53,6 +54,37 @@ func main() {
 
 	dependencies := platform.New()
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
+	defaultRoot := filepath.Dir(config.SettingsPath)
+	locatorPath := filepath.Join(filepath.Dir(defaultRoot), "dsh-work-location", "locations.json")
+	locationLock, err := dshworkapp.AcquireManagerProcessLock(locatorPath)
+	if err != nil {
+		log.Fatalf("lock storage locations: %v", err)
+	}
+	defer locationLock.Close()
+	locations, err := storagepaths.Open(locatorPath, defaultRoot)
+	if err != nil {
+		log.Fatalf("read storage locations: %v", err)
+	}
+	// Keep the existing manager lock boundary while preparing a relocation.
+	previousRoot := locations.Snapshot().Current.Root
+	previousLock, err := dshworkapp.AcquireManagerProcessLock(filepath.Join(previousRoot, "settings.json"))
+	if err != nil {
+		log.Fatalf("lock current storage: %v", err)
+	}
+	if err := locations.ApplyPending(); err != nil {
+		log.Printf("storage migration failed; using original location: %v", err)
+	}
+	_ = previousLock.Close()
+	if previousRoot != locations.Snapshot().Current.Root {
+		if entries, e := os.ReadDir(previousRoot); e == nil && len(entries) == 1 && entries[0].Name() == "manager.lock" {
+			_ = os.Remove(filepath.Join(previousRoot, "manager.lock"))
+			_ = os.Remove(previousRoot)
+		}
+	}
+	storage := locations.Snapshot().Current
+	config.SettingsPath = filepath.Join(storage.Root, "settings.json")
+	config.DSHDataDirectory = filepath.Join(storage.Root, "environment")
+	config.BootstrapDirectory = filepath.Join(storage.Root, "bootstrap")
 	managerLock, lockErr := dshworkapp.AcquireManagerProcessLock(config.SettingsPath)
 	if lockErr != nil {
 		var failure lifecycle.Failure
@@ -69,37 +101,29 @@ func main() {
 	}()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
+	dsh.SetUserDataDirectory(storage.UserDataPath())
 	petActivity := dshactivity.New(filepath.Join(filepath.Dir(config.SettingsPath), "pet-activity-bridge"))
 	defer petActivity.Close()
 	dsh.SetLaunchPatch(petActivity.Prepare)
-	runtimeHint := dsh.RuntimeHint()
 	var managerRunner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, managerErr := dshmanager.New(dshmanager.Config{
-		CommandRunner:    managerRunner,
-		PluginCommands:   dshadapter.NewPluginCommands(),
-		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:     platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:  dsh,
-		ProfileCatalog:   dsh,
+		DisableHealthSnapshots: true,
+		CommandRunner:          managerRunner,
+		PluginCommands:         dshadapter.NewPluginCommands(),
+		RuntimeInstaller:       platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:             platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:            platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:          platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:           platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:        dsh,
+		ProfileCatalog:         dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
-			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
+			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
-		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path,
-			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(runtimeHint.Path),
-		}},
-		DefaultRunContext: dshmanager.RunContext{
-			RuntimeID: "dsh-" + runtimeHint.Version,
-			Node:      dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem},
-			Profile:   dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
-		},
 	})
 	if managerErr != nil {
 		log.Printf("dsh-work manager state unavailable: %v", managerErr)
@@ -199,7 +223,11 @@ func main() {
 		if desktop != nil {
 			desktop.Event.Emit("acquisition", status)
 		}
-	})
+	}, workspaceTrusted.Load)
+	dshworkapp.SetBackupFileActions(managerService,
+		func() (string, error) { return nativeui.ChooseProfileBackup(desktop) },
+		func(path string) error { return desktop.Env.OpenFileManager(path, false) })
+	dshworkapp.SetProfileExportAction(managerService, func(name string) (string, error) { return nativeui.SaveProfileArchive(desktop, name) })
 	var publishLocale func(dshworksettings.Locale)
 	settingsService := dshworkapp.NewSettingsService(
 		settingsManager,
@@ -229,10 +257,18 @@ func main() {
 		Name:        "dsh-work",
 		Description: "A local desktop shell for DSH workspaces.",
 		Icon:        dshWorkAppIcon,
+		Windows: application.WindowsOptions{
+			WebviewUserDataPath: filepath.Join(filepath.Dir(config.SettingsPath), "webview"),
+		},
 		Services: []application.Service{
 			application.NewService(hostService),
 			application.NewService(managerService),
 			application.NewService(settingsService),
+			application.NewService(dshworkapp.NewStorageService(locations,
+				func(path string) error { return desktop.Env.OpenFileManager(path, false) },
+				func(currentPath string) (string, error) {
+					return nativeui.ChooseDirectory(desktop, currentPath)
+				})),
 			application.NewService(petSettingsService),
 			application.NewService(nativeNotificationHost),
 		},

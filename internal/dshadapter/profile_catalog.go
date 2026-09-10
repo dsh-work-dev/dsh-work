@@ -8,9 +8,9 @@ import "github.com/local/dsh-work/internal/dshmanager"
 func (a *Adapter) BuiltInProfiles() []dshmanager.ProfileDefinition {
 	return []dshmanager.ProfileDefinition{
 		{Name: "web", Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
-		{Name: "headless", Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
-		{Name: "sdk", Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
-		{Name: "sdk-minimal", Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
-		{Name: "acp", Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
+		{Name: "headless", DesktopUnsupported: true, Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
+		{Name: "sdk", DesktopUnsupported: true, Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
+		{Name: "sdk-minimal", DesktopUnsupported: true, Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
+		{Name: "acp", DesktopUnsupported: true, Kind: dshmanager.ProfileKindBuiltIn, AutoInitialize: true},
 	}
 }

@@ -42,6 +42,22 @@ export function DeleteProfile(request: dshmanager$0.ProfileDeleteRequest): $Canc
     return $Call.ByID(3806339691, request);
 }
 
+export function DeleteProfileBackup(ref: dshmanager$0.ProfileRef, fileName: string): $CancellablePromise<void> {
+    return $Call.ByID(856008297, ref, fileName);
+}
+
+export function EnterSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(246338583);
+}
+
+export function ExitSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(2298611703);
+}
+
+export function ExportProfile(ref: dshmanager$0.ProfileRef): $CancellablePromise<string> {
+    return $Call.ByID(3399802680, ref);
+}
+
 export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3706159683);
 }
@@ -53,6 +69,10 @@ export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
  */
 export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
     return $Call.ByID(500405340);
+}
+
+export function ImportProfileBackup(): $CancellablePromise<dshmanager$0.ProfileCloneResult | null> {
+    return $Call.ByID(4094017527);
 }
 
 export function InstallLatestNode(): $CancellablePromise<dshmanager$0.Snapshot> {
@@ -69,6 +89,14 @@ export function InstallRuntime(version: string): $CancellablePromise<dshmanager$
 
 export function ListPlugins(request: dshmanager$0.PluginListRequest): $CancellablePromise<dshmanager$0.PluginInfo[] | null> {
     return $Call.ByID(3735864195, request);
+}
+
+export function ListProfileBackups(ref: dshmanager$0.ProfileRef): $CancellablePromise<dshmanager$0.ProfileBackupResult[] | null> {
+    return $Call.ByID(968671673, ref);
+}
+
+export function OpenProfileBackups(ref: dshmanager$0.ProfileRef): $CancellablePromise<void> {
+    return $Call.ByID(3482533913, ref);
 }
 
 export function RefreshDSHReleases(): $CancellablePromise<dshmanager$0.Snapshot> {
@@ -109,6 +137,10 @@ export function ResolveLaunch(request: dshmanager$0.LaunchRequest): $Cancellable
 
 export function RestoreKnownGood(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3365799665);
+}
+
+export function RestoreProfileBackup(request: dshmanager$0.ProfileRestoreRequest): $CancellablePromise<dshmanager$0.ProfileCloneResult> {
+    return $Call.ByID(291893256, request);
 }
 
 export function RetryLastSwitch(): $CancellablePromise<dshmanager$0.Snapshot> {

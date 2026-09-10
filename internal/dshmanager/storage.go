@@ -12,17 +12,20 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-// State is the manager persistence contract. Current and known-good state are
-// intentionally absent because they are only true while a Host Worker is
-// alive. Configured is the single persisted Run context.
+// State persists the desired selection and the last verified recovery files.
+// Current remains process-local; persisted health is not a claim of a live Worker.
 type State struct {
-	DataDirectories  []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
-	Runtimes         []RuntimeInfo            `json:"runtimes,omitempty"`
-	Nodes            []NodeInstallationInfo   `json:"nodes,omitempty"`
-	LatestNode       *NodeReleaseInfo         `json:"latestNode,omitempty"`
-	DSHReleases      []DSHReleaseInfo         `json:"dshReleases,omitempty"`
-	PluginProvenance []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
-	Configured       *RunContext              `json:"configured,omitempty"`
+	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
+	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
+	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
+	RecoveryPending   bool                     `json:"recoveryPending,omitempty"`
+	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
+	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
+	Nodes             []NodeInstallationInfo   `json:"nodes,omitempty"`
+	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
+	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
+	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
 // StateStore isolates persistence from manager policy. A future platform or
@@ -59,13 +62,17 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 // are intentionally ignored so a newer build can add optional catalog metadata
 // without making an older build lose the user's selection.
 type persistedState struct {
-	DataDirectories  []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
-	Runtimes         []RuntimeInfo            `json:"runtimes,omitempty"`
-	Nodes            []NodeInstallationInfo   `json:"nodes,omitempty"`
-	LatestNode       *NodeReleaseInfo         `json:"latestNode,omitempty"`
-	DSHReleases      []DSHReleaseInfo         `json:"dshReleases,omitempty"`
-	PluginProvenance []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
-	Configured       *RunContext              `json:"configured,omitempty"`
+	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
+	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
+	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
+	RecoveryPending   bool                     `json:"recoveryPending,omitempty"`
+	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
+	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
+	Nodes             []NodeInstallationInfo   `json:"nodes,omitempty"`
+	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
+	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
+	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
 func decodeState(data []byte) (State, error) {
@@ -81,6 +88,8 @@ func decodeState(data []byte) (State, error) {
 		return State{}, err
 	}
 	state := State{
+		SafeMode: persisted.SafeMode,
+		Healthy:  persisted.Healthy, LastSwitchAttempt: persisted.LastSwitchAttempt, RecoveryPending: persisted.RecoveryPending,
 		DataDirectories:  persisted.DataDirectories,
 		Runtimes:         persisted.Runtimes,
 		Nodes:            persisted.Nodes,
@@ -110,6 +119,25 @@ func decodeState(data []byte) (State, error) {
 }
 
 func validateState(state State) error {
+	if state.SafeMode != nil {
+		if err := validateRunContext(state.SafeMode.ReturnTo); err != nil {
+			return err
+		}
+		if err := validateRunContext(state.SafeMode.Target); err != nil {
+			return err
+		}
+		if state.SafeMode.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID || state.SafeMode.Target.Profile.Name != "web" || state.SafeMode.ReturnTo.Profile.DataDirectoryID == SafeModeDataDirectoryID {
+			return errors.New("invalid safe mode state")
+		}
+	}
+	if state.Healthy != nil {
+		if err := validateRunContext(state.Healthy.Launch.Target); err != nil {
+			return err
+		}
+		if !filepath.IsAbs(state.Healthy.Directory) || !filepath.IsAbs(state.Healthy.Launch.DataDirectory.Path) {
+			return errors.New("invalid healthy snapshot path")
+		}
+	}
 	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))
 	for _, dataDirectory := range state.DataDirectories {
 		if err := validateDataDirectory(dataDirectory); err != nil {

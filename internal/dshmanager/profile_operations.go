@@ -131,6 +131,12 @@ func (m *Manager) DeleteProfile(ctx context.Context, request ProfileDeleteReques
 	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be deleted", "choose a custom profile")
 	}
+	m.mu.RLock()
+	protected := m.safeMode != nil && m.safeMode.ReturnTo.Profile == request.Profile
+	m.mu.RUnlock()
+	if protected {
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "profile is retained for leaving safe mode", "return to the previous environment before deleting it")
+	}
 	failedTarget := lastSwitchAttempt != nil && lastSwitchAttempt.Target.Profile == request.Profile
 	if profileRefMatches(current, request.Profile) || profileRefMatches(configured, request.Profile) || profileRefMatches(knownGood, request.Profile) || failedTarget {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the selected DSH profile is in use", "switch to another profile before deleting it")
@@ -144,14 +150,17 @@ func (m *Manager) DeleteProfile(ctx context.Context, request ProfileDeleteReques
 	if info.Mode()&os.ModeSymlink != 0 {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "the DSH profile path is not a directory", "choose an existing custom profile")
 	}
+	if _, err := m.prepareProfileBackups(ctx, request.Profile); err != nil {
+		return Snapshot{}, recoveryFailure(err, lifecycle.ErrorProfileDeleteFailed, "Profile backups could not be prepared for deletion.")
+	}
 	if err := os.RemoveAll(profilePath); err != nil {
 		return Snapshot{}, failureWithMeta(lifecycle.ErrorProfileDeleteFailed, "the DSH profile could not be deleted", "the profile may be only partially removed", true, true)
 	}
 	return m.Snapshot(context.Background())
 }
 
-// BackupProfile writes a compressed, portable profile backup next to the DSH
-// data directory. Dependency trees and other generated directories are
+// BackupProfile writes a compressed profile backup inside its owner's hidden
+// backup directory. Dependency trees and other generated directories are
 // excluded; manifests, lockfiles, patches and user-authored config files are
 // retained so a future restore can ask DSH to reconcile dependencies again.
 func (m *Manager) BackupProfile(ctx context.Context, request ProfileBackupRequest) (ProfileBackupResult, error) {
@@ -180,10 +189,6 @@ func (m *Manager) BackupProfile(ctx context.Context, request ProfileBackupReques
 	if dataDirectory.Ownership == DataDirectoryOwnershipUser && !directoryExists(dataDirectory.Path) {
 		return ProfileBackupResult{}, failure(lifecycle.ErrorProfileNotFound, "The selected user DSH data directory is unavailable", "register an existing DSH data directory")
 	}
-	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
-		return ProfileBackupResult{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be backed up", "choose an existing custom profile")
-	}
-
 	profilePath := filepath.Join(dataDirectory.Path, "profiles", request.Profile.Name)
 	info, err := os.Lstat(profilePath)
 	if err != nil || !info.IsDir() {
@@ -192,7 +197,13 @@ func (m *Manager) BackupProfile(ctx context.Context, request ProfileBackupReques
 	if info.Mode()&os.ModeSymlink != 0 {
 		return ProfileBackupResult{}, failure(lifecycle.ErrorProfileInvalid, "the DSH profile path is not a directory", "choose an existing custom profile")
 	}
-	backupDirectory := filepath.Join(dataDirectory.Path, "profile-backups")
+	backupDirectory, err := m.prepareProfileBackups(ctx, request.Profile)
+	if err != nil {
+		return ProfileBackupResult{}, profileBackupFailure(err)
+	}
+	if err := validateBackupProfile(profilePath); err != nil {
+		return ProfileBackupResult{}, profileBackupFailure(err)
+	}
 	if err := os.MkdirAll(backupDirectory, 0o700); err != nil {
 		return ProfileBackupResult{}, profileBackupFailure(err)
 	}
@@ -215,53 +226,12 @@ func (m *Manager) BackupProfile(ctx context.Context, request ProfileBackupReques
 		}
 		return ProfileBackupResult{}, profileBackupFailure(statErr)
 	}
-	temporary, err := os.CreateTemp(backupDirectory, ".profile-backup-*.part")
-	if err != nil {
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	temporaryPath := temporary.Name()
-	keepTemporary := false
-	defer func() {
-		if !keepTemporary {
-			_ = os.Remove(temporaryPath)
-		}
-	}()
-	archive := zip.NewWriter(temporary)
-	manifest := struct {
-		Profile   ProfileRef `json:"profile"`
-		CreatedAt string     `json:"createdAt"`
-		Format    string     `json:"format"`
-	}{Profile: request.Profile, CreatedAt: createdAt.Format(time.RFC3339), Format: "dsh-work-profile-v1"}
-	if err := writeBackupEntry(archive, "_dsh-work/manifest.json", func(writer io.Writer) error {
-		return json.NewEncoder(writer).Encode(manifest)
-	}); err != nil {
-		_ = archive.Close()
-		_ = temporary.Close()
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	if err := addProfileBackupFiles(ctx, archive, profilePath); err != nil {
-		_ = archive.Close()
-		_ = temporary.Close()
+	if err := writeProfileArchive(ctx, request.Profile, profilePath, backupDirectory, destination, createdAt); err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
 			return ProfileBackupResult{}, cancellation
 		}
 		return ProfileBackupResult{}, profileBackupFailure(err)
 	}
-	if err := archive.Close(); err != nil {
-		_ = temporary.Close()
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	if err := temporary.Close(); err != nil {
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	if err := os.Rename(temporaryPath, destination); err != nil {
-		return ProfileBackupResult{}, profileBackupFailure(err)
-	}
-	keepTemporary = true
 	stat, err := os.Stat(destination)
 	if err != nil {
 		return ProfileBackupResult{}, profileBackupFailure(err)
@@ -375,7 +345,7 @@ func backupExcludedDirectory(name string) bool {
 
 func profileGeneratedDirectory(name string) bool {
 	switch strings.ToLower(name) {
-	case "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
+	case profileBackupFolder, "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
 		return true
 	default:
 		return false
@@ -417,4 +387,117 @@ func safeBackupPart(value string) string {
 
 func profileBackupFailure(_ error) error {
 	return failureWithMeta(lifecycle.ErrorProfileBackupFailed, "the profile backup could not be created", "the profile was not changed", true, false)
+}
+
+// ExportProfile writes a portable archive selected by the native save dialog.
+// It does not create a local backup or include the owner's backup history.
+func (m *Manager) ExportProfile(ctx context.Context, ref ProfileRef, destination string) (resultErr error) {
+	defer func() {
+		resultErr = recoveryFailure(resultErr, lifecycle.ErrorProfileBackupFailed, "The profile could not be exported.")
+	}()
+	release, err := m.acquireOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if err := m.ensureMutationAllowed(); err != nil {
+		return err
+	}
+	if err := validateProfileRef(ref); err != nil {
+		return err
+	}
+	directory, err := m.backupDataDirectory(ref.DataDirectoryID)
+	if err != nil {
+		return err
+	}
+	source := filepath.Join(directory.Path, "profiles", ref.Name)
+	info, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("profile must be a directory")
+	}
+	if err := validateBackupProfile(source); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(destination) {
+		return errors.New("export destination must be absolute")
+	}
+	// Resolve existing parents to reject a linked path into the source tree.
+	resolvedSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(destination))
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(resolvedSource, filepath.Join(parent, filepath.Base(destination)))
+	if err == nil && filepath.IsLocal(relative) {
+		return errors.New("choose an export location outside the profile directory")
+	}
+	if info, err := os.Lstat(destination); err == nil && !info.Mode().IsRegular() {
+		return errors.New("export destination must be a regular file")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeProfileArchive(ctx, ref, source, parent, destination, time.Now().UTC())
+}
+
+func writeProfileArchive(ctx context.Context, ref ProfileRef, profilePath, backupDirectory, destination string, createdAt time.Time) error {
+	temporary, err := os.CreateTemp(backupDirectory, ".profile-backup-*.part")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	keepTemporary := false
+	defer func() {
+		if !keepTemporary {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	archive := zip.NewWriter(temporary)
+	manifest := struct {
+		Profile   ProfileRef `json:"profile"`
+		CreatedAt string     `json:"createdAt"`
+		Format    string     `json:"format"`
+	}{Profile: ref, CreatedAt: createdAt.Format(time.RFC3339), Format: "dsh-work-profile-v1"}
+	if err := writeBackupEntry(archive, "_dsh-work/manifest.json", func(writer io.Writer) error {
+		return json.NewEncoder(writer).Encode(manifest)
+	}); err != nil {
+		_ = archive.Close()
+		_ = temporary.Close()
+		return err
+	}
+	if err := addProfileBackupFiles(ctx, archive, profilePath); err != nil {
+		_ = archive.Close()
+		_ = temporary.Close()
+		if cancellation := contextError(ctx); cancellation != nil {
+			return cancellation
+		}
+		return err
+	}
+	if err := archive.Close(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if err := os.Rename(temporaryPath, destination); err != nil {
+		return err
+	}
+	keepTemporary = true
+	return nil
 }

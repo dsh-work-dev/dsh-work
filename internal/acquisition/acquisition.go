@@ -128,6 +128,7 @@ const (
 // OperationStatus is the bounded, credential-free projection emitted to the
 // trusted Settings surface for one explicit artifact operation.
 type OperationStatus struct {
+	Log           string           `json:"log,omitempty"`
 	OperationID   string           `json:"operationId"`
 	Artifact      ArtifactIdentity `json:"artifact"`
 	State         OperationState   `json:"state"`

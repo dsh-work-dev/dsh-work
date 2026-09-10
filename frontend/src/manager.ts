@@ -1,8 +1,12 @@
+import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
-import {DataDirectoryOwnership, NodeSelectionKind, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {NodeSelectionKind, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {mountOperationLog} from "./operation-log";
+import {mountStorage} from "./storage";
+import {mountRecovery} from "./recovery";
 import {mountNotifications, mountSettings} from "./settings";
 import {mountPets} from "./pets";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
@@ -35,12 +39,9 @@ const backupProfile = ManagerService.BackupProfile;
 const installRuntime = ManagerService.InstallRuntime;
 const cancelRuntime = ManagerService.CancelRuntime;
 const removeRuntime = ManagerService.RemoveRuntime;
-const registerDataDirectory = ManagerService.RegisterDataDirectory;
-const removeDataDirectory = ManagerService.RemoveDataDirectory;
 const refreshDSHReleases = ManagerService.RefreshDSHReleases;
 const installLatestNode = ManagerService.InstallLatestNode;
 const removeNode = ManagerService.RemoveNode;
-const retryLastSwitch = ManagerService.RetryLastSwitch;
 const restoreKnownGood = ManagerService.RestoreKnownGood;
 
 function managerErrorMessage(error: unknown, fallbackKey: string): string {
@@ -48,14 +49,11 @@ function managerErrorMessage(error: unknown, fallbackKey: string): string {
   return t(fallbackKey);
 }
 
-function dataDirectoryOwnershipLabel(value: DataDirectoryOwnership): string {
-  if (value === DataDirectoryOwnership.DataDirectoryOwnershipDSHWork) {
-    return "dsh-work";
-  }
-  if (value === DataDirectoryOwnership.DataDirectoryOwnershipUser) {
-    return t("value.user");
-  }
-  return t("value.other");
+function switchReason(code: string): string {
+  if (code === "RUNTIME_PROFILE_INCOMPATIBLE") return t("switch.incompatible");
+  if (code === "DSH_EARLY_EXIT") return t("switch.earlyExit");
+  if (code === "PROFILE_PREPARATION_FAILED") return t("switch.preparationFailed");
+  return t("error.switchRunContext");
 }
 
 function profileKindLabel(value: string): string {
@@ -105,90 +103,6 @@ function pluginSourceLabel(plugin: PluginInfo): string {
   return t("value.unknownSource");
 }
 
-function runtimePreparationText(preparation: RuntimePreparation): string {
-  if (preparation.state === "failed" && preparation.error?.summary) {
-    return preparation.error.summary;
-  }
-  switch (preparation.state) {
-    case "acquiring-node":
-      return t("runtimes.downloadingNode");
-    case "acquiring-dsh":
-      return t("runtimes.downloadingDsh");
-    case "verifying":
-      return t("runtimes.verifying");
-    case "installed":
-      return t(preparation.artifactKind === "node" ? "runtimes.nodePrepared" : "runtimes.prepared");
-    case "cancelled":
-      return t("runtimes.cancelled");
-    case "failed":
-      return t("runtimes.failed");
-  }
-  switch (preparation.operation) {
-    case "detect-pnpm":
-      return t("runtimes.checkingTools");
-    case "detect-npm":
-      return t("runtimes.checkingTools");
-    case "download-node":
-      return t("runtimes.downloadingNode");
-    case "install-dsh":
-      return t("runtimes.downloadingDsh");
-    case "verify":
-      return t("runtimes.verifying");
-    default:
-      return t("runtimes.preparing");
-  }
-}
-
-function acquisitionPreparation(status: OperationStatus): RuntimePreparation {
-  const state = status.state === "succeeded" ? "installed" : status.state === "failed" ? "failed" : status.state === "canceled" ? "cancelled" :
-    status.artifact.kind === "node" ? "acquiring-node" : "acquiring-dsh";
-  const resultRoute = status.result?.route || undefined;
-  return {
-    state,
-    operation: (status.step || "none") as RuntimePreparation["operation"],
-    targetVersion: status.artifact.version,
-    source: (status.route || resultRoute || "none") as RuntimePreparation["source"],
-    receivedBytes: status.receivedBytes,
-    totalBytes: status.totalBytes,
-    hasTotal: status.hasTotal,
-    canCancel: status.canCancel,
-    operationId: status.operationId,
-    artifactKind: status.artifact.kind as RuntimePreparation["artifactKind"],
-    attempt: status.attempt,
-    error: status.result?.failure ? {
-      code: status.result.failure.kind,
-      summary: status.result.failure.summary,
-      retryable: status.result.failure.retryable,
-      effectOccurred: false,
-      correlationId: status.operationId || ""
-    } : undefined,
-    result: status.result ? {
-      succeeded: status.result.succeeded,
-      route: resultRoute as "official" | "mirror" | "local" | undefined,
-      failure: status.result.failure ? {
-        kind: status.result.failure.kind,
-        retryable: status.result.failure.retryable,
-      } : undefined,
-    } : undefined,
-  };
-}
-
-function formatRuntimeBytes(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    return "0 B";
-  }
-  if (value < 1024) {
-    return `${Math.round(value)} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  if (value < 1024 * 1024 * 1024) {
-    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
 export function runtimePreparationArtifactKind(preparation: Pick<RuntimePreparation, "artifactKind" | "state" | "operation">): "node" | "dsh" {
   if (preparation.artifactKind === "node" || preparation.state === "acquiring-node" || preparation.operation === "download-node") {
     return "node";
@@ -206,6 +120,7 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
 type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "settings" | "notifications" | "pets" | "about";
 
 function sectionName(value: string | null): ManagerSection {
+  if (value === "backups") return "profiles";
   if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
     return value;
   }
@@ -219,13 +134,10 @@ export function mountManager() {
   const profile = document.getElementById("manager-profile") as HTMLSelectElement;
   const packageInput = document.getElementById("manager-plugin-package") as HTMLInputElement;
   const install = document.getElementById("manager-plugin-install") as HTMLButtonElement;
-  const newDataDirectoryPath = document.getElementById("manager-new-data-directory-path") as HTMLInputElement;
-  const newDataDirectoryId = document.getElementById("manager-new-data-directory-id") as HTMLInputElement;
-  const newDataDirectoryName = document.getElementById("manager-new-data-directory-name") as HTMLInputElement;
-  const registerDataDirectoryButton = document.getElementById("manager-register-data-directory") as HTMLButtonElement;
   const runtimeVersion = document.getElementById("manager-runtime-version") as HTMLSelectElement;
   const installRuntimeButton = document.getElementById("manager-runtime-install") as HTMLButtonElement;
   const refreshDSHButton = document.getElementById("manager-dsh-refresh") as HTMLButtonElement;
+  let releasesLoading = false;
   const installNodeButton = document.getElementById("manager-node-install") as HTMLButtonElement;
   const dshPreparationPanel = document.getElementById("manager-dsh-preparation") as HTMLElement;
   const dshPreparationDetail = document.getElementById("manager-dsh-preparation-detail") as HTMLParagraphElement;
@@ -245,7 +157,7 @@ export function mountManager() {
   const currentRuntime = document.getElementById("manager-current-runtime") as HTMLElement;
   const currentDataDirectory = document.getElementById("manager-current-data-directory") as HTMLElement;
   const currentProfile = document.getElementById("manager-current-profile") as HTMLElement;
-  const currentWorkspace = document.getElementById("manager-current-workspace") as HTMLElement;
+  const currentNode = document.getElementById("manager-current-node") as HTMLElement;
   const currentState = document.getElementById("manager-current-state") as HTMLElement;
   const configuredContext = document.getElementById("manager-configured-context") as HTMLElement;
   const configuredRuntime = document.getElementById("manager-configured-runtime") as HTMLElement;
@@ -256,14 +168,15 @@ export function mountManager() {
   const knownGoodDataDirectory = document.getElementById("manager-known-good-data-directory") as HTMLElement;
   const knownGoodProfile = document.getElementById("manager-known-good-profile") as HTMLElement;
   const selectedProfileLabel = document.getElementById("manager-selected-profile") as HTMLElement;
-  const currentProfileSummary = document.getElementById("manager-current-profile-summary") as HTMLElement;
-  const currentProfileStatus = document.getElementById("manager-current-profile-status") as HTMLParagraphElement;
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
   const profileEmpty = document.getElementById("manager-profile-empty") as HTMLElement;
   const profileDetail = document.getElementById("manager-profile-detail") as HTMLElement;
   const profileName = document.getElementById("manager-profile-name") as HTMLInputElement;
   const profileRename = document.getElementById("manager-profile-rename") as HTMLButtonElement;
   const profileClone = document.getElementById("manager-profile-clone") as HTMLButtonElement;
+  let exportInFlight = false;
+  const profileExport = document.getElementById("manager-profile-export") as HTMLButtonElement;
+  const renameControls = document.getElementById("profile-rename-controls") as HTMLElement;
   const profileBackup = document.getElementById("manager-profile-backup") as HTMLButtonElement;
   const profileDelete = document.getElementById("manager-profile-delete") as HTMLButtonElement;
   const pluginEmpty = document.getElementById("manager-plugin-empty") as HTMLElement;
@@ -278,7 +191,6 @@ export function mountManager() {
   const switchFailureDetail = document.getElementById("manager-switch-failure-detail") as HTMLParagraphElement;
   const switchRetry = document.getElementById("manager-switch-retry") as HTMLButtonElement;
   const switchRestore = document.getElementById("manager-switch-restore") as HTMLButtonElement;
-  const dataDirectoryList = document.getElementById("manager-data-directories") as HTMLDivElement;
   const sectionPicker = document.getElementById("manager-section-select") as HTMLSelectElement;
   sectionPicker.addEventListener("change", () => showSection(sectionName(sectionPicker.value)));
   const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-manager-section]"));
@@ -297,6 +209,9 @@ export function mountManager() {
   let themeSyncAvailable = false;
   let contextSwitchInFlight = false;
   let runtimeInstallInFlight = false;
+  let runtimeRemovalInFlight = false;
+  let runtimeCancelPending = false;
+  let activeRuntimeKind: "node" | "dsh" = "dsh";
   let runtimePreparations: Partial<Record<"node" | "dsh", RuntimePreparation>> = {};
 
   if (initialRuntimeVersion) {
@@ -316,23 +231,31 @@ export function mountManager() {
   };
 
   // Feedback belongs to the initiating panel, including asynchronous failures.
-  function feedbackFor(section: ManagerSection) {
-    const panel = panels.find(item => item.dataset.managerPanel === section)!;
+  function feedbackFor(section: ManagerSection, scope?: HTMLElement) {
+    const panel = scope ?? panels.find(item => item.dataset.managerPanel === section)!;
     const result = document.createElement("p");
     result.className = "panel-result";
     result.setAttribute("role", "status");
     result.hidden = true;
-    panel.append(result);
+    (section === "profiles" ? document.getElementById("manager-profile-detail")! : panel).append(result);
+    panel.prepend(result);
+    let anchor: Element | null = null;
     const clear = () => { result.hidden = true; result.textContent = ""; };
     panel.addEventListener("change", clear, true);
     panel.addEventListener("click", event => {
-      if ((event.target as Element).closest("button")) clear();
+      const button = (event.target as Element).closest("button");
+      if (button) {
+        clear();
+        anchor = button.closest(".manager-list-item, .profile-actions, .profile-rename-row, .plugin-install-row, .manager-actions, .setting-row") ?? button;
+      }
     }, true);
     return (message: string, tone: "neutral" | "success" | "error" = "neutral", persistent = false) => {
       // Controls already show successful changes. Only failures and actionable
       // results (backup filename or required restart) need accompanying text.
       if (!message) { clear(); return; }
-      if (tone !== "error" && !persistent) return;
+      if (tone !== "error" && !persistent) { clear(); return; }
+      if (!scope && anchor?.isConnected && panel.contains(anchor)) anchor.after(result);
+      else panel.append(result);
       result.textContent = message;
       result.hidden = false;
     };
@@ -340,10 +263,17 @@ export function mountManager() {
   const setFeedback = feedbackFor("overview");
   const settingsFeedback = feedbackFor("settings");
   const profilesFeedback = feedbackFor("profiles");
+  const recovery = mountRecovery((next, restored) => {
+    snapshot = next;
+    if (restored) { managedProfile = {...restored}; renameControls.hidden = true; }
+    renderSelection(); renderOverview(); renderProfiles(); renderRuntimes();
+    if (restored) { selectedProfileLabel.tabIndex = -1; selectedProfileLabel.focus(); }
+  });
   const pluginsFeedback = feedbackFor("plugins");
-  const runtimesFeedback = feedbackFor("runtimes");
-  const directoriesFeedback = feedbackFor("data-directories");
+  const runtimesFeedback = feedbackFor("runtimes", document.getElementById("manager-dsh-group")!);
+  const nodeFeedback = feedbackFor("runtimes", document.getElementById("manager-node-group")!);
   const settings = mountSettings(settingsFeedback);
+  mountStorage();
   const notifications = mountNotifications(feedbackFor("notifications"));
   const pets = mountPets();
 
@@ -370,6 +300,8 @@ export function mountManager() {
       document.getElementById("manager-content")!.scrollTop = 0;
     }
     currentSection = next;
+    const sharedState = document.querySelector<HTMLElement>(".manager-load-state");
+    if (sharedState) sharedState.style.display = ["overview", "profiles", "plugins", "runtimes"].includes(next) ? "" : "none";
     managerTitle.textContent = t(sectionCopy[next].title);
     sectionPicker.value = next;
     for (const panel of panels) {
@@ -385,6 +317,77 @@ export function mountManager() {
       }
     }
   }
+
+  const stickyPanels = Array.from(document.querySelectorAll<HTMLElement>(".profile-editor, .pets-preview-panel"));
+  const positionProfileEditor = () => {
+    for (const panel of stickyPanels) panel.style.top = `${Math.min(0, window.innerHeight - 48 - panel.offsetHeight)}px`;
+  };
+  const profileResize = new ResizeObserver(positionProfileEditor);
+  stickyPanels.forEach(panel => profileResize.observe(panel));
+  window.addEventListener("resize", positionProfileEditor);
+  window.addEventListener("pagehide", () => { profileResize.disconnect(); window.removeEventListener("resize", positionProfileEditor); }, {once: true});
+  const environmentEditor = document.getElementById("environment-editor")!;
+  const environmentApply = document.getElementById("environment-apply") as HTMLButtonElement;
+  let editingEnvironment = false;
+  function editEnvironment(target?: ManagerRunContext) {
+    if (!snapshot || mutationBlocked()) return;
+    editingEnvironment = false;
+    renderSelection();
+    if (target) {
+      runtime.value = target.runtimeId;
+      node.value = target.node.kind === "system" ? "system" : target.node.installationId ?? "";
+      dataDirectory.value = target.profile.dataDirectoryId;
+      fillProfiles(target.profile);
+    }
+    editingEnvironment = true;
+    environmentEditor.hidden = false;
+    showSection("overview");
+    runtime.focus();
+  }
+  document.getElementById("environment-edit")!.addEventListener("click", () => editEnvironment());
+  document.getElementById("environment-cancel")!.addEventListener("click", () => {
+    editingEnvironment = false; environmentEditor.hidden = true; renderSelection();
+    document.getElementById("environment-edit")!.focus();
+  });
+  environmentApply.addEventListener("click", () => void switchRunContext());
+  document.getElementById("known-good-return")!.addEventListener("click", () => { if (snapshot?.knownGood) editEnvironment(snapshot.knownGood); });
+  document.getElementById("plugins-restart")!.addEventListener("click", () => { if (snapshot?.current) editEnvironment(snapshot.current); });
+  const renameStart = document.getElementById("profile-rename-start") as HTMLButtonElement;
+  const finishRename = () => { renameControls.hidden = true; renameStart.focus(); };
+  renameStart.addEventListener("click", () => { renameControls.hidden = false; profileName.focus(); profileName.select(); });
+  document.getElementById("profile-rename-cancel")!.addEventListener("click", finishRename);
+  profileName.addEventListener("keydown", event => {
+    if (event.key === "Escape") finishRename();
+    if (event.key === "Enter" && !profileRename.disabled) profileRename.click();
+  });
+  document.getElementById("profile-back-to-list")!.addEventListener("click", () => {
+    const selected = profileList.querySelector<HTMLButtonElement>("[aria-pressed=true]");
+    selected?.focus();
+  });
+  document.getElementById("profile-switch")!.addEventListener("click", () => { if (managedProfile) void switchToProfile(managedProfile); });
+  document.getElementById("profile-plugins-link")!.addEventListener("click", () => showSection("plugins"));
+  document.getElementById("plugins-profile-link")!.addEventListener("click", () => {
+    if (snapshot?.current) selectProfile(snapshot.current.profile); else showSection("profiles");
+  });
+  const loadState = document.createElement("div");
+  loadState.className = "manager-load-state";
+  loadState.setAttribute("role", "status");
+  const loadMessage = document.createElement("span");
+  const loadRetry = document.createElement("button");
+  loadRetry.className = "button button-secondary"; loadRetry.type = "button";
+  loadRetry.textContent = t("common.retry"); loadRetry.hidden = true;
+  loadMessage.textContent = t("view.loading");
+  loadState.append(loadMessage, loadRetry);
+  document.querySelector(".manager-topbar")!.after(loadState);
+  loadRetry.addEventListener("click", () => void refresh());
+  document.getElementById("about-version")!.textContent = `dsh-work ${__APP_VERSION__}`;
+  document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
+    const result = document.getElementById("about-result")!;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({version: __APP_VERSION__, state: hostStatus?.state, current: snapshot?.current, failure: snapshot?.lastSwitchAttempt}, null, 2));
+      result.textContent = t("logs.copied");
+    } catch { result.textContent = t("logs.copyFailed"); }
+  })());
 
   function sameProfileRef(left: ManagerProfileRef | undefined, right: ManagerProfileRef | undefined): boolean {
     return !!left && !!right && left.dataDirectoryId === right.dataDirectoryId && left.name === right.name;
@@ -410,7 +413,7 @@ export function mountManager() {
   }
 
   function mutationBlocked(): boolean {
-    return contextSwitchInFlight || runtimeInstallInFlight;
+    return contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
   }
 
   function canMutateProfile(ref: ManagerProfileRef | undefined): boolean {
@@ -419,6 +422,7 @@ export function mountManager() {
   }
 
   function dataDirectoryLabel(dataDirectoryId: string): string {
+	if (dataDirectoryId === "dsh-work") return "DSH Work";
     return (snapshot?.dataDirectories ?? []).find((item) => item.id === dataDirectoryId)?.name ?? dataDirectoryId;
   }
 
@@ -431,6 +435,7 @@ export function mountManager() {
   }
 
   function renderOverview() {
+    recovery.render(snapshot, mutationBlocked());
     if (!snapshot) {
       return;
     }
@@ -440,21 +445,14 @@ export function mountManager() {
       dataDirectory: currentDataDirectory,
       profile: currentProfile
     });
-    const workspace = hostStatus?.workspace;
-    if (workspace?.state === "selected" && workspace.path) {
-      const workspaceTitle = workspace.title || workspace.path;
-      currentWorkspace.textContent = workspaceTitle;
-      currentWorkspace.title = workspace.path;
-      currentWorkspace.setAttribute("aria-label", `${workspaceTitle}: ${workspace.path}`);
-    } else if (workspace?.state === "selection-required") {
-      currentWorkspace.textContent = t("value.chooseWorkspaceInDsh");
-      currentWorkspace.removeAttribute("title");
-      currentWorkspace.setAttribute("aria-label", t("value.chooseWorkspaceInDsh"));
-    } else {
-      currentWorkspace.textContent = t("value.noWorkspace");
-      currentWorkspace.removeAttribute("title");
-      currentWorkspace.setAttribute("aria-label", t("value.noWorkspace"));
-    }
+    const target = model.current.target;
+    const selection = hostStatus?.launchSelection;
+    const matchingLaunch = target && selection?.runtimeId === target.runtimeId && selection.profileName === target.profile.name
+      && selection.nodeId === (target.node.kind === "system" ? "system" : target.node.installationId);
+    const nodeVersion = target ? matchingLaunch && selection?.nodeVersion || (target.node.kind === "system"
+      ? snapshot.systemNode?.version
+      : snapshot.nodes?.find(node => node.id === target.node.installationId)?.version) : undefined;
+    currentNode.textContent = nodeVersion ? `${nodeVersion} · ${t(target?.node.kind === "system" ? "value.system" : "value.installed")}` : "—";
     const stateKey = hostStatus?.state === "Starting" || hostStatus?.state === "Stopping"
       ? "value.switching"
       : hostStatus?.state === "Failed"
@@ -473,7 +471,10 @@ export function mountManager() {
         profile: configuredProfile
       });
     }
-    knownGoodContext.hidden = !model.knownGood;
+    knownGoodContext.hidden = !model.knownGood || sameRunContext(model.current.target, model.knownGood.target);
+    const knownReturn = document.getElementById("known-good-return") as HTMLButtonElement;
+    knownReturn.hidden = !model.knownGood || sameRunContext(model.current.target, model.knownGood.target);
+    knownReturn.disabled = mutationBlocked();
     if (model.knownGood) {
       renderOverviewLane(model.knownGood, {
         runtime: knownGoodRuntime,
@@ -484,9 +485,12 @@ export function mountManager() {
     const attempt = snapshot.lastSwitchAttempt;
     switchFailure.hidden = !attempt;
     if (attempt) {
-      switchFailureDetail.textContent = t("error.switchRunContext");
-      switchRetry.hidden = false;
-      switchRestore.hidden = !snapshot.knownGood || attempt.rollback === "restored";
+      const targetProfile = snapshot.profiles?.find(item => sameProfileRef(item.ref, attempt.target.profile));
+      const reason = targetProfile?.launchable === false ? t("switch.incompatible") : switchReason(attempt.failure.code);
+      switchFailureDetail.textContent = `${t("switch.failedTarget", {profile: attempt.target.profile.name})} ${reason} ${snapshot.current ? t("switch.stillRunning", {profile: snapshot.current.profile.name}) : t("switch.stopped")}`;
+      document.getElementById("manager-switch-diagnostic")!.textContent = JSON.stringify(attempt, null, 2);
+      switchRetry.hidden = !attempt.failure.retryable || targetProfile?.launchable === false;
+      switchRestore.hidden = !!snapshot.current || !snapshot.knownGood || attempt.rollback === "restored";
     }
     if (hostStatus?.state === "Failed" && hostStatus.error) {
       setFeedback(t("status.failureFallback"), "error");
@@ -527,6 +531,7 @@ export function mountManager() {
         currentVersion ? t("value.currentVersion", {version: currentVersion}) : t("value.installed"),
         plugin.availableVersion ? t("value.availableVersion", {version: plugin.availableVersion}) : "",
       ].filter(Boolean).join(" · ");
+      if (!item.launchable) detail.textContent = t("profiles.noDesktop");
       text.append(name, detail);
       if (mutable) {
         if (plugin.updateCheck === "available") {
@@ -556,6 +561,7 @@ export function mountManager() {
   }
 
   function renderProfileDetail() {
+    recovery.selectProfile(managedProfile);
     const item = managedProfileItem();
     profileEmpty.hidden = !!item;
     profileDetail.hidden = !item;
@@ -563,26 +569,27 @@ export function mountManager() {
       profileName.value = "";
       profileClone.disabled = true;
       profileBackup.disabled = true;
+      profileExport.disabled = true;
       profileDelete.disabled = true;
       return;
     }
     selectedProfileLabel.textContent = item.ref.name;
-    const profileState = item.renamable
-      ? `${dataDirectoryLabel(item.ref.dataDirectoryId)} · ${profileKindLabel(item.kind)}`
-      : `${dataDirectoryLabel(item.ref.dataDirectoryId)} · ${profileKindLabel(item.kind)} · ${t("profiles.fixedName")}`;
-    const mutable = canMutateProfile(item.ref);
     const current = currentRunContext();
     const isCurrent = !!current && sameProfileRef(item.ref, current.profile);
     const canRename = item.renamable && !isCurrent && !mutationBlocked();
-    const accessNote = mutable
-      ? t("profiles.currentEditable")
-      : t("profiles.readOnly");
-    profileScopeNote.textContent = `${profileState} · ${accessNote}`;
-    profileName.value = item.ref.name;
+    profileScopeNote.textContent = [profileKindLabel(item.kind), isCurrent ? t("profiles.current") : ""].filter(Boolean).join(" · ");
+    renameStart.hidden = !item.renamable;
+    renameStart.disabled = !canRename;
+    const switchProfile = document.getElementById("profile-switch") as HTMLButtonElement;
+    switchProfile.hidden = isCurrent;
+    switchProfile.disabled = !item.launchable || mutationBlocked();
+    document.getElementById("profile-plugins-link")!.hidden = !isCurrent;
+    if (renameControls.hidden) profileName.value = item.ref.name;
     profileName.disabled = !canRename;
     profileRename.disabled = !canRename;
     profileClone.disabled = (!item.exists && !item.autoInitialize) || mutationBlocked();
-    profileBackup.disabled = !item.exists || item.kind !== "custom" || mutationBlocked();
+    profileBackup.disabled = !item.exists || mutationBlocked();
+    profileExport.disabled = !item.exists || mutationBlocked() || exportInFlight;
     profileDelete.disabled = !item.deletable || mutationBlocked();
   }
 
@@ -591,16 +598,14 @@ export function mountManager() {
     pluginEmpty.hidden = !!item;
     pluginDetail.hidden = !item;
     if (!item) {
+      pluginProfileLabel.textContent = "—";
       profilePlugins.replaceChildren();
       return;
     }
-    pluginProfileLabel.textContent = `${item.ref.name} · ${dataDirectoryLabel(item.ref.dataDirectoryId)}`;
+    pluginProfileLabel.textContent = item.ref.name;
     const mutable = canMutateProfile(item.ref);
-    const current = currentRunContext();
-    const isCurrent = !!current && sameProfileRef(item.ref, current.profile);
-    pluginScopeNote.textContent = isCurrent
-      ? mutable ? t("profiles.pluginsEditable") : t("profiles.pluginsReadOnly")
-      : t("profiles.pluginsReadOnly");
+    pluginScopeNote.hidden = mutable || mutationBlocked();
+    pluginScopeNote.textContent = t("plugins.startToEdit");
     renderPluginList(item, mutable);
     install.disabled = !mutable;
     packageInput.disabled = !mutable;
@@ -621,7 +626,7 @@ export function mountManager() {
     for (const item of profiles) {
       const option = document.createElement("option");
       option.value = item.ref.name;
-      option.textContent = item.exists ? item.ref.name : `${item.ref.name} · ${t("value.new")}`;
+      option.textContent = !item.launchable ? `${item.ref.name} · ${t("profiles.noDesktop")}` : item.exists ? item.ref.name : `${item.ref.name} · ${t("value.new")}`;
       option.disabled = !item.launchable;
       profile.append(option);
     }
@@ -633,6 +638,7 @@ export function mountManager() {
   }
 
   function renderSelection() {
+    if (editingEnvironment) return;
     const configured = snapshot?.configured;
     runtime.replaceChildren();
     for (const item of snapshot?.runtimes ?? []) {
@@ -679,7 +685,7 @@ export function mountManager() {
     const hostPreparation = (hostStatus as (HostLifecycleStatus & {runtimePreparation?: RuntimePreparation}) | undefined)?.runtimePreparation;
     const hostKind = hostPreparation ? preparationKind(hostPreparation) : undefined;
     const preparations: Partial<Record<"node" | "dsh", RuntimePreparation>> = {...runtimePreparations};
-    if (hostPreparation && hostKind && !preparations[hostKind]) {
+    if (hostPreparation && hostKind && !Object.hasOwn(preparations, hostKind)) {
       preparations[hostKind] = hostPreparation;
     }
     renderRuntimePreparationCard("dsh", preparations.dsh, {
@@ -717,7 +723,8 @@ export function mountManager() {
       return;
     }
     view.panel.hidden = false;
-    const detail = runtimePreparationText(preparation);
+    const cancelling = runtimeCancelPending && runtimeInstallInFlight && kind === activeRuntimeKind;
+    const detail = cancelling ? t("runtimes.cancelling") : runtimePreparationText(preparation);
     view.detail.textContent = detail;
     const hasProgress = preparation.hasTotal && (preparation.totalBytes ?? 0) > 0;
     const active = preparation.state !== "installed" && preparation.state !== "failed" && preparation.state !== "cancelled";
@@ -760,7 +767,8 @@ export function mountManager() {
     }
     view.meta.textContent = meta.join(" · ");
     view.cancel.hidden = !preparation.canCancel || !runtimeInstallInFlight;
-    view.cancel.disabled = !runtimeInstallInFlight;
+    view.cancel.disabled = cancelling;
+    view.cancel.textContent = t(cancelling ? "runtimes.cancelling" : "common.cancel");
   }
 
   function selectedRunContext(): ManagerRunContext | undefined {
@@ -778,18 +786,17 @@ export function mountManager() {
   }
 
   function setContextControlsDisabled(disabled: boolean) {
+    disabled = disabled || !snapshot || runtimeInstallInFlight || runtimeRemovalInFlight;
+    environmentApply.disabled = disabled;
+    (document.getElementById("environment-edit") as HTMLButtonElement).disabled = disabled;
     runtime.disabled = disabled;
     node.disabled = disabled;
     dataDirectory.disabled = disabled;
     profile.disabled = disabled;
-    runtimeVersion.disabled = disabled || runtimeInstallInFlight;
-    installRuntimeButton.disabled = disabled || runtimeInstallInFlight;
-    refreshDSHButton.disabled = disabled || runtimeInstallInFlight;
+    runtimeVersion.disabled = disabled || runtimeInstallInFlight || releasesLoading || !snapshot?.dshReleases?.length;
+    installRuntimeButton.disabled = disabled || runtimeInstallInFlight || releasesLoading || !runtimeVersion.value || !!snapshot?.runtimes?.some(item => item.version === runtimeVersion.value && item.installed);
+    refreshDSHButton.disabled = disabled || runtimeInstallInFlight || releasesLoading;
     installNodeButton.disabled = disabled || runtimeInstallInFlight;
-    newDataDirectoryPath.disabled = disabled;
-    newDataDirectoryId.disabled = disabled;
-    newDataDirectoryName.disabled = disabled;
-    registerDataDirectoryButton.disabled = disabled;
     for (const button of Array.from(profileList.querySelectorAll<HTMLButtonElement>("[data-run-context-switch]"))) {
       button.disabled = disabled;
     }
@@ -806,7 +813,7 @@ export function mountManager() {
     if (contextSwitchInFlight) {
       return;
     }
-    const operationFeedback = currentSection === "profiles" ? profilesFeedback : currentSection === "runtimes" ? runtimesFeedback : settingsFeedback;
+    const operationFeedback = currentSection === "profiles" ? profilesFeedback : currentSection === "runtimes" ? runtimesFeedback : setFeedback;
     const next = target ?? selectedRunContext();
     if (!next) {
       operationFeedback(t("error.selectRunContext"), "error");
@@ -814,25 +821,28 @@ export function mountManager() {
     }
     contextSwitchInFlight = true;
     setContextControlsDisabled(true);
-    operationFeedback(t("feedback.switchingRunContext"), "neutral");
+    operationFeedback(t("feedback.switchingRunContext"), "neutral", true);
     try {
       snapshot = await setRunContext(next);
+      editingEnvironment = false; environmentEditor.hidden = true;
       await refreshCurrentPluginObservation();
       applyTheme(snapshot.theme);
-      operationFeedback(t("feedback.contextSwitched"), "success");
+      operationFeedback("");
       renderSelection();
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
     } catch (error) {
       await refresh(next.profile).catch(() => undefined);
-      operationFeedback(managerErrorMessage(error, "error.switchRunContext"), "error");
+      const failure = snapshot?.lastSwitchAttempt;
+      operationFeedback(failure ? `${t("switch.failedTarget", {profile: failure.target.profile.name})} ${switchReason(failure.failure.code)}` : managerErrorMessage(error, "error.switchRunContext"), "error");
       console.error("Could not switch DSH Run context", error);
     } finally {
       contextSwitchInFlight = false;
       setContextControlsDisabled(false);
+      renderOverview();
       renderProfileDetail();
+      if (environmentEditor.hidden) document.getElementById("environment-edit")!.focus();
     }
   }
 
@@ -843,34 +853,30 @@ export function mountManager() {
       settingsFeedback(t("error.selectRunContext"), "error");
       return;
     }
-	await switchRunContext({runtimeId, node: base?.node ?? {kind: NodeSelectionKind.NodeSelectionSystem}, profile: {...ref}});
+	editEnvironment({runtimeId, node: base?.node ?? {kind: NodeSelectionKind.NodeSelectionSystem}, profile: {...ref}});
   }
 
   function selectProfile(ref: ManagerProfileRef) {
     managedProfile = {...ref};
+    renameControls.hidden = true;
+    document.getElementById("profile-result")!.textContent = "";
     renderProfiles();
     showSection("profiles");
+    if (window.matchMedia("(max-width: 760px)").matches) { selectedProfileLabel.tabIndex = -1; selectedProfileLabel.focus({preventScroll: true}); profileDetail.scrollIntoView({block: "start"}); }
   }
 
   function renderProfiles() {
+    const focusedKey = (document.activeElement as HTMLElement)?.dataset.profileKey;
     profileList.replaceChildren();
     const profiles = snapshot?.profiles ?? [];
     const current = currentRunContext();
-    const currentItem = current ? profiles.find((item) => sameProfileRef(item.ref, current.profile)) : undefined;
-    if (currentItem) {
-      currentProfileSummary.textContent = currentItem.ref.name;
-      currentProfileStatus.textContent = `${dataDirectoryLabel(currentItem.ref.dataDirectoryId)} · ${t("profiles.currentHint")}`;
-    } else {
-      currentProfileSummary.textContent = t("profiles.noCurrent");
-      currentProfileStatus.textContent = t("profiles.currentHint");
-    }
     if (!managedProfileItem()) {
       syncManagedProfile();
     }
     if (profiles.length === 0) {
       const empty = document.createElement("p");
       empty.className = "manager-empty";
-      empty.textContent = t("profiles.noProfiles");
+      empty.textContent = t(snapshot ? "profiles.noProfiles" : "view.loading");
       profileList.append(empty);
       renderProfileDetail();
       renderPluginPanel();
@@ -895,39 +901,34 @@ export function mountManager() {
       });
       text.append(name, detail);
       const choose = document.createElement("button");
-      choose.className = "button button-secondary";
+      choose.className = "profile-select";
       choose.type = "button";
-      choose.textContent = t(selected ? "action.selected" : "action.select");
-      choose.disabled = selected;
+      choose.dataset.profileKey = `${item.ref.dataDirectoryId}/${item.ref.name}`;
+      choose.setAttribute("aria-pressed", String(selected));
+      choose.setAttribute("aria-label", t("profile.inspect", {profile: item.ref.name}));
+      choose.append(text);
       choose.addEventListener("click", () => selectProfile(item.ref));
-      row.append(text, choose);
-      if (!canMutateProfile(item.ref) && item.launchable) {
-        const switchButton = document.createElement("button");
-        switchButton.className = "button button-primary";
-        switchButton.type = "button";
-        switchButton.textContent = t("action.switchToProfile");
-        switchButton.disabled = contextSwitchInFlight;
-        switchButton.dataset.runContextSwitch = "true";
-        switchButton.addEventListener("click", () => void switchToProfile(item.ref));
-        row.append(switchButton);
-      }
+      row.append(choose);
       profileList.append(row);
     }
     renderProfileDetail();
     renderPluginPanel();
+    if (focusedKey) profileList.querySelector<HTMLButtonElement>(`[data-profile-key="${CSS.escape(focusedKey)}"]`)?.focus({preventScroll: true});
   }
 
   function renderRuntimes() {
     renderRuntimePreparations();
     const selectedRelease = runtimeVersion.value;
     runtimeVersion.replaceChildren();
+    if (!snapshot?.dshReleases?.length) runtimeVersion.add(new Option(t(releasesLoading ? "startup.fetchingReleases" : "runtimes.fetchFirst"), ""));
     for (const release of snapshot?.dshReleases ?? []) {
       const option = document.createElement("option");
       option.value = release.version;
-      option.textContent = `${release.version}${release.tags?.length ? ` · ${release.tags.join(", ")}` : ""}`;
+      option.textContent = `${release.version} · ${t(snapshot?.runtimes?.some(r => r.version === release.version && r.installed) ? "startup.localInstalled" : "startup.remoteDownload")}${release.tags?.length ? ` · ${release.tags.join(", ")}` : ""}`;
       runtimeVersion.append(option);
     }
-    if (selectedRelease) runtimeVersion.value = selectedRelease;
+    if (selectedRelease && snapshot?.dshReleases?.some(item => item.version === selectedRelease)) runtimeVersion.value = selectedRelease;
+    setContextControlsDisabled(contextSwitchInFlight);
     runtimeList.replaceChildren();
     const runtimes = snapshot?.runtimes ?? [];
     if (runtimes.length === 0) {
@@ -944,7 +945,7 @@ export function mountManager() {
       const name = document.createElement("strong");
       name.textContent = `${item.version}${selected ? ` · ${t("action.selected")}` : ""}`;
       const detail = document.createElement("span");
-      const artifactSource = item.installSource ? runtimeArtifactSourceLabel(item.installSource) : "";
+      const artifactSource = item.installSource && item.installSource !== "none" ? runtimeArtifactSourceLabel(item.installSource) : "";
       detail.textContent = [runtimeSourceLabel(item.source), t(item.installed ? "value.verified" : "value.unverified"), artifactSource]
         .filter(Boolean)
         .join(" · ");
@@ -955,7 +956,8 @@ export function mountManager() {
         switchButton.className = "button button-primary";
         switchButton.type = "button";
         switchButton.textContent = t("action.switch");
-        switchButton.addEventListener("click", () => void switchRunContext({...snapshot!.configured!, runtimeId: item.id}));
+        switchButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
+        switchButton.addEventListener("click", () => editEnvironment({...snapshot!.configured!, runtimeId: item.id}));
         row.append(switchButton);
       }
       if (item.removable) {
@@ -964,25 +966,29 @@ export function mountManager() {
         removeButton.type = "button";
         removeButton.textContent = t("action.remove");
         removeButton.dataset.contextMutation = "true";
-        const protectedRuntime = [snapshot?.configured, snapshot?.current, snapshot?.knownGood].some((target) => target?.runtimeId === item.id);
-        removeButton.disabled = contextSwitchInFlight || protectedRuntime;
+        const protectedRuntime = [snapshot?.configured, snapshot?.current, snapshot?.knownGood, snapshot?.safeMode?.returnTo].some((target) => target?.runtimeId === item.id);
+        removeButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight || protectedRuntime;
         removeButton.addEventListener("click", () => void (async () => {
-          if (contextSwitchInFlight) {
+          if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) {
             return;
           }
-          removeButton.disabled = true;
+          runtimeRemovalInFlight = true;
+          runtimesFeedback("");
+          renderRuntimes();
           try {
             snapshot = await removeRuntime(item.id);
             runtimesFeedback(t("feedback.removedRuntime", {version: item.version}), "success");
+            runtimePreparations.dsh = undefined;
+            operationLogs.dsh.clear();
             renderSelection();
             renderProfiles();
             renderRuntimes();
-            renderDataDirectories();
           } catch (error) {
             runtimesFeedback(managerErrorMessage(error, "error.removeRuntime"), "error");
             console.error("Could not remove DSH runtime", error);
           } finally {
-            removeButton.disabled = contextSwitchInFlight || protectedRuntime;
+            runtimeRemovalInFlight = false;
+            renderRuntimes();
           }
         })());
         row.append(removeButton);
@@ -1008,7 +1014,8 @@ export function mountManager() {
         useButton.className = "button button-primary";
         useButton.type = "button";
         useButton.textContent = t("action.switch");
-        useButton.addEventListener("click", () => void switchRunContext({...snapshot!.configured!, node: {kind: NodeSelectionKind.NodeSelectionSystem}}));
+        useButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
+        useButton.addEventListener("click", () => editEnvironment({...snapshot!.configured!, node: {kind: NodeSelectionKind.NodeSelectionSystem}}));
         row.append(useButton);
       }
       nodeList.append(row);
@@ -1035,7 +1042,8 @@ export function mountManager() {
         switchButton.className = "button button-primary";
         switchButton.type = "button";
         switchButton.textContent = t("action.switch");
-        switchButton.addEventListener("click", () => void switchRunContext({...snapshot!.configured!, node: {kind: NodeSelectionKind.NodeSelectionManaged, installationId: item.id}}));
+        switchButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
+        switchButton.addEventListener("click", () => editEnvironment({...snapshot!.configured!, node: {kind: NodeSelectionKind.NodeSelectionManaged, installationId: item.id}}));
         row.append(switchButton);
       }
       if (item.removable) {
@@ -1043,11 +1051,25 @@ export function mountManager() {
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
         removeButton.textContent = t("action.remove");
-        const protectedNode = [snapshot?.configured, snapshot?.current, snapshot?.knownGood].some((target) => target?.node.kind === NodeSelectionKind.NodeSelectionManaged && target.node.installationId === item.id);
-        removeButton.disabled = contextSwitchInFlight || protectedNode;
+        const protectedNode = [snapshot?.configured, snapshot?.current, snapshot?.knownGood, snapshot?.safeMode?.returnTo].some((target) => target?.node.kind === NodeSelectionKind.NodeSelectionManaged && target.node.installationId === item.id);
+        removeButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight || protectedNode;
         removeButton.addEventListener("click", () => void (async () => {
-          try { snapshot = await removeNode(item.id); renderSelection(); renderRuntimes(); }
-          catch (error) { runtimesFeedback(managerErrorMessage(error, "error.removeNode"), "error"); }
+          if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) return;
+          runtimeRemovalInFlight = true;
+          nodeFeedback("");
+          renderRuntimes();
+          try {
+            snapshot = await removeNode(item.id);
+            nodeFeedback("");
+            runtimePreparations.node = undefined;
+            operationLogs.node.clear();
+            renderSelection();
+          } catch (error) {
+            nodeFeedback(managerErrorMessage(error, "error.removeNode"), "error");
+          } finally {
+            runtimeRemovalInFlight = false;
+            renderRuntimes();
+          }
         })());
         row.append(removeButton);
       }
@@ -1067,82 +1089,33 @@ export function mountManager() {
 	}
   }
 
-  function renderDataDirectories() {
-    dataDirectoryList.replaceChildren();
-    const dataDirectories = snapshot?.dataDirectories ?? [];
-    if (dataDirectories.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "manager-empty";
-      empty.textContent = t("dataDirectories.noDirectories");
-      dataDirectoryList.append(empty);
-      return;
-    }
-    for (const item of dataDirectories) {
-      const selected = item.id === snapshot?.configured?.profile.dataDirectoryId;
-      const row = document.createElement("div");
-      row.className = `manager-list-item${selected ? " is-selected" : ""}`;
-      const text = document.createElement("div");
-      const name = document.createElement("strong");
-      name.textContent = `${item.name}${selected ? ` · ${t("action.selected")}` : ""}`;
-      const detail = document.createElement("span");
-      detail.className = "manager-data-directory-detail";
-      detail.textContent = `${dataDirectoryOwnershipLabel(item.ownership)} · ${item.path}`;
-      detail.title = item.path;
-      detail.setAttribute("aria-label", `${dataDirectoryOwnershipLabel(item.ownership)}: ${item.path}`);
-      text.append(name, detail);
-      row.append(text);
-      if (item.ownership === DataDirectoryOwnership.DataDirectoryOwnershipUser) {
-        const removeButton = document.createElement("button");
-        removeButton.className = "button button-secondary";
-        removeButton.type = "button";
-        removeButton.textContent = t("action.unregister");
-        removeButton.dataset.contextMutation = "true";
-        removeButton.disabled = contextSwitchInFlight;
-        removeButton.addEventListener("click", () => void (async () => {
-          if (contextSwitchInFlight) {
-            return;
-          }
-          removeButton.disabled = true;
-          try {
-            snapshot = await removeDataDirectory(item.id);
-            directoriesFeedback(t("feedback.unregisteredDataDirectory", {name: item.name}), "success");
-            renderSelection();
-            renderProfiles();
-            renderRuntimes();
-            renderDataDirectories();
-          } catch (error) {
-            directoriesFeedback(managerErrorMessage(error, "error.unregisterDataDirectory"), "error");
-            console.error("Could not unregister DSH data directory", error);
-          } finally {
-            removeButton.disabled = contextSwitchInFlight;
-          }
-        })());
-        row.append(removeButton);
-      }
-      dataDirectoryList.append(row);
-    }
-  }
-
   async function refresh(preferredProfile?: ManagerProfileRef) {
-    if (!contextSwitchInFlight) {
-      setFeedback("");
-    }
+    loadRetry.disabled = true;
     try {
       [snapshot, hostStatus] = await Promise.all([getSnapshot(), getHostStatus()]);
+      loadState.hidden = true;
+      setContextControlsDisabled(mutationBlocked());
       applyTheme(snapshot.theme);
       renderSelection();
       syncManagedProfile(preferredProfile);
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
       showSection(currentSection);
       themeSyncAvailable = true;
       startThemeSync();
     } catch (error) {
-      setFeedback(managerErrorMessage(error, "error.loadDshData"), "error");
+      loadState.hidden = false; loadRetry.hidden = false;
+      loadMessage.textContent = t("view.unavailable");
+      if (!snapshot) {
+        for (const field of [currentState, currentRuntime, currentProfile, currentNode]) field.textContent = "—";
+        profileList.textContent = "";
+        profileEmpty.hidden = true; pluginEmpty.hidden = true;
+        setContextControlsDisabled(true);
+      }
       console.error("Could not read DSH manager snapshot", error);
     }
+    loadRetry.disabled = false;
     await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh()]);
   }
 
@@ -1150,29 +1123,59 @@ export function mountManager() {
     item.addEventListener("click", () => showSection(sectionName(item.dataset.managerSection ?? null)));
   }
   Events.On("lifecycle", () => void refresh());
+  const operationLogs = {
+    node: mountOperationLog(nodePreparationPanel),
+    dsh: mountOperationLog(dshPreparationPanel),
+    plugin: mountOperationLog(document.querySelector("#manager-plugin-detail") as HTMLElement),
+  };
+  function beginRuntimeInstall(kind: "node" | "dsh", version?: string) {
+    activeRuntimeKind = kind;
+    runtimeInstallInFlight = true;
+    runtimeCancelPending = false;
+    (kind === "node" ? nodeFeedback : runtimesFeedback)("");
+    operationLogs[kind].clear();
+    runtimePreparations[kind] = {artifactKind: kind, state: "resolving-toolchain", operation: "none", targetVersion: version, source: "none", hasTotal: false, canCancel: false};
+    renderRuntimes();
+  }
   Events.On("acquisition", (event) => {
-    const preparation = acquisitionPreparation(event.data as OperationStatus);
-    runtimePreparations[preparationKind(preparation)] = preparation;
-    renderRuntimePreparations();
+    const status = event.data as OperationStatus;
+    const kind = status.artifact.kind === "plugin" ? "plugin" : status.artifact.kind === "node" ? "node" : "dsh";
+    const log = operationLogs[kind];
+    if (status.log) {
+      log.append(status.operationId, status.log);
+      return;
+    }
+    const preparation = acquisitionPreparation(status);
+    let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);
+    if (status.state === "active" && status.step.startsWith("detect-")) message = t("runtimes.checkingTools");
+    if (status.state === "succeeded") message = t("runtimes.resultSucceeded");
+    if (kind === "plugin") document.getElementById("plugin-operation-status")!.textContent = message;
+    if (status.route) message += ` · ${runtimeArtifactSourceLabel(status.route)}`;
+    if (status.artifact.version) message += ` · ${status.artifact.version}`;
+    if (status.receivedBytes) message += ` · ${formatRuntimeBytes(status.receivedBytes)}${status.hasTotal ? ` / ${formatRuntimeBytes(status.totalBytes ?? 0)}` : ""}`;
+    const bucket = status.hasTotal && status.totalBytes ? Math.floor((status.receivedBytes ?? 0) / status.totalBytes * 10) : Math.floor((status.receivedBytes ?? 0) / (5 * 1024 * 1024));
+    log.append(status.operationId, message, status.state === "failed", `${status.state}/${status.step}/${status.route}/${bucket}`);
+    if (kind !== "plugin") {
+      runtimePreparations[kind] = preparation;
+      if (status.state !== "active") (kind === "node" ? nodeFeedback : runtimesFeedback)("");
+      renderRuntimePreparations();
+    }
   });
+  setContextControlsDisabled(true);
+  for (const field of [currentState, currentRuntime, currentProfile, currentNode]) field.textContent = "—";
+  profileEmpty.hidden = true; pluginEmpty.hidden = true;
   showSection(currentSection);
   subscribeLocale(() => {
+    Object.values(operationLogs).forEach(log => log.labels());
     showSection(currentSection);
     renderSelection();
     renderOverview();
     renderProfiles();
     renderRuntimes();
-    renderDataDirectories();
     pets.renderLocale();
   });
 
-  dataDirectory.addEventListener("change", () => {
-    fillProfiles();
-    void switchRunContext();
-  });
-  runtime.addEventListener("change", () => void switchRunContext());
-  node.addEventListener("change", () => void switchRunContext());
-  profile.addEventListener("change", () => void switchRunContext());
+  dataDirectory.addEventListener("change", () => fillProfiles());
   window.addEventListener("focus", () => {
     void syncTheme();
     void refresh();
@@ -1206,7 +1209,7 @@ export function mountManager() {
     profileName.disabled = disabled || !canRename;
     profileRename.disabled = disabled || !canRename;
     profileClone.disabled = disabled || (!item?.exists && !item?.autoInitialize) || mutationBlocked();
-    profileBackup.disabled = disabled || !item?.exists || item?.kind !== "custom" || mutationBlocked();
+    profileBackup.disabled = disabled || !item?.exists || mutationBlocked();
     profileDelete.disabled = disabled || !item?.deletable || mutationBlocked();
     for (const button of Array.from(profilePlugins.querySelectorAll<HTMLButtonElement>("[data-plugin-remove]"))) {
       button.disabled = disabled;
@@ -1234,10 +1237,13 @@ export function mountManager() {
           ? await upgradePlugin({target, package: packageSpec})
           : await removePlugin({target, package: packageSpec});
       await refresh(target.profile);
+      document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
       pluginsFeedback(result.restartRequired
         ? t("feedback.pluginChangedRestart")
         : t(operation === "install" ? "feedback.pluginInstalled" : operation === "upgrade" ? "feedback.pluginUpgraded" : "feedback.pluginRemoved", {profile: result.profile.name}), "success", result.restartRequired);
     } catch (error) {
+      // A failed candidate may have restored the previous environment.
+      await Promise.allSettled([refresh()]);
       pluginsFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
       console.error("Could not change profile plugin", error);
     } finally {
@@ -1268,7 +1274,8 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
+      renameControls.hidden = true;
+      renameStart.focus();
       profilesFeedback(t("feedback.profileRenamed", {profile: nextName}), "success");
     } catch (error) {
       profilesFeedback(managerErrorMessage(error, "error.renameProfile"), "error");
@@ -1288,11 +1295,11 @@ export function mountManager() {
       const result = await cloneProfile({profile: item.ref});
       snapshot = result.snapshot;
       managedProfile = {...result.profile};
+      renameControls.hidden = true;
       renderSelection();
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
       showSection("profiles");
       profilesFeedback(t("feedback.profileCloned", {profile: result.profile.name}), "success");
     } catch (error) {
@@ -1319,7 +1326,6 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
       showSection("profiles");
       profilesFeedback(t("feedback.profileDeleted", {profile: item.ref.name}), "success");
     } catch (error) {
@@ -1330,6 +1336,18 @@ export function mountManager() {
     }
   })());
 
+  profileExport.addEventListener("click", () => void (async () => {
+    const item = managedProfileItem();
+    if (!item?.exists || mutationBlocked() || exportInFlight) return;
+    exportInFlight = true;
+    profileExport.disabled = true;
+    try {
+      const file = await ManagerService.ExportProfile(item.ref);
+      if (file) profilesFeedback(t("feedback.profileExported", {file}), "success", true);
+    } catch (error) { profilesFeedback(managerErrorMessage(error, "error.exportProfile"), "error"); }
+    finally { exportInFlight = false; renderProfileDetail(); }
+  })());
+
   profileBackup.addEventListener("click", () => void (async () => {
     const item = managedProfileItem();
     if (!item?.exists || contextSwitchInFlight) {
@@ -1338,7 +1356,7 @@ export function mountManager() {
     profileBackup.disabled = true;
     try {
       const result = await backupProfile({profile: item.ref});
-      profilesFeedback(t("feedback.profileBackedUp", {file: result.fileName}), "success", true);
+      recovery.backupCreated(result);
     } catch (error) {
       profilesFeedback(managerErrorMessage(error, "error.backupProfile"), "error");
       console.error("Could not back up DSH profile", error);
@@ -1347,41 +1365,8 @@ export function mountManager() {
     }
   })());
 
-  registerDataDirectoryButton.addEventListener("click", () => void (async () => {
-    if (contextSwitchInFlight) {
-      return;
-    }
-    if (!newDataDirectoryId.value.trim() || !newDataDirectoryName.value.trim() || !newDataDirectoryPath.value.trim()) {
-      directoriesFeedback(t("error.completeDataDirectory"), "error");
-      return;
-    }
-    registerDataDirectoryButton.disabled = true;
-    try {
-      snapshot = await registerDataDirectory({
-        id: newDataDirectoryId.value.trim(),
-        name: newDataDirectoryName.value.trim(),
-        path: newDataDirectoryPath.value.trim(),
-        ownership: DataDirectoryOwnership.DataDirectoryOwnershipUser
-      });
-      directoriesFeedback(t("feedback.registeredDataDirectory", {id: newDataDirectoryId.value.trim()}), "success");
-      newDataDirectoryPath.value = "";
-      newDataDirectoryId.value = "";
-      newDataDirectoryName.value = "";
-      renderSelection();
-      renderOverview();
-      renderProfiles();
-      renderRuntimes();
-      renderDataDirectories();
-    } catch (error) {
-      directoriesFeedback(managerErrorMessage(error, "error.registerDataDirectory"), "error");
-      console.error("Could not register DSH data directory", error);
-    } finally {
-      registerDataDirectoryButton.disabled = contextSwitchInFlight;
-    }
-  })());
-
   installRuntimeButton.addEventListener("click", () => void (async () => {
-    if (contextSwitchInFlight || runtimeInstallInFlight) {
+    if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) {
       return;
     }
     const version = runtimeVersion.value.trim();
@@ -1389,9 +1374,7 @@ export function mountManager() {
       runtimesFeedback(t("error.noDshRelease"), "error");
       return;
     }
-    runtimeInstallInFlight = true;
-    setContextControlsDisabled(true);
-    renderRuntimePreparations();
+    beginRuntimeInstall("dsh", version);
     try {
       snapshot = await installRuntime(version);
       runtimesFeedback(t("feedback.installedRuntime", {version}), "success");
@@ -1400,53 +1383,70 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
-      renderDataDirectories();
     } catch (error) {
-      runtimesFeedback(managerErrorMessage(error, "error.installRuntime"), "error");
+      if (!runtimePreparations.dsh?.result && runtimePreparations.dsh?.state !== "cancelled") {
+        runtimePreparations.dsh = undefined;
+        runtimesFeedback(managerErrorMessage(error, "error.installRuntime"), "error");
+      }
       console.error("Could not install DSH runtime", error);
     } finally {
       runtimeInstallInFlight = false;
-      setContextControlsDisabled(contextSwitchInFlight);
-      renderRuntimePreparations();
+      runtimeCancelPending = false;
+      renderRuntimes();
     }
   })());
 
+  runtimeVersion.addEventListener("change", () => setContextControlsDisabled(contextSwitchInFlight));
   refreshDSHButton.addEventListener("click", () => void (async () => {
-	refreshDSHButton.disabled = true;
+	releasesLoading = true;
+	renderRuntimes();
+	refreshDSHButton.textContent = t("startup.fetchingReleases");
 	try { snapshot = await refreshDSHReleases(); renderRuntimes(); runtimesFeedback(t("feedback.dshReleasesRefreshed"), "success"); }
 	catch (error) { runtimesFeedback(managerErrorMessage(error, "error.refreshDshReleases"), "error"); }
-	finally { refreshDSHButton.disabled = false; }
+	finally { releasesLoading = false; refreshDSHButton.textContent = t("action.refresh"); renderRuntimes(); }
   })());
 
   installNodeButton.addEventListener("click", () => void (async () => {
-	if (runtimeInstallInFlight) return;
-	runtimeInstallInFlight = true;
-	setContextControlsDisabled(true);
-	try { snapshot = await installLatestNode(); renderSelection(); renderRuntimes(); runtimesFeedback(t("feedback.installedNode"), "success"); }
-	catch (error) { runtimesFeedback(managerErrorMessage(error, "error.installNode"), "error"); }
-	finally { runtimeInstallInFlight = false; setContextControlsDisabled(contextSwitchInFlight); renderRuntimePreparations(); }
+	if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) return;
+	beginRuntimeInstall("node");
+	try { snapshot = await installLatestNode(); renderSelection(); nodeFeedback(""); }
+	catch (error) {
+	    if (!runtimePreparations.node?.result && runtimePreparations.node?.state !== "cancelled") {
+        runtimePreparations.node = undefined;
+        nodeFeedback(managerErrorMessage(error, "error.installNode"), "error");
+      }
+    }
+	finally { runtimeInstallInFlight = false; runtimeCancelPending = false; renderRuntimes(); }
   })());
 
-  switchRetry.addEventListener("click", () => void (async () => {
-	try { snapshot = await retryLastSwitch(); await refreshCurrentPluginObservation(); renderSelection(); renderOverview(); renderProfiles(); renderRuntimes(); }
-	catch (error) { settingsFeedback(managerErrorMessage(error, "error.switchRunContext"), "error"); }
+  document.getElementById("manager-switch-copy")!.addEventListener("click", () => void (async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById("manager-switch-diagnostic")!.textContent ?? "");
+      settingsFeedback(t("logs.copied"), "success");
+    } catch { settingsFeedback(t("logs.copyFailed"), "error"); }
   })());
+  switchRetry.addEventListener("click", () => {
+    if (snapshot?.lastSwitchAttempt) void switchRunContext(snapshot.lastSwitchAttempt.target);
+  });
 
   switchRestore.addEventListener("click", () => void (async () => {
 	try { snapshot = await restoreKnownGood(); await refreshCurrentPluginObservation(); renderSelection(); renderOverview(); renderProfiles(); renderRuntimes(); }
-	catch (error) { settingsFeedback(managerErrorMessage(error, "error.switchRunContext"), "error"); }
+	catch (error) { await refresh().catch(() => undefined); settingsFeedback(managerErrorMessage(error, "error.switchRunContext"), "error"); }
   })());
 
   for (const cancelRuntimeButton of cancelRuntimeButtons) {
     cancelRuntimeButton.addEventListener("click", () => void (async () => {
-      if (!runtimeInstallInFlight) {
+      if (!runtimeInstallInFlight || runtimeCancelPending) {
         return;
       }
-      cancelRuntimeButton.disabled = true;
+      runtimeCancelPending = true;
+      renderRuntimePreparations();
       try {
         await cancelRuntime();
       } catch (error) {
-        runtimesFeedback(managerErrorMessage(error, "error.cancelRuntime"), "error");
+        runtimeCancelPending = false;
+        (activeRuntimeKind === "node" ? nodeFeedback : runtimesFeedback)(managerErrorMessage(error, "error.cancelRuntime"), "error");
+        renderRuntimePreparations();
         console.error("Could not cancel runtime preparation", error);
       }
     })());

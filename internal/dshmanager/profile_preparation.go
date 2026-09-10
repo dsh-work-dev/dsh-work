@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -14,9 +15,14 @@ const maxProfileManifestBytes = 1 << 20
 
 // PrepareRunContext is the switch-time seam for rebuilding generated profile
 // state. It is intentionally separate from ResolveLaunch: resolving a target
-// remains a read-only catalog operation, while a Host switch may explicitly
-// prepare the candidate before stopping the current Worker.
+// remains a read-only catalog operation, while a Host switch prepares the
+// candidate after stopping the current Worker.
 func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) error {
+	// A clean rescue home boots the shipped web composition directly. Running
+	// the plugin install command here would make rescue depend on provisioning.
+	if launch.Target.Profile.DataDirectoryID == SafeModeDataDirectoryID {
+		return contextError(ctx)
+	}
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return err
@@ -42,6 +48,9 @@ func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) 
 	if err != nil {
 		return failureWithMeta(lifecycle.ErrorProfilePreparationFailed, "the DSH profile could not be prepared", "the DSH plugin command could not be constructed", true, false)
 	}
+	if err := prepareProfileWorkingDirectory(launch.DataDirectory); err != nil {
+		return failureWithMeta(lifecycle.ErrorProfilePreparationFailed, "the DSH data directory could not be prepared", err.Error(), true, false)
+	}
 	env := cloneEnvironment(launch.Node.ChildEnvironment)
 	env["DSH_HOME"] = launch.DataDirectory.Path
 	if _, err := runner.Run(ctx, launch.Runtime.Path, args, env, launch.DataDirectory.Path); err != nil {
@@ -66,6 +75,9 @@ func (m *Manager) materializeBuiltInProfile(ctx context.Context, config Config, 
 	if err != nil {
 		return failureWithMeta(lifecycle.ErrorProfileCloneFailed, "the built-in profile could not be initialized", "the DSH command could not be constructed", true, false)
 	}
+	if err := prepareProfileWorkingDirectory(dataDirectory); err != nil {
+		return failureWithMeta(lifecycle.ErrorProfileCloneFailed, "the DSH data directory could not be prepared", err.Error(), true, false)
+	}
 	env := map[string]string{"DSH_HOME": dataDirectory.Path}
 	if selected := profilePreparationNode(current, configured); selected != nil {
 		if resolved, resolveErr := resolveNode(ctx, config.NodeResolver, *selected, config.Nodes); resolveErr == nil {
@@ -82,17 +94,36 @@ func (m *Manager) materializeBuiltInProfile(ctx context.Context, config Config, 
 	return nil
 }
 
+// DSH can initialize a missing profile, but the process must first have an
+// existing working directory. Only app-owned homes may be created here.
+func prepareProfileWorkingDirectory(directory DataDirectoryInfo) error {
+	info, err := os.Stat(directory.Path)
+	if errors.Is(err, os.ErrNotExist) && directory.Ownership == DataDirectoryOwnershipDSHWork {
+		if err := os.MkdirAll(directory.Path, 0o700); err != nil {
+			return fmt.Errorf("create DSH data directory %q: %w", directory.Path, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open DSH data directory %q: %w", directory.Path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("DSH data directory %q is not a directory", directory.Path)
+	}
+	return nil
+}
+
 func profilePreparationRuntime(config Config, current, configured *RunContext) (RuntimeInfo, bool) {
 	for _, context := range []*RunContext{current, configured} {
 		if context == nil {
 			continue
 		}
-		if runtime, ok := findRuntime(config.Runtimes, context.RuntimeID); ok && runtimeExecutablePresent(runtime.Path) {
+		if runtime, ok := findRuntime(config.Runtimes, context.RuntimeID); ok && runtimeInstallationPresent(runtime) {
 			return runtime, true
 		}
 	}
 	for _, runtime := range config.Runtimes {
-		if runtimeExecutablePresent(runtime.Path) {
+		if runtimeInstallationPresent(runtime) {
 			return runtime, true
 		}
 	}

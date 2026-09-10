@@ -137,6 +137,7 @@ export function mountPets() {
   }
 
   function renderVisibility() {
+    visibility.closest<HTMLElement>(".setting-row")!.hidden = !panel;
     const preference = panel?.preference;
     const runtime = panel?.runtime;
     visibility.checked = preference?.visibilityIntent === "visible";
@@ -145,6 +146,8 @@ export function mountPets() {
     visibility.disabled = !preference?.selectedKey || switching || refreshing;
     if (visibilityFailure) {
       visibilityStatus.textContent = visibilityFailure;
+    } else if (!panel) {
+      visibilityStatus.textContent = "";
     } else if (!preference?.selectedKey) {
       visibilityStatus.textContent = t("pets.noSelection.status");
     } else if (runtime?.effectiveVisibility === "paused") {
@@ -220,8 +223,10 @@ export function mountPets() {
   }
 
   function renderPreview() {
+    document.querySelector<HTMLElement>(".pets-preview-panel")!.hidden = !panel;
     const item = (panel?.snapshot.items ?? []).find((candidate) => candidate.stableSourceKey === browseKey);
     previewName.textContent = item?.displayName ?? preview?.displayName ?? "";
+    previewName.hidden = !previewName.textContent;
     previewDescription.textContent = item?.description ?? preview?.description ?? "";
     previewPlaceholder.hidden = !!previewDataURL;
     previewImage.hidden = !previewDataURL;
@@ -287,11 +292,17 @@ export function mountPets() {
     const scanning = loading || (refreshing && panel?.snapshot.scanState === "never-scanned");
     if (scanning) {
       list.replaceChildren();
-      listCount.textContent = t("pets.list.count", {count: 0});
+      listCount.textContent = "—";
       empty.hidden = false;
       emptyTitle.textContent = t("pets.loading");
       emptyDescription.hidden = true;
       invalidIssues.hidden = true;
+      return;
+    }
+    if (!panel && !loading) {
+      list.replaceChildren(); listCount.textContent = "—";
+      empty.hidden = false; emptyTitle.textContent = t("view.unavailable");
+      emptyDescription.hidden = true; invalidIssues.hidden = true;
       return;
     }
     const items = visibleItems();
@@ -363,7 +374,7 @@ export function mountPets() {
     renderSize();
     renderList();
     renderPreview();
-    search.disabled = switching || refreshing;
+    search.disabled = !panel || switching || refreshing;
     refreshButton.disabled = refreshing || switching;
     refreshButton.textContent = refreshing ? t("pets.refresh.inProgress") : t("pets.refresh.action");
   }
@@ -604,7 +615,7 @@ export function mountPets() {
     }
   }
 
-  refreshButton.addEventListener("click", () => void refreshCatalog());
+  refreshButton.addEventListener("click", () => void (panel ? refreshCatalog() : refresh()));
   search.addEventListener("input", () => renderList());
   visibility.addEventListener("change", () => void setVisibility());
   alwaysOnTop.addEventListener("change", async () => {

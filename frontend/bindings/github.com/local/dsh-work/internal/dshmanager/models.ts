@@ -277,6 +277,12 @@ export interface ProfileRenameRequest {
     "newName": string;
 }
 
+export interface ProfileRestoreRequest {
+    "dataDirectoryId": string;
+    "fileName": string;
+    "profileName": string;
+}
+
 /**
  * ResolvedLaunch carries the validated catalog records alongside the
  * normalized target. Host uses this as one immutable handoff into the DSH
@@ -387,7 +393,13 @@ export enum RuntimeToolchain {
     RuntimeToolchainManagedNodeNPM = "managed-node-npm",
 };
 
+export interface SafeModeState {
+    "target": RunContext;
+    "returnTo": RunContext;
+}
+
 export interface Snapshot {
+    "safeMode"?: SafeModeState | null;
     "runtimes": RuntimeInfo[] | null;
     "dshReleases": DSHReleaseInfo[] | null;
     "nodes": NodeInstallationInfo[] | null;
@@ -404,7 +416,7 @@ export interface Snapshot {
 
 /**
  * SwitchAttempt is the one bounded terminal result retained for recovery. It
- * is process-local and never mutates an immutable runtime installation.
+ * is persisted with the recovery point and never mutates a runtime installation.
  */
 export interface SwitchAttempt {
     "target": RunContext;

@@ -2,7 +2,27 @@
 
 package windows
 
-import "testing"
+import (
+	"context"
+	"github.com/local/dsh-work/internal/dshadapter"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestCommandOutputIncludesProcessCreationFailure(t *testing.T) {
+	var lines []string
+	ctx := dshadapter.WithCommandOutput(context.Background(), func(line string) { lines = append(lines, line) })
+	_, err := (CommandExecutor{}).Run(ctx, filepath.Join(t.TempDir(), "missing.exe"), nil, nil, "")
+	if err == nil {
+		t.Fatal("missing executable unexpectedly started")
+	}
+	if len(lines) == 0 || !strings.Contains(strings.Join(lines, "\n"), "missing.exe") {
+		t.Fatalf("process creation failure was lost from operation logs: %v", lines)
+	}
+}
 
 func TestValidateBatchInvocationRejectsShellSyntax(t *testing.T) {
 	for _, test := range []struct {
@@ -28,5 +48,36 @@ func TestValidateBatchInvocationAllowsFixedDSHArguments(t *testing.T) {
 		"--profile", "web", "--host", "127.0.0.1", "--port", "4321", "--no-open",
 	}); err != nil {
 		t.Fatalf("fixed DSH launch args rejected: %v", err)
+	}
+}
+
+func TestCommandExecutorStreamsBeforeCommandExits(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	lines := make(chan string, 4)
+	ctx = dshadapter.WithCommandOutput(ctx, func(line string) { lines <- line })
+	done := make(chan error, 1)
+	go func() {
+		_, err := (CommandExecutor{}).Run(ctx, filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), []string{"-NoProfile", "-Command", "Write-Output 'download started'; Start-Sleep -Milliseconds 700; Write-Output 'installed'"}, nil, "")
+		done <- err
+	}()
+	select {
+	case line := <-lines:
+		if line != "download started" {
+			t.Fatalf("first line = %q", line)
+		}
+	case <-ctx.Done():
+		t.Fatal("no live command output")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("output arrived only after exit: %v", err)
+	default:
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if line := <-lines; line != "installed" {
+		t.Fatalf("last line = %q", line)
 	}
 }

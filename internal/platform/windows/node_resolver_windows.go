@@ -44,6 +44,14 @@ func (r RunNodeResolver) Resolve(ctx context.Context, selection dshmanager.NodeS
 				Retryable: true, CorrelationID: lifecycle.NewCorrelationID(),
 			}
 		}
+		// PATH may name a version-manager shim. Persist the actual executable
+		// identity so a healthy snapshot can retain the Node that was tested.
+		identity, err := r.executor.Run(ctx, nodePath, []string{"-p", "process.execPath"}, nil, "")
+		executablePath := strings.TrimSpace(identity.Stdout)
+		if err != nil || !filepath.IsAbs(executablePath) {
+			return dshmanager.ResolvedNode{}, errors.New("system Node executable identity is unavailable")
+		}
+		nodePath = filepath.Clean(executablePath)
 		resolved := dshmanager.ResolvedNode{
 			Selection: selection, Version: version, NodePath: nodePath,
 			ChildEnvironment: childPathEnvironment(filepath.Dir(nodePath)),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import test from "node:test";
 
-import {viewModel, type LifecycleStatus} from "../src/lifecycle";
+import {runningLaunchSelection, startupProfileName, viewModel, type LifecycleStatus} from "../src/lifecycle";
 import {buildOverviewModel, sameRunContext} from "../src/overview";
 import {runtimePreparationArtifactKind, runtimePreparationProgressPercent} from "../src/manager";
 import {hasTranslationInEveryLocale, isStaticCopy} from "../src/i18n";
@@ -204,4 +204,17 @@ test("acquisition terminal result copy exists in all locales", () => {
 	for (const key of ["runtimes.resultSucceeded", "runtimes.resultCancelled", "runtimes.resultFailedRetryable", "runtimes.resultFailed"]) {
 		assert.equal(hasTranslationInEveryLocale(key), true, key);
 	}
+});
+
+test("startup profile follows candidate and rollback rather than last saved selection", () => {
+  assert.equal(startupProfileName(status({launchSelection: {runtimeId: "dsh", nodeId: "system", profileName: "web 1"}}), "web"), "web 1");
+  assert.equal(startupProfileName(status({launchSelection: {runtimeId: "dsh", nodeId: "system", profileName: "web"}}), "web 1"), "web");
+  assert.equal(startupProfileName(status({}), "web 1"), "web 1");
+});
+
+test("a failed attempt does not overwrite the next manual runtime selection", () => {
+  const launchSelection = {runtimeId: "candidate", nodeId: "node-next", runtimeVersion: "next", nodeVersion: "24", profileName: "web 1"};
+  assert.equal(runningLaunchSelection(status({state: "Starting", launchSelection})), launchSelection);
+  assert.equal(runningLaunchSelection(status({state: "Failed", launchSelection})), undefined);
+  assert.equal(runningLaunchSelection(status({state: "Stopped", launchSelection})), undefined);
 });

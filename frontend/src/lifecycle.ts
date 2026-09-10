@@ -1,5 +1,5 @@
 export type LifecycleState = "Starting" | "Ready" | "Stopping" | "Stopped" | "Failed";
-export type LifecyclePhase = "idle" | "configuration" | "runtime" | "worker" | "readiness" | "workspace" | "stopping" | "failed";
+export type LifecyclePhase = "idle" | "configuration" | "runtime" | "node" | "profile" | "worker" | "readiness" | "checkpoint" | "workspace" | "stopping" | "failed";
 
 export interface LifecycleFailure {
   code: string;
@@ -43,6 +43,7 @@ export interface RuntimePreparation {
 }
 
 export interface LifecycleStatus {
+  launchSelection?: {runtimeId: string; nodeId: string; profileName?: string; runtimeVersion?: string; runtimePath?: string; nodeVersion?: string; nodePath?: string; dataDirectoryPath?: string};
   state: LifecycleState;
   phase: LifecyclePhase;
   generationId?: string;
@@ -71,8 +72,11 @@ const phaseLabels: Record<LifecyclePhase, string> = {
   idle: "Idle",
   configuration: "Preparing",
   runtime: "Checking DSH",
+  node: "Checking Node.js",
+  profile: "Checking profile and plugins",
   worker: "Starting DSH",
   readiness: "Checking readiness",
+  checkpoint: "Saving recovery environment",
   workspace: "Workspace ready",
   stopping: "Stopping",
   failed: "Needs attention"
@@ -82,8 +86,11 @@ const phaseLabelKeys: Record<LifecyclePhase, string> = {
   idle: "status.idle",
   configuration: "status.preparing",
   runtime: "status.checkingDsh",
+  node: "startup.checkNode",
+  profile: "startup.checkProfile",
   worker: "status.startingDsh",
   readiness: "status.checkingReadiness",
+  checkpoint: "status.savingEnvironment",
   workspace: "status.workspaceReady",
   stopping: "status.stopping",
   failed: "status.needsAttention"
@@ -163,4 +170,13 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 		showRetry: false,
 		workspace: copy("status.waitingWorkspace", "Waiting for the DSH workspace.")
 	};
+}
+
+// The persisted selection is the last healthy context, not a switch candidate.
+export function startupProfileName(status: LifecycleStatus, configured?: string): string | undefined {
+  return status.launchSelection?.profileName || configured;
+}
+
+export function runningLaunchSelection(status: LifecycleStatus) {
+  return ["Starting", "Stopping", "Ready"].includes(status.state) ? status.launchSelection : undefined;
 }

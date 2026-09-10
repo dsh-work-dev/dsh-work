@@ -497,6 +497,25 @@ func TestManagerPreparesMissingProfileDependenciesBeforeSwitch(t *testing.T) {
 	}
 }
 
+func TestDevelopmentLauncherWithoutDSHPackageIsNotInstalled(t *testing.T) {
+	m := newTestManager(t)
+	launcher := filepath.Join(t.TempDir(), "run-dsh.cmd")
+	if err := os.WriteFile(launcher, []byte("@node missing.js"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.config.Runtimes[0].Path = launcher
+	m.config.Runtimes[0].Source = RuntimeSourceDevelopmentFixture
+	snapshot, err := m.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Runtimes[0].Installed {
+		t.Fatal("launcher without its DSH package was advertised as installed")
+	}
+	_, err = m.ResolveLaunch(context.Background(), LaunchRequest{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}})
+	assertFailureCode(t, err, lifecycle.ErrorDSHRuntimeNotFound)
+}
+
 func TestManagerBacksUpProfileWithoutGeneratedDependencyTrees(t *testing.T) {
 	manager := newTestManager(t)
 	profile := ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}
@@ -520,7 +539,7 @@ func TestManagerBacksUpProfileWithoutGeneratedDependencyTrees(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BackupProfile() error = %v", err)
 	}
-	backupPath := filepath.Join(manager.config.DataDirectories[0].Path, "profile-backups", backup.FileName)
+	backupPath := filepath.Join(manager.config.DataDirectories[0].Path, "profiles", backup.Profile.Name, profileBackupFolder, backup.FileName)
 	archive, err := zip.OpenReader(backupPath)
 	if err != nil {
 		t.Fatal(err)
@@ -779,7 +798,7 @@ func TestPublicPluginAttemptFallsBackOnlyAfterReachabilityFailure(t *testing.T) 
 	}
 	dataDirectory := DataDirectoryInfo{ID: "home", Path: t.TempDir()}
 	runtime := RuntimeInfo{Path: filepath.Join(t.TempDir(), "dsh.cmd")}
-	route, _, err := manager.runPublicPluginAttempt(context.Background(), dataDirectory, runtime, ProfileRef{DataDirectoryID: "home", Name: "web"}, "@example/plugin@1.2.3", "add")
+	route, _, err := manager.runPublicPluginAttempt(context.Background(), dataDirectory, runtime, ProfileRef{DataDirectoryID: "home", Name: "web"}, "@example/plugin@1.2.3", "add", map[string]string{"DSH_HOME": dataDirectory.Path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +808,7 @@ func TestPublicPluginAttemptFallsBackOnlyAfterReachabilityFailure(t *testing.T) 
 
 	runner.calls = nil
 	runner.failures = []error{errors.New("engine requirement failed")}
-	if _, _, err := manager.runPublicPluginAttempt(context.Background(), dataDirectory, runtime, ProfileRef{DataDirectoryID: "home", Name: "web"}, "@example/plugin@1.2.3", "add"); err == nil {
+	if _, _, err := manager.runPublicPluginAttempt(context.Background(), dataDirectory, runtime, ProfileRef{DataDirectoryID: "home", Name: "web"}, "@example/plugin@1.2.3", "add", map[string]string{"DSH_HOME": dataDirectory.Path}); err == nil {
 		t.Fatal("semantic failure = nil")
 	}
 	if len(runner.calls) != 1 {
@@ -939,6 +958,33 @@ func TestManagerVerifiesRuntimeBeforeRegisteringIt(t *testing.T) {
 	if len(snapshot.Runtimes) != 1 || snapshot.Runtimes[0].Version != "1.2.3" {
 		t.Fatalf("registered runtimes = %#v", snapshot.Runtimes)
 	}
+}
+
+func TestManagerCanAcquireMissingConfiguredRuntimeOnFirstUse(t *testing.T) {
+	root := t.TempDir()
+	installer := &recordingInstaller{runtime: RuntimeInfo{Path: filepath.Join(root, "dsh.cmd")}}
+	if err := os.WriteFile(installer.runtime.Path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(Config{
+		StatePath: filepath.Join(root, "manager.json"), RuntimeInstaller: installer,
+		DSHReleases: testDSHReleases("1.2.3"), RuntimeVerifier: &recordingRuntimeVerifier{},
+		Runtimes:          []RuntimeInfo{{ID: "dsh-1.2.3", Version: "1.2.3", Path: filepath.Join(root, "missing.cmd")}},
+		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.InstallRuntime(context.Background(), "1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Runtimes) != 1 || !snapshot.Runtimes[0].Installed || snapshot.Configured.RuntimeID != "dsh-1.2.3" {
+		t.Fatalf("first-use install = %+v", snapshot)
+	}
+	// Once installed, the selected environment is protected from replacement.
+	_, err = manager.InstallRuntime(context.Background(), "1.2.3")
+	assertFailureCode(t, err, lifecycle.ErrorRuntimeInUse)
 }
 
 func TestManagerDoesNotRegisterRuntimeRejectedByVerifier(t *testing.T) {
@@ -1537,4 +1583,38 @@ func (s cancelAfterSaveStore) Save(ctx context.Context, path string, state State
 		s.cancel()
 	}
 	return err
+}
+
+func TestHealthyCommitResolvesOnlyMatchingFailure(t *testing.T) {
+	for _, failedProfile := range []string{"web", "web-clean"} {
+		t.Run(failedProfile, func(t *testing.T) {
+			manager := newTestManager(t)
+			manager.config.DisableHealthSnapshots = true
+			target := RunContext{RuntimeID: "dsh-test", Node: NodeSelection{Kind: NodeSelectionSystem}, Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+			failed := target
+			failed.Profile.Name = failedProfile
+			if _, err := manager.RecordSwitchAttempt(context.Background(), SwitchAttempt{Target: failed, Failure: lifecycle.Failure{Code: lifecycle.ErrorProfilePreparationFailed}}, false); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := manager.CommitCurrent(context.Background(), &target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantFailure := failedProfile != "web"
+			if (snapshot.LastSwitchAttempt != nil) != wantFailure {
+				t.Fatalf("failure after healthy commit = %+v", snapshot.LastSwitchAttempt)
+			}
+			reopened, err := New(manager.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err = reopened.Snapshot(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (snapshot.LastSwitchAttempt != nil) != wantFailure {
+				t.Fatalf("persisted failure = %+v", snapshot.LastSwitchAttempt)
+			}
+		})
+	}
 }

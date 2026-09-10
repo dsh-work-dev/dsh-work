@@ -3,13 +3,78 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+func TestProfileImportUsesCurrentDirectoryAndExportUsesNativeSelection(t *testing.T) {
+	f := newRunContextSwitchFixture(t)
+	defer f.close()
+	f.startReady(t)
+	snapshot, err := f.manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := snapshot.Current.Profile
+	var home string
+	for _, directory := range snapshot.DataDirectories {
+		if directory.ID == current.DataDirectoryID {
+			home = directory.Path
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, "profiles", current.Name, "package.json"), []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := NewManagerService(f.manager)
+	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "settings"})
+	archive := filepath.Join(t.TempDir(), "export.zip")
+	SetProfileExportAction(service, func(string) (string, error) { return archive, nil })
+	if file, err := service.ExportProfile(ctx, current); err != nil || file != "export.zip" {
+		t.Fatalf("export = %q, %v", file, err)
+	}
+	SetBackupFileActions(service, func() (string, error) { return archive, nil }, nil)
+	result, err := service.ImportProfileBackup(ctx)
+	if err != nil || result == nil || result.Profile.DataDirectoryID != current.DataDirectoryID || result.Profile == current {
+		t.Fatalf("import = %#v, %v", result, err)
+	}
+	SetProfileExportAction(service, func(string) (string, error) { return "", nil })
+	if file, err := service.ExportProfile(ctx, current); err != nil || file != "" {
+		t.Fatalf("cancelled picker = %q, %v", file, err)
+	}
+}
+
+type startupTestWindow struct {
+	application.Window
+	name string
+}
+
+func (w startupTestWindow) Name() string { return w.name }
+
+func TestRuntimeSurfaceRequiresStartupOriginTrust(t *testing.T) {
+	trusted := true
+	service := NewManagerServiceWithRuntimeProgress(nil, nil, nil, func() bool { return trusted })
+	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "workspace"})
+	if !service.runtimeSurfaceAuthorized(ctx) {
+		t.Fatal("local startup shell rejected")
+	}
+	trusted = false
+	if service.runtimeSurfaceAuthorized(ctx) {
+		t.Fatal("DSH page retained runtime management access after navigation")
+	}
+	ctx = context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "settings"})
+	if !service.runtimeSurfaceAuthorized(ctx) {
+		t.Fatal("Settings access rejected")
+	}
+	if service.runtimeSurfaceAuthorized(context.Background()) {
+		t.Fatal("missing window accepted")
+	}
+}
 
 func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {
 	root := t.TempDir()

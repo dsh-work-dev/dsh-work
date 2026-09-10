@@ -56,6 +56,7 @@ type ReadyAnnouncement struct {
 // resolved separately for this generation and is never persisted by the
 // manager.
 type LaunchContext struct {
+	SafeMode           bool
 	GenerationID       string
 	Runtime            Runtime
 	BootstrapDirectory string
@@ -72,10 +73,13 @@ type Adapter struct {
 	discoveryRoot      string
 	client             *http.Client
 	launchPatch        func(string) (string, error)
+	userDataDirectory  string
 }
 
 // SetLaunchPatch installs a Host-owned, ephemeral overlay for each Worker.
 func (a *Adapter) SetLaunchPatch(prepare func(string) (string, error)) { a.launchPatch = prepare }
+
+func (a *Adapter) SetUserDataDirectory(path string) { a.userDataDirectory = path }
 
 func New(executor CommandExecutor, expectedVersion string) *Adapter {
 	if expectedVersion == "" {
@@ -206,11 +210,8 @@ func (a *Adapter) VerifyWithEnvironment(ctx context.Context, path, expectedVersi
 	return nil
 }
 
-// VerifyProfile validates the runtime/profile pairing at the adapter
-// boundary. The pinned DSH contract currently accepts every valid profile
-// name for its supported runtime; keeping this check here gives future DSH
-// versions a single place to reject incompatible profile composition before
-// the Host stops a known-good Worker.
+// VerifyProfile rejects known non-Web built-ins before the Host stops its
+// current Worker. Custom profiles still pass through the runtime health check.
 func (a *Adapter) VerifyProfile(ctx context.Context, runtimePath, runtimeVersion, dataDirectoryPath, profileName string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -233,6 +234,16 @@ func (a *Adapter) VerifyProfile(ctx context.Context, runtimePath, runtimeVersion
 			Summary: "The selected DSH runtime and profile are incompatible.",
 		}
 	}
+	for _, definition := range a.BuiltInProfiles() {
+		if definition.Name == profileName && definition.DesktopUnsupported {
+			return lifecycle.Failure{
+				Code:    lifecycle.ErrorRuntimeProfileIncompatible,
+				Summary: "This profile does not provide the Web interface required by DSH Work.",
+				Detail:  "Select the web profile or a custom profile providing a Web interface.",
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -284,7 +295,14 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		ExpectedHost:     "127.0.0.1",
 		ExpectedPort:     launch.Port,
 	}
-	if a.launchPatch != nil {
+	if a.userDataDirectory != "" && !launch.SafeMode {
+		patch, err := prepareUserDataPatch(dataDirectory, a.userDataDirectory)
+		if err != nil {
+			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH user data: %w", err)
+		}
+		plan.Args = append([]string{"--patch", patch}, plan.Args...)
+	}
+	if a.launchPatch != nil && !launch.SafeMode {
 		patch, err := a.launchPatch(launch.GenerationID)
 		if err != nil {
 			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH activity bridge: %w", err)

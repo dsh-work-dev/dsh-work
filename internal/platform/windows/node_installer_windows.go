@@ -126,11 +126,13 @@ func (i *ManagedNodeInstaller) install(ctx context.Context, release dshmanager.N
 	}()
 
 	extracted := filepath.Join(result.StagingPath, "extracted")
+	dshadapter.ReportCommandOutput(ctx, "Extracting Node archive…")
 	if err := extractNodeArchive(result.PayloadPath, extracted); err != nil {
 		return dshmanager.NodeInstallationInfo{}, runtimeFailure(lifecycle.ErrorRuntimeInstallFailed, "The managed Node archive could not be prepared.", false)
 	}
 	nodePath := filepath.Join(extracted, "node.exe")
 	npmPath := filepath.Join(extracted, "npm.cmd")
+	dshadapter.ReportCommandOutput(ctx, "Verifying Node and npm…")
 	if err := verifyNodeExecutables(ctx, i.executor, nodePath, npmPath, release.Version); err != nil {
 		return dshmanager.NodeInstallationInfo{}, err
 	}

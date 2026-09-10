@@ -28,8 +28,11 @@ const (
 	PhaseIdle          Phase = "idle"
 	PhaseConfiguration Phase = "configuration"
 	PhaseRuntime       Phase = "runtime"
+	PhaseNode          Phase = "node"
+	PhaseProfile       Phase = "profile"
 	PhaseWorker        Phase = "worker"
 	PhaseReadiness     Phase = "readiness"
+	PhaseCheckpoint    Phase = "checkpoint"
 	PhaseWorkspace     Phase = "workspace"
 	PhaseStopping      Phase = "stopping"
 	PhaseFailed        Phase = "failed"
@@ -128,6 +131,7 @@ const (
 	ErrorRuntimeProfileIncompatible ErrorCode = "RUNTIME_PROFILE_INCOMPATIBLE"
 	ErrorManagerOperationBusy       ErrorCode = "MANAGER_OPERATION_BUSY"
 	ErrorManagerStateInvalid        ErrorCode = "MANAGER_STATE_INVALID"
+	ErrorRecoveryPointSaveFailed    ErrorCode = "RECOVERY_POINT_SAVE_FAILED"
 	ErrorSettingsStateInvalid       ErrorCode = "SETTINGS_STATE_INVALID"
 	ErrorSettingsUnavailable        ErrorCode = "SETTINGS_UNAVAILABLE"
 	ErrorNotificationDeliveryFailed ErrorCode = "NOTIFICATION_DELIVERY_FAILED"
@@ -158,8 +162,21 @@ func (f Failure) Error() string {
 	return fmt.Sprintf("%s: %s (%s)", f.Code, f.Summary, f.Detail)
 }
 
+// LaunchSelection identifies the executables actually selected for this attempt.
+type LaunchSelection struct {
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	RuntimePath       string `json:"runtimePath,omitempty"`
+	NodeVersion       string `json:"nodeVersion,omitempty"`
+	NodePath          string `json:"nodePath,omitempty"`
+	DataDirectoryPath string `json:"dataDirectoryPath,omitempty"`
+	ProfileName       string `json:"profileName"`
+	RuntimeID         string `json:"runtimeId"`
+	NodeID            string `json:"nodeId"`
+}
+
 // Status is the immutable read model consumed by the frontend.
 type Status struct {
+	LaunchSelection    *LaunchSelection          `json:"launchSelection,omitempty"`
 	State              State                     `json:"state"`
 	Phase              Phase                     `json:"phase"`
 	GenerationID       string                    `json:"generationId,omitempty"`
@@ -272,13 +289,17 @@ func validPhaseTransition(state State, from, to Phase) bool {
 	}
 	switch from {
 	case PhaseConfiguration:
-		return to == PhaseRuntime
-	case PhaseRuntime:
+		return to == PhaseRuntime || to == PhaseNode
+	case PhaseNode:
+		return to == PhaseRuntime || to == PhaseWorker
+	case PhaseProfile:
 		return to == PhaseWorker
+	case PhaseRuntime:
+		return to == PhaseWorker || to == PhaseNode || to == PhaseProfile
 	case PhaseWorker:
 		return to == PhaseReadiness
 	case PhaseReadiness:
-		return false
+		return to == PhaseCheckpoint
 	default:
 		return false
 	}
@@ -448,6 +469,10 @@ func (m *Machine) checkGeneration(generationID string) error {
 
 func cloneStatus(status Status) Status {
 	copy := status
+	if status.LaunchSelection != nil {
+		selection := *status.LaunchSelection
+		copy.LaunchSelection = &selection
+	}
 	if status.Workspace != nil {
 		workspace := *status.Workspace
 		copy.Workspace = &workspace
@@ -465,4 +490,14 @@ func cloneStatus(status Status) Status {
 		copy.RuntimePreparation = &preparation
 	}
 	return copy
+}
+
+func (m *Machine) SetLaunchSelection(generationID string, selection LaunchSelection) (Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.checkGeneration(generationID); err != nil {
+		return cloneStatus(m.status), err
+	}
+	m.status.LaunchSelection = &selection
+	return cloneStatus(m.status), nil
 }

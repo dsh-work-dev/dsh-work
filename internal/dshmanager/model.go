@@ -163,9 +163,10 @@ const (
 // profile knowledge at that boundary avoids making the manager duplicate a
 // version-specific DSH profile catalog.
 type ProfileDefinition struct {
-	Name           string      `json:"name"`
-	Kind           ProfileKind `json:"kind"`
-	AutoInitialize bool        `json:"autoInitialize"`
+	DesktopUnsupported bool        `json:"desktopUnsupported,omitempty"`
+	Name               string      `json:"name"`
+	Kind               ProfileKind `json:"kind"`
+	AutoInitialize     bool        `json:"autoInitialize"`
 }
 
 // ProfileInfo is a read model. It does not compose or mutate DSH profiles;
@@ -369,7 +370,7 @@ const (
 )
 
 // SwitchAttempt is the one bounded terminal result retained for recovery. It
-// is process-local and never mutates an immutable runtime installation.
+// is persisted with the recovery point and never mutates a runtime installation.
 type SwitchAttempt struct {
 	Target            RunContext         `json:"target"`
 	Stage             SwitchAttemptStage `json:"stage"`
@@ -381,6 +382,7 @@ type SwitchAttempt struct {
 }
 
 type Snapshot struct {
+	SafeMode          *SafeModeState         `json:"safeMode,omitempty"`
 	Runtimes          []RuntimeInfo          `json:"runtimes"`
 	DSHReleases       []DSHReleaseInfo       `json:"dshReleases"`
 	Nodes             []NodeInstallationInfo `json:"nodes"`

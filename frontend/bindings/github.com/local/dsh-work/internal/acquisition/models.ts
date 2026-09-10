@@ -66,6 +66,7 @@ export enum OperationState {
  * trusted Settings surface for one explicit artifact operation.
  */
 export interface OperationStatus {
+    "log"?: string;
     "operationId": string;
     "artifact": ArtifactIdentity;
     "state": OperationState;

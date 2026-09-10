@@ -17,8 +17,11 @@ type toolchainProbeExecutor struct {
 	calls       []string
 }
 
-func (e *toolchainProbeExecutor) Run(_ context.Context, executable string, _ []string, _ map[string]string, _ string) (dshadapter.CommandResult, error) {
+func (e *toolchainProbeExecutor) Run(_ context.Context, executable string, args []string, _ map[string]string, _ string) (dshadapter.CommandResult, error) {
 	e.calls = append(e.calls, executable)
+	if len(args) == 2 && args[0] == "-p" && args[1] == "process.execPath" {
+		return dshadapter.CommandResult{Stdout: `C:\selected-node\node.exe`}, nil
+	}
 	switch executable {
 	case "node.exe":
 		version := e.nodeVersion
@@ -100,7 +103,7 @@ func TestRunNodeResolverDoesNotInvokePackageManagerDuringLaunchResolution(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Version != "18.3.0" || len(executor.calls) != 1 || executor.calls[0] != "node.exe" {
+	if resolved.Version != "18.3.0" || resolved.NodePath != `C:\selected-node\node.exe` || len(executor.calls) != 2 || executor.calls[0] != "node.exe" {
 		t.Fatalf("launch resolution = %#v calls=%#v", resolved, executor.calls)
 	}
 }

@@ -5,6 +5,7 @@ package windows
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -49,6 +50,12 @@ func TestManagedNodeInstallerIsIdempotentAndDoesNotActivate(t *testing.T) {
 	}
 	if filepath.Base(first.NodePath) != "node.exe" || filepath.Base(first.NPMPath) != "npm.cmd" {
 		t.Fatalf("installed paths = %#v", first)
+	}
+	if err := installer.Remove(context.Background(), first); err != nil {
+		t.Fatalf("remove installed Node: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(first.NodePath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Node installation remains after removal: %v", err)
 	}
 }
 

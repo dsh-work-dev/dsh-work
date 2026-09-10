@@ -6,6 +6,7 @@ toolchain go1.25.14
 
 require (
 	github.com/at-wat/ebml-go v0.19.2
+	github.com/otiai10/copy v1.14.1
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	golang.org/x/image v0.41.0
@@ -22,4 +23,6 @@ require (
 	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/otiai10/mint v1.6.3 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 )
