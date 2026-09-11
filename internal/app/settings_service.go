@@ -13,17 +13,17 @@ import (
 // as fake frontend controls. DSH manager controls share this Settings window
 // but remain a separate service boundary.
 type SettingsService struct {
-	manager                  *settings.Manager
-	onCloseToTrayChanged     func(bool)
+	manager *settings.Manager
+
 	onLocaleChanged          func(settings.Locale)
 	onNotificationsChanged   func(notifications.Preferences)
 	onRuntimeRollbackChanged func(bool)
 }
 
-func NewSettingsService(manager *settings.Manager, onCloseToTrayChanged func(bool), onLocaleChanged func(settings.Locale), onNotificationsChanged func(notifications.Preferences), rollbackChanged ...func(bool)) *SettingsService {
+func NewSettingsService(manager *settings.Manager, onLocaleChanged func(settings.Locale), onNotificationsChanged func(notifications.Preferences), rollbackChanged ...func(bool)) *SettingsService {
 	service := &SettingsService{
-		manager:                manager,
-		onCloseToTrayChanged:   onCloseToTrayChanged,
+		manager: manager,
+
 		onLocaleChanged:        onLocaleChanged,
 		onNotificationsChanged: onNotificationsChanged,
 	}
@@ -62,25 +62,6 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
 	return s.manager.Snapshot(ctx)
-}
-
-func (s *SettingsService) SetCloseToTray(ctx context.Context, enabled bool) (settings.Values, error) {
-	if s == nil || s.manager == nil {
-		return settings.Values{}, settingsUnavailable()
-	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
-	}
-	ctx, cancel := managerContext(ctx)
-	defer cancel()
-	values, err := s.manager.SetCloseToTray(ctx, enabled)
-	if err != nil {
-		return settings.Values{}, err
-	}
-	if s.onCloseToTrayChanged != nil {
-		s.onCloseToTrayChanged(values.CloseToTray)
-	}
-	return values, nil
 }
 
 func (s *SettingsService) SetLocale(ctx context.Context, locale string) (settings.Values, error) {

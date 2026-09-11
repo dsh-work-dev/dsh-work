@@ -26,10 +26,12 @@ A matching version alone does not skip repair.
 
 ## ADR-0004 — Global Settings and tray-aware lifecycle
 
-Persist versioned dsh-work settings separately from DSH data. The close policy
-decides whether the last-window close hides to tray or begins full Quit; explicit
-Quit remains the operation that owns Worker cleanup. Windows persistence uses a
-native replace/write-through operation behind the platform boundary.
+Persist versioned dsh-work settings separately from DSH data. Closing the last
+desktop window exits the UI client; explicit background Quit owns Worker cleanup.
+Ignore legacy closeToTray values and omit that field on save. The daemon owns
+the tray and preferences independently of the client, as specified in ADR-0017.
+Windows persistence uses a native replace/write-through operation behind the
+platform boundary.
 
 ## ADR-0005 — Small typed localization boundary
 
@@ -140,9 +142,9 @@ owns cookies and native authority. HTTP remains the upstream route protocol
 inside the pipe, and its internal loopback authority is not a listening socket.
 
 Reuse go-winio, coder/websocket and Go/Node HTTP implementations. Keep this in
-the regular application lifecycle, including restart and safe mode. The tray
-Host is the current background owner; remote clients and a separate daemon
-remain deferred. See [Architecture](architecture.md).
+the regular application lifecycle, including restart and safe mode. The daemon
+is the background Host owner; the UI forwards Worker traffic through it as
+specified in ADR-0017. Remote clients remain deferred. See [Architecture](architecture.md).
 
 ## ADR-0015 — Explicit version records and confined file access
 
@@ -167,3 +169,22 @@ on one page. Place failures, diagnostics and next actions near their source.
 Reuse the square monochrome system. [Settings and startup](settings.md) defines
 the current page layout; [Interface standards](standards/interface.md) governs
 future changes.
+
+## ADR-0017 — Per-user daemon and independent desktop client
+
+Run the Host/manager, Worker supervisor, tray, Pet and notification adapters in
+a resident per-user daemon. Invoke the same executable separately for the
+workbench and Settings UI. Reuse Wails for native surfaces, go-winio for
+current-user local IPC, and Go HTTP for control and Worker forwarding. The online
+CLI uses the same serialized manager authority.
+
+This boundary preserves tasks through a whole UI-process crash as well as normal
+window closure. It adds a local transport hop and requires typed state/event
+projection. Portless communication alone does not require separate processes;
+the process split serves the UI-crash isolation contract. It does not implement
+remote access or a system-wide Windows service.
+
+Only explicit background shutdown stops the Worker and its children, releases
+locks and exits native background surfaces. A desktop window close never
+substitutes for that operation. See [Architecture](architecture.md) for the
+transport and lifecycle contracts.

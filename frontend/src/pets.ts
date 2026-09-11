@@ -1,4 +1,4 @@
-import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {subscribeLocale, t} from "./i18n";
 import {beginControlUpdate} from "./ui/pending-control";
 

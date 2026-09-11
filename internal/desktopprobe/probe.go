@@ -9,15 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
-	dshworkapp "github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/desktopbridge"
-	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
-	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 func Patch(root, discoveryRoot string) func(string) (string, error) {
@@ -54,15 +49,18 @@ func Patch(root, discoveryRoot string) func(string) (string, error) {
 }
 
 const probePlugin = `import {once} from 'node:events';
+import {spawn} from 'node:child_process';
 export const inject=['webServer','sessions','connection'];
 export function apply(ctx){
-let cancelled=0;
+let cancelled=0,backgroundTicks=0,backgroundTimer,backgroundChild;
 const ws=new WebSocketServer({noServer:true});
 ws.on('connection',socket=>{socket.on('message',(data,binary)=>socket.send(data,{binary}));});
 ctx.effect(()=>ctx.webServer.registerUpgrade({path:'/__work/probe-ws',handler:(req,socket,head)=>{if(ctx.connection.requestRejection(req)){socket.destroy();return;}ws.handleUpgrade(req,socket,head,client=>ws.emit('connection',client));}}));
 ctx.effect(()=>()=>{for(const socket of ws.clients)socket.terminate();ws.close();});
 ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/__work/probe',handler:async(req,res)=>{
 const action=new URL(req.url,'http://local').searchParams.get('action');
+if(action==='background'){if(!backgroundTimer){backgroundTimer=setInterval(()=>backgroundTicks++,100);backgroundChild=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{windowsHide:true,stdio:'ignore'});}res.end('started');return;}
+if(action==='background-status'){res.setHeader('content-type','application/json');res.end(JSON.stringify({ticks:backgroundTicks,pid:process.pid,child:backgroundChild?.pid}));return;}
 if(action==='echo'){res.writeHead(200,{'content-type':'application/octet-stream'});for await(const chunk of req){if(!res.write(chunk))await once(res,'drain');}res.end();return;}
 if(action==='stream'){res.writeHead(200,{'content-type':'application/octet-stream'});res.write('first');const timer=setTimeout(()=>res.end('last'),30000);res.once('close',()=>{clearTimeout(timer);cancelled++;});return;}
 if(action==='session'){let s=ctx.sessions.get('pc-ipc-probe');if(!s)s=ctx.sessions.create('pc-ipc-probe');s.append('turn/start',{turn:1});s.append('turn/end',{turn:1,reason:{kind:'completed'}});res.end('ok');return;}
@@ -120,76 +118,6 @@ try{
 }catch(error){results.failure=String(error);results.stack=error?.stack;}
 report();
 `
-
-func Install(app *application.App, window application.Window, path string, host *dshworkapp.Host, activity *dshactivity.Bridge) {
-	var once sync.Once
-	var round int
-	var firstGeneration string
-	var reportMu sync.Mutex
-	finish := func(data map[string]any) {
-		once.Do(func() {
-			data["transport"] = "named-pipe"
-			data["processes"] = probeProcesses(host.Diagnostics().PID)
-			data["hostPID"] = os.Getpid()
-			data["workerPID"] = host.Diagnostics().PID
-			data["activity"] = activity.Snapshot()
-			data["hostStatus"] = host.Status()
-			data["diagnostics"] = host.Diagnostics()
-			data["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-			encoded, _ := json.MarshalIndent(data, "", "  ")
-			_ = os.WriteFile(path, encoded, 0600)
-			app.Quit()
-		})
-	}
-	app.HandleStream("probe-report", func(c *application.StreamConn) {
-		if c.Window() == nil || c.Window().ID() != window.ID() {
-			return
-		}
-		b, err := c.Receive()
-		if err != nil || len(b) > 32<<10 {
-			return
-		}
-		var data map[string]any
-		if json.Unmarshal(b, &data) != nil {
-			return
-		}
-		reportMu.Lock()
-		defer reportMu.Unlock()
-		if data["ok"] == true && round == 0 {
-			firstGeneration = host.Status().GenerationID
-			round = 1
-			host.Restart()
-			return
-		}
-		if data["ok"] == true {
-			if host.Status().GenerationID == firstGeneration {
-				data["ok"] = false
-				data["failure"] = "restart reused Worker generation"
-			} else {
-				data["restartVerified"] = true
-			}
-		}
-		finish(data)
-	})
-	go func() {
-		deadline := time.NewTimer(180 * time.Second)
-		defer deadline.Stop()
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-deadline.C:
-				finish(map[string]any{"ok": false, "failure": "WebView probe timed out"})
-				return
-			case <-ticker.C:
-				if status := host.Status(); status.Error != nil {
-					finish(map[string]any{"ok": false, "failure": status.Error.Summary})
-					return
-				}
-			}
-		}
-	}()
-}
 
 func Configure(c *dshmanager.Config, dsh *dshadapter.Adapter, root string) {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") == "" {

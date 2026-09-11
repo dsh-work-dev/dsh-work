@@ -1,7 +1,7 @@
 import {mountRestorePoints} from "./restore-points";
 import {Events} from "@wailsio/runtime";
 import {safeModeActive} from "./recovery";
-import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {NodeSelectionKind, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {runningLaunchSelection, startupProfileName, type LifecycleStatus} from "./lifecycle";

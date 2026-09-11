@@ -80,6 +80,31 @@ func (b *Bridge) Serve(c ByteConn) error {
 	}
 	req.Header.Set("Origin", b.Origin)
 	credit := make(chan struct{}, 1)
+	// Read control frames independently of a blocked upload. A duplex Worker
+	// can fill its response pipe while waiting for our next download credit;
+	// processing that credit must not wait for the upload pipe to drain.
+	upload := make(chan []byte, 1)
+	go func() {
+		defer w.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case frame := <-upload:
+				if frame[0] == 2 {
+					return
+				}
+				if _, err := w.Write(frame[1:]); err != nil {
+					cancel()
+					return
+				}
+				if err := c.Send([]byte{3}); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	go func() {
 		defer cancel()
 		defer w.Close()
@@ -99,10 +124,9 @@ func (b *Bridge) Serve(c ByteConn) error {
 				if ended {
 					return
 				}
-				if _, err = w.Write(frame[1:]); err != nil {
-					return
-				}
-				if err = c.Send([]byte{3}); err != nil {
+				select {
+				case upload <- frame:
+				default:
 					return
 				}
 			case 2:
@@ -110,7 +134,11 @@ func (b *Bridge) Serve(c ByteConn) error {
 					return
 				}
 				ended = true
-				w.Close()
+				select {
+				case upload <- frame:
+				default:
+					return
+				}
 			case 4:
 				if len(frame) != 1 {
 					return

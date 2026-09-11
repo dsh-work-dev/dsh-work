@@ -1,4 +1,4 @@
-import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {ProfileBackupResult, ProfileCloneResult, ProfileRef, Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {currentLocale, t} from "./i18n";
 

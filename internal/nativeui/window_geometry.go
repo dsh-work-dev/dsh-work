@@ -11,7 +11,12 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-func RestoreWindowGeometry(options application.WebviewWindowOptions, manager *settings.Manager) application.WebviewWindowOptions {
+type GeometryStore interface {
+	Snapshot(context.Context) (settings.Values, error)
+	SetWindowGeometry(context.Context, string, settings.WindowGeometry) error
+}
+
+func RestoreWindowGeometry(options application.WebviewWindowOptions, manager GeometryStore) application.WebviewWindowOptions {
 	if manager == nil {
 		return options
 	}
@@ -34,7 +39,7 @@ func RestoreWindowGeometry(options application.WebviewWindowOptions, manager *se
 
 // Capture dimensions on the native event thread; debounce only the settings write.
 // Closing and application shutdown flush pending changes before the window dies.
-func RememberWindowGeometry(window application.Window, options application.WebviewWindowOptions, manager *settings.Manager) func() {
+func RememberWindowGeometry(window application.Window, options application.WebviewWindowOptions, manager GeometryStore) func() {
 	if manager == nil {
 		return func() {}
 	}

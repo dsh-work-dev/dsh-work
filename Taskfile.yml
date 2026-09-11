@@ -143,10 +143,11 @@ tasks:
       - node scripts/build-worker-bridge.mjs
 
   test:desktop:
-    summary: Verify the desktop Host and real Worker streams
+    summary: Verify independent daemon/UI lifetime and real Worker streams
     platforms: [windows]
     deps:
       - build
+      - build:dsh-work
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-desktop.ps1
 

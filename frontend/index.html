@@ -332,7 +332,6 @@
         <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
           <div class="settings-list">
             <div class="setting-row"><div class="setting-copy"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p class="manager-note" data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div><div class="setting-control"><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div></div>
-            <div data-setting-switch="settings-close-to-tray" data-label="general.closeToTray" data-status="settings-close-to-tray-status"></div>
             <div class="setting-row">
               <div class="setting-copy">
                 <label for="settings-locale" data-i18n="general.language">Language</label>
@@ -346,7 +345,7 @@
               </div>
             </div>
           </div>
-          <p id="settings-close-to-tray-status" class="sr-only" role="status" aria-live="polite"></p>
+          <p id="settings-general-status" class="sr-only" role="status" aria-live="polite"></p>
         </section>
 
         <section id="manager-section-notifications" class="manager-section settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>

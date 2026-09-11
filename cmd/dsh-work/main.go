@@ -31,6 +31,9 @@ func run(args []string, stdout, stderr io.Writer) (runErr error) {
 		printUsage(stdout)
 		return nil
 	}
+	if handled, err := tryOnline(args, stdout); handled {
+		return err
+	}
 	manager, managerLock, err := newManager()
 	if err != nil {
 		return err
@@ -127,7 +130,7 @@ func (r commandRunner) Run(ctx context.Context, executable string, args []string
 	return dshmanager.CommandResult{Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-func runRuntime(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runRuntime(manager managerAPI, args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		listArgs := args
 		if len(args) > 0 && args[0] == "list" {
@@ -214,7 +217,7 @@ func runRuntime(manager *dshmanager.Manager, args []string, stdout io.Writer) er
 	}
 }
 
-func runDataDirectory(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runDataDirectory(manager managerAPI, args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		listArgs := args
 		if len(args) > 0 && args[0] == "list" {
@@ -271,7 +274,7 @@ func runDataDirectory(manager *dshmanager.Manager, args []string, stdout io.Writ
 	}
 }
 
-func runProfile(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runProfile(manager managerAPI, args []string, stdout io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		listArgs := args
 		if len(args) > 0 && args[0] == "list" {
@@ -294,7 +297,7 @@ func runProfile(manager *dshmanager.Manager, args []string, stdout io.Writer) er
 	return fmt.Errorf("unknown profile command %q", args[0])
 }
 
-func runUse(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runUse(manager managerAPI, args []string, stdout io.Writer) error {
 	set := flag.NewFlagSet("use", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
 	runtimeID := set.String("runtime", "", "runtime id")
@@ -317,7 +320,7 @@ func runUse(manager *dshmanager.Manager, args []string, stdout io.Writer) error 
 	return printSnapshotHint(stdout, snapshot)
 }
 
-func runPlugin(manager *dshmanager.Manager, args []string, stdout io.Writer) error {
+func runPlugin(manager managerAPI, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return errorsForUsage("plugin requires list, add or remove")
 	}
@@ -424,8 +427,8 @@ func executableExists(path string) bool {
 }
 
 func printUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "dsh-work manages DSH runtimes, data directories and profiles while dsh-work is stopped.")
-	fmt.Fprintln(stdout, "Use the running dsh-work Settings window for Run context and profile plugin changes.")
+	fmt.Fprintln(stdout, "dsh-work connects to the running background, or locks offline state when stopped.")
+	fmt.Fprintln(stdout, "Online commands: status, restart, stop.")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")

@@ -1,0 +1,420 @@
+//go:build windows
+
+package desktopprobe_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/local/dsh-work/internal/pet"
+	"image"
+	"image/color"
+	"image/png"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+	"unsafe"
+
+	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/desktopprobe"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"golang.org/x/sys/windows"
+)
+
+func TestRealDaemonLifecycle(t *testing.T) {
+	if os.Getenv("DSH_WORK_DAEMON_TEST") != "1" {
+		t.Skip("opt-in native process/WebView test")
+	}
+	t.Chdir(filepath.Join("..", ".."))
+	root, err := filepath.Abs(filepath.Join(".task", "daemon-lifecycle", fmt.Sprint(time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(root, "webview.json")
+	writeLifecyclePet(t, root)
+	t.Setenv("DSH_WORK_DESKTOP_ROOT", root)
+	t.Setenv("DSH_WORK_DESKTOP_REPORT", report)
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"version":2,"closeToTray":false,"locale":"zh-CN"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := os.Getenv("DSH_WORK_TEST_BINARY")
+	if binary == "" {
+		binary = "bin/dsh-work.exe"
+	}
+	exe, _ := filepath.Abs(binary)
+	cli, _ := filepath.Abs("bin/dsh-work-cli.exe")
+	logFile, err := os.Create(filepath.Join(root, "process.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	start := func(args ...string) *exec.Cmd {
+		cmd := exec.Command(exe, args...)
+		daemon.Detach(cmd)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		return cmd
+	}
+	background := start("--daemon")
+	done := make(chan error, 1)
+	go func() { done <- background.Wait() }()
+	client := daemon.NewClient(root)
+	defer client.Close()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = client.Call(ctx, "HostService", "Quit", "workspace", nil, nil)
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			_ = background.Process.Kill()
+		}
+	})
+	var state daemon.Snapshot
+	waitUntil(t, 120*time.Second, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if client.JSON(ctx, "/snapshot", nil, &state) != nil {
+			return false
+		}
+		if state.Status.State == lifecycle.StateFailed {
+			t.Fatalf("production startup failed: %+v; diagnostics=%+v", state.Status, state.Diagnostics)
+		}
+		return state.Status.State == lifecycle.StateReady
+	})
+	baseline := state
+	if baseline.PID != background.Process.Pid || baseline.Diagnostics.PID == 0 {
+		t.Fatalf("ownership: %+v", baseline)
+	}
+	t.Logf("daemon=%d Worker=%d generation=%s root=%s", baseline.PID, baseline.Diagnostics.PID, baseline.Status.GenerationID, root)
+	var panel app.PetPanel
+	if err := client.Call(context.Background(), "PetSettingsService", "RefreshPetCatalog", "settings", nil, &panel); err != nil {
+		t.Fatal(err)
+	}
+	var petKey string
+	for _, item := range panel.Snapshot.Items {
+		if item.DisplayName == "Lifecycle Pet" {
+			petKey = item.StableSourceKey
+		}
+	}
+	if petKey == "" {
+		t.Fatal("lifecycle Pet fixture not discovered")
+	}
+	if err := client.Call(context.Background(), "PetSettingsService", "SelectPet", "settings", []any{petKey}, &panel); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Call(context.Background(), "PetSettingsService", "SetPetVisibility", "settings", []any{true}, &panel); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "settings", []any{"completed", false}, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 10*time.Second, func() bool { return nativeWindowVisible(baseline.PID, "dsh-work Pet") })
+	workerRequest := func(action string) []byte {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		r, err := http.NewRequestWithContext(ctx, "GET", daemon.Origin+"/worker?action="+action, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("X-DSH-Path", "/__work/probe")
+		r.Header.Set("X-DSH-Generation", baseline.Status.GenerationID)
+		resp, err := client.HTTP.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			t.Fatalf("Worker %d: %s", resp.StatusCode, data)
+		}
+		return data
+	}
+	workerRequest("background")
+	taskState := func() struct{ Ticks, PID, Child int } {
+		var v struct{ Ticks, PID, Child int }
+		if err := json.Unmarshal(workerRequest("background-status"), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	firstTask := taskState()
+	if firstTask.Child == 0 {
+		t.Fatal("owned child missing")
+	}
+	assertSame := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := client.JSON(ctx, "/snapshot", nil, &state); err != nil {
+			t.Fatal(err)
+		}
+		if state.PID != baseline.PID || state.Diagnostics.PID != baseline.Diagnostics.PID || state.Status.GenerationID != baseline.Status.GenerationID {
+			t.Fatal("UI replaced background or Worker")
+		}
+		if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
+			t.Fatal("UI lifecycle hid background Pet")
+		}
+		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel); err != nil {
+			t.Fatal(err)
+		}
+		if panel.Runtime.EffectiveVisibility != pet.VisibilityVisible || state.Preferences.Notifications.Completed {
+			t.Fatal("Pet or notification preference lost")
+		}
+
+	}
+	var uiPIDs []int
+	for round := 0; round < 2; round++ {
+		_ = os.Remove(report)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		err := client.JSON(ctx, "/open", "", nil)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			OK      bool   `json:"ok"`
+			UIPID   int    `json:"uiPID"`
+			Failure string `json:"failure"`
+		}
+		waitUntil(t, 160*time.Second, func() bool {
+			data, err := os.ReadFile(report)
+			return err == nil && json.Unmarshal(data, &result) == nil
+		})
+		if !result.OK {
+			t.Fatalf("WebView: %s; report=%s", result.Failure, report)
+		}
+		waitUntil(t, 15*time.Second, func() bool { return !processAlive(result.UIPID) })
+		uiPIDs = append(uiPIDs, result.UIPID)
+		assertSame()
+		t.Logf("round %d: native UI %d closed; daemon and Worker unchanged", round, result.UIPID)
+	}
+	if uiPIDs[0] == uiPIDs[1] {
+		t.Fatal("reopen reused exited UI PID")
+	}
+	// Crash a separate UI with real native windows, leaving the Worker task and
+	// its subprocess running. A subsequent tray/open request reattaches.
+	t.Setenv("DSH_WORK_UI_HOLD", "1")
+	multi := start("--ui")
+	multiClient := daemon.NewClient(root + "-ui")
+	waitUntil(t, 30*time.Second, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return multiClient.JSON(ctx, "/open", "settings", nil) == nil
+	})
+	waitUntil(t, 5*time.Second, func() bool {
+		return nativeWindowVisible(multi.Process.Pid, "dsh-work", "操作", "设置", "帮助") && nativeWindowVisible(multi.Process.Pid, "设置")
+	})
+	if err := multiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !processAlive(multi.Process.Pid) {
+		t.Fatal("closing workbench also closed Settings")
+	}
+	if err := multiClient.JSON(context.Background(), "/close", "settings", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 10*time.Second, func() bool { return !processAlive(multi.Process.Pid) })
+	_ = multi.Wait()
+	multiClient.Close()
+	assertSame()
+	crash := start("--ui")
+	uiClient := daemon.NewClient(root + "-ui")
+	defer uiClient.Close()
+	waitUntil(t, 30*time.Second, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return uiClient.JSON(ctx, "/open", "", nil) == nil
+	})
+	if err := crash.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = crash.Wait()
+	assertSame()
+	if !processAlive(firstTask.Child) {
+		t.Fatal("UI crash killed task child")
+	}
+	output, err := exec.Command(cli, "profile", "list", "--json").CombinedOutput()
+	if err != nil || !json.Valid(output) {
+		t.Fatalf("online CLI: %s %v", output, err)
+	}
+	after := taskState()
+	if after.Ticks <= firstTask.Ticks || after.Child != firstTask.Child {
+		t.Fatal("background task stopped across UI lifecycles")
+	}
+	t.Logf("UI crash survived; task ticks %d -> %d, child=%d; online CLI passed", firstTask.Ticks, after.Ticks, after.Child)
+	// Reopen from the same background launcher after the crash, then stop it.
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	err = client.JSON(ctx, "/open", "", nil)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSame()
+	var finalUI struct{ PID int }
+	if err := uiClient.JSON(context.Background(), "/status", nil, &finalUI); err != nil {
+		t.Fatal(err)
+	}
+	processSample := desktopprobe.Processes(baseline.Diagnostics.PID, baseline.PID, finalUI.PID)
+	sampleData, _ := json.Marshal(processSample)
+	var sample struct {
+		Error                      string
+		TCPListeners, UDPEndpoints []any
+	}
+	if json.Unmarshal(sampleData, &sample) != nil || sample.Error != "" || len(sample.TCPListeners) != 0 || len(sample.UDPEndpoints) != 0 {
+		t.Fatalf("process/network sample: %s", sampleData)
+	}
+	// Restart belongs to the background owner and replaces exactly the Worker.
+	if err := client.Call(context.Background(), "HostService", "Restart", "workspace", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var restarted daemon.Snapshot
+	waitUntil(t, 120*time.Second, func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		return client.JSON(ctx, "/snapshot", nil, &restarted) == nil && restarted.Status.State == lifecycle.StateReady && restarted.Status.GenerationID != baseline.Status.GenerationID
+	})
+	if restarted.PID != baseline.PID || processAlive(int(baseline.Diagnostics.PID)) || processAlive(firstTask.Child) {
+		t.Fatal("restart ownership or child cleanup failed")
+	}
+	if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
+		t.Fatal("restart hid Pet")
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+	err = client.Call(ctx, "HostService", "Quit", "workspace", nil, nil)
+	cancel()
+	if err != nil {
+		t.Logf("stop response closed during exit: %v", err)
+	}
+	waitUntil(t, 20*time.Second, func() bool {
+		return !processAlive(baseline.PID) && !processAlive(int(baseline.Diagnostics.PID)) && !processAlive(firstTask.Child) && !processAlive(finalUI.PID) && !processAlive(int(restarted.Diagnostics.PID))
+	})
+	lock, err := app.AcquireManagerProcessLock(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatalf("manager lock retained: %v", err)
+	}
+	_ = lock.Close()
+	data, err := os.ReadFile(filepath.Join(root, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prefs map[string]any
+	_ = json.Unmarshal(data, &prefs)
+	if _, exists := prefs["closeToTray"]; exists {
+		t.Fatal("legacy close preference persisted again")
+	}
+	logData, err := os.ReadFile(filepath.Join(root, "process.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logData), "does not match registered data type") {
+		t.Fatal("native UI rejected background events; see process.log")
+	}
+	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "checks": []string{"native WebView binary/WS/cancellation", "native last-window close exits UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI closed", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench close", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
+	raw, _ := json.MarshalIndent(evidence, "", "  ")
+	_ = os.WriteFile(filepath.Join(root, "lifecycle.json"), raw, 0600)
+	t.Logf("evidence: %s", filepath.Join(root, "lifecycle.json"))
+}
+
+func waitUntil(t *testing.T, limit time.Duration, predicate func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if predicate() {
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	t.Fatal("native lifecycle condition timed out")
+}
+func processAlive(pid int) bool {
+	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	status, _ := windows.WaitForSingleObject(h, 0)
+	return status == uint32(windows.WAIT_TIMEOUT)
+}
+
+func writeLifecyclePet(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, "probe-pets", "pets", "lifecycle")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Codex discovery requires its entry marker before selecting a native
+	// companion manifest. Rendering is provided by dsh-pet.json below.
+	if err := os.WriteFile(filepath.Join(dir, "pet.json"), []byte(`{"id":"lifecycle","displayName":"Lifecycle Pet"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"schema":"dsh.pet","schemaVersion":1,"id":"lifecycle","displayName":"Lifecycle Pet","assets":[{"id":"idle","renderer":"dsh-raster-v1","type":"image","path":"idle.png"}],"tracks":{"idle":{"asset":"idle","frames":[{"index":0,"durationMs":125}]}}}`
+	if err := os.WriteFile(filepath.Join(dir, "dsh-pet.json"), []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "idle.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	sprite := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			sprite.SetNRGBA(x, y, color.NRGBA{R: 50, G: 180, B: 200, A: 255})
+		}
+	}
+	if err := png.Encode(f, sprite); err != nil {
+		t.Fatal(err)
+	}
+}
+func nativeWindowVisible(pid int, title string, menuLabels ...string) bool {
+	dll := windows.NewLazySystemDLL("user32.dll")
+	enum := dll.NewProc("EnumWindows")
+	owner := dll.NewProc("GetWindowThreadProcessId")
+	text := dll.NewProc("GetWindowTextW")
+	visible := dll.NewProc("IsWindowVisible")
+	found := false
+	callback := windows.NewCallback(func(hwnd, unused uintptr) uintptr {
+		var id uint32
+		owner.Call(hwnd, uintptr(unsafe.Pointer(&id)))
+		if id != uint32(pid) {
+			return 1
+		}
+		var buf [256]uint16
+		text.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+		shown, _, _ := visible.Call(hwnd)
+		if windows.UTF16ToString(buf[:]) == title && shown != 0 {
+			if len(menuLabels) > 0 {
+				menu, _, _ := dll.NewProc("GetMenu").Call(hwnd)
+				count, _, _ := dll.NewProc("GetMenuItemCount").Call(menu)
+				if menu == 0 || int(count) != len(menuLabels) {
+					return 1
+				}
+				for i, label := range menuLabels {
+					var item [128]uint16
+					dll.NewProc("GetMenuStringW").Call(menu, uintptr(i), uintptr(unsafe.Pointer(&item[0])), 128, 0x400)
+					if windows.UTF16ToString(item[:]) != label {
+						return 1
+					}
+				}
+			}
+			found = true
+			return 0
+		}
+		return 1
+	})
+	enum.Call(callback, 0)
+	return found
+}

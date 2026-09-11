@@ -1,6 +1,6 @@
 import {Events} from "@wailsio/runtime";
 
-import {SettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {SettingsService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {Values} from "../bindings/github.com/local/dsh-work/internal/settings";
 import {applyLocale, normalizeLocale, subscribeLocale, t} from "./i18n";
 import {beginControlUpdate} from "./ui/pending-control";
@@ -22,11 +22,10 @@ function settingsErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function mountSettings(setFeedback: Feedback) {
-  const toggle = document.getElementById("settings-close-to-tray") as HTMLInputElement;
   const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLSelectElement;
   const localeSelect = document.getElementById("settings-locale") as HTMLSelectElement;
-  const status = document.getElementById("settings-close-to-tray-status") as HTMLParagraphElement;
-  const controls = [toggle, rollbackToggle, localeSelect];
+  const status = document.getElementById("settings-general-status") as HTMLParagraphElement;
+  const controls = [rollbackToggle, localeSelect];
   controls.forEach(control => control.disabled = true);
   let savedLocale = normalizeLocale(localeSelect.value);
 
@@ -36,7 +35,6 @@ export function mountSettings(setFeedback: Feedback) {
   function render(values: Values) {
     form.hidden = false;
     controls.forEach(control => control.disabled = false);
-    toggle.checked = values.closeToTray;
     rollbackToggle.value = values.automaticRuntimeRollback ? "automatic" : "choose";
     localeSelect.value = normalizeLocale(values.locale);
     savedLocale = normalizeLocale(values.locale);
@@ -72,21 +70,6 @@ export function mountSettings(setFeedback: Feedback) {
     } finally { retry.disabled = false; }
   }
 
-  toggle.addEventListener("change", () => void (async () => {
-    const previous = !toggle.checked;
-    const finishUpdate = beginControlUpdate(toggle);
-    try {
-      render(await SettingsService.SetCloseToTray(toggle.checked));
-      setFeedback("");
-    } catch (error) {
-      toggle.checked = previous;
-      setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
-
-      console.error("Could not update dsh-work close behavior", error);
-    } finally {
-      finishUpdate();
-    }
-  })());
 
   rollbackToggle.addEventListener("change", () => void (async () => {
 	const previous = rollbackToggle.value === "automatic" ? "choose" : "automatic";

@@ -13,9 +13,15 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 - automatic and manual version snapshots for DSH and profile plugins;
 - supervised Worker startup, readiness and shutdown;
 - authenticated local IPC and binary WebView streams to the DSH Workspace;
-- persistent locale, close-to-tray, recovery and desktop-notification preferences;
+- a per-user background daemon shared by the desktop UI and online manager CLI;
+- background tasks that survive desktop window closure and UI process crashes;
+- persistent locale, recovery, Pet and desktop-notification preferences;
 - remembered Workspace and Settings window sizes and maximised state;
 - Windows Job Object ownership for the Worker process tree.
+
+Closing the last desktop window exits the UI client. The tray, Worker, Pet and
+notifications remain with the background daemon. Use “停止后台并退出” in the
+tray or application menu to stop background work and exit.
 
 ## Project boundary
 

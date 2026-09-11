@@ -64,14 +64,11 @@ export enum PetVisibilityIntent {
 
 /**
  * Values is the versioned, platform-neutral dsh-work preference contract.
- * CloseToTray is true by default so closing the last window keeps dsh-work and
- * its managed DSH worker available from the notification area.
  */
 export interface Values {
     "workspaceWindow": WindowGeometry;
     "settingsWindow": WindowGeometry;
     "version": number;
-    "closeToTray": boolean;
     "automaticRuntimeRollback": boolean;
     "locale": Locale;
     "notifications": notifications$0.Preferences;

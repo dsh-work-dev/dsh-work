@@ -1,5 +1,5 @@
 import {transientStatus} from "./ui/transient-status";
-import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {Snapshot, RestorePoint} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {currentLocale, subscribeLocale, t} from "./i18n";
 

@@ -77,8 +77,8 @@ func TestSettingsInvalidNotificationObjectFallsBackWithoutDiscardingOtherValues(
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if values.CloseToTray || values.Locale != LocaleJapanese {
-		t.Fatalf("recoverable settings = %#v, want closeToTray=false and locale=%q", values, LocaleJapanese)
+	if values.Locale != LocaleJapanese {
+		t.Fatalf("recoverable settings = %#v, want locale=%q", values, LocaleJapanese)
 	}
 	if values.Notifications != notifications.DefaultPreferences() {
 		t.Fatalf("invalid notifications = %#v, want defaults %#v", values.Notifications, notifications.DefaultPreferences())

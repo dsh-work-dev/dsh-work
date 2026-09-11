@@ -1,4 +1,4 @@
-import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {currentLocale as getLocale, subscribeLocale} from "./i18n";
 
 export interface Activity {

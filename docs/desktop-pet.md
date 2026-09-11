@@ -95,7 +95,8 @@ on selection changes. Stale asynchronous responses cannot restore an old pet.
 | `internal/app/pet_*.go` | Trusted Settings/pet APIs, activity projection, media capabilities and hit-region validation |
 | `internal/dshactivity` | DSH launch plugin, authenticated activity bridge and navigation |
 | `internal/nativeui/pet_*.go` | Window options, activity sizing and platform-specific pointer sampling |
-| `main.go` | Service/window assembly and lifetime wiring |
+| `internal/desktopapp/daemon.go` | Daemon-owned Pet service/window assembly and lifetime wiring |
+| `internal/desktopclient` | Settings proxies to daemon-owned Pet services |
 | `frontend/src/pets.ts` | Settings controls and raster/video previews |
 | `frontend/src/pet_overlay.ts` | State synchronization, gestures and hit-region reporting |
 | `frontend/src/pet_player.ts` | Local Canvas/video playback, visibility cleanup and alpha bounds |
@@ -104,6 +105,10 @@ on selection changes. Stale asynchronous responses cannot restore an old pet.
 The native pointer adapter receives a hit-test callback; it does not depend on
 the application service. Generated bindings expose allowlisted Host operations.
 The pet frontend does not gain filesystem, process or native-window authority.
+
+The daemon owns the Pet window and notification adapters. They survive closure
+or a crash of the workbench UI client; reopening Settings connects to the same
+Pet state. Explicit background shutdown ends the overlay.
 
 ## Persistence contract
 

@@ -4,6 +4,11 @@ Version records (called snapshots in the internal API) let users return a
 profile to a previously working DSH and plugin version set. This document describes when a point is recorded, how to
 restore it and the constraints on recovery.
 
+The daemon owns the manager lock, recovery transaction and Worker process.
+Settings sends operations to that daemon; closing the UI does not cancel an
+accepted recovery. Reopen Settings to inspect its state. Explicit background
+shutdown or daemon interruption follows the interruption policy below.
+
 ## Recording and visible actions
 
 Normal startup captures dependency inputs before launching the Worker and

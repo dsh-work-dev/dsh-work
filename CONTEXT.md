@@ -20,6 +20,8 @@ in the documents linked from `docs/README.md`.
 
 | Term | Meaning | Not this |
 |---|---|---|
+| Daemon | The per-user background process owning Host state, Worker lifetime, tray, Pet and notifications. | The desktop window process or a remote access endpoint. |
+| Desktop UI client | The process owning workbench and Settings windows and projecting daemon state. | The owner of background tasks. |
 | Desktop Pet | A dsh-work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
 | Pet catalog | The Host-controlled set of validated Pet assets available for selection. | A package execution environment or a DSH plugin registry. |
 | Pet visibility intent | The user's persisted choice to show or hide the selected Pet. | Proof that a native window is currently visible. |

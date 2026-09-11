@@ -1,4 +1,4 @@
-import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {mountPetActivity} from "./pet_activity";
 import {PetPlayer, type Playback, type Timeline} from "./pet_player";
 

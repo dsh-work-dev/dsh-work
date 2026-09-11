@@ -180,13 +180,11 @@ func safePreferenceKey(value string) bool {
 }
 
 // Values is the versioned, platform-neutral dsh-work preference contract.
-// CloseToTray is true by default so closing the last window keeps dsh-work and
-// its managed DSH worker available from the notification area.
 type Values struct {
-	WorkspaceWindow          WindowGeometry            `json:"workspaceWindow"`
-	SettingsWindow           WindowGeometry            `json:"settingsWindow"`
-	Version                  int                       `json:"version"`
-	CloseToTray              bool                      `json:"closeToTray"`
+	WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
+	SettingsWindow  WindowGeometry `json:"settingsWindow"`
+	Version         int            `json:"version"`
+
 	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
 	Locale                   Locale                    `json:"locale"`
 	Notifications            notifications.Preferences `json:"notifications"`
@@ -195,8 +193,8 @@ type Values struct {
 
 func DefaultValues() Values {
 	return Values{
-		Version:                  stateVersion,
-		CloseToTray:              true,
+		Version: stateVersion,
+
 		AutomaticRuntimeRollback: true,
 		Locale:                   DefaultLocale,
 		Notifications:            notifications.DefaultPreferences(),
@@ -285,22 +283,6 @@ func (m *Manager) Snapshot(ctx context.Context) (Values, error) {
 	return cloneValues(m.values), nil
 }
 
-func (m *Manager) SetCloseToTray(ctx context.Context, enabled bool) (Values, error) {
-	if err := contextError(ctx); err != nil {
-		return Values{}, err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	next := m.values
-	next.CloseToTray = enabled
-	next.Version = stateVersion
-	if err := m.store.Save(ctx, m.path, next); err != nil {
-		return Values{}, err
-	}
-	m.values = next
-	return cloneValues(next), nil
-}
-
 func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) {
 	if err := contextError(ctx); err != nil {
 		return Values{}, err
@@ -381,10 +363,10 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
-		WorkspaceWindow          WindowGeometry  `json:"workspaceWindow"`
-		SettingsWindow           WindowGeometry  `json:"settingsWindow"`
-		Version                  int             `json:"version"`
-		CloseToTray              *bool           `json:"closeToTray"`
+		WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
+		SettingsWindow  WindowGeometry `json:"settingsWindow"`
+		Version         int            `json:"version"`
+
 		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
 		Locale                   *Locale         `json:"locale"`
 		Notifications            json.RawMessage `json:"notifications"`
@@ -397,9 +379,6 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	values.WorkspaceWindow = raw.WorkspaceWindow
 	values.SettingsWindow = raw.SettingsWindow
 	values.Version = stateVersion
-	if raw.CloseToTray != nil {
-		values.CloseToTray = *raw.CloseToTray
-	}
 	if raw.Locale != nil && raw.Locale.Valid() {
 		values.Locale = *raw.Locale
 	}

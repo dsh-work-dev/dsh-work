@@ -2,4 +2,4 @@
 
 package desktopprobe
 
-func probeProcesses(uint32) any { return map[string]any{"error": "unsupported platform"} }
+func Processes(uint32, int, int) any { return map[string]any{"error": "unsupported platform"} }

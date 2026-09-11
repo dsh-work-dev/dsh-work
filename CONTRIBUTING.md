@@ -72,10 +72,14 @@ wails3 task build
 wails3 task run
 ```
 
-The standalone manager CLI is built by `wails3 task build:dsh-work`. It is an
-offline surface: commands fail while the desktop process owns the manager lock.
+The manager CLI is built by `wails3 task build:dsh-work`. It connects to the
+running per-user daemon for online operations. When no daemon is reachable,
+manager commands use offline access under the existing manager lock; they do
+not bypass a lock held by another process. `status`, `restart` and `stop` require
+a running daemon. The CLI does not start the daemon automatically.
 
 ```powershell
+bin\dsh-work-cli.exe status
 bin\dsh-work-cli.exe runtime list
 bin\dsh-work-cli.exe profile list
 bin\dsh-work-cli.exe use --runtime dsh-0.1.5-rc.2 --data-directory dsh-work --profile web

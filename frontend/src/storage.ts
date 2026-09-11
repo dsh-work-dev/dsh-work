@@ -1,4 +1,4 @@
-import {StorageService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {StorageService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {State} from "../bindings/github.com/local/dsh-work/internal/storagepaths/models";
 import {mountFolderPicker} from "./ui/folder-picker";
 import {subscribeLocale, t} from "./i18n";

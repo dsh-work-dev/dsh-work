@@ -3,7 +3,7 @@ import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
-import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/app";
+import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {mountOperationLog} from "./operation-log";

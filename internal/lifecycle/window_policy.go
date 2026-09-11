@@ -2,42 +2,21 @@ package lifecycle
 
 import "sync"
 
-// WindowCloseAction is the platform-neutral result of a user closing one
-// dsh-work window. The Wails/platform edge decides how to realize the action.
-type WindowCloseAction string
-
-const (
-	WindowCloseToTray WindowCloseAction = "tray"
-	WindowCloseQuit   WindowCloseAction = "quit"
-)
-
-type WindowCloseDecision struct {
-	Action      WindowCloseAction
-	LastVisible bool
-}
-
 // WindowLedger tracks visibility independently from native window handles.
 // It keeps the shared contract testable and prevents a platform hook from
 // treating WindowClosing as an implicit application quit.
 type WindowLedger struct {
-	mu          sync.Mutex
-	visible     map[string]bool
-	closeToTray bool
-	quitting    bool
+	mu       sync.Mutex
+	visible  map[string]bool
+	quitting bool
 }
 
-func NewWindowLedger(closeToTray bool, windowIDs ...string) *WindowLedger {
+func NewWindowLedger(windowIDs ...string) *WindowLedger {
 	visible := make(map[string]bool, len(windowIDs))
 	for _, id := range windowIDs {
 		visible[id] = false
 	}
-	return &WindowLedger{visible: visible, closeToTray: closeToTray}
-}
-
-func (l *WindowLedger) SetCloseToTray(enabled bool) {
-	l.mu.Lock()
-	l.closeToTray = enabled
-	l.mu.Unlock()
+	return &WindowLedger{visible: visible}
 }
 
 func (l *WindowLedger) SetVisible(id string, visible bool) {
@@ -59,21 +38,6 @@ func (l *WindowLedger) TryShow(id string) bool {
 	}
 	l.visible[id] = true
 	return true
-}
-
-func (l *WindowLedger) RequestClose(id string) WindowCloseDecision {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.quitting {
-		return WindowCloseDecision{Action: WindowCloseQuit, LastVisible: true}
-	}
-	l.visible[id] = false
-	lastVisible := l.visibleCountLocked() == 0
-	if lastVisible && !l.closeToTray {
-		l.quitting = true
-		return WindowCloseDecision{Action: WindowCloseQuit, LastVisible: true}
-	}
-	return WindowCloseDecision{Action: WindowCloseToTray, LastVisible: lastVisible}
 }
 
 func (l *WindowLedger) BeginQuit() {

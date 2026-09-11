@@ -1,5 +1,21 @@
 # Settings and startup
 
+## Window lifecycle and preferences
+
+Closing a desktop window closes that window. Closing the last workbench or
+Settings window exits the UI client while the daemon, Worker tasks, tray, Pet
+and notifications continue. Reopen from the tray to connect to the same daemon.
+Use “停止后台并退出” from the tray or application menu for Worker/child cleanup
+and complete background shutdown.
+
+There is no close-behavior setting. Legacy persisted `closeToTray` values are
+ignored and are omitted when preferences are saved. Locale, automatic recovery,
+Pet and notification preferences remain persisted.
+
+The workbench title is `dsh-work` and its native menu contains 操作/设置/帮助
+in Chinese. Settings uses the localized Settings title. Both window types
+restore their saved normal size and maximised state independently.
+
 ## Information hierarchy
 
 Keep common actions directly available. Use spacing, grouping, ordering and

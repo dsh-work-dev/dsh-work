@@ -29,6 +29,15 @@ type ManagerService struct {
 	runtimeCancel      context.CancelFunc
 }
 
+func (s *ManagerService) RegisterRuntime(ctx context.Context, runtime dshmanager.RuntimeInfo) (dshmanager.Snapshot, error) {
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Runtime registration requires Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.RegisterRuntime(ctx, runtime)
+}
+
 const managerOperationTimeout = 2 * time.Minute
 const runtimeOperationTimeout = 15 * time.Minute
 
@@ -553,6 +562,9 @@ func contextWithTimeout(parent context.Context, timeout time.Duration) (context.
 func isTrustedWindow(ctx context.Context, name string) bool {
 	if ctx == nil {
 		return false
+	}
+	if surface, ok := ctx.Value(localClientSurfaceKey{}).(string); ok {
+		return surface == name
 	}
 	window, ok := ctx.Value(application.WindowKey).(application.Window)
 	return ok && window != nil && window.Name() == name

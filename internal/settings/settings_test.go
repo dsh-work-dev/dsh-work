@@ -10,7 +10,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-func TestSettingsDefaultToKeepingTheAppInTheTray(t *testing.T) {
+func TestSettingsDefaults(t *testing.T) {
 	manager, err := New(Config{Path: filepath.Join(t.TempDir(), "settings.json")})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -19,8 +19,8 @@ func TestSettingsDefaultToKeepingTheAppInTheTray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
 	}
-	if !values.CloseToTray || !values.AutomaticRuntimeRollback || values.Version != stateVersion || values.Locale != DefaultLocale {
-		t.Fatalf("default values = %#v, want version %d, closeToTray=true and locale=%q", values, stateVersion, DefaultLocale)
+	if !values.AutomaticRuntimeRollback || values.Version != stateVersion || values.Locale != DefaultLocale {
+		t.Fatalf("default values = %#v, want version %d, locale=%q", values, stateVersion, DefaultLocale)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestSettingsVersionOneMigratesAutomaticRuntimeRollbackToEnabled(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values.Version != 2 || !values.AutomaticRuntimeRollback || values.CloseToTray || values.Locale != LocaleJapanese {
+	if values.Version != 2 || !values.AutomaticRuntimeRollback || values.Locale != LocaleJapanese {
 		t.Fatalf("migrated settings = %#v", values)
 	}
 }
@@ -181,36 +181,6 @@ func TestSettingsPetPreferencePersistsAsOneVersionedValue(t *testing.T) {
 	}
 	if values.Pet.SelectedKey == nil || *values.Pet.SelectedKey != selected || values.Pet.VisibilityIntent != PetVisibilityVisible || values.Pet.Position.MonitorID != "display-2" {
 		t.Fatalf("reloaded Pet preference = %#v", values.Pet)
-	}
-}
-
-func TestSettingsPersistClosePolicy(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	values, err := manager.SetCloseToTray(context.Background(), false)
-	if err != nil {
-		t.Fatalf("SetCloseToTray() error = %v", err)
-	}
-	if values.CloseToTray {
-		t.Fatal("SetCloseToTray(false) kept closeToTray=true")
-	}
-	if _, err := manager.SetCloseToTray(context.Background(), true); err != nil {
-		t.Fatalf("SetCloseToTray(true) error = %v", err)
-	}
-
-	reloaded, err := New(Config{Path: path, Replacer: renameReplacer{}})
-	if err != nil {
-		t.Fatalf("reload New() error = %v", err)
-	}
-	reloadedValues, err := reloaded.Snapshot(context.Background())
-	if err != nil {
-		t.Fatalf("reload Snapshot() error = %v", err)
-	}
-	if !reloadedValues.CloseToTray {
-		t.Fatal("reloaded closeToTray=false, want true")
 	}
 }
 
