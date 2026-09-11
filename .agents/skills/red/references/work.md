@@ -1,38 +1,41 @@
 # Work with RED
 
-Use this loop for engineering tasks.
+## Ground and route
 
-## Discover
+Use the entrypoint's context-loading rules. Start from the relevant Document baseline and active E summary; follow R or historical evidence to resolve current questions.
 
-Locate the project root, repository instructions, `red.toml`, relevant Document sources, active Evolve items, and implementation evidence.
+- Implement directly when Document or active E specifies the work and no decision-blocking unknown remains.
+- Use Research for unknowns that can change implementation or acceptance, including Document/evidence conflicts.
+- Use Evolve for changes to accepted behavior, public interfaces, data, architecture, or engineering rules.
 
-## Ground
+A clear feature request may authorize direct entry to Evolve. A bug violating Document may proceed from diagnosis to repair without changing Document. Route by knowledge state rather than a mandatory R-to-E-to-D sequence.
 
-Build the smallest useful context. Mark each input as Document, Evolve, Research, or implementation evidence. Do not load unrelated project history.
+## Maintain active E
 
-## Route
+On resumption or new instructions, compare active E with the request and current evidence. Before dependent work, record material changes to scope, design, acceptance, decisions, or constraints, including findings that change the plan. Distinguish authorized decisions from unresolved alternatives; a user request clearly authorizing an adjustment supplies that authority. Ordinary E maintenance needs no separate approval.
 
-- Implement directly when accepted Document or an active Evolve item specifies the work and no decision-blocking unknown remains.
-- Enter Research when an unknown can change the implementation or acceptance criteria.
-- Enter Evolve when the task changes accepted behavior, a public interface, data, architecture, or an engineering rule.
-- Investigate a Document/evidence conflict through Research before updating either side.
+After meaningful results, record concise evidence, verification status (including failed or pending checks), and remaining work. Before pause, handoff, or completion, reconcile E with actual work and current decisions. Batch minor edits until these triggers. If storage is unavailable, preserve the update in the task and identify the blocker.
 
-A clear feature request may enter Evolve without a separate Research artifact. A bug that violates existing Document may move from diagnosis to a direct repair without changing Document.
+Keep current scope, decisions, acceptance, verification, and next steps easy to resume. Replace stale status while retaining decision rationale, unresolved alternatives, and review evidence. Link detailed logs or experiments from R/E instead of copying output or appending every turn. Update affected sections without re-reading the whole record after each edit.
 
-Route work by knowledge state instead of a required R-to-E-to-D sequence. The user's current request may authorize direct entry to Evolve when it already defines the change and its boundary.
+## Reconcile replaced knowledge
+
+When a proposed change alters an existing decision, search the affected Document sections and active R/E for the same behavior, rule, or assumption. Include the affected owners and outstanding conflicts in the reviewable E result. After acceptance, reconcile that scope with the accepted decision:
+
+- Fully replaced: update the owning Document explanation and its current-use links; mark affected working records as superseded or close them using the project's existing conventions.
+- Partly replaced: state which conditions or parts changed and preserve the still-valid constraints, rationale, and open work.
+- Still applicable: retain it. A newer decision alone does not invalidate an older one.
+
+Carry accepted, durable rationale into Document using [the writing guidance](artifacts.md#write-document-for-its-readers) before retiring its working record. Retain useful evidence and rejected alternatives in R/E under the project's retention policy. Keep historical records distinguishable from current guidance; preserve frozen archives. Record replacement relationships on the R/E side. Concurrent changes with unresolved conflicts remain open for a decision.
 
 ## Persist
 
-Create an artifact only when the persistence criteria in `protocol.md` apply. Use the CLI when available. Otherwise follow `artifacts.md` by hand.
+Persist work that crosses tasks, needs review, presents alternatives, affects public behavior or architecture, or leaves an unresolved conflict. Keep small local work in task context when persistence is unnecessary. Use the CLI when available; consult `artifacts.md` for record structure. Follow project storage and version-control policy; artifact creation does not authorize publication.
 
-Follow the project's storage and version-control policy. Do not treat artifact creation as authorization to stage or publish it.
+## Execute and report
 
-## Research checkpoint
+Investigate within Research; design, implement, verify, and revise within authorized Evolve scope. Seek a decision for scope expansion. Apply the entrypoint's transition boundary:
 
-Investigate inside Research. When the evidence supports a proposed Evolve scope, report the findings, remaining uncertainty, risks, and proposed scope. Stop there unless the user or a project-authorized decision source explicitly advances the work to Evolve.
-
-## Evolve loop and acceptance checkpoint
-
-Design, implement, test, revise, and resolve tradeoffs inside the authorized Evolve scope. Ask for a new decision when work would expand that scope.
-
-When acceptance conditions pass, report the implementation evidence and proposed Document changes. Stop there unless the user or a project-authorized decision source explicitly accepts the result. Then update Document and record the promotion. Do not treat the request that started Research or Evolve as advance acceptance of a result the user had not seen.
+- Present R findings, uncertainty, risks, and proposed E scope for a decision.
+- Present E verification evidence and proposed Document changes for acceptance.
+- Record authorized promotions; synchronize accepted E behavior with Document.
