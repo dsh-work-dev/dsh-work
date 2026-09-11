@@ -18,9 +18,11 @@ for the original slice did not cover this complete launch contract.
 
 ## ADR-0003 — External runtime manager
 
-dsh-work manages an external catalog of immutable, exact-version DSH runtimes
-and explicit DSH data-directory/profile selections. GUI startup resolves local
-files and does not invoke npm, pnpm, npx or an implicit download.
+dsh-work manages an external catalog of exact-version DSH runtimes and explicit
+Node/data-directory/profile selections. Normal startup resolves local files.
+Version recovery is a separate path that force-reinstalls the recorded DSH
+version into its managed directory through npm or pnpm; it may download packages.
+A matching version alone does not skip repair.
 
 ## ADR-0004 — Global Settings and tray-aware lifecycle
 
@@ -43,8 +45,8 @@ failure is diagnostic and does not change the source event outcome.
 
 ## ADR-0007 — Separate DSH data directory and Workspace context
 
-The persisted Run context contains runtime, DSH data-directory and profile
-identity only. DSH owns Workspace registration and session semantics; Workspace
+The persisted Run context contains runtime, Node selection, DSH data-directory
+and profile identity. DSH owns Workspace registration and session semantics; Workspace
 context is resolved separately for a generation and is never inferred from the
 Host process directory.
 
@@ -52,8 +54,11 @@ Host process directory.
 
 Changing runtime, DSH data directory or profile replaces the complete Run
 context. The candidate becomes current only after readiness and gateway checks;
-failure restores known-good. Profile mutation is allowed only for the current
-healthy profile, and manager operations are serialized across desktop and CLI.
+failure follows the user's recovery preference. Automatic recovery uses a
+verified version snapshot and is bounded to prevent retry loops. Normal plugin
+mutation requires the current healthy profile; recovery reapplies recorded
+inputs after the Worker has stopped. Manager operations are serialized across
+desktop and CLI.
 
 ## ADR-0009 — Field-compatible manager state
 
@@ -68,7 +73,8 @@ instead of whether a marker matches the running build. Required identity checks
 still prevent an ambiguous or incomplete selection from reaching launch.
 
 This decision applies to the manager State only. Global Host preferences remain
-the separate versioned `internal/settings` contract, and runtime, Node,
+the separate versioned `internal/settings` contract. The optional
+`versionRecovery` payload has its own schema version. Runtime, Node,
 DSH-release and plugin records retain their business version fields.
 
 ## ADR-0010 — Host-owned Desktop Pet with data-only package adapters
@@ -94,3 +100,33 @@ window receives pointer input so the drag affordance can appear on hover, but
 only the explicit handle moves the window. Position is persisted as a
 monitor-relative normalized anchor, and Host resize failure rolls back the
 persisted dimensions.
+
+
+## ADR-0012 — Verified version snapshots and package-manager recovery
+
+Accepted 2026-09-11 after implementation and Windows recovery verification.
+
+Record exact DSH and installed plugin versions plus bounded dependency inputs,
+using the existing atomic manager-state writer. Compare inputs captured before
+startup with inputs after readiness before advancing success pointers. Keep a
+healthy Worker available if snapshot persistence fails.
+
+Recover through package-manager installation and verify both installed inputs
+and Worker readiness. Preserve `node_modules` as a directory owned by the
+package manager. With the supported pnpm hoisted workflow, force install alone
+can skip same-version damaged files, so recovery first removes declared packages
+through the package manager, reapplies the recorded inputs and forces a frozen
+install. This reuses existing installation and atomic-persistence mechanisms.
+
+Automatic success points are scoped by profile; switches retain the previously
+successful environment as their recovery source. Safe mode keeps separate data
+and does not replace normal success points. Failure policy, interruption limits
+and supported source types are defined in [Version recovery](version-recovery.md).
+
+## ADR-0013 — Persist native window dimensions in Host settings
+
+Accepted 2026-09-11. Workspace and Settings independently persist normal logical
+width/height and maximised state in the existing Host settings store. Wails
+native events supply observations; writes are debounced and flushed on close
+and shutdown. Preserve normal dimensions through minimisation and maximisation.
+Restore valid dimensions at creation and use defaults when absent or invalid.

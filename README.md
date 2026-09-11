@@ -9,10 +9,12 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 
 - a trusted desktop shell and Settings surface;
 - explicit DSH runtime, data-directory and profile management;
-- atomic Run-context switching with known-good rollback;
+- serialized Run-context switching with configurable recovery;
+- automatic and manual version snapshots for DSH and profile plugins;
 - supervised Worker startup, readiness and shutdown;
 - a trusted loopback gateway to the DSH Workspace;
-- persistent locale, close-to-tray and desktop-notification preferences;
+- persistent locale, close-to-tray, recovery and desktop-notification preferences;
+- remembered Workspace and Settings window sizes and maximised state;
 - Windows Job Object ownership for the Worker process tree.
 
 ## Project boundary

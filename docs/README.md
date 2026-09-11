@@ -13,9 +13,11 @@ preserve.
    current shape.
 4. [Desktop Pet](desktop-pet.md) — the Host-owned Pet surface, persistence,
    interaction and current release limits.
-5. [Safety standards](standards/safety.md) — authority, data and failure
+5. [Version recovery](version-recovery.md) — verified snapshots, package-manager
+   restoration, failure policy and supported limits.
+6. [Safety standards](standards/safety.md) — authority, data and failure
    containment rules.
-6. [Interface standards](standards/interface.md) — trusted UI, copy, states and
+7. [Interface standards](standards/interface.md) — trusted UI, copy, states and
    accessibility rules.
 
 Domain terminology and ownership rules are maintained in
