@@ -21,6 +21,11 @@ export function mountHost() {
   const releases = element<HTMLButtonElement>("refresh-releases");
   const errorPanel = element("startup-action-error");
   const output = element("startup-output");
+  const resolution = element("startup-resolution");
+  const diagnostics = element("startup-diagnostics");
+  const restoreDialog = element<HTMLDialogElement>("startup-restore-dialog");
+  const restoreButton = element<HTMLButtonElement>("open-startup-restore");
+  let logsRequested = false;
   const copy = element<HTMLButtonElement>("copy-startup-output");
   const panels = {node: element("startup-node-progress"), dsh: element("startup-dsh-progress")};
   const logs = {node: mountOperationLog(panels.node), dsh: mountOperationLog(panels.dsh)};
@@ -62,7 +67,7 @@ export function mountHost() {
     const code = status.error?.code ?? "";
     const phase = status.state === "Starting" ? status.phase : lastPhase;
     let current = acquisitionKind === "node" ? 0 : acquisitionKind === "dsh" ? 1 : phase === "node" || phase === "configuration" ? 0 : phase === "runtime" ? 1 : phase === "profile" ? 2 : 3;
-    if (failed) current = code.includes("NODE") ? 0 : code.includes("PROFILE") ? 2 : code.includes("RUNTIME") || code.includes("VERSION") ? 1 : code.startsWith("DSH_") ? 3 : current;
+    if (failed) current = code.includes("NODE") ? 0 : code.includes("PROFILE") ? 2 : code.includes("RUNTIME") || code.includes("VERSION") ? 1 : code.startsWith("DSH_") || code.includes("PROCESS") ? 3 : -1;
     if (missing && !active() && !busy) current = !installedNode() ? 0 : 1;
     const ids = ["node", "dsh", "profile", "start"];
     const values = [launch?.nodeVersion || (selectedNode === "system" ? snapshot?.systemNode?.version : snapshot?.nodes?.find(n => n.id === selectedNode)?.version), launch?.runtimeVersion || selectedVersion(), startupProfileName(status, snapshot?.configured?.profile.name), t("startup.ready")];
@@ -77,10 +82,18 @@ export function mountHost() {
       if (index === 2 && values[index] && !done) element(labels[index]).textContent = `${values[index]} · ${element(labels[index]).textContent}`;
     });
     retry.textContent = t(missing ? "startup.installAndStart" : failed ? "common.retry" : "startup.continue");
-    const currentBody = element(`check-${ids[current]}`).querySelector(".check-body")!;
-    for (const content of [progressPanel, element("status-message"), errorPanel]) {
-      if (content.parentElement !== currentBody) currentBody.append(content);
+    const currentBody = current >= 0 && !connectionFailed ? element(`check-${ids[current]}`).querySelector(".check-body")! : undefined;
+    for (const content of [progressPanel, resolution]) {
+      if (currentBody) { if (content.parentElement !== currentBody) currentBody.append(content); }
+      else document.querySelector(".startup-footer")!.before(content);
     }
+    const needsAttention = failed || !!lastError || connectionFailed;
+    resolution.classList.toggle("has-error", needsAttention);
+    diagnostics.hidden = !needsAttention && !logsRequested;
+    const logToggle = element("show-startup-log");
+    logToggle.hidden = needsAttention;
+    logToggle.setAttribute("aria-expanded", String(!diagnostics.hidden));
+    if (connectionFailed) output.textContent = lastError || t("startup.readError");
     progressPanel.hidden = !acquiring;
     if (!acquiring) progressBar.removeAttribute("value");
     element("node-controls").hidden = !(snapshot && !installedNode() && !active() && !busy);
@@ -92,7 +105,10 @@ export function mountHost() {
     downloadDsh.disabled = busy || active() || !downloadableVersion() || !!installedRuntime();
     const safe = element<HTMLButtonElement>("startup-safe-mode");
     safe.hidden = !failed && !stopped;
-    element("startup-restore-points").hidden = !failed && !stopped && snapshot?.restorePoints?.operation?.status !== "running";
+    const restoring = snapshot?.restorePoints?.operation?.status === "running";
+    restoreButton.hidden = !failed && !stopped && !restoring;
+    restoreButton.disabled = !snapshot || busy || (active() && !restoring);
+    restoreButton.textContent = t(restoring ? "startup.restoreProgress" : "startup.restore");
     versionPoints.render(snapshot, busy || active());
     safe.disabled = busy || active() || !snapshot?.configured || !installedRuntime() || !installedNode();
     safe.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
@@ -103,12 +119,12 @@ export function mountHost() {
     cancel.disabled = cancelRequested || status.state === "Stopping";
     document.querySelector<HTMLElement>(".startup-checks")!.hidden = connectionFailed;
     if (connectionFailed) {
-      document.querySelector(".startup-actions")!.before(errorPanel);
+
       element("app-title").textContent = t("startup.attention");
       for (const id of ["startup-node-state", "startup-dsh-state", "startup-profile", "startup-start-state"]) element(id).textContent = "—";
       for (const id of ["node", "dsh", "profile", "start"]) element(`check-${id}`).dataset.state = "pending";
       retry.hidden = false; retry.disabled = busy; retry.textContent = t("common.retry");
-      cancel.hidden = true; safe.hidden = true;
+      cancel.hidden = true; safe.hidden = true; restoreButton.hidden = true;
     }
   }
 
@@ -151,10 +167,13 @@ export function mountHost() {
     lastError = [value?.summary, value?.detail, value?.message].filter(Boolean).join("\n") || String(error);
     errorPanel.textContent = t(connectionFailed ? "startup.readError" : cancelRequested ? "runtimes.cancelled" : lastError.includes("PROFILE_") ? "startup.profileFailure" : "startup.failureMessage");
     errorPanel.hidden = false;
+    render();
   }
 
   async function action(work: () => Promise<unknown>, acquisition?: "node" | "dsh") {
     if (busy) return;
+    element("diagnostic-copy-status").textContent = "";
+    logsRequested = false;
     busy = true; acquiring = !!acquisition; acquisitionKind = acquisition; cancelRequested = false; errorPanel.hidden = true; lastError = "";
     progressMessage.textContent = t("startup.preparing"); progressBar.removeAttribute("value");
     if (acquisition) {
@@ -259,7 +278,9 @@ export function mountHost() {
     if (acquiring) await ManagerService.CancelRuntime();
     await HostService.Quit();
   })().catch(showError));
-  element("show-startup-log").addEventListener("click", () => { element("startup-diagnostics").hidden = !element("startup-diagnostics").hidden; });
+  element("show-startup-log").addEventListener("click", () => { logsRequested = !logsRequested; render(); });
+  restoreButton.addEventListener("click", () => { versionPoints.closePreview(); restoreDialog.showModal(); });
+  element("close-startup-restore").addEventListener("click", () => restoreDialog.close());
   copy.addEventListener("click", () => void (async () => {
     await poll();
     const runtime = snapshot?.runtimes?.find(r => r.id === selectedRuntime);
@@ -315,7 +336,7 @@ export function mountHost() {
       const data = await HostService.GetStartupOutput();
       const text = [!busy && status.error && [status.error.code, status.error.summary, status.error.detail].filter(Boolean).join("\n"), lastError, logs.node.text(), logs.dsh.text(), data.stdout && `[stdout]\n${data.stdout}`, data.stderr && `[stderr]\n${data.stderr}`].filter(Boolean).join("\n\n");
       const follows = output.scrollHeight - output.scrollTop - output.clientHeight < 32;
-      if (output.textContent !== text) { output.textContent = text || t("host.noOutput"); if (follows) output.scrollTop = output.scrollHeight; }
+      if (output.textContent !== text) { output.textContent = text || t("host.noOutput"); if (follows && active()) output.scrollTop = output.scrollHeight; }
       await refreshEnvironment();
     } catch (error) { console.error("Startup output unavailable", error); }
     finally { polling = false; }

@@ -9,6 +9,10 @@
   chrome that competes with the primary task.
 - Settings is a trusted, shallow management surface; the tray is a compact
   lifecycle companion, not another full application.
+- Add a separate view only when density or task complexity justifies it. Prefer
+  ordering, grouping and reduced repetition first. Keep simple management
+  controls directly reachable; runtime management stays on one page.
+- Apply the concrete layout in [Settings and startup](../settings.md).
 
 ## Copy and state
 
@@ -22,6 +26,9 @@
 - Use a named current step instead of a blank view, indefinite unlabeled spinner
   or fabricated percentage.
 - Error surfaces present a safe summary and next action before technical detail.
+  Place diagnostics and copy/retry controls near the failing operation. Failed
+  startup and operation logs open automatically. Clear short-lived success
+  notices without clearing a later error or active progress.
 
 ## Visual system
 
@@ -30,6 +37,9 @@
 - Express hierarchy primarily through alignment, spacing and typography. Avoid
   nested decorative cards, excessive shadows, gradients, glow and ornamental
   badges.
+- The current visual system uses square control/card/surface radius tokens and
+  a monochrome palette. New components reuse those tokens and danger/focus
+  treatments.
 - Selection, focus, warning and failure must remain distinguishable without
   relying on color alone.
 - DSH owns `ui-theme.preference`; dsh-work trusted surfaces consume the resolved

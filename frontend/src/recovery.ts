@@ -12,6 +12,11 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   const importFeedback = document.getElementById("backup-import-feedback")!;
   const more = document.getElementById("backup-more") as HTMLButtonElement;
   let showAll = false;
+  const history = document.getElementById("backup-history-dialog") as HTMLDialogElement;
+  const historyOpen = document.getElementById("backup-history-open") as HTMLButtonElement;
+  const summary = document.getElementById("backup-summary")!;
+  historyOpen.addEventListener("click", () => history.showModal());
+  document.getElementById("backup-history-close")!.addEventListener("click", () => history.close());
   const feedback = document.getElementById("backup-feedback")!;
   const importButton = document.getElementById("backup-import") as HTMLButtonElement;
   const openButton = document.getElementById("backup-open") as HTMLButtonElement;
@@ -29,6 +34,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   let request = 0;
 
   function controls() {
+    historyOpen.disabled = !selectedProfile;
     importButton.disabled = busy || blocked || !(snapshot?.current ?? snapshot?.configured);
     for (const button of [openButton, refreshButton, ...Array.from(list.querySelectorAll<HTMLButtonElement>("button"))]) button.disabled = busy || blocked || !selectedProfile;
     safeButton.disabled = busy || blocked || !snapshot?.configured;
@@ -43,6 +49,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     const token = ++request;
     const focused = (document.activeElement as HTMLElement)?.dataset.backup;
     list.textContent = t("view.loading");
+    summary.textContent = t("view.loading");
     more.hidden = true; document.getElementById("backup-count")!.textContent = "";
     feedback.textContent = "";
     if (!id || !owner) return;
@@ -51,6 +58,8 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
       if (token !== request || owner.name !== selectedProfile?.name || id !== selectedProfile?.dataDirectoryId) return;
       list.replaceChildren();
       document.getElementById("backup-count")!.textContent = String(backups.length);
+      const latest = [...backups].sort((a,b) => b.createdAt.localeCompare(a.createdAt))[0];
+      summary.textContent = latest ? t("backup.summary", {count: backups.length, time: new Intl.DateTimeFormat(currentLocale(), {dateStyle: "medium", timeStyle: "short"}).format(new Date(latest.createdAt))}) : t("backup.empty");
       more.hidden = showAll || backups.length <= 5;
       if (!backups.length) {
         const empty = document.createElement("p");
@@ -83,7 +92,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
         row.append(label, actions); list.append(row);
       }
       if (focused) list.querySelector<HTMLButtonElement>(`[data-backup="${CSS.escape(focused)}"]`)?.focus({preventScroll: true});
-    } catch { if (token === request) { list.textContent = ""; feedback.textContent = t("backup.listError"); } }
+    } catch { if (token === request) { list.textContent = ""; feedback.textContent = t("backup.listError"); summary.textContent = t("backup.listError"); } }
     controls();
   }
 
@@ -127,7 +136,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     selectProfile(profile?: ProfileRef) {
       const changed = selectedProfile?.name !== profile?.name || selectedProfile?.dataDirectoryId !== profile?.dataDirectoryId;
       selectedProfile = profile && {...profile};
-      if (changed) { feedback.textContent = ""; showAll = false; void refresh(); }
+      if (changed) { if (history.open) history.close(); feedback.textContent = ""; showAll = false; void refresh(); }
       controls();
       backupResult.hidden = !createdBackup || createdBackup.profile.name !== profile?.name || createdBackup.profile.dataDirectoryId !== profile?.dataDirectoryId;
     },

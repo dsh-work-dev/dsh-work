@@ -22,6 +22,9 @@ func (i *versionRecoveryFixtureInstaller) Install(context.Context, string) (dshm
 }
 func (i *versionRecoveryFixtureInstaller) ForceInstall(context.Context, string, dshmanager.ResolvedNode) (dshmanager.RuntimeInfo, error) {
 	i.calls++
+	if err := os.WriteFile(i.runtime.Path, []byte("test runtime"), 0600); err != nil {
+		return dshmanager.RuntimeInfo{}, err
+	}
 	return i.runtime, nil
 }
 
@@ -42,14 +45,21 @@ func TestVersionRecoveryHostPolicyAndReadyLifetime(t *testing.T) {
 			installer := &versionRecoveryFixtureInstaller{}
 			var profile string
 			f := newRunContextSwitchFixture(t, func(c *dshmanager.Config) {
-				c.EnableVersionRestorePoints = true
-				c.DisableHealthSnapshots = true
 				c.PluginCommands = dshadapter.NewPluginCommands()
 				installer.runtime = c.Runtimes[0]
 				c.RuntimeInstaller = installer
 				profile = filepath.Join(c.DataDirectories[0].Path, "profiles", "alpha")
 				c.CommandRunner = versionRecoveryFixtureRunner{profile: profile}
-				if err := os.WriteFile(filepath.Join(profile, "package.json"), []byte(`{"dependencies":{}}`), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(profile, "package.json"), []byte(`{"dependencies":{"plugin":"1.0.0"}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Join(profile, "node_modules", "plugin"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(profile, "node_modules", "plugin", "package.json"), []byte(`{"version":"1.0.0"}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(profile, "pnpm-lock.yaml"), []byte("lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      plugin:\n        specifier: 1.0.0\n        version: 1.0.0\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(filepath.Join(profile, "plugin-state"), []byte("healthy"), 0600); err != nil {

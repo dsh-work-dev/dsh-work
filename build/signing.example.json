@@ -1,0 +1,5 @@
+{
+  "windows": { "status": "unconfigured", "certificateThumbprint": null, "timestampURL": null },
+  "macos": { "status": "unconfigured", "developerIdentity": null, "teamID": null, "notaryProfile": null },
+  "applicationUpdate": { "status": "unconfigured", "publicKey": null, "feedURL": null }
+}

@@ -20,6 +20,7 @@ import (
 // ProfileVersionAdapter owns the DSH-specific dependency manifest boundary.
 // Package managers remain responsible for dependency resolution and installation.
 type ProfileVersionAdapter interface {
+	CheckVersionProfile(context.Context, string) error
 	CaptureVersions(context.Context, string) (ProfileVersionInput, error)
 	ApplyVersions(context.Context, string, ProfileVersionInput) error
 	ResetVersions(context.Context, string) ([]string, error)
@@ -28,7 +29,7 @@ type ProfileVersionAdapter interface {
 }
 
 type ProfileVersionInput struct {
-	Manifest       json.RawMessage `json:"manifest"`
+	Bundles        []string        `json:"bundles"`
 	Lock           string          `json:"lock"`
 	Workspace      string          `json:"workspace"`
 	Plugins        []VersionPlugin `json:"plugins"`
@@ -40,6 +41,7 @@ type VersionPlugin struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Source  string `json:"source"`
+	Group   string `json:"group"`
 }
 
 type RestorePoint struct {
@@ -55,6 +57,7 @@ type RestorePoint struct {
 	Platform       string          `json:"platform"`
 	Plugins        []VersionPlugin `json:"plugins"`
 	Digest         string          `json:"digest"`
+	Lockfile       string          `json:"lockfile,omitempty"`
 	Unavailable    string          `json:"unavailable,omitempty"`
 }
 
@@ -120,9 +123,6 @@ func (s *VersionRecoveryState) point(id string) *storedRestorePoint {
 	return nil
 }
 func (m *Manager) versionViewLocked() *RestorePointsView {
-	if !m.config.EnableVersionRestorePoints {
-		return nil
-	}
 	s := cloneVersionRecovery(m.versionRecovery)
 	v := &RestorePointsView{Points: []RestorePoint{}, LastByProfile: s.LastByProfile, LastRunning: s.LastRunning, SaveError: m.restoreSaveError, Operation: s.Pending, CanSave: m.current != nil && m.current.Profile.DataDirectoryID != SafeModeDataDirectoryID && m.verifiedPoint != nil && !m.switching}
 	for _, p := range s.Points {
@@ -131,12 +131,11 @@ func (m *Manager) versionViewLocked() *RestorePointsView {
 	sort.Slice(v.Points, func(i, j int) bool { return v.Points[i].LastVerifiedAt > v.Points[j].LastVerifiedAt })
 	return v
 }
-func (m *Manager) VersionPointsEnabled() bool { return m.config.EnableVersionRestorePoints }
 
 // CaptureLaunchVersions runs before starting the Worker; errors affect the
 // recorder, not the ability to start an otherwise usable environment.
 func (m *Manager) CaptureLaunchVersions(ctx context.Context, launch ResolvedLaunch) ResolvedLaunch {
-	if !m.config.EnableVersionRestorePoints || launch.Target.Profile.DataDirectoryID == SafeModeDataDirectoryID {
+	if launch.Target.Profile.DataDirectoryID == SafeModeDataDirectoryID {
 		return launch
 	}
 	release, err := m.acquireOperation(ctx)
@@ -164,6 +163,9 @@ func (m *Manager) readVersionPoint(ctx context.Context, launch ResolvedLaunch) (
 		return nil, err
 	}
 	p := &storedRestorePoint{RestorePoint: RestorePoint{Target: launch.Target, DSHVersion: launch.Runtime.Version, NodeVersion: launch.Node.Version, PackageManager: input.PackageManager, Platform: runtime.GOOS + "/" + runtime.GOARCH, Plugins: input.Plugins, Unavailable: input.Unavailable}, Input: input}
+	if input.Lock != "" {
+		p.Lockfile = "pnpm-lock.yaml"
+	}
 	if !validRuntimeVersion(p.DSHVersion) {
 		p.Unavailable = "DSH has no exact installable version"
 	}
@@ -189,6 +191,10 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 	}
 	defer release()
 	m.mu.RLock()
+	if m.current != nil && *m.current != launch.Target {
+		m.mu.RUnlock()
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "another Run context is current", "stop the current Worker before committing a different context")
+	}
 	state := m.stateLocked()
 	m.mu.RUnlock()
 	s := cloneVersionRecovery(state.VersionRecovery)
@@ -441,18 +447,7 @@ func (m *Manager) PreviewRestorePoint(ctx context.Context, id string) (RestorePo
 	found := false
 	for _, d := range config.DataDirectories {
 		if d.ID == p.Target.Profile.DataDirectoryID {
-			root, err := os.OpenRoot(d.Path)
-			if err != nil {
-				return p.RestorePoint, errors.New("snapshot data directory is unavailable")
-			}
-			profile, err := root.OpenRoot(filepath.Join("profiles", p.Target.Profile.Name))
-			root.Close()
-			if err != nil {
-				return p.RestorePoint, errors.New("snapshot profile is unavailable")
-			}
-			_, err = profile.Stat("package.json")
-			profile.Close()
-			if err != nil {
+			if err := config.PluginCommands.(ProfileVersionAdapter).CheckVersionProfile(ctx, filepath.Join(d.Path, "profiles", p.Target.Profile.Name)); err != nil {
 				return p.RestorePoint, errors.New("snapshot profile manifest is unavailable")
 			}
 			found = true
@@ -553,12 +548,16 @@ func (m *Manager) RecoverVersionPoint(ctx context.Context, id string) (launch Re
 	if err = adapter.ApplyVersions(ctx, profile, p.Input); err != nil {
 		return launch, err
 	}
-	args, err := adapter.ForceInstall(target.Profile.Name, p.Input.Lock != "")
-	if err != nil {
-		return launch, err
-	}
-	if _, err = config.CommandRunner.Run(ctx, installed.Path, args, env, launch.DataDirectory.Path); err != nil {
-		return launch, fmt.Errorf("install snapshot dependencies: %w", err)
+	// A pristine profile without plugins or a lock has nothing to install.
+	// Running pnpm here would introduce a new lock absent from the record.
+	if len(p.Input.Plugins) > 0 || p.Input.Lock != "" {
+		args, err := adapter.ForceInstall(target.Profile.Name, p.Input.Lock != "")
+		if err != nil {
+			return launch, err
+		}
+		if _, err = config.CommandRunner.Run(ctx, installed.Path, args, env, launch.DataDirectory.Path); err != nil {
+			return launch, fmt.Errorf("install snapshot dependencies: %w", err)
+		}
 	}
 	actual, err := m.readVersionPoint(ctx, launch)
 	if err != nil {
@@ -593,6 +592,11 @@ func (m *Manager) FailVersionRecovery(ctx context.Context) {
 		return
 	}
 	defer release()
+	// Installation already recorded its specific error. Do not replace it with
+	// a startup message when Host completes the failed recovery transaction.
+	if operation := m.PendingVersionRecovery(); operation != nil && operation.Status == "failed" {
+		return
+	}
 	_ = m.setRecoveryStage(ctx, "failed", "failed", "The restored environment could not start")
 }
 func (m *Manager) PendingVersionRecovery() *RecoveryOperation {

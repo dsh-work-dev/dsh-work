@@ -52,7 +52,7 @@ func (c NodeCatalogClient) RefreshLatest(ctx context.Context) (NodeRelease, erro
 		return NodeRelease{}, err
 	}
 	indexData, readErr := os.ReadFile(indexResult.PayloadPath)
-	cleanupErr := os.RemoveAll(indexResult.StagingPath)
+	cleanupErr := removeMetadata(indexResult)
 	if readErr != nil {
 		return NodeRelease{}, Failure{Kind: FailureLocalIO, Summary: "Node release metadata could not be read", Cause: readErr}
 	}
@@ -73,7 +73,7 @@ func (c NodeCatalogClient) RefreshLatest(ctx context.Context) (NodeRelease, erro
 		return NodeRelease{}, err
 	}
 	checksumData, readErr := os.ReadFile(checksumResult.PayloadPath)
-	cleanupErr = os.RemoveAll(checksumResult.StagingPath)
+	cleanupErr = removeMetadata(checksumResult)
 	if readErr != nil {
 		return NodeRelease{}, Failure{Kind: FailureLocalIO, Summary: "Node checksum metadata could not be read", Cause: readErr}
 	}
@@ -258,4 +258,11 @@ func nodeArchiveTarget(platform, architecture string) (string, string, error) {
 	default:
 		return "", "", Failure{Kind: FailureNotFound, Summary: "Node archive is unavailable for this architecture"}
 	}
+}
+
+// A metadata attempt owns one file, not a directory tree. Remove exactly that
+// file and its empty staging directory; unexpected entries remain untouched.
+// This also avoids recursive Windows directory traversal for a single payload.
+func removeMetadata(result Result) error {
+	return errors.Join(os.Remove(result.PayloadPath), os.Remove(result.StagingPath))
 }

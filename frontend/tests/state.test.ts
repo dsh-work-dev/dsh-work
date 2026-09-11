@@ -43,15 +43,16 @@ test("runtime preparation exposes a typed download state", () => {
   assert.equal(model.showCancel, true);
 });
 
-test("ready status exposes the trusted workspace URL", () => {
+test("ready status shows the selected workspace", () => {
   const model = viewModel(status({
     state: "Ready",
     phase: "workspace",
     canCancel: true,
-    workspaceUrl: "http://127.0.0.1:4321/"
+    workspaceUrl: "/?generation=test",
+    workspace: {generationId:"test",state:"selected",path:"C:/work/project"}
   }));
   assert.equal(model.tone, "ready");
-  assert.equal(model.workspace, "http://127.0.0.1:4321/");
+  assert.equal(model.workspace, "C:/work/project");
   assert.equal(model.showRetry, false);
 });
 
@@ -195,7 +196,7 @@ test("i18n copy re-applies over a stale translation of the same key", () => {
 
 test("every visible HTML translation key exists in all locales", () => {
 	const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-	const keys = Array.from(html.matchAll(/data-i18n(?:-aria-label|-placeholder)?="([^"]+)"/g), (match) => match[1]);
+	const keys = Array.from(html.matchAll(/data-i18n(?:-aria-label|-placeholder|-label)?="([^"]+)"/g), (match) => match[1]);
 	assert.ok(keys.length > 0);
 	for (const key of keys) assert.equal(hasTranslationInEveryLocale(key), true, key);
 });

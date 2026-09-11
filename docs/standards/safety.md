@@ -7,10 +7,11 @@
   are untrusted inputs.
 - The frontend uses only the generated, allowlisted Host bindings. Workspace
   content has no direct process, filesystem or arbitrary native authority.
-- Worker and gateway input is validated for the active generation before it
+- Worker and channel input is validated for the active generation before it
   changes Host state.
-- Local services bind to loopback and still require explicit origin, session
-  and route checks; loopback alone is not a trust boundary.
+- Desktop communication uses authenticated OS IPC with current-user access.
+  Worker documents have fixed window roles and per-generation stream checks.
+  Management runtime access is denied before native dispatch.
 
 ## Data and privacy
 

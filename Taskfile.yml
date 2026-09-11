@@ -3,7 +3,7 @@ version: '3'
 vars:
   APP_NAME: dsh-work
   BIN_DIR: bin
-  DSH_VERSION: 0.1.2-alpha.3
+  DSH_VERSION: 0.1.5-rc.2
 
 tasks:
   default:
@@ -52,10 +52,13 @@ tasks:
 
   test:
     summary: Run the complete Go unit and contract suite
+    deps:
+      - worker:assets
     cmds:
       - go test . ./cmd/... ./internal/...
 
   frontend:install:
+    run: once
     summary: Install the locked frontend dependencies
     dir: frontend
     sources:
@@ -82,8 +85,10 @@ tasks:
       - generate:bindings
     cmds:
       - npm run typecheck
+      - node node_modules/typescript/bin/tsc --project ../internal/desktopbridge/tsconfig.json
 
   frontend:build:
+    run: once
     summary: Build the trusted frontend assets
     dir: frontend
     deps:
@@ -101,7 +106,10 @@ tasks:
       - npm run dev -- --port {{.WAILS_VITE_PORT | default 9245}} --strictPort
 
   generate:bindings:
+    run: once
     summary: Generate the narrow Wails TypeScript Host bindings
+    deps:
+      - worker:assets
     cmds:
       - wails3 generate bindings -ts -i -clean=true
 
@@ -124,7 +132,23 @@ tasks:
     summary: Build the explicit dsh-work runtime/profile manager CLI
     cmds:
       - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
-      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/dsh-work{{exeExt}}" ./cmd/dsh-work
+      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/dsh-work-cli{{exeExt}}" ./cmd/dsh-work
+
+  worker:assets:
+    run: once
+    summary: Generate the Worker Fetch adapter against the bundled Wails runtime
+    deps:
+      - frontend:install
+    cmds:
+      - node scripts/build-worker-bridge.mjs
+
+  test:desktop:
+    summary: Verify the desktop Host and real Worker streams
+    platforms: [windows]
+    deps:
+      - build
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-desktop.ps1
 
   run:
     summary: Run the already-built dsh-work application

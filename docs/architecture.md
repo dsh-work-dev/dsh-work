@@ -8,7 +8,7 @@ User
   v
 dsh-work Host (Go + Wails)
   |-- trusted startup and Settings WebViews
-  |-- Workspace WebView --> trusted loopback gateway --> DSH Worker
+  |-- Worker WebView --> Wails byte streams --> authenticated OS pipe --> DSH Worker
   |-- lifecycle and runtime manager --> Supervisor --> platform adapter
   |-- settings and notification policy --> native desktop adapters
   |-- Pet catalog/runtime/renderer --> transparent Host-owned Pet overlay
@@ -30,7 +30,9 @@ content cannot grant themselves Host capabilities.
 | `internal/dshadapter` | exact-version launch, readiness, profile and plugin command grammar |
 | `internal/dshmanager` | runtime catalog, profiles, version snapshots and serialized recovery state |
 | `internal/workspacecontext` | per-generation DSH Workspace context |
-| `internal/workergateway` | trusted-origin HTTP and WebSocket access to the Worker |
+| `internal/workerchannel` | per-generation channel, authentication cookies and activity lifetime |
+| `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |
+| `internal/desktopbridge` | resource delivery, Fetch and WebSocket over bounded Wails byte streams |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
@@ -44,6 +46,50 @@ filesystem and operating-system primitives implement those interfaces at the
 edge. The frontend uses the generated allowlisted Host bindings and has no
 direct process or filesystem authority. Logs and UI projections observe state;
 they do not define lifecycle truth.
+
+## Desktop communication
+
+The Host creates a fresh authenticated named pipe before each Windows Worker
+launch. `go-winio` enforces a current-user SID ACL and rejects remote pipe
+clients. Per-launch random credentials authenticate both ends with HMAC. The
+Node carrier connects to that pipe and reuses the published DSH WebServer route,
+index and upgrade contracts without calling TCP listen. The HTTP authority
+`http://127.0.0.1:1` is an internal routing identity; the transport can only dial
+the pipe. Credentials and carrier modules live in an owned temporary directory
+and are removed with the generation.
+
+The startup window (`workspace`) and Settings are permanent trusted surfaces.
+The DSH window (`worker`) has an immutable role. Native-stamped window identity
+selects resource handlers and denies its management runtime requests. Worker
+service-worker registration is blocked to protect the shared WebView origin.
+Resources use the native asset handler; Fetch and WebSocket bodies use Wails
+Streams with 64 KiB chunks, upload acknowledgements and download credits.
+Every stream names its document generation. Worker authentication cookies stay
+in the Host cookie jar. External HTTP(S) links open through a narrow callback.
+
+The existing tray Host owns the Worker independently of window visibility.
+Restart closes streams and the pipe, verifies the process boundary, then starts
+the next generation. Safe mode uses the same channel with its own profile and
+omits optional activity and user-data overlays. The process supervisor remains
+the authority for graceful stop, forced stop and process-tree cleanup.
+
+The OS transport uses `go-winio`, HTTP uses the Go/Node standard libraries and
+WebSocket uses `coder/websocket` plus the selected profile's upstream routes.
+Application code adapts those libraries to Wails and DSH ownership contracts;
+it does not implement HTTP, WebSocket framing or named-pipe security itself.
+
+## Launch adapter and byte semantics
+
+The desktop carrier preserves upstream opaque resource queries, including DSH
+plugin bootstrap URLs; parsing and re-encoding those queries changes their
+meaning. Readiness uses the owned authenticated channel rather than probing a
+printed loopback URL. Candidate and recovery diagnostics retain separate failure
+causes with bounded, redacted output.
+
+Byte transport describes the carrier, not a replacement for DSH application
+protocols: HTTP, JSON, text and WebSocket payloads retain their upstream semantics.
+The regular desktop executable uses this architecture directly. The former TCP
+gateway and standalone prototype/comparison entry points are removed.
 
 ## Manager persistence
 
@@ -79,6 +125,20 @@ sizes replace the saved dimensions; maximised state is stored separately and
 minimised/fullscreen observations are ignored. Position is still centred on
 creation; this feature does not persist screen coordinates.
 
+## Confined version-file access
+
+Version input reads and writes remain confined to the selected data directory.
+On Windows, `google/safeopen` opens files component by component beneath that
+home, including profile path components. This addresses the observed Go 1.25
+`os.Root` `OBJ_DONT_REPARSE` failure in the daily redirected AppData environment
+while retaining traversal checks. `os.Root` remains in use for rooted publication
+and removal, and on other platforms. Windows NTSTATUS errors are normalized so
+missing optional inputs preserve ordinary filesystem semantics.
+
+The dependency supplies no-follow file access; it was chosen over custom native
+filesystem infrastructure. This is a scoped response to reproduced behavior,
+not a general claim that `os.Root` fails on ordinary Windows filesystems.
+
 ## Desktop Pet boundary
 
 The Pet follows the same boundary: the Host owns package validation, selection,
@@ -94,9 +154,9 @@ capabilities.
 2. Normal startup resolves a complete local Run context. Snapshot recovery is
    a separate installation path and may acquire recorded versions.
 3. The Worker enters its platform process boundary before it can run.
-4. A fresh generation ID scopes startup, readiness, gateway and Workspace
+4. A fresh generation ID scopes startup, readiness, IPC and Workspace
    events; obsolete-generation events are ignored.
-5. Workspace navigation occurs only after active readiness and gateway checks.
+5. Workspace navigation occurs only after authenticated readiness checks.
 6. Run-context switching stops and verifies the old generation before starting
    a candidate. Candidate and previous Worker generations never overlap.
 7. Readiness establishes the current Worker. Verified version inputs advance

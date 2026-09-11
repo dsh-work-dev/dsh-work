@@ -1,0 +1,9 @@
+{
+  "extends": "../../frontend/tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "baseUrl": ".",
+    "paths": { "@wailsio/runtime": ["../../frontend/node_modules/@wailsio/runtime/types/index.d.ts"] }
+  },
+  "include": ["client.ts"]
+}

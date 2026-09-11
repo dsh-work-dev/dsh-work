@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/cookiejar"
 	"os"
 	"path/filepath"
 	"time"
@@ -18,7 +17,8 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/platform"
-	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workerchannel"
+	"github.com/local/dsh-work/internal/workeripc"
 )
 
 // dsh-work-smoke exercises the same Host, DSH Adapter and native Windows
@@ -67,21 +67,21 @@ func main() {
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)
 	}
-	gateway := workergateway.New()
+	channel := workerchannel.New()
 	host := dshworkapp.NewHost(dshworkapp.Dependencies{
 		DSH:        dsh,
 		Manager:    manager,
 		Supervisor: dependencies.Supervisor,
-		Gateway:    gateway,
+		Channel:    channel,
 	}, config)
 	statuses := make(chan lifecycle.Status, 32)
-	var handoffURL string
+	var workspaceURL string
 	host.SetPublish(func(status lifecycle.Status) {
 		encoded, _ := json.Marshal(status)
 		fmt.Println(string(encoded))
 		statuses <- status
 	})
-	host.SetReadyHandler(func(url string) { handoffURL = url })
+	host.SetReadyHandler(func(url string) { workspaceURL = url })
 	host.SetDebug(func(message string) { fmt.Printf("DEBUG %s\n", message) })
 
 	start := host.Start()
@@ -89,12 +89,12 @@ func main() {
 		fatalf("host did not enter Starting: %+v", start)
 	}
 	ready := waitForState(statuses, lifecycle.StateReady, config.ReadinessTimeout+config.GracefulStopTimeout+config.EmptyTimeout+10*time.Second)
-	if ready.Error != nil || ready.WorkspaceURL == "" || handoffURL == "" {
+	if ready.Error != nil || ready.WorkspaceURL == "" || workspaceURL == "" {
 		diagnostics := host.Diagnostics()
 		_ = host.ShutdownForApp()
 		fatalf("host did not become ready: %+v diagnostics=%+v", ready, diagnostics)
 	}
-	if err := probeWorkspace(handoffURL); err != nil {
+	if err := probeWorkspace(channel.Current().Client(), workeripc.Origin+"/"); err != nil {
 		_ = host.ShutdownForApp()
 		fatalf("workspace probe failed after readiness: %v", err)
 	}
@@ -134,16 +134,11 @@ func waitForState(statuses <-chan lifecycle.Status, expected lifecycle.State, ti
 	}
 }
 
-func probeWorkspace(value string) error {
+func probeWorkspace(client *http.Client, value string) error {
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, value, nil)
 	if err != nil {
 		return err
 	}
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return err
-	}
-	client := &http.Client{Jar: jar, Timeout: 3 * time.Second}
 	response, err := client.Do(request)
 	if err != nil {
 		return err

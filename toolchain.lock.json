@@ -19,10 +19,8 @@
   },
   "dsh": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.1.2-alpha.3",
+    "version": "0.1.5-rc.2",
     "profile": "web",
-    "host": "127.0.0.1",
-    "startup": "dsh --profile web --host 127.0.0.1 --port <explicit-port>",
     "compatibility": "exact-version"
   },
   "targets": {

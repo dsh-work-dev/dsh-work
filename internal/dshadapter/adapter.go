@@ -5,23 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/workeripc"
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
-const SupportedVersion = "0.1.2-alpha.3"
+const SupportedVersion = "0.1.5-rc.2"
 
 var exactRuntimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 
@@ -63,7 +61,7 @@ type LaunchContext struct {
 	DataDirectory      string
 	Profile            string
 	Workspace          workspacecontext.Context
-	Port               int
+	HostPatch          string
 }
 
 type Adapter struct {
@@ -71,7 +69,6 @@ type Adapter struct {
 	expectedVersion    string
 	executableOverride string
 	discoveryRoot      string
-	client             *http.Client
 	launchPatch        func(string) (string, error)
 	userDataDirectory  string
 }
@@ -88,12 +85,6 @@ func New(executor CommandExecutor, expectedVersion string) *Adapter {
 	return &Adapter{
 		executor:        executor,
 		expectedVersion: expectedVersion,
-		client: &http.Client{
-			Timeout: 2 * time.Second,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
 	}
 }
 
@@ -280,7 +271,7 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 	if launch.Workspace.State == workspacecontext.StateSelected {
 		workingDirectory = launch.Workspace.Path
 	}
-	origin := "http://127.0.0.1:" + strconv.Itoa(launch.Port)
+	origin := workeripc.Origin
 	env := map[string]string{"DSH_HOME": dataDirectory}
 	for key, value := range launch.Runtime.Env {
 		env[key] = value
@@ -288,12 +279,10 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 	plan := supervisor.LaunchPlan{
 		GenerationID:     launch.GenerationID,
 		Executable:       launch.Runtime.Path,
-		Args:             []string{"--profile", launch.Profile, "--host", "127.0.0.1", "--port", strconv.Itoa(launch.Port), "--no-open"},
+		Args:             []string{"--patch", launch.HostPatch, "--profile", launch.Profile, "--host", "127.0.0.1", "--port", "1", "--no-open"},
 		Env:              env,
 		WorkingDirectory: workingDirectory,
 		ExpectedOrigin:   origin,
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     launch.Port,
 	}
 	if a.userDataDirectory != "" && !launch.SafeMode {
 		patch, err := prepareUserDataPatch(dataDirectory, a.userDataDirectory)
@@ -308,6 +297,9 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH activity bridge: %w", err)
 		}
 		plan.Args = append([]string{"--patch", patch}, plan.Args...)
+	}
+	if launch.HostPatch == "" {
+		return supervisor.LaunchPlan{}, errors.New("Worker channel patch is required")
 	}
 	if err := plan.Validate(); err != nil {
 		return supervisor.LaunchPlan{}, err
@@ -331,7 +323,7 @@ func (a *Adapter) ParseReadyAnnouncement(text string) (ReadyAnnouncement, bool) 
 
 func (a *Adapter) ValidateReady(announcement ReadyAnnouncement, plan supervisor.LaunchPlan) error {
 	u, err := url.Parse(announcement.URL)
-	if err != nil || u.Scheme != "http" || u.Hostname() != plan.ExpectedHost || u.Port() != strconv.Itoa(plan.ExpectedPort) || u.User != nil || u.Fragment != "" || (u.Path != "" && u.Path != "/") || !validSessionQuery(u.RawQuery) {
+	if err != nil || u.Scheme != "http" || u.Scheme+"://"+u.Host != plan.ExpectedOrigin || u.User != nil || u.Fragment != "" || (u.Path != "" && u.Path != "/") || !validSessionQuery(u.RawQuery) {
 		return lifecycle.Failure{
 			Code:      lifecycle.ErrorDSHInvalidReadiness,
 			Summary:   "DSH announced an untrusted workspace origin.",
@@ -353,7 +345,10 @@ func validSessionQuery(rawQuery string) bool {
 	return ok && len(tokens) == 1 && tokens[0] != "" && len(tokens[0]) <= 512
 }
 
-func (a *Adapter) Probe(ctx context.Context, announcement ReadyAnnouncement, plan supervisor.LaunchPlan) error {
+func (a *Adapter) Probe(ctx context.Context, announcement ReadyAnnouncement, plan supervisor.LaunchPlan, client *http.Client) error {
+	if client == nil {
+		return errors.New("Worker client required")
+	}
 	if err := a.ValidateReady(announcement, plan); err != nil {
 		return err
 	}
@@ -362,12 +357,12 @@ func (a *Adapter) Probe(ctx context.Context, announcement ReadyAnnouncement, pla
 		return &ProbeError{reason: "invalid readiness URL", cause: err}
 	}
 	request.Header.Set("Accept", "text/html")
-	response, err := a.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
-		return &ProbeError{reason: "loopback probe failed", cause: err}
+		return &ProbeError{reason: "Worker IPC probe failed", cause: err}
 	}
 	if response.StatusCode == http.StatusSeeOther {
-		if err := completeLaunchTokenExchange(ctx, a.client, request, response, plan); err != nil {
+		if err := completeLaunchTokenExchange(ctx, client, request, response, plan); err != nil {
 			return err
 		}
 		return nil
@@ -380,29 +375,29 @@ func completeLaunchTokenExchange(ctx context.Context, client *http.Client, initi
 	defer response.Body.Close()
 	location := response.Header.Get("Location")
 	if location != "/" {
-		return &ProbeError{reason: "loopback authentication redirect was not the expected clean root", cause: fmt.Errorf("location %q", location)}
+		return &ProbeError{reason: "Worker IPC authentication redirect was not the expected clean root", cause: fmt.Errorf("location %q", location)}
 	}
 	cleanURL, err := url.Parse(plan.ExpectedOrigin + "/")
 	if err != nil {
-		return &ProbeError{reason: "loopback clean URL could not be constructed", cause: err}
+		return &ProbeError{reason: "Worker IPC clean URL could not be constructed", cause: err}
 	}
 	cleanRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, cleanURL.String(), nil)
 	if err != nil {
-		return &ProbeError{reason: "loopback clean URL could not be requested", cause: err}
+		return &ProbeError{reason: "Worker IPC clean URL could not be requested", cause: err}
 	}
 	cleanRequest.Header.Set("Accept", "text/html")
 	for _, cookie := range response.Cookies() {
 		cleanRequest.AddCookie(cookie)
 	}
 	if len(response.Cookies()) == 0 {
-		return &ProbeError{reason: "loopback authentication redirect did not issue a session cookie", cause: errors.New("missing session cookie")}
+		return &ProbeError{reason: "Worker IPC authentication redirect did not issue a session cookie", cause: errors.New("missing session cookie")}
 	}
 	if initial.URL.Scheme != cleanURL.Scheme || initial.URL.Host != cleanURL.Host {
-		return &ProbeError{reason: "loopback authentication redirect changed origin", cause: errors.New("origin mismatch")}
+		return &ProbeError{reason: "Worker IPC authentication redirect changed origin", cause: errors.New("origin mismatch")}
 	}
 	cleanResponse, err := client.Do(cleanRequest)
 	if err != nil {
-		return &ProbeError{reason: "loopback authenticated probe failed", cause: err}
+		return &ProbeError{reason: "Worker IPC authenticated probe failed", cause: err}
 	}
 	defer cleanResponse.Body.Close()
 	return validateHTMLResponse(cleanResponse)
@@ -410,15 +405,15 @@ func completeLaunchTokenExchange(ctx context.Context, client *http.Client, initi
 
 func validateHTMLResponse(response *http.Response) error {
 	if response.StatusCode != http.StatusOK {
-		return &ProbeError{reason: "loopback probe returned unexpected status", cause: fmt.Errorf("status %d", response.StatusCode)}
+		return &ProbeError{reason: "Worker IPC probe returned unexpected status", statusCode: response.StatusCode, cause: fmt.Errorf("status %d", response.StatusCode)}
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64*1024))
 	if err != nil {
-		return &ProbeError{reason: "loopback response could not be read", cause: err}
+		return &ProbeError{reason: "Worker IPC response could not be read", cause: err}
 	}
 	contentType := strings.ToLower(response.Header.Get("Content-Type"))
 	if !strings.Contains(contentType, "text/html") && !strings.Contains(strings.ToLower(string(body)), "<html") {
-		return &ProbeError{reason: "loopback response is not a web application", cause: errors.New("unexpected content type")}
+		return &ProbeError{reason: "Worker IPC response is not a web application", cause: errors.New("unexpected content type")}
 	}
 	return nil
 }
@@ -510,18 +505,10 @@ func stripANSI(text string) string {
 	return ansiPattern.ReplaceAllString(text, "")
 }
 
-func AllocateLoopbackPort() (int, error) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-	return listener.Addr().(*net.TCPAddr).Port, nil
-}
-
 type ProbeError struct {
-	reason string
-	cause  error
+	reason     string
+	cause      error
+	statusCode int
 }
 
 func (e *ProbeError) Error() string {
@@ -532,3 +519,21 @@ func (e *ProbeError) Error() string {
 }
 
 func (e *ProbeError) Unwrap() error { return e.cause }
+
+// Diagnostic returns only controlled probe facts, never the request URL, token,
+// response body, or the arbitrary transport error text.
+func (e *ProbeError) Diagnostic() string {
+	if e.statusCode != 0 {
+		return fmt.Sprintf("%s (HTTP %d).", e.reason, e.statusCode)
+	}
+	if errors.Is(e.cause, context.DeadlineExceeded) {
+		return e.reason + ": request deadline exceeded."
+	}
+	if errors.Is(e.cause, context.Canceled) {
+		return e.reason + ": request canceled."
+	}
+	if errors.Is(e.cause, io.EOF) || errors.Is(e.cause, io.ErrUnexpectedEOF) {
+		return e.reason + ": connection closed before the response completed."
+	}
+	return e.reason + "."
+}

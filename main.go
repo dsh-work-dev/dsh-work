@@ -5,15 +5,19 @@ import (
 	"embed"
 	"errors"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/local/dsh-work/internal/acquisition"
 	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/desktopbridge"
+	"github.com/local/dsh-work/internal/desktopprobe"
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
@@ -24,7 +28,8 @@ import (
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
-	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workerchannel"
+	"github.com/local/dsh-work/internal/workeripc"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	wailsnotifications "github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -55,7 +60,15 @@ func main() {
 	dependencies := platform.New()
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
 	defaultRoot := filepath.Dir(config.SettingsPath)
+	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		defaultRoot = root
+		config.ReadinessTimeout = 180 * time.Second
+	}
+
 	locatorPath := filepath.Join(filepath.Dir(defaultRoot), "dsh-work-location", "locations.json")
+	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		locatorPath = filepath.Join(defaultRoot, "location", "locations.json")
+	}
 	locationLock, err := dshworkapp.AcquireManagerProcessLock(locatorPath)
 	if err != nil {
 		log.Fatalf("lock storage locations: %v", err)
@@ -105,33 +118,42 @@ func main() {
 	petActivity := dshactivity.New(filepath.Join(filepath.Dir(config.SettingsPath), "pet-activity-bridge"))
 	defer petActivity.Close()
 	dsh.SetLaunchPatch(petActivity.Prepare)
+	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		dsh.SetLaunchPatch(func(generation string) (string, error) {
+			patch, err := petActivity.Prepare(generation)
+			if err != nil {
+				return "", err
+			}
+			return desktopprobe.Patch(filepath.Join(storage.Root, "probe"), config.DiscoveryRoot)(patch)
+		})
+	}
 	var managerRunner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
-	manager, managerErr := dshmanager.New(dshmanager.Config{
-		DisableHealthSnapshots:     true,
-		EnableVersionRestorePoints: true,
-		CommandRunner:              managerRunner,
-		PluginCommands:             dshadapter.NewPluginCommands(),
-		RuntimeInstaller:           platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:                 platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:                platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:              platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:               platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:            dsh,
-		ProfileCatalog:             dsh,
+	managerConfig := dshmanager.Config{
+		CommandRunner:    managerRunner,
+		PluginCommands:   dshadapter.NewPluginCommands(),
+		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:     platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:  dsh,
+		ProfileCatalog:   dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
-	})
+	}
+	desktopprobe.Configure(&managerConfig, dsh, storage.Root)
+	manager, managerErr := dshmanager.New(managerConfig)
 	if managerErr != nil {
 		log.Printf("dsh-work manager state unavailable: %v", managerErr)
 		manager = nil
 	}
-	gateway := workergateway.New()
-	gateway.SetWorkerObserver(petActivity.Start)
+	channel := workerchannel.New()
+	channel.SetWorkerObserver(petActivity.Start)
 	var automaticRuntimeRollback atomic.Bool
 	automaticRuntimeRollback.Store(true)
 	host := dshworkapp.NewHost(dshworkapp.Dependencies{
@@ -139,12 +161,10 @@ func main() {
 		Manager:                  manager,
 		ManagerError:             managerErr,
 		Supervisor:               dependencies.Supervisor,
-		Gateway:                  gateway,
+		Channel:                  channel,
 		PlatformError:            dependencies.Err,
 		AutomaticRuntimeRollback: automaticRuntimeRollback.Load,
 	}, config)
-	var workspaceTrusted atomic.Bool
-	workspaceTrusted.Store(true)
 	settingsManager, settingsErr := dshworksettings.New(dshworksettings.Config{
 		Path:     config.SettingsPath,
 		Replacer: dependencies.FileReplacer,
@@ -169,10 +189,15 @@ func main() {
 	} else {
 		petCatalog = catalog
 	}
+	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		host.SetDebug(func(message string) { log.Print(message) })
+	}
 	var activeLocale atomic.Value
 	activeLocale.Store(string(localePreference))
 	windowLedger := lifecycle.NewWindowLedger(closeToTray, "workspace", "settings")
 	var workspaceWindow application.Window
+	var workerWindow application.Window
+	var workerActive atomic.Bool
 	var settingsWindow application.Window
 	var petWindow application.Window
 	var settingsWindowMu sync.Mutex
@@ -201,11 +226,11 @@ func main() {
 	notificationRouter := dshworknotifications.NewRouter(
 		nativeui.NewNotificationDelivery(nativeNotification, nativeNotificationHost),
 		func() bool {
-			return workspaceWindow != nil && workspaceWindow.IsFocused()
+			return (workspaceWindow != nil && workspaceWindow.IsFocused()) || (workerWindow != nil && workerWindow.IsFocused())
 		},
 	)
 	notificationRouter.SetPreferences(notificationPreference)
-	hostService := dshworkapp.NewHostService(host, workspaceTrusted.Load, func() dshworksettings.Locale {
+	hostService := dshworkapp.NewHostService(host, func() dshworksettings.Locale {
 		if settingsManager == nil {
 			return localePreference
 		}
@@ -224,7 +249,7 @@ func main() {
 		if desktop != nil {
 			desktop.Event.Emit("acquisition", status)
 		}
-	}, workspaceTrusted.Load)
+	})
 	dshworkapp.SetBackupFileActions(managerService,
 		func() (string, error) { return nativeui.ChooseProfileBackup(desktop) },
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) })
@@ -254,6 +279,19 @@ func main() {
 	dshworkapp.SetPetOverlayCapabilities(petSettingsService, petOverlayCapabilities)
 	nativeTheme := dshWindowTheme(manager)
 
+	workerSurface := &desktopbridge.Surface{
+		Window: func() application.Window { return workerWindow },
+		Current: func() *desktopbridge.Bridge {
+			session := channel.Current()
+			if session == nil {
+				return nil
+			}
+			return &desktopbridge.Bridge{Client: session.Client(), Origin: workeripc.Origin, Generation: session.Generation(), OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) }}
+		},
+	}
+	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
+	}
 	desktop = application.New(application.Options{
 		Name:        "dsh-work",
 		Description: "A local desktop shell for DSH workspaces.",
@@ -274,7 +312,8 @@ func main() {
 			application.NewService(nativeNotificationHost),
 		},
 		Assets: application.AssetOptions{
-			Handler: dshworkapp.PetMediaHandler(petSettingsService, application.AssetFileServerFS(assets)),
+			Middleware: workerSurface.Middleware,
+			Handler:    dshworkapp.PetMediaHandler(petSettingsService, application.AssetFileServerFS(assets)),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
@@ -459,7 +498,8 @@ func main() {
 			petWindow.OnWindowEvent(eventType, handlePetDisplayChange)
 		}
 	}
-	gateway.SetOpenExternal(desktop.Browser.OpenURL)
+	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
+	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
 	notificationRouter.SetDeliveryFailureHandler(func(dshworknotifications.Event) {
 		desktop.Event.Emit("notification-failure", true)
 	})
@@ -486,6 +526,9 @@ func main() {
 		windowLedger.SetVisible("workspace", false)
 		if workspaceWindow != nil {
 			workspaceWindow.Hide()
+			if workerWindow != nil {
+				workerWindow.Hide()
+			}
 		}
 		settingsWindowMu.Lock()
 		window := settingsWindow
@@ -506,7 +549,11 @@ func main() {
 		if workspaceWindow == nil || !windowLedger.TryShow("workspace") {
 			return
 		}
-		workspaceWindow.Show().Focus()
+		if workerActive.Load() {
+			workerWindow.Show().Focus()
+		} else {
+			workspaceWindow.Show().Focus()
+		}
 	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
 		if result.Error != nil {
@@ -748,6 +795,27 @@ func main() {
 		UseApplicationMenu: true,
 	}, settingsManager)
 	workspaceWindow = desktop.Window.NewWithOptions(workspaceOptions)
+	workerOptions := workspaceOptions
+	workerOptions.Name = "worker"
+	workerOptions.URL = "/"
+	workerOptions.Hidden = true
+	workerWindow = desktop.Window.NewWithOptions(workerOptions)
+	if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" {
+		desktopprobe.Install(desktop, workerWindow, report, host, petActivity)
+	}
+	workerWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { handleWindowClosing("workspace", workerWindow, event) })
+	desktop.OnShutdown(nativeui.RememberWindowGeometry(workerWindow, workspaceOptions, settingsManager))
+	restoreStartup := func() {
+		windowActionsMu.Lock()
+		defer windowActionsMu.Unlock()
+		visible := workerWindow.IsVisible()
+		workerActive.Store(false)
+		workerWindow.Hide()
+		if visible {
+			workspaceWindow.Show().Focus()
+		}
+	}
+
 	flushWorkspaceGeometry := nativeui.RememberWindowGeometry(workspaceWindow, workspaceOptions, settingsManager)
 	desktop.OnShutdown(flushWorkspaceGeometry)
 	workspaceWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
@@ -761,6 +829,9 @@ func main() {
 	windowLedger.SetVisible("workspace", true)
 
 	host.SetPublish(func(status lifecycle.Status) {
+		if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && status.Error != nil {
+			log.Printf("Host failure: %+v diagnostics=%+v", status.Error, host.Diagnostics())
+		}
 		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))
@@ -771,8 +842,7 @@ func main() {
 			refreshLifecycleMenu()
 		}
 		if status.State == lifecycle.StateStopping && workspaceWindow != nil {
-			workspaceTrusted.Store(true)
-			workspaceWindow.SetURL("/")
+			restoreStartup()
 		}
 		eventID := status.CorrelationID
 		if eventID == "" {
@@ -814,12 +884,18 @@ func main() {
 		}
 	})
 	host.SetReadyHandler(func(workspaceURL string) {
-		workspaceTrusted.Store(false)
-		workspaceWindow.SetURL(workspaceURL)
+		windowActionsMu.Lock()
+		defer windowActionsMu.Unlock()
+		visible := workspaceWindow.IsVisible()
+		workerWindow.SetURL(workspaceURL)
+		workerActive.Store(true)
+		workspaceWindow.Hide()
+		if visible {
+			workerWindow.Show().Focus()
+		}
 	})
 	host.SetRecoveryHandler(func() {
-		workspaceTrusted.Store(true)
-		workspaceWindow.SetURL("/")
+		restoreStartup()
 	})
 	host.SetQuitHandler(func() {
 		windowLedger.BeginQuit()

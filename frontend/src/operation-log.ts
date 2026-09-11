@@ -40,6 +40,7 @@ export function mountOperationLog(parent: HTMLElement) {
   });
   function append(id: string, message: string, failed = false, stepKey?: string) {
     if (id !== operationID) {
+      details.open = false;
       operationID = id;
       lines = []; size = 0; lastStep = "";
 
@@ -50,6 +51,7 @@ export function mountOperationLog(parent: HTMLElement) {
     labels();
     details.hidden = false;
     details.dataset.failed = String(failed);
+    if (failed) details.open = true;
     const time = new Date().toLocaleTimeString([], {hour12: false});
     for (const line of message.split(/\r?\n/)) {
       if (!line.trim()) continue;

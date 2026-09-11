@@ -59,6 +59,12 @@ On Windows, verify the real DSH tracer bullet after installing the fixture:
 wails3 task test:windows-real-dsh
 ```
 
+Exercise the integrated native desktop channel, streams and lifecycle with:
+
+```powershell
+wails3 task test:desktop
+```
+
 Build and run the desktop application with:
 
 ```powershell
@@ -70,10 +76,10 @@ The standalone manager CLI is built by `wails3 task build:dsh-work`. It is an
 offline surface: commands fail while the desktop process owns the manager lock.
 
 ```powershell
-bin\dsh-work.exe runtime list
-bin\dsh-work.exe profile list
-bin\dsh-work.exe use --runtime dsh-0.1.2-alpha.3 --data-directory dsh-work --profile web
-bin\dsh-work.exe plugin list --data-directory dsh-work --profile web
+bin\dsh-work-cli.exe runtime list
+bin\dsh-work-cli.exe profile list
+bin\dsh-work-cli.exe use --runtime dsh-0.1.5-rc.2 --data-directory dsh-work --profile web
+bin\dsh-work-cli.exe plugin list --data-directory dsh-work --profile web
 ```
 
 ## Engineering rules

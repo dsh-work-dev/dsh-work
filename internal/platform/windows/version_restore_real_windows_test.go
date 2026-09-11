@@ -13,7 +13,7 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
-	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workerchannel"
 )
 
 // This explicitly enabled integration uses the installed package managers and
@@ -45,7 +45,12 @@ func TestVersionRestoreRealDSH(t *testing.T) {
 	}
 	command("plugin", "--profile", "web", "add", "is-number@7.0.0", "--save-exact")
 	store := filepath.Join(work, "runtimes")
-	config := dshmanager.Config{EnableVersionRestorePoints: true, DisableHealthSnapshots: true, StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, store), NodeResolver: NewRunNodeResolver(run, store), ProfileCatalog: dshadapter.New(run, dshadapter.SupportedVersion), Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
+	// Exercise recovery of an acquisition-published tree too: pnpm can retain
+	// the staging virtual-store path after the directory is moved into place.
+	if _, err := NewRuntimeInstaller(run, store).Install(ctx, dshadapter.SupportedVersion); err != nil {
+		t.Fatal(err)
+	}
+	config := dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, store), NodeResolver: NewRunNodeResolver(run, store), ProfileCatalog: dshadapter.New(run, dshadapter.SupportedVersion), Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
 	m, err := dshmanager.New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +145,7 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 	run := CommandExecutor{}
 	adapter := dshadapter.New(run, dshadapter.SupportedVersion)
 	adapter.SetDiscoveryRoot(root)
-	m, err := dshmanager.New(dshmanager.Config{EnableVersionRestorePoints: true, DisableHealthSnapshots: true, StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, filepath.Join(work, "runtimes")), NodeResolver: NewRunNodeResolver(run, filepath.Join(work, "runtimes")), ProfileCatalog: adapter, Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}, DefaultRunContext: dshmanager.RunContext{RuntimeID: "fixture", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "home", Name: "web"}}})
+	m, err := dshmanager.New(dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, filepath.Join(work, "runtimes")), NodeResolver: NewRunNodeResolver(run, filepath.Join(work, "runtimes")), ProfileCatalog: adapter, Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}, DefaultRunContext: dshmanager.RunContext{RuntimeID: "fixture", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "home", Name: "web"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +154,7 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 	cfg.DSHDataDirectory = home
 	cfg.ReadinessTimeout = 60 * time.Second
 	cfg.ProbeTimeout = 2 * time.Second
-	h := app.NewHost(app.Dependencies{Manager: m, DSH: adapter, Supervisor: NewJobObjectAdapter(), Gateway: workergateway.New()}, cfg)
+	h := app.NewHost(app.Dependencies{Manager: m, DSH: adapter, Supervisor: NewJobObjectAdapter(), Channel: workerchannel.New()}, cfg)
 	defer h.ShutdownForApp()
 	statuses := make(chan lifecycle.Status, 256)
 	h.SetPublish(func(s lifecycle.Status) {

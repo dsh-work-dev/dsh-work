@@ -345,13 +345,10 @@ export function mountPets() {
       content.className = "pets-list-copy";
       const name = document.createElement("strong");
       name.textContent = item.displayName;
-      const description = document.createElement("span");
-      description.className = "pets-list-description";
-      description.textContent = item.description ?? "";
       const detail = document.createElement("span");
       const status = item.current ? ` · ${t("pets.current.status")}` : "";
       detail.textContent = `${sourceBadge(item)}${status}`;
-      content.append(name, description, detail);
+      content.append(name, detail);
       option.append(thumbnail, content);
       option.addEventListener("click", () => void browse(item.stableSourceKey));
       list.append(option);

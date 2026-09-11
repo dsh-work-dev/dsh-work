@@ -27,15 +27,19 @@
         <li id="check-start"><span class="check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong data-i18n="startup.startStep">启动</strong><span id="startup-start-state"></span></div></div></li>
       </ol>
       <div id="startup-progress" hidden><p id="startup-progress-message" role="status"></p><progress id="startup-progress-bar" data-i18n-aria-label="host.startupProgress"></progress></div>
-      <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
-      <div class="startup-actions"><button id="retry" class="startup-primary" type="button" hidden>重试</button><button id="startup-safe-mode" type="button" data-i18n="safe.enter" hidden>安全模式启动</button><button id="cancel" type="button" data-i18n="common.cancel" hidden>取消</button></div>
-      <section id="startup-restore-points" class="restore-points-panel" hidden></section>
-      <footer class="startup-footer"><button id="show-startup-log" type="button" data-i18n="startup.log">日志</button><button id="open-runtime-settings" type="button" data-i18n="startup.settings">设置</button><button id="copy-startup-output" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button><span id="diagnostic-copy-status" role="status"></span><button id="quit" type="button" data-i18n="common.quit">退出</button></footer>
-
-      <section id="startup-diagnostics" class="startup-diagnostics" hidden>
-
-        <pre id="startup-output" tabindex="0"></pre>
+      <section id="startup-resolution">
+        <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
+        <div class="startup-actions"><button id="retry" class="startup-primary" type="button" hidden>重试</button><button id="startup-safe-mode" type="button" data-i18n="safe.enter" hidden>启动安全模式</button><button id="open-startup-restore" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" type="button" data-i18n="common.cancel" hidden>取消</button></div>
+        <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">
+          <div class="startup-diagnostic-actions"><strong id="startup-log-title" data-i18n="startup.log">日志</strong><span id="diagnostic-copy-status" role="status"></span><button id="copy-startup-output" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button></div>
+          <pre id="startup-output" tabindex="0"></pre>
+        </section>
       </section>
+      <footer class="startup-footer"><button id="open-runtime-settings" type="button" data-i18n="startup.settings">设置</button><button id="show-startup-log" type="button" data-i18n="startup.log" aria-controls="startup-diagnostics" aria-expanded="false">日志</button><button id="quit" type="button" data-i18n="common.quit">退出</button></footer>
+      <dialog id="startup-restore-dialog" class="startup-restore-dialog" aria-labelledby="startup-restore-title">
+        <header><h2 id="startup-restore-title" data-i18n="startup.restore">恢复版本</h2><button id="close-startup-restore" type="button" data-i18n="startup.close">关闭</button></header>
+        <section id="startup-restore-points" class="restore-points-panel"></section>
+      </dialog>
       <div hidden><div id="startup-node-progress"><p></p><progress></progress></div><div id="startup-dsh-progress"><p></p><progress></progress></div></div>
     </main>
     <main id="pet-surface" class="pet-surface" aria-label="Desktop pet" hidden>
@@ -53,25 +57,40 @@
       <aside class="manager-sidebar" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
         <select id="manager-section-select" class="manager-section-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
           <option value="overview" data-i18n="manager.overview">Overview</option>
+          <optgroup label="Application" data-i18n-label="manager.groupApplication">
           <option value="settings" data-i18n="manager.general">General</option>
           <option value="notifications" data-i18n="manager.notifications">Notifications</option>
           <option value="pets" data-i18n="manager.pets">Pets</option>
+          </optgroup>
+          <optgroup label="DSH environment" data-i18n-label="manager.groupEnvironment">
+          <option value="runtimes" data-i18n="manager.runtimes">Runtimes</option>
           <option value="profiles" data-i18n="manager.profiles">Profiles</option>
           <option value="plugins" data-i18n="manager.plugins">Plugins</option>
-          <option value="runtimes" data-i18n="manager.runtimes">Runtimes</option>
+          </optgroup>
+          <optgroup label="Maintenance" data-i18n-label="manager.groupMaintenance">
           <option value="data-directories" data-i18n="manager.dataDirectories">DSH data directories</option>
           <option value="about" data-i18n="manager.about">About</option>
+          </optgroup>
         </select>
         <nav class="manager-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
           <button class="manager-nav-item is-active" data-manager-section="overview" type="button"><span data-i18n="manager.overview">Overview</span></button>
+          <section class="manager-nav-group" aria-labelledby="settings-group-application">
+          <h2 id="settings-group-application" class="manager-nav-heading" data-i18n="manager.groupApplication">Application</h2>
           <button class="manager-nav-item" data-manager-section="settings" type="button"><span data-i18n="manager.general">General</span></button>
           <button class="manager-nav-item" data-manager-section="notifications" type="button"><span data-i18n="manager.notifications">Notifications</span></button>
           <button class="manager-nav-item" data-manager-section="pets" type="button"><span data-i18n="manager.pets">Pets</span></button>
+          </section>
+          <section class="manager-nav-group" aria-labelledby="settings-group-environment">
+          <h2 id="settings-group-environment" class="manager-nav-heading" data-i18n="manager.groupEnvironment">DSH environment</h2>
+          <button class="manager-nav-item" data-manager-section="runtimes" type="button"><span data-i18n="manager.runtimes">Runtimes</span></button>
           <button class="manager-nav-item" data-manager-section="profiles" type="button"><span data-i18n="manager.profiles">Profiles</span></button>
           <button class="manager-nav-item" data-manager-section="plugins" type="button"><span data-i18n="manager.plugins">Plugins</span></button>
-          <button class="manager-nav-item" data-manager-section="runtimes" type="button"><span data-i18n="manager.runtimes">Runtimes</span></button>
+          </section>
+          <section class="manager-nav-group" aria-labelledby="settings-group-maintenance">
+          <h2 id="settings-group-maintenance" class="manager-nav-heading" data-i18n="manager.groupMaintenance">Maintenance</h2>
           <button class="manager-nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
           <button class="manager-nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span></button>
+          </section>
         </nav>
       </aside>
 
@@ -186,18 +205,22 @@
                 </div>
                 </div>
                 <div class="profile-actions">
-                  <button class="button button-secondary" id="manager-profile-clone" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button>
-                  <button class="button button-secondary" id="manager-profile-backup" data-context-mutation="true" data-i18n="action.backup" type="button">Backup</button>
-                  <button class="button button-secondary" id="manager-profile-export" data-i18n="action.export" type="button">Export</button>
-                  <button class="button button-danger" id="manager-profile-delete" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button>
+                  <button class="button button-primary" id="manager-profile-backup" data-context-mutation="true" data-i18n="action.backup" type="button">Backup</button>
+                  <div class="profile-secondary-actions">
+                    <button class="button button-secondary" id="manager-profile-clone" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button>
+                    <button class="button button-secondary" id="manager-profile-export" data-i18n="action.export" type="button">Export</button>
+                    <button class="button button-danger" id="manager-profile-delete" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button>
+                  </div>
                 </div>
                 <div id="profile-backup-result" class="profile-backup-result" hidden>
                   <span id="profile-backup-message" role="status"></span>
                   <button id="profile-backup-open" class="button button-secondary button-compact" data-i18n="backup.open" type="button">Open backup folder</button>
                 </div>
+                <div class="backup-summary-row"><p id="backup-summary" class="manager-note" role="status"></p><button id="backup-history-open" class="button button-secondary" data-i18n="backup.history" type="button">管理备份</button></div>
+                <dialog id="backup-history-dialog" class="settings-dialog" aria-labelledby="backup-history-title">
+                <header class="settings-dialog-heading"><h2 id="backup-history-title"><span data-i18n="backup.collection">备份</span> <span id="backup-count"></span></h2><button id="backup-history-close" class="button button-secondary" data-i18n="startup.close" type="button">关闭</button></header>
                 <section id="profile-owned-backups" class="profile-restore">
                   <div class="profile-backups-heading">
-                    <h3><span data-i18n="backup.collection">Backups</span> <span id="backup-count"></span></h3>
                     <div class="manager-actions">
                       <button id="backup-open" class="button button-secondary button-compact" data-i18n="backup.open" type="button">Open backup folder</button>
                       <button id="backup-refresh" class="button button-secondary button-compact" data-i18n="action.refresh" type="button">Refresh</button>
@@ -208,6 +231,7 @@
                     <p id="backup-feedback" class="manager-note" role="status"></p>
                   </div>
                 </section>
+                </dialog>
               </div>
             </div>
           </div>
@@ -307,21 +331,18 @@
 
         <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
           <div class="settings-list">
-            <div class="setting-row"><div class="setting-copy"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p class="manager-note" data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div>
+            <div class="setting-row"><div class="setting-copy"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p class="manager-note" data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div><div class="setting-control"><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div></div>
             <div data-setting-switch="settings-close-to-tray" data-label="general.closeToTray" data-status="settings-close-to-tray-status"></div>
             <div class="setting-row">
               <div class="setting-copy">
-                <strong data-i18n="general.language">Language</strong>
+                <label for="settings-locale" data-i18n="general.language">Language</label>
               </div>
               <div class="setting-control">
-                <label for="settings-locale">
-                  <span class="sr-only" data-i18n="general.languageLabel">Language</span>
                   <select id="settings-locale">
                     <option value="en" data-i18n="locale.english">English</option>
                     <option value="zh-CN" data-i18n="locale.chinese">中文</option>
                     <option value="ja-JP" data-i18n="locale.japanese">日本語</option>
                   </select>
-                </label>
               </div>
             </div>
           </div>
@@ -374,7 +395,6 @@
                 <img id="pets-preview-image" alt="" hidden />
               </div>
               <h3 id="pets-preview-name" class="pets-preview-name"></h3>
-              <p id="pets-preview-description" class="manager-note"></p>
               <p id="pets-preview-message" class="manager-note" role="status" aria-live="polite"></p>
               <div class="button-row pets-preview-actions">
                 <button class="button button-primary" id="pets-use" data-i18n="pets.use.action" type="button" disabled>Use this pet</button>
@@ -411,6 +431,7 @@
             </div>
           </div>
           <p id="pets-size-status" class="manager-note" role="status" aria-live="polite"></p>
+              <p id="pets-preview-description" class="manager-note pets-description"></p>
 
             </section>
           </div>

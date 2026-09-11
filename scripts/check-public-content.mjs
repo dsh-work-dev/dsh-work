@@ -4,9 +4,9 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
-const trackedResearch = git(["ls-files", "--cached", "--", ".research"]).trim();
-if (trackedResearch !== "") {
-  throw new Error(`Private research material is tracked:\n${trackedResearch}`);
+for (const directory of [".research", ".evolve"]) {
+  const tracked = git(["ls-files", "--cached", "--", directory]).trim();
+  if (tracked !== "") throw new Error(`Private working material is tracked in ${directory}:\n${tracked}`);
 }
 
 for (const args of [
@@ -20,4 +20,4 @@ for (const args of [
   }
 }
 
-console.log("public-content: no tracked .research files; git whitespace checks passed");
+console.log("public-content: no tracked Research/Evolve files; git whitespace checks passed");

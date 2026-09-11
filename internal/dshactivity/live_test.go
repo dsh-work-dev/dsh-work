@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/local/dsh-work/internal/workeripc"
 )
 
 // Opt-in integration against the installed, pinned DSH web Worker. No model/API
@@ -65,12 +66,16 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if err = os.WriteFile(patch, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	port := 1
+	carrier, err := workeripc.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
+	defer carrier.Close()
+	patch, err = carrier.Prepare(filepath.Join(home, "carrier"), filepath.Join(home, "dsh-home", "profiles", "web"), patch)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", cli, "--profile", "web", "--patch", patch, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open")
@@ -118,7 +123,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		<-done
 		t.Fatalf("DSH startup timed out: %s", <-logs)
 	}
-	b.Start(ctx, authURL)
+	b.Start(ctx, authURL, carrier.HTTP)
 	deadline := time.Now().Add(12 * time.Second)
 	for !b.Snapshot().Connected && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
@@ -240,7 +245,8 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	// Raw webServer routes must explicitly retain DSH's cookie trust fence.
 	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/activity-client", strings.NewReader(`{}`))
 	anonymous.Header.Set("Origin", origin)
-	unauthorized, err := http.DefaultClient.Do(anonymous)
+	anonymousClient := &http.Client{Transport: carrier.HTTP}
+	unauthorized, err := anonymousClient.Do(anonymous)
 	if err != nil {
 		t.Fatal(err)
 	}

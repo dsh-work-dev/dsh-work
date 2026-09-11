@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,27 +65,28 @@ func TestCancelInterruptsHealthCommitBeforeWaitingForManagerGuard(t *testing.T) 
 	f.waitForHostState(t, lifecycle.StateStopped)
 }
 
-func TestColdStartupRestoresPersistedHealthyEnvironment(t *testing.T) {
+func TestColdStartupRestoresPersistedVersionRecord(t *testing.T) {
 	f := newRunContextSwitchFixture(t)
 	defer f.close()
 	f.startReady(t)
 	if err := f.host.ShutdownForApp(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.manager.SetConfigured(context.Background(), f.target("beta")); err != nil {
-		t.Fatal(err)
-	}
 	snapshot, err := f.manager.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	statePath := filepath.Join(filepath.Dir(snapshot.Runtimes[0].Path), "manager.json")
-	manager, err := dshmanager.New(dshmanager.Config{StatePath: statePath})
+	runtime := snapshot.Runtimes[0]
+	statePath := filepath.Join(filepath.Dir(runtime.Path), "manager.json")
+	installer := &versionRecoveryFixtureInstaller{runtime: runtime}
+	manager, err := dshmanager.New(dshmanager.Config{StatePath: statePath, PluginCommands: switchVersionCommands{}, CommandRunner: versionRecoveryFixtureRunner{}, RuntimeInstaller: installer})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.supervisor.startErrors["beta"] = errors.New("candidate cannot start")
-	f.host = NewHost(Dependencies{DSH: f.dsh, Manager: manager, Supervisor: f.supervisor, Gateway: &testGateway{server: f.dsh.server}}, f.host.config)
+	if err = os.Remove(runtime.Path); err != nil {
+		t.Fatal(err)
+	}
+	f.host = NewHost(Dependencies{DSH: f.dsh, Manager: manager, Supervisor: f.supervisor, Channel: &testChannel{server: f.dsh.server}}, f.host.config)
 	f.host.Start()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -101,8 +103,8 @@ func TestColdStartupRestoresPersistedHealthyEnvironment(t *testing.T) {
 		t.Fatalf("cold recovery did not complete: %#v, status %#v", snapshot.LastSwitchAttempt, f.host.Status())
 	}
 	assertRunContext(t, snapshot.Current, f.target("alpha"), "recovered current")
-	if f.host.Status().State != lifecycle.StateReady {
-		t.Fatal("recovered worker is not Ready")
+	if installer.calls != 1 || f.host.Status().State != lifecycle.StateReady {
+		t.Fatal("version recovery did not reinstall and reach Ready")
 	}
 }
 
@@ -124,18 +126,31 @@ type fileHealthDSH struct {
 	path string
 }
 
-func (d *fileHealthDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan) error {
+func (d *fileHealthDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan, client *http.Client) error {
 	data, err := os.ReadFile(d.path)
 	if err != nil || string(data) != "healthy" {
 		return errors.New("plugin failed to load")
 	}
-	return d.switchTestDSH.Probe(ctx, announcement, plan)
+	return d.switchTestDSH.Probe(ctx, announcement, plan, client)
 }
 
-func TestPluginChangesRestoreFilesThroughSwitchTransaction(t *testing.T) {
+func TestPluginChangesReinstallVersionsThroughSwitchTransaction(t *testing.T) {
 	for _, operation := range []string{"add", "update", "remove"} {
 		t.Run(operation, func(t *testing.T) {
-			f := newRunContextSwitchFixture(t)
+			f := newRunContextSwitchFixture(t, func(c *dshmanager.Config) {
+				profile := filepath.Join(c.DataDirectories[0].Path, "profiles", "alpha")
+				c.PluginCommands = dshadapter.NewPluginCommands()
+				c.CommandRunner = versionRecoveryFixtureRunner{profile: profile}
+				for name, contents := range map[string]string{"package.json": `{"dependencies":{"plugin":"1.0.0"}}`, "pnpm-lock.yaml": "lockfileVersion: '9.0'\n", "node_modules/plugin/package.json": `{"version":"1.0.0"}`} {
+					path := filepath.Join(profile, name)
+					if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
 			defer f.close()
 			snapshot, err := f.manager.Snapshot(context.Background())
 			if err != nil {

@@ -27,7 +27,6 @@ type ManagerService struct {
 	publishAcquisition func(acquisition.OperationStatus)
 	runtimeMu          sync.Mutex
 	runtimeCancel      context.CancelFunc
-	startupTrusted     func() bool
 }
 
 const managerOperationTimeout = 2 * time.Minute
@@ -44,11 +43,9 @@ func NewManagerService(manager *dshmanager.Manager, host ...*Host) *ManagerServi
 // NewManagerServiceWithRuntimeProgress keeps the Wails event publisher at the
 // trusted desktop composition boundary. The manager binding still returns the
 // durable snapshot; this callback only projects acquisition progress.
-func NewManagerServiceWithRuntimeProgress(manager *dshmanager.Manager, host *Host, publish func(acquisition.OperationStatus), startupTrusted ...func() bool) *ManagerService {
+func NewManagerServiceWithRuntimeProgress(manager *dshmanager.Manager, host *Host, publish func(acquisition.OperationStatus)) *ManagerService {
 	service := &ManagerService{manager: manager, host: host, publishAcquisition: publish}
-	if len(startupTrusted) > 0 {
-		service.startupTrusted = startupTrusted[0]
-	}
+
 	return service
 }
 
@@ -591,5 +588,5 @@ func (s *ManagerService) commandLogContext(ctx context.Context, operationID stri
 // Only the local startup shell and Settings may acquire or select runtimes.
 // The workspace window keeps its name after navigation, so origin trust is required.
 func (s *ManagerService) runtimeSurfaceAuthorized(ctx context.Context) bool {
-	return isTrustedWindow(ctx, "settings") || (isTrustedWindow(ctx, "workspace") && s.startupTrusted != nil && s.startupTrusted())
+	return isTrustedWindow(ctx, "settings") || isTrustedWindow(ctx, "workspace")
 }

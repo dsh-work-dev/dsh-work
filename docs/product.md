@@ -14,7 +14,7 @@ dsh-work owns:
 - trusted settings and native desktop integrations;
 - the installed-runtime catalog and selected Run context;
 - Worker process ownership, readiness, restart and cleanup;
-- the trusted gateway between the Workspace WebView and DSH;
+- the authenticated IPC channel between the Workspace WebView and DSH;
 - desktop-notification preferences, routing and delivery.
 - the Desktop Pet catalog, trusted Pet preferences and the native Pet surface.
 
@@ -32,16 +32,16 @@ silently mutate DSH-owned data.
 
 ## Current capabilities
 
-- The Host starts one exact-version local DSH runtime on loopback and exposes a
-  trusted Workspace session only after readiness and gateway validation.
+- The Host starts one exact-version DSH runtime through an authenticated local
+  channel and exposes the Workspace only after readiness validation.
 - Runtime, DSH data-directory and profile switches are serialized. A candidate
   becomes current only when ready. Failure follows the automatic-recovery or
   user-choice preference; recovery requires an available version snapshot.
 - Current-profile plugin associations can be inspected and changed through DSH
   commands. Non-current profiles are read-only.
 - Successful normal startup records the last successful version snapshot.
-  Settings Overview exposes the snapshot list and manual save, rename, version
-  preview, restore and delete actions.
+  Settings Overview presents a compact record summary and save action, with
+  history and selected-record management in a dedicated dialog.
 - Settings General offers automatic recovery of the last successful snapshot or
   user choice. The failed-startup surface offers retry, snapshot recovery and
   safe mode. In Settings Overview, “启动安全模式” sits beside “切换环境”.
@@ -66,6 +66,8 @@ silently mutate DSH-owned data.
   cancellation and managed Worker cleanup.
 - Windows uses a Job Object to own the Worker process tree.
 
+See [Settings and startup](settings.md) for the accepted interaction layout.
+
 ## Current limitations
 
 - Normal startup requires a compatible runtime already registered locally.
@@ -77,8 +79,10 @@ silently mutate DSH-owned data.
   See [Version recovery](version-recovery.md) for the exact limits.
 - Native process-supervision and packaging parity for macOS and Linux are not
   implemented.
-- The Pet task-event producer is not present in this repository, so task-driven
-  reactions are not end-to-end complete.
-- Native platform, packaging, visual and accessibility evidence for the Pet has
-  not yet been collected beyond automated checks; Windows is the reference
-  implementation path.
+- DSH activity integration supplies Pet reactions and conversation navigation.
+  Overlay input, multi-monitor DPI, OS stacking and complete accessibility
+  acceptance remain open.
+- Application installation and self-update are pending. Developer identities,
+  signing and update-feed credentials remain unconfigured placeholders.
+- Mobile clients and remote access are deferred. The existing tray Host owns
+  background work; a separately installable daemon is not implemented.

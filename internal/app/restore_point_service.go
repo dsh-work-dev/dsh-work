@@ -10,7 +10,6 @@ import (
 )
 
 type versionRecoveryManager interface {
-	VersionPointsEnabled() bool
 	RecoveryPointID(dshmanager.RunContext, bool) string
 	PreviewRestorePoint(context.Context, string) (dshmanager.RestorePoint, error)
 	RecoverVersionPoint(context.Context, string) (dshmanager.ResolvedLaunch, error)
@@ -21,7 +20,7 @@ type restorePointKey struct{}
 
 func (h *Host) RestoreVersionPoint(ctx context.Context, id string) (dshmanager.Snapshot, error) {
 	m, ok := h.deps.Manager.(versionRecoveryManager)
-	if !ok || !m.VersionPointsEnabled() {
+	if !ok {
 		return dshmanager.Snapshot{}, errors.New("version snapshots are unavailable")
 	}
 	p, err := m.PreviewRestorePoint(ctx, id)

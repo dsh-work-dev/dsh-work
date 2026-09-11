@@ -326,6 +326,7 @@ export interface RestorePoint {
     "platform": string;
     "plugins": VersionPlugin[] | null;
     "digest": string;
+    "lockfile"?: string;
     "unavailable"?: string;
 }
 
@@ -492,4 +493,5 @@ export interface VersionPlugin {
     "name": string;
     "version": string;
     "source": string;
+    "group": string;
 }

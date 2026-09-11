@@ -26,8 +26,6 @@ func TestJobObjectAdapterHonorsCancelledStartContext(t *testing.T) {
 		Args:             []string{"/d", "/c", "exit 0"},
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:4321",
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     4321,
 	}
 	worker, err := NewJobObjectAdapter().Start(ctx, plan, nil)
 	if worker != nil || !errors.Is(err, context.Canceled) {
@@ -46,8 +44,6 @@ func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
 		Args:             []string{"/d", "/c", "echo worker-ready"},
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:4321",
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     4321,
 	}
 	rawOutput := make(chan string, 4)
 	worker, err := NewJobObjectAdapter().Start(context.Background(), plan, func(_ supervisor.OutputStream, text string) {
@@ -112,8 +108,6 @@ func TestJobObjectWorkerPassesExplicitEnvironment(t *testing.T) {
 		Env:              map[string]string{"DSH_WORK_TEST_HOME": `C:\dsh-work-smoke-home`},
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:4321",
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     4321,
 	}
 	worker, err := NewJobObjectAdapter().Start(context.Background(), plan, nil)
 	if err != nil {

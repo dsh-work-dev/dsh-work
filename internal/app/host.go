@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/supervisor"
-	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
@@ -28,12 +29,12 @@ type DSHAdapter interface {
 	BuildLaunchPlan(dshadapter.LaunchContext) (supervisor.LaunchPlan, error)
 	ParseReadyAnnouncement(string) (dshadapter.ReadyAnnouncement, bool)
 	ValidateReady(dshadapter.ReadyAnnouncement, supervisor.LaunchPlan) error
-	Probe(context.Context, dshadapter.ReadyAnnouncement, supervisor.LaunchPlan) error
+	Probe(context.Context, dshadapter.ReadyAnnouncement, supervisor.LaunchPlan, *http.Client) error
 	RequestShutdown(context.Context, supervisor.Worker) error
 }
 
-type WorkerGateway interface {
-	Start(context.Context, string) (workergateway.Session, error)
+type WorkerChannel interface {
+	Prepare(context.Context, string, string, string) (workerchannel.Session, error)
 }
 
 // ProfilePluginManager is the manager surface used by the trusted Settings
@@ -79,7 +80,7 @@ type Dependencies struct {
 	ManagerError             error
 	WorkspaceResolver        workspacecontext.Resolver
 	Supervisor               supervisor.Adapter
-	Gateway                  WorkerGateway
+	Channel                  WorkerChannel
 	PlatformError            error
 	AutomaticRuntimeRollback func() bool
 }
@@ -210,13 +211,12 @@ type generationRun struct {
 	worker            supervisor.Worker
 	plan              supervisor.LaunchPlan
 	readiness         <-chan dshadapter.ReadyAnnouncement
-	gateway           workergateway.Session
+	channel           workerchannel.Session
 	workspaceRequest  workspacecontext.Request
 	workspace         workspacecontext.Context
 	launch            *dshmanager.ResolvedLaunch
 	target            *dshmanager.RunContext
 	readyWorkspaceURL string
-	readyHandoffURL   string
 	managerLive       bool
 	managerGuarded    bool
 	cleanupDone       bool
@@ -547,13 +547,7 @@ func (h *Host) finishContextSwitchFailure(manager RunContextManager, candidateFa
 	failure.Retryable = true
 	if candidateFailure != nil {
 		candidate := h.failureFor(candidateFailure, lifecycle.ErrorDSHStartFailed, "The candidate Run context could not start.", true)
-		if candidate.Code != failure.Code {
-			if failure.Detail == "" {
-				failure.Detail = fmt.Sprintf("Rollback failed after candidate error %s.", candidate.Code)
-			} else {
-				failure.Detail = fmt.Sprintf("Rollback failed after candidate error %s. %s", candidate.Code, failure.Detail)
-			}
-		}
+		failure.Detail = fmt.Sprintf("Candidate %s: %s Rollback %s: %s", candidate.Code, candidate.Detail, failure.Code, failure.Detail)
 	}
 	if failure.Detail == "" {
 		failure.Detail = "The previous Run context was retained for a later recovery attempt."
@@ -733,7 +727,6 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	knownGood := h.knownGoodRunContextLocked()
 	pointID := ""
 	versions, versioned := manager.(versionRecoveryManager)
-	versioned = versioned && versions.VersionPointsEnabled()
 	if versioned {
 		pointID = versions.RecoveryPointID(target, startupFailure != nil)
 		if selected, _ := ctx.Value(restorePointKey{}).(string); selected != "" {
@@ -817,20 +810,8 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 			if err != nil {
 				candidateFailure = h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The version snapshot could not be restored.", true)
 			}
-		} else if recovery, ok := manager.(interface {
-			RestoreHealthy(context.Context) (dshmanager.ResolvedLaunch, error)
-		}); ok {
-			var err error
-			resolved, err = recovery.RestoreHealthy(switchCtx)
-			if err != nil {
-				candidateFailure = h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The healthy environment could not be restored.", true)
-			}
 		} else {
-			var err error
-			resolved, err = manager.ResolveLaunch(switchCtx, dshmanager.LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
-			if err != nil {
-				candidateFailure = h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The healthy environment could not be resolved.", true)
-			}
+			candidateFailure = h.failureFor(errors.New("version recovery is unavailable"), lifecycle.ErrorManagerStateInvalid, "The version record could not be restored.", true)
 		}
 	}
 	if candidateFailure == nil && mutate != nil {
@@ -882,7 +863,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	if !automaticRollback {
 		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, true)
 	}
-	if versioned && pointID == "" {
+	if !versioned || pointID == "" {
 		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, true, dshmanager.RollbackUnavailable, nil, false)
 	}
 	if knownGood == nil {
@@ -904,17 +885,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	}
 	dshadapter.ReportCommandOutput(rollbackCtx, "Candidate failed: "+candidateFailure.Summary)
 	dshadapter.ReportCommandOutput(rollbackCtx, "Restoring the previous healthy environment…")
-	var rollbackLaunch dshmanager.ResolvedLaunch
-	var rollbackErr error
-	if versioned {
-		rollbackLaunch, rollbackErr = versions.RecoverVersionPoint(rollbackCtx, pointID)
-	} else if recovery, ok := manager.(interface {
-		RestoreHealthy(context.Context) (dshmanager.ResolvedLaunch, error)
-	}); ok {
-		rollbackLaunch, rollbackErr = recovery.RestoreHealthy(rollbackCtx)
-	} else {
-		rollbackLaunch, rollbackErr = manager.ResolveLaunch(rollbackCtx, dshmanager.LaunchRequest{RuntimeID: knownGood.RuntimeID, Node: knownGood.Node, Profile: knownGood.Profile})
-	}
+	rollbackLaunch, rollbackErr := versions.RecoverVersionPoint(rollbackCtx, pointID)
 	if rollbackErr != nil {
 		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, rollbackErr, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, rollbackErr)
@@ -980,7 +951,7 @@ func (h *Host) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error
 	if err != nil {
 		return snapshot, err
 	}
-	if versions, ok := manager.(versionRecoveryManager); ok && versions.VersionPointsEnabled() {
+	if versions, ok := manager.(versionRecoveryManager); ok {
 		target := snapshot.Configured
 		if target == nil {
 			return snapshot, errors.New("select an environment first")
@@ -991,10 +962,7 @@ func (h *Host) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error
 		}
 		return h.RestoreVersionPoint(ctx, id)
 	}
-	if snapshot.KnownGood == nil {
-		return snapshot, lifecycle.Failure{Code: lifecycle.ErrorManagerStateInvalid, Summary: "There is no known-good Run context to restore.", CorrelationID: lifecycle.NewCorrelationID()}
-	}
-	return h.applyRunContext(ctx, *snapshot.KnownGood, nil, nil, true)
+	return snapshot, errors.New("version recovery is unavailable")
 }
 
 func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.ResolvedLaunch) (lifecycle.Status, *lifecycle.Failure, error) {
@@ -1154,6 +1122,7 @@ func (h *Host) runStartup(run *generationRun) {
 func (h *Host) run(run *generationRun) {
 	defer func() {
 		run.cancel()
+		_ = h.closeChannel(run)
 		close(run.done)
 	}()
 
@@ -1248,8 +1217,8 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	if h.deps.Supervisor == nil {
 		return nil, h.failureFor(errors.New("process supervisor is unavailable"), lifecycle.ErrorPlatformUnsupported, "The native process supervisor is unavailable.", false)
 	}
-	if h.deps.Gateway == nil {
-		return nil, h.failureFor(errors.New("trusted DSH workspace gateway is unavailable"), lifecycle.ErrorGatewayUnavailable, "The trusted DSH workspace gateway is unavailable.", false)
+	if h.deps.Channel == nil {
+		return nil, h.failureFor(errors.New("trusted DSH workspace channel is unavailable"), lifecycle.ErrorChannelUnavailable, "The trusted DSH workspace channel is unavailable.", false)
 	}
 	if err := h.setPhase(run, lifecycle.PhaseNode); err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not enter runtime discovery.", false)
@@ -1307,10 +1276,11 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		return nil, nil
 	}
 
-	port, err := dshadapter.AllocateLoopbackPort()
+	channel, err := h.deps.Channel.Prepare(run.ctx, run.generation, launch.dataDirectory.Path, launch.profile)
 	if err != nil {
-		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not allocate a loopback port for DSH.", true)
+		return nil, h.failureFor(err, lifecycle.ErrorChannelStartFailed, "dsh-work could not prepare Worker communication.", true)
 	}
+	run.setChannel(channel)
 	plan, err := h.deps.DSH.BuildLaunchPlan(dshadapter.LaunchContext{
 		SafeMode:           launch.dataDirectory.ID == dshmanager.SafeModeDataDirectoryID,
 		GenerationID:       run.generation,
@@ -1319,7 +1289,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		DataDirectory:      launch.dataDirectory.Path,
 		Profile:            launch.profile,
 		Workspace:          launch.workspace,
-		Port:               port,
+		HostPatch:          channel.Patch(),
 	})
 	if err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorDSHStartFailed, "dsh-work could not construct the DSH launch plan.", false)
@@ -1352,7 +1322,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	run.readiness = readiness
 	run.workspace = launch.workspace
 	run.mu.Unlock()
-	h.debugf("managed DSH worker started for expected port %d", plan.ExpectedPort)
+	h.debugf("managed DSH worker started with authenticated IPC")
 	return worker, nil
 }
 
@@ -1391,9 +1361,8 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 		}, nil
 	}
 	if recovery, ok := h.deps.Manager.(interface {
-		VersionPointsEnabled() bool
 		ResumeVersionRecovery(context.Context, bool) (*dshmanager.ResolvedLaunch, error)
-	}); ok && recovery.VersionPointsEnabled() {
+	}); ok {
 		automatic := true
 		if h.deps.AutomaticRuntimeRollback != nil {
 			automatic = h.deps.AutomaticRuntimeRollback()
@@ -1405,17 +1374,8 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 		if restored != nil {
 			return hostLaunch{runtime: runtimeAdapterValue(restored.Runtime, restored.Node), dataDirectory: restored.DataDirectory, profile: restored.Target.Profile.Name, resolved: restored}, nil
 		}
-	} else if recovery, ok := h.deps.Manager.(interface {
-		ResumeRecovery(context.Context) (*dshmanager.ResolvedLaunch, error)
-	}); ok {
-		restored, err := recovery.ResumeRecovery(run.ctx)
-		if err != nil {
-			return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "The interrupted recovery could not be resumed.", true)
-		}
-		if restored != nil {
-			return hostLaunch{runtime: runtimeAdapterValue(restored.Runtime, restored.Node), dataDirectory: restored.DataDirectory, profile: restored.Target.Profile.Name, resolved: restored}, nil
-		}
 	}
+
 	snapshot, err := h.deps.Manager.Snapshot(run.ctx)
 	if err != nil {
 		return hostLaunch{}, h.failureFor(err, lifecycle.ErrorManagerStateInvalid, "dsh-work could not read the DSH launch selection.", false)
@@ -1519,7 +1479,6 @@ func runtimeAdapterValue(runtime dshmanager.RuntimeInfo, node dshmanager.Resolve
 func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
 	run.mu.RLock()
 	launch := cloneResolvedLaunch(run.launch)
-	handoffURL := run.readyHandoffURL
 	workspaceURL := run.readyWorkspaceURL
 	run.mu.RUnlock()
 	target := run.targetCopy()
@@ -1553,7 +1512,7 @@ func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
 		return h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not publish DSH readiness.", false)
 	}
 	if ready := h.readyHandler(); ready != nil {
-		ready(handoffURL)
+		ready(workspaceURL)
 	}
 	h.emit(status)
 	run.signalReady()
@@ -1586,11 +1545,11 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 			}
 			if failure := h.probeUntilReady(run, worker, candidate, plan, deadlineAt); failure == nil {
 				h.debugf("active readiness probe passed")
-				gateway, err := h.startGateway(run, candidate.URL)
+				channel, err := h.startChannel(run, candidate.URL)
 				if err != nil {
-					return announcement, h.failureFor(err, lifecycle.ErrorGatewayStartFailed, "dsh-work could not establish the trusted DSH workspace path.", true)
+					return announcement, h.failureFor(err, lifecycle.ErrorChannelStartFailed, "dsh-work could not establish the trusted DSH workspace path.", true)
 				}
-				if err := h.markReady(run, gateway.Origin(), gateway.URL()); err != nil {
+				if err := h.markReady(run, channel.URL()); err != nil {
 					return announcement, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not publish DSH readiness.", false)
 				}
 				return announcement, nil
@@ -1613,7 +1572,7 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 func (h *Host) probeUntilReady(run *generationRun, worker supervisor.Worker, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan, deadline time.Time) *lifecycle.Failure {
 	for {
 		probeCtx, cancel := context.WithTimeout(run.ctx, h.config.ProbeTimeout)
-		err := h.deps.DSH.Probe(probeCtx, announcement, plan)
+		err := h.deps.DSH.Probe(probeCtx, announcement, plan, run.getChannel().Client())
 		cancel()
 		if err == nil {
 			select {
@@ -1636,7 +1595,7 @@ func (h *Host) probeUntilReady(run *generationRun, worker supervisor.Worker, ann
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return h.failureFor(err, lifecycle.ErrorDSHReadinessTimeout, "DSH has announced a workspace but its loopback endpoint is not ready yet.", true)
+			return h.failureFor(err, lifecycle.ErrorDSHReadinessTimeout, "DSH has announced a workspace but its IPC endpoint is not ready yet.", true)
 		}
 		delay := 150 * time.Millisecond
 		if remaining < delay {
@@ -1659,62 +1618,25 @@ func (h *Host) probeUntilReady(run *generationRun, worker supervisor.Worker, ann
 	}
 }
 
-func (h *Host) startGateway(run *generationRun, upstreamURL string) (workergateway.Session, error) {
-	if h.deps.Gateway == nil {
-		return nil, lifecycle.Failure{
-			Code:    lifecycle.ErrorGatewayUnavailable,
-			Summary: "The trusted DSH workspace gateway is unavailable.",
-		}
+func (h *Host) startChannel(run *generationRun, authURL string) (workerchannel.Session, error) {
+	channel := run.getChannel()
+	if channel == nil {
+		return nil, errors.New("Worker channel missing")
 	}
-	gateway, err := h.deps.Gateway.Start(run.ctx, upstreamURL)
-	if err != nil {
-		return nil, err
+	if run.ctx.Err() != nil {
+		return nil, run.ctx.Err()
 	}
-	if gateway == nil || gateway.URL() == "" || gateway.Origin() == "" {
-		if gateway != nil {
-			_ = gateway.Close()
-		}
-		return nil, lifecycle.Failure{
-			Code:    lifecycle.ErrorGatewayStartFailed,
-			Summary: "The trusted DSH workspace gateway returned no usable URL.",
-		}
-	}
-	if err := validateGatewaySession(gateway); err != nil {
-		_ = gateway.Close()
-		return nil, lifecycle.Failure{
-			Code:    lifecycle.ErrorGatewayStartFailed,
-			Summary: "The trusted DSH workspace gateway returned an invalid session.",
-			Detail:  err.Error(),
-		}
-	}
-	run.setGateway(gateway)
-	return gateway, nil
+	channel.Activate(authURL)
+	return channel, nil
 }
 
-func validateGatewaySession(gateway workergateway.Session) error {
-	origin, err := url.Parse(gateway.Origin())
-	if err != nil || origin.Scheme != "http" || origin.Hostname() != "127.0.0.1" || origin.Port() == "" || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || origin.Path != "" && origin.Path != "/" {
-		return errors.New("gateway origin is not an HTTP loopback origin")
-	}
-	handoff, err := url.Parse(gateway.URL())
-	if err != nil || handoff.Scheme != origin.Scheme || handoff.Host != origin.Host || handoff.Path != "/__work/bootstrap" || handoff.Fragment != "" || handoff.User != nil {
-		return errors.New("gateway bootstrap URL is not bound to its origin")
-	}
-	query := handoff.Query()
-	if len(query) != 1 || len(query["session"]) != 1 || query.Get("session") == "" || len(query.Get("session")) > 128 {
-		return errors.New("gateway bootstrap URL has an invalid session")
-	}
-	return nil
-}
-
-func (h *Host) markReady(run *generationRun, workspaceURL, handoffURL string) error {
+func (h *Host) markReady(run *generationRun, workspaceURL string) error {
 	err := h.setPhase(run, lifecycle.PhaseCheckpoint)
 	if err != nil {
 		return err
 	}
 	run.mu.Lock()
 	run.readyWorkspaceURL = workspaceURL
-	run.readyHandoffURL = handoffURL
 	run.mu.Unlock()
 	return nil
 }
@@ -1737,9 +1659,9 @@ func (h *Host) cleanupWorker(run *generationRun, worker supervisor.Worker) *life
 	if failure := h.clearCurrent(run); failure != nil {
 		rememberFailure(failure)
 	}
-	gatewayErr := h.closeGateway(run)
-	if gatewayErr != nil {
-		rememberFailure(h.failureFor(gatewayErr, lifecycle.ErrorGatewayCloseFailed, "dsh-work could not close the trusted DSH workspace path.", true))
+	channelErr := h.closeChannel(run)
+	if channelErr != nil {
+		rememberFailure(h.failureFor(channelErr, lifecycle.ErrorChannelCloseFailed, "dsh-work could not close the trusted DSH workspace path.", true))
 	}
 	gracefulCtx, cancel := context.WithTimeout(context.Background(), h.config.GracefulStopTimeout)
 	_ = h.deps.DSH.RequestShutdown(gracefulCtx, worker)
@@ -1825,14 +1747,14 @@ func (h *Host) releaseManagerStopGuard(run *generationRun) {
 	}
 }
 
-func (h *Host) closeGateway(run *generationRun) error {
-	gateway := run.getGateway()
-	if gateway == nil {
+func (h *Host) closeChannel(run *generationRun) error {
+	channel := run.getChannel()
+	if channel == nil {
 		return nil
 	}
-	err := gateway.Close()
+	err := channel.Close()
 	if err == nil {
-		run.setGateway(nil)
+		run.setChannel(nil)
 	}
 	return err
 }
@@ -1929,6 +1851,10 @@ func (h *Host) failureFor(err error, fallbackCode lifecycle.ErrorCode, summary s
 		Retryable: retryable,
 		Detail:    defaultRemediation(fallbackCode),
 	}
+	var probe *dshadapter.ProbeError
+	if errors.As(err, &probe) {
+		failure.Detail = probe.Diagnostic()
+	}
 	if h.Status().State == lifecycle.StateStarting || h.Status().State == lifecycle.StateReady {
 		failure.EffectOccurred = true
 	}
@@ -1951,9 +1877,9 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorRuntimeInstallUnavailable, lifecycle.ErrorRuntimeInstallFailed:
 		return "Retry the explicit runtime installation on a supported native platform."
 	case lifecycle.ErrorDSHReadinessTimeout, lifecycle.ErrorDSHStartFailed, lifecycle.ErrorProcessStartFailed:
-		return "Check the DSH installation and loopback port, then retry."
-	case lifecycle.ErrorGatewayUnavailable, lifecycle.ErrorGatewayStartFailed, lifecycle.ErrorGatewayCloseFailed:
-		return "Retry the trusted local workspace handoff."
+		return "Check the DSH installation and retry."
+	case lifecycle.ErrorChannelUnavailable, lifecycle.ErrorChannelStartFailed, lifecycle.ErrorChannelCloseFailed:
+		return "Restart the Workspace."
 	case lifecycle.ErrorProcessStopFailed, lifecycle.ErrorProcessCleanupFailed:
 		return "Retry cleanup before starting another workspace."
 	case lifecycle.ErrorPlatformUnsupported:
@@ -2040,9 +1966,9 @@ func (r *generationRun) readinessChannel() <-chan dshadapter.ReadyAnnouncement {
 	return r.readiness
 }
 
-func (r *generationRun) setGateway(gateway workergateway.Session) {
+func (r *generationRun) setChannel(channel workerchannel.Session) {
 	r.mu.Lock()
-	r.gateway = gateway
+	r.channel = channel
 	r.mu.Unlock()
 }
 
@@ -2117,10 +2043,10 @@ func (r *generationRun) isManagerLive() bool {
 	return r.managerLive
 }
 
-func (r *generationRun) getGateway() workergateway.Session {
+func (r *generationRun) getChannel() workerchannel.Session {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.gateway
+	return r.channel
 }
 
 func (r *generationRun) setCleanupComplete(value bool) {
@@ -2147,10 +2073,9 @@ func (r *generationRun) launchPlan() supervisor.LaunchPlan {
 
 // HostService is the intentionally narrow Wails binding surface.
 type HostService struct {
-	host             *Host
-	workspaceTrusted func() bool
-	localeProvider   func() settings.Locale
-	openSettings     func(string)
+	host           *Host
+	localeProvider func() settings.Locale
+	openSettings   func(string)
 }
 
 // StartupOutput is the redacted DSH process output retained by the supervisor
@@ -2161,8 +2086,8 @@ type StartupOutput struct {
 	Stderr string `json:"stderr"`
 }
 
-func NewHostService(host *Host, workspaceTrusted func() bool, localeProvider func() settings.Locale, openSettings ...func(string)) *HostService {
-	service := &HostService{host: host, workspaceTrusted: workspaceTrusted, localeProvider: localeProvider}
+func NewHostService(host *Host, localeProvider func() settings.Locale, openSettings ...func(string)) *HostService {
+	service := &HostService{host: host, localeProvider: localeProvider}
 	if len(openSettings) > 0 {
 		service.openSettings = openSettings[0]
 	}
@@ -2283,7 +2208,7 @@ func (s *HostService) authorized(ctx context.Context) bool {
 	if s == nil || s.host == nil || !isTrustedWindow(ctx, "workspace") {
 		return false
 	}
-	return s.workspaceTrusted != nil && s.workspaceTrusted()
+	return true
 }
 
 func trustedSurfaceStatus() lifecycle.Status {

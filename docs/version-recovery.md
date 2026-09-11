@@ -1,7 +1,8 @@
-# Version recovery
+# Version records and recovery
 
-Accepted 2026-09-11 from the verified implementation in `5948d41` and the
-Settings layout/window follow-up in `bb85f9c`.
+Version records (called snapshots in the internal API) let users return a
+profile to a previously working DSH and plugin version set. This document describes when a point is recorded, how to
+restore it and the constraints on recovery.
 
 ## Recording and visible actions
 
@@ -17,11 +18,16 @@ references. Manual points remain until explicitly deleted; points referenced by
 success pointers or an unfinished recovery are protected. Manual saving requires
 a current verified normal environment whose dependency inputs have not changed.
 
-Settings Overview always exposes version snapshots and manual save, rename,
-version details, restore preview and delete actions. “启动安全模式” appears beside
-“切换环境”; the former explanatory row and its separators are removed. Startup
-failure exposes snapshot recovery, retry and safe mode. Recovery displays its
-installation/startup stage and offers cancellation.
+Settings Overview shows a compact latest-verified summary, record count, save
+action and history entry. History uses newest-first rows; selecting a record
+opens metadata, plugin versions and restore/rename/delete actions in the same
+dialog. Restore confirmation replaces those details. Closing returns focus to
+the originating control. “启动安全模式” appears beside “切换环境”.
+
+Startup failure places retry, safe mode, version recovery and visible bounded
+diagnostics beside the failing step, including a direct copy action. Version
+selection and confirmation use a focused dialog. Recovery shows its current
+installation/startup stage and cancellation beside the active operation.
 
 Recording failure is visible but does not stop a healthy Worker or replace the
 previous durable success point. Safe-mode startup never advances normal success
@@ -35,9 +41,13 @@ point records its ID, kind, label, timestamps, target Run context, exact DSH
 version, installed plugin versions/sources, Node and package-manager versions,
 platform, content digest and any restoration restriction.
 
-The private payload contains dependency-related manifest fields, DSH bundle
-associations, pnpm lock and workspace inputs. User configuration outside these
-dependency fields is preserved during restoration. Installed package trees,
+The private payload contains an explicit plugin list (name, installed exact
+version, original source specifier and dependency group), ordered DSH bundle
+associations, `pnpm-lock.yaml` and required `pnpm-workspace.yaml` inputs. A lock
+is retained even for a zero-plugin profile. It does not store an opaque copy of
+the package manifest. Restoration reconstructs dependency fields while
+preserving current non-dependency settings. Original source specifiers match
+the frozen lock; recaptured installed versions and digest verify the result. Installed package trees,
 conversation data and Workspace data are not snapshot contents. Inputs containing
 recognised credentials are rejected; inputs are validated again before applying.
 
@@ -62,9 +72,15 @@ The frontend receives summaries, not private dependency input contents.
 
 The supported pnpm path uses `--force`, `--frozen-lockfile` when a lock is present,
 and `--config.optimistic-repeat-install=false`. Package-manager removal before
-installation is needed because the tested hoisted linker can otherwise skip
-same-version damaged files. Runtime installation uses the resolved native npm
-or pnpm toolchain; recovery does not relocate caches or stores.
+installation is needed because the supported hoisted linker can otherwise skip
+same-version damaged files.
+
+For a runtime published from acquisition staging, pnpm first performs a forced
+install at the final location to reconcile its own virtual-store metadata,
+then removes and reinstalls the runtime. A pristine profile with neither
+plugins nor lock needs no profile installation step. Runtime installation uses
+the resolved native npm or pnpm toolchain; recovery does not relocate caches or
+stores.
 
 ## Failure and interruption policy
 
@@ -85,21 +101,14 @@ pin an automatic point indefinitely and is cleared when its point is removed.
 Persisted success and completed recovery are historical records, not evidence of
 a currently live Worker.
 
-## Supported boundary and evidence
+## Compatibility and recovery limits
 
-The production recovery path is Windows with DSH 0.1.2-alpha.3's pnpm profile
-workflow. Registry dependencies with usable lock inputs are supported. Local or
-Git sources and auxiliary dependency configuration files are not promised
-historical reconstruction. An npm-only profile without a pnpm lock is marked
-unavailable before the Worker is stopped. The recorded Node version must match;
+The supported reference environment is Windows with the DSH 0.1.5-rc.2
+development fixture and its pnpm profile workflow. Compatibility is validated against
+exact DSH versions; this is not a promise that future releases work unchanged.
+Registry dependencies with usable lock inputs are supported. Local or
+Git sources, advanced manifest dependency configuration (such as overrides or
+peer configuration), and auxiliary dependency files are not promised historical
+reconstruction. Unsupported records expose a restoration restriction. A profile with plugins but no pnpm lock is marked unavailable before the Worker is stopped. The recorded Node version must match;
 this operation does not reinstall Node. Package acquisition can fail when sources
 or caches are unavailable, and saved points remain available for a later retry.
-
-Windows integration tests exercised real DSH forced installation, plugin version
-and set restoration, same-version file repair, preservation of a `node_modules`
-sentinel and nondependency profile fields, normal startup and safe-mode isolation.
-Host/manager regressions cover failure policy, cross-profile recovery targets,
-recording failure, persistence reload and interrupted retry limits. The window
-follow-up covers resize/maximise/minimise/close observations and settings reload;
-its UI layout was checked in a browser fixture. Automated native-window event
-coverage does not constitute a manual desktop resize/relaunch test.

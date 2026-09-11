@@ -56,16 +56,15 @@ type startupTestWindow struct {
 
 func (w startupTestWindow) Name() string { return w.name }
 
-func TestRuntimeSurfaceRequiresStartupOriginTrust(t *testing.T) {
-	trusted := true
-	service := NewManagerServiceWithRuntimeProgress(nil, nil, nil, func() bool { return trusted })
+func TestRuntimeSurfaceRequiresPermanentWindowRole(t *testing.T) {
+	service := NewManagerServiceWithRuntimeProgress(nil, nil, nil)
 	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "workspace"})
 	if !service.runtimeSurfaceAuthorized(ctx) {
 		t.Fatal("local startup shell rejected")
 	}
-	trusted = false
+	ctx = context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "worker"})
 	if service.runtimeSurfaceAuthorized(ctx) {
-		t.Fatal("DSH page retained runtime management access after navigation")
+		t.Fatal("Worker window received runtime management access")
 	}
 	ctx = context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "settings"})
 	if !service.runtimeSurfaceAuthorized(ctx) {
@@ -89,7 +88,7 @@ func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {
 }
 
 func TestHostServiceRefusesControlsFromAnUntrustedSurface(t *testing.T) {
-	status := NewHostService(nil, func() bool { return true }, nil).GetStatus(context.Background())
+	status := NewHostService(nil, nil).GetStatus(context.Background())
 	if status.Error == nil || status.Error.Code != lifecycle.ErrorTrustedSurfaceRequired {
 		t.Fatalf("untrusted Host status = %+v", status)
 	}

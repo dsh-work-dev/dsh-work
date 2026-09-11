@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -28,29 +27,26 @@ const (
 // manager. Workspace context is intentionally absent: it belongs to DSH's
 // session surface and is resolved per Worker generation.
 type Config struct {
-	// Snapshot capture is deferred while the startup flow is being validated.
-	DisableHealthSnapshots     bool
-	EnableVersionRestorePoints bool
-	StatePath                  string
-	DataDirectories            []DataDirectoryInfo
-	Runtimes                   []RuntimeInfo
-	DSHReleases                []DSHReleaseInfo
-	Nodes                      []NodeInstallationInfo
-	DefaultRunContext          RunContext
-	CommandRunner              CommandRunner
-	PluginCommands             PluginCommandBuilder
-	RuntimeInstaller           RuntimeInstaller
-	NodeCatalog                NodeReleaseCatalog
-	NodeInstaller              NodeInstaller
-	NodeResolver               NodeResolver
-	DSHCatalog                 DSHReleaseCatalog
-	RuntimeVerifier            RuntimeVerifier
-	StateStore                 StateStore
-	ProfileCatalog             ProfileCatalog
-	ProfileReader              ProfileReader
-	ThemeReader                ThemeReader
-	PluginOfficialRegistry     string
-	PluginMirrorRegistry       string
+	StatePath              string
+	DataDirectories        []DataDirectoryInfo
+	Runtimes               []RuntimeInfo
+	DSHReleases            []DSHReleaseInfo
+	Nodes                  []NodeInstallationInfo
+	DefaultRunContext      RunContext
+	CommandRunner          CommandRunner
+	PluginCommands         PluginCommandBuilder
+	RuntimeInstaller       RuntimeInstaller
+	NodeCatalog            NodeReleaseCatalog
+	NodeInstaller          NodeInstaller
+	NodeResolver           NodeResolver
+	DSHCatalog             DSHReleaseCatalog
+	RuntimeVerifier        RuntimeVerifier
+	StateStore             StateStore
+	ProfileCatalog         ProfileCatalog
+	ProfileReader          ProfileReader
+	ThemeReader            ThemeReader
+	PluginOfficialRegistry string
+	PluginMirrorRegistry   string
 }
 
 // CommandRunner is the narrow seam for invoking the selected DSH public CLI.
@@ -176,11 +172,9 @@ type Manager struct {
 	configured        *RunContext
 	current           *RunContext
 	knownGood         *RunContext
-	healthy           *HealthySnapshot
 	versionRecovery   *VersionRecoveryState
 	verifiedPoint     *storedRestorePoint
 	restoreSaveError  string
-	recoveryPending   bool
 	safeMode          *SafeModeState
 	latestNode        *NodeReleaseInfo
 	dshReleases       []DSHReleaseInfo
@@ -451,19 +445,12 @@ func New(config Config) (*Manager, error) {
 	}
 	manager.config = normalized
 	if state != nil {
-		manager.healthy = state.Healthy
 		manager.versionRecovery = cloneVersionRecovery(state.VersionRecovery)
-		if normalized.EnableVersionRestorePoints {
-			if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
-				manager.knownGood = cloneRunContext(&p.Target)
-			}
+		if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
+			manager.knownGood = cloneRunContext(&p.Target)
 		}
 		manager.safeMode = cloneSafeMode(state.SafeMode)
-		manager.recoveryPending = state.RecoveryPending
 		manager.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
-		if state.Healthy != nil && !normalized.DisableHealthSnapshots {
-			manager.knownGood = cloneRunContext(&state.Healthy.Launch.Target)
-		}
 		manager.latestNode = cloneNodeRelease(state.LatestNode)
 		manager.dshReleases = cloneDSHReleases(state.DSHReleases)
 		manager.pluginProvenance = append([]PluginProvenanceRecord(nil), state.PluginProvenance...)
@@ -1635,72 +1622,14 @@ func (m *Manager) CommitCurrent(ctx context.Context, target *RunContext) (Snapsh
 	if err != nil {
 		return Snapshot{}, err
 	}
+	resolved = m.CaptureLaunchVersions(ctx, resolved)
 	return m.CommitHealthy(ctx, resolved)
 }
 
 // CommitHealthy uses the exact launch that passed readiness, including pinned
 // recovery executables. It never re-resolves a floating system Node at commit.
 func (m *Manager) CommitHealthy(ctx context.Context, resolved ResolvedLaunch) (Snapshot, error) {
-	if m.config.EnableVersionRestorePoints {
-		return m.commitVersionHealthy(ctx, resolved)
-	}
-	release, err := m.acquireOperation(ctx)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	defer release()
-	if err := contextError(ctx); err != nil {
-		return Snapshot{}, err
-	}
-	runContext := resolved.Target
-	m.mu.RLock()
-	busy := m.current != nil && *m.current != runContext
-	m.mu.RUnlock()
-	if busy {
-		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "another Run context is current", "stop the current Worker before committing a different context")
-	}
-	var healthy *HealthySnapshot
-	if !m.config.DisableHealthSnapshots {
-		healthy, err = m.captureHealthy(ctx, resolved)
-	} else {
-		m.mu.RLock()
-		healthy = m.healthy
-		m.mu.RUnlock()
-	}
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("save healthy environment: %w", err)
-	}
-	m.mu.RLock()
-	state := m.stateLocked()
-	statePath := m.config.StatePath
-	m.mu.RUnlock()
-	state.Configured = cloneRunContext(&runContext)
-	state.Healthy = healthy
-	if runContext.Profile.DataDirectoryID != SafeModeDataDirectoryID {
-		state.SafeMode = nil
-	}
-	state.RecoveryPending = false
-	// A later healthy launch of the failed target resolves that old failure.
-	// A rollback to another target retains its own failed candidate record.
-	if state.LastSwitchAttempt != nil && state.LastSwitchAttempt.Target == runContext {
-		state.LastSwitchAttempt = nil
-	}
-	if err := m.store.Save(ctx, statePath, state); err != nil {
-		return Snapshot{}, err
-	}
-	m.mu.Lock()
-	m.configured = cloneRunContext(&runContext)
-	m.current = cloneRunContext(&runContext)
-	m.knownGood = cloneRunContext(&runContext)
-	m.healthy = healthy
-	m.safeMode = cloneSafeMode(state.SafeMode)
-	m.recoveryPending = false
-	m.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
-	m.mu.Unlock()
-	if !m.config.DisableHealthSnapshots {
-		m.pruneHealthySnapshots(healthy, resolved)
-	}
-	return m.Snapshot(context.Background())
+	return m.commitVersionHealthy(ctx, resolved)
 }
 
 // ClearCurrent removes the process-local current context after a Worker
@@ -2155,16 +2084,16 @@ func (m *Manager) acquireOperation(ctx context.Context) (func(), error) {
 
 func (m *Manager) stateLocked() State {
 	return State{
-		SafeMode:        cloneSafeMode(m.safeMode),
-		VersionRecovery: cloneVersionRecovery(m.versionRecovery),
-		Healthy:         m.healthy, LastSwitchAttempt: cloneSwitchAttempt(m.lastSwitchAttempt), RecoveryPending: m.recoveryPending,
-		DataDirectories:  cloneDataDirectories(m.config.DataDirectories),
-		Runtimes:         cloneRuntimes(m.config.Runtimes),
-		Nodes:            cloneNodes(m.config.Nodes),
-		LatestNode:       cloneNodeRelease(m.latestNode),
-		DSHReleases:      cloneDSHReleases(m.dshReleases),
-		PluginProvenance: append([]PluginProvenanceRecord(nil), m.pluginProvenance...),
-		Configured:       cloneRunContext(m.configured),
+		SafeMode:          cloneSafeMode(m.safeMode),
+		VersionRecovery:   cloneVersionRecovery(m.versionRecovery),
+		LastSwitchAttempt: cloneSwitchAttempt(m.lastSwitchAttempt),
+		DataDirectories:   cloneDataDirectories(m.config.DataDirectories),
+		Runtimes:          cloneRuntimes(m.config.Runtimes),
+		Nodes:             cloneNodes(m.config.Nodes),
+		LatestNode:        cloneNodeRelease(m.latestNode),
+		DSHReleases:       cloneDSHReleases(m.dshReleases),
+		PluginProvenance:  append([]PluginProvenanceRecord(nil), m.pluginProvenance...),
+		Configured:        cloneRunContext(m.configured),
 	}
 }
 

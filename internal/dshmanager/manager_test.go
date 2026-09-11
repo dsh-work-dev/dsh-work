@@ -193,7 +193,7 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 }
 
-func TestManagerKeepsConfiguredCurrentAndKnownGoodContextsSeparate(t *testing.T) {
+func TestManagerKeepsCurrentWithoutInventingUnverifiedRecovery(t *testing.T) {
 	manager := newTestManager(t)
 	configured := RunContext{
 		RuntimeID: "dsh-test",
@@ -224,8 +224,8 @@ func TestManagerKeepsConfiguredCurrentAndKnownGoodContextsSeparate(t *testing.T)
 	if snapshot.Current == nil || snapshot.Current.Profile.Name != "web" {
 		t.Fatalf("current = %#v, want web", snapshot.Current)
 	}
-	if snapshot.KnownGood == nil || snapshot.KnownGood.Profile.Name != "web" {
-		t.Fatalf("known-good = %#v, want web", snapshot.KnownGood)
+	if snapshot.KnownGood != nil || snapshot.RestorePoints == nil || snapshot.RestorePoints.SaveError == "" {
+		t.Fatalf("missing version adapter must retain current with a recording error, not invent recovery: %#v", snapshot)
 	}
 }
 
@@ -1589,7 +1589,6 @@ func TestHealthyCommitResolvesOnlyMatchingFailure(t *testing.T) {
 	for _, failedProfile := range []string{"web", "web-clean"} {
 		t.Run(failedProfile, func(t *testing.T) {
 			manager := newTestManager(t)
-			manager.config.DisableHealthSnapshots = true
 			target := RunContext{RuntimeID: "dsh-test", Node: NodeSelection{Kind: NodeSelectionSystem}, Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
 			failed := target
 			failed.Profile.Name = failedProfile

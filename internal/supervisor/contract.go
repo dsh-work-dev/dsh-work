@@ -16,8 +16,6 @@ type LaunchPlan struct {
 	Env              map[string]string `json:"env,omitempty"`
 	WorkingDirectory string            `json:"workingDirectory"`
 	ExpectedOrigin   string            `json:"expectedOrigin"`
-	ExpectedHost     string            `json:"expectedHost"`
-	ExpectedPort     int               `json:"expectedPort"`
 }
 
 func (p LaunchPlan) Validate() error {
@@ -30,15 +28,9 @@ func (p LaunchPlan) Validate() error {
 	if p.WorkingDirectory == "" {
 		return fmt.Errorf("working directory is required")
 	}
-	if p.ExpectedHost != "127.0.0.1" {
-		return fmt.Errorf("expected host must be 127.0.0.1")
-	}
-	if p.ExpectedPort < 1 || p.ExpectedPort > 65535 {
-		return fmt.Errorf("expected port is outside the TCP range")
-	}
 	u, err := url.Parse(p.ExpectedOrigin)
-	if err != nil || u.Scheme != "http" || u.Hostname() != p.ExpectedHost || u.Port() != fmt.Sprint(p.ExpectedPort) || u.Path != "" && u.Path != "/" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("expected origin is not a loopback HTTP origin")
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.Path != "" && u.Path != "/" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("expected Worker routing identity is invalid")
 	}
 	return nil
 }

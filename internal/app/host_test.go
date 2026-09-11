@@ -3,13 +3,11 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/supervisor"
-	"github.com/local/dsh-work/internal/workergateway"
+	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
@@ -28,22 +26,24 @@ type testDSH struct {
 	announcedURL string
 }
 
-type testGateway struct {
+type testChannel struct {
 	server *httptest.Server
 }
 
-func (g *testGateway) Start(context.Context, string) (workergateway.Session, error) {
-	return testGatewaySession{origin: g.server.URL + "/", url: g.server.URL + "/__work/bootstrap?session=test-session"}, nil
+func (g *testChannel) Prepare(context.Context, string, string, string) (workerchannel.Session, error) {
+	return testChannelSession{url: "/?generation=test-session"}, nil
 }
 
-type testGatewaySession struct {
-	origin string
-	url    string
+type testChannelSession struct {
+	url string
 }
 
-func (s testGatewaySession) URL() string    { return s.url }
-func (s testGatewaySession) Origin() string { return s.origin }
-func (testGatewaySession) Close() error     { return nil }
+func (testChannelSession) Generation() string   { return "test-session" }
+func (s testChannelSession) URL() string        { return s.url }
+func (testChannelSession) Patch() string        { return "host.patch.json" }
+func (testChannelSession) Client() *http.Client { return http.DefaultClient }
+func (testChannelSession) Activate(string)      {}
+func (testChannelSession) Close() error         { return nil }
 
 type hostRuntimeInstaller struct {
 	path  string
@@ -130,10 +130,6 @@ func (d *testDSH) Discover(context.Context) (dshadapter.Runtime, error) {
 }
 
 func (d *testDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (supervisor.LaunchPlan, error) {
-	u, err := url.Parse(d.server.URL)
-	if err != nil {
-		return supervisor.LaunchPlan{}, err
-	}
 	workingDirectory := launch.BootstrapDirectory
 	if launch.Workspace.State == workspacecontext.StateSelected {
 		workingDirectory = launch.Workspace.Path
@@ -145,8 +141,6 @@ func (d *testDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (supervisor.L
 		WorkingDirectory: workingDirectory,
 		Env:              map[string]string{"DSH_HOME": launch.DataDirectory},
 		ExpectedOrigin:   d.server.URL,
-		ExpectedHost:     u.Hostname(),
-		ExpectedPort:     portFromURL(u),
 	}, nil
 }
 
@@ -159,15 +153,15 @@ func (d *testDSH) ParseReadyAnnouncement(text string) (dshadapter.ReadyAnnouncem
 
 func (*testDSH) ValidateReady(announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan) error {
 	parsed, err := url.Parse(announcement.URL)
-	if err != nil || parsed.Hostname() != plan.ExpectedHost || parsed.Port() != portString(plan.ExpectedPort) {
+	if err != nil || parsed.Scheme+"://"+parsed.Host != plan.ExpectedOrigin {
 		return lifecycle.Failure{Code: lifecycle.ErrorDSHInvalidReadiness, Summary: "invalid test readiness"}
 	}
 	return nil
 }
 
-func (d *testDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan) error {
+func (d *testDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan, client *http.Client) error {
 	parsed, err := url.Parse(announcement.URL)
-	if err != nil || parsed.Hostname() != plan.ExpectedHost || parsed.Port() != portString(plan.ExpectedPort) {
+	if err != nil || parsed.Scheme+"://"+parsed.Host != plan.ExpectedOrigin {
 		return lifecycle.Failure{Code: lifecycle.ErrorDSHInvalidReadiness, Summary: "invalid test readiness"}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, announcement.URL, nil)
@@ -250,7 +244,7 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	defer dsh.server.Close()
 	manager := newHostTestManager(t, "web")
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server}}, Config{
 		BootstrapDirectory:  t.TempDir(),
 		DSHDataDirectory:    t.TempDir(),
 		ReadinessTimeout:    time.Second,
@@ -261,9 +255,9 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 		ShutdownTimeout:     time.Second,
 	})
 	statuses := make(chan lifecycle.Status, 16)
-	var handoffURL string
+	var workspaceURL string
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
-	host.SetReadyHandler(func(value string) { handoffURL = value })
+	host.SetReadyHandler(func(value string) { workspaceURL = value })
 	if status := host.Start(); status.State != lifecycle.StateStarting {
 		t.Fatalf("Start() status = %+v", status)
 	}
@@ -274,8 +268,8 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	if ready.Workspace == nil || ready.Workspace.State != workspacecontext.StateSelectionRequired || ready.Workspace.GenerationID != ready.GenerationID {
 		t.Fatalf("workspace context was not resolved for the generation: %+v", ready.Workspace)
 	}
-	if ready.WorkspaceURL != dsh.server.URL+"/" || handoffURL != dsh.server.URL+"/__work/bootstrap?session=test-session" {
-		t.Fatalf("gateway session was projected incorrectly: status=%q handoff=%q", ready.WorkspaceURL, handoffURL)
+	if ready.WorkspaceURL != "/?generation=test-session" || workspaceURL != "/?generation=test-session" {
+		t.Fatalf("channel session was projected incorrectly: status=%q workspace=%q", ready.WorkspaceURL, workspaceURL)
 	}
 	if status := host.Cancel(); status.State != lifecycle.StateStopping {
 		t.Fatalf("Cancel() status = %+v", status)
@@ -318,7 +312,7 @@ func TestHostDoesNotPullMissingRuntimeDuringStartup(t *testing.T) {
 	statuses := make(chan lifecycle.Status, 32)
 	host := NewHost(Dependencies{
 		DSH: dsh, Manager: manager,
-		Supervisor: &testSupervisor{}, Gateway: &testGateway{server: dsh.server},
+		Supervisor: &testSupervisor{}, Channel: &testChannel{server: dsh.server},
 	}, Config{
 		BootstrapDirectory: t.TempDir(),
 		ReadinessTimeout:   time.Second,
@@ -372,7 +366,7 @@ func TestHostUsesManagerRunContextAndClearsCurrentState(t *testing.T) {
 	}
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{
-		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server},
 		WorkspaceResolver: workspacecontext.ResolverFunc(func(_ context.Context, generation string, _ workspacecontext.Request) (workspacecontext.Context, error) {
 			return workspacecontext.NewSelected(generation, "workspace-1", workspacePath, "Project")
 		}),
@@ -440,7 +434,7 @@ func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
 	statuses := make(chan lifecycle.Status, 8)
 	supervisorAdapter := &testSupervisor{}
 	host := NewHost(Dependencies{
-		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server},
 	}, Config{
 		BootstrapDirectory: filepath.Join(root, "bootstrap"),
 		ReadinessTimeout:   time.Second,
@@ -483,7 +477,7 @@ func TestHostDoesNotStartWhenTheRunContextManagerCannotLoad(t *testing.T) {
 		DSH:          dsh,
 		ManagerError: errors.New("manager state is corrupt"),
 		Supervisor:   supervisorAdapter,
-		Gateway:      &testGateway{server: dsh.server},
+		Channel:      &testChannel{server: dsh.server},
 	}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
@@ -509,7 +503,7 @@ func TestHostDoesNotUseAnImplicitRunContextWithoutManager(t *testing.T) {
 	host := NewHost(Dependencies{
 		DSH:        dsh,
 		Supervisor: supervisorAdapter,
-		Gateway:    &testGateway{server: dsh.server},
+		Channel:    &testChannel{server: dsh.server},
 	}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
@@ -533,7 +527,7 @@ func TestHostRestoresRecoverySurfaceAfterReadyWorkerExit(t *testing.T) {
 	defer dsh.server.Close()
 	manager := newHostTestManager(t, "web")
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server}}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
 		ReadinessTimeout:   time.Second,
@@ -563,7 +557,7 @@ func TestHostDoesNotOverlapAWorkerWhenCleanupIsUnverified(t *testing.T) {
 	defer dsh.server.Close()
 	manager := newHostTestManager(t, "web")
 	supervisorAdapter := &testSupervisor{}
-	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server}}, Config{
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server}}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
 		ReadinessTimeout:   time.Second,
@@ -766,7 +760,7 @@ func TestHostCommitsCandidateOnlyAfterReady(t *testing.T) {
 	}
 }
 
-func TestHostCancellingCandidateSwitchStillRestoresKnownGood(t *testing.T) {
+func TestHostCancellingCandidateSwitchStopsWithoutAutomaticRestore(t *testing.T) {
 	fixture := newRunContextSwitchFixture(t)
 	defer fixture.close()
 	fixture.startReady(t)
@@ -791,15 +785,17 @@ func TestHostCancellingCandidateSwitchStillRestoresKnownGood(t *testing.T) {
 	select {
 	case outcome := <-result:
 		assertFailureCode(t, outcome.err, lifecycle.ErrorCancelled)
-		assertRunContext(t, outcome.snapshot.Current, fixture.target("alpha"), "cancelled-switch current")
-		if status := fixture.host.Status(); status.State != lifecycle.StateReady {
-			t.Fatalf("host status after cancelled switch = %+v, want Ready", status)
+		if outcome.snapshot.Current != nil {
+			t.Fatal("cancelled switch restarted a Worker")
+		}
+		if outcome.snapshot.LastSwitchAttempt == nil || outcome.snapshot.LastSwitchAttempt.Rollback != dshmanager.RollbackDisabled {
+			t.Fatal("cancellation did not suppress automatic restore")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancelled context switch did not finish")
 	}
 	fixture.supervisor.assertNoOverlap(t)
-	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta", "start:alpha")
+	fixture.supervisor.assertEventOrder(t, "start:alpha", "stop:alpha", "start:beta", "stop:beta")
 }
 
 func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
@@ -954,12 +950,11 @@ func TestHostEntersRetryableFailedWhenRollbackFails(t *testing.T) {
 
 	fixture.dsh.setFailure("alpha", false)
 	fixture.dsh.setFailure("beta", false)
-	if status := fixture.host.Start(); status.State != lifecycle.StateStarting {
-		t.Fatalf("retry Start() status = %+v, want Starting", status)
+	if _, err := fixture.host.RestoreKnownGood(context.Background()); err != nil {
+		t.Fatalf("explicit version recovery retry failed: %v", err)
 	}
-	ready := fixture.waitForHostState(t, lifecycle.StateReady)
-	if ready.Error != nil {
-		t.Fatalf("retry reached Ready with error: %+v", ready.Error)
+	if ready := fixture.host.Status(); ready.State != lifecycle.StateReady || ready.Error != nil {
+		t.Fatalf("recovery retry did not reach Ready: %+v", ready)
 	}
 	recovered, err := fixture.manager.Snapshot(context.Background())
 	if err != nil {
@@ -974,6 +969,21 @@ type runContextSwitchFixture struct {
 	supervisor *switchTestSupervisor
 	host       *Host
 	statuses   chan lifecycle.Status
+}
+
+// Lifecycle fixtures supply version inputs independently of real package installation.
+// Real frozen-lock and package repair behavior is covered by version recovery tests.
+type switchVersionCommands struct{ dshadapter.PluginCommands }
+
+func (switchVersionCommands) CaptureVersions(context.Context, string) (dshmanager.ProfileVersionInput, error) {
+	return dshmanager.ProfileVersionInput{PackageManager: "pnpm"}, nil
+}
+func (switchVersionCommands) CheckVersionProfile(context.Context, string) error { return nil }
+func (switchVersionCommands) ApplyVersions(context.Context, string, dshmanager.ProfileVersionInput) error {
+	return nil
+}
+func (switchVersionCommands) ResetVersions(context.Context, string) ([]string, error) {
+	return nil, nil
 }
 
 func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Config)) *runContextSwitchFixture {
@@ -1011,6 +1021,9 @@ func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Conf
 			Profile:   dshmanager.ProfileRef{DataDirectoryID: "alpha-home", Name: "alpha"},
 		},
 	}
+	managerConfig.PluginCommands = switchVersionCommands{}
+	managerConfig.CommandRunner = versionRecoveryFixtureRunner{}
+	managerConfig.RuntimeInstaller = &versionRecoveryFixtureInstaller{runtime: managerConfig.Runtimes[0]}
 	for _, apply := range configure {
 		apply(&managerConfig)
 	}
@@ -1024,7 +1037,7 @@ func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Conf
 		startSignals: make(map[string]chan struct{}),
 	}
 	host := NewHost(Dependencies{
-		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Gateway: &testGateway{server: dsh.server},
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server},
 	}, Config{
 		BootstrapDirectory:  filepath.Join(root, "bootstrap"),
 		ReadinessTimeout:    45 * time.Millisecond,
@@ -1126,10 +1139,6 @@ func newSwitchTestDSH() *switchTestDSH {
 }
 
 func (d *switchTestDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (supervisor.LaunchPlan, error) {
-	u, err := url.Parse(d.server.URL)
-	if err != nil {
-		return supervisor.LaunchPlan{}, err
-	}
 	return supervisor.LaunchPlan{
 		GenerationID:     launch.GenerationID,
 		Executable:       launch.Runtime.Path,
@@ -1137,8 +1146,6 @@ func (d *switchTestDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (superv
 		WorkingDirectory: launch.BootstrapDirectory,
 		Env:              map[string]string{"DSH_HOME": launch.DataDirectory},
 		ExpectedOrigin:   d.server.URL,
-		ExpectedHost:     u.Hostname(),
-		ExpectedPort:     portFromURL(u),
 	}, nil
 }
 
@@ -1155,13 +1162,13 @@ func (d *switchTestDSH) ParseReadyAnnouncement(text string) (dshadapter.ReadyAnn
 
 func (d *switchTestDSH) ValidateReady(announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan) error {
 	parsed, err := url.Parse(announcement.URL)
-	if err != nil || parsed.Hostname() != plan.ExpectedHost || parsed.Port() != portString(plan.ExpectedPort) {
+	if err != nil || parsed.Scheme+"://"+parsed.Host != plan.ExpectedOrigin {
 		return lifecycle.Failure{Code: lifecycle.ErrorDSHInvalidReadiness, Summary: "invalid switch test readiness"}
 	}
 	return nil
 }
 
-func (d *switchTestDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan) error {
+func (d *switchTestDSH) Probe(ctx context.Context, announcement dshadapter.ReadyAnnouncement, plan supervisor.LaunchPlan, client *http.Client) error {
 	if len(plan.Args) >= 2 {
 		d.mu.Lock()
 		failed := d.failProfiles[plan.Args[1]]
@@ -1382,12 +1389,19 @@ func waitForStatus(t *testing.T, statuses <-chan lifecycle.Status, state lifecyc
 	}
 }
 
-func portFromURL(value *url.URL) int {
-	var port int
-	_, _ = fmt.Sscanf(value.Port(), "%d", &port)
-	return port
-}
-
-func portString(port int) string {
-	return strconv.Itoa(port)
+func TestReadinessFailureKeepsSafeProbeDiagnostic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "private upstream detail", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	adapter := dshadapter.New(nil, dshadapter.SupportedVersion)
+	err := adapter.Probe(context.Background(), dshadapter.ReadyAnnouncement{URL: server.URL + "/?token=private-launch-token"}, supervisor.LaunchPlan{ExpectedOrigin: server.URL}, server.Client())
+	if err == nil {
+		t.Fatal("probe unexpectedly succeeded")
+	}
+	host := NewHost(Dependencies{}, Config{})
+	failure := host.failureFor(err, lifecycle.ErrorDSHReadinessTimeout, "DSH not ready", true)
+	if !strings.Contains(failure.Detail, "HTTP 401") || strings.Contains(failure.Detail, "private") || strings.Contains(failure.Detail, server.URL) {
+		t.Fatalf("unsafe or missing probe diagnostic: %s", failure.Detail)
+	}
 }

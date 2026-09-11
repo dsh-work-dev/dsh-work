@@ -1,63 +1,60 @@
 html[data-surface="host"] body { font-family: var(--font-body); }
 .startup-shell {
-  width: min(720px, 100%); margin: 0 auto; padding: clamp(36px, 10vh, 100px) 24px 40px;
-  button, select { min-height: 44px; border: 1px solid var(--line-strong); border-radius: 0; padding: 10px 16px; background: var(--surface); color: var(--text); font: inherit; }
+  width: min(700px, 100%); margin: 0 auto; padding: clamp(20px, 5vh, 48px) 28px 20px;
+  button, select { min-height: var(--control-height); border: 1px solid var(--line-strong); border-radius: var(--radius-control); padding: 8px 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; }
   button { cursor: pointer; }
-  button:hover { background: var(--hover); }
+  button:hover:not(:disabled) { background: var(--action); color: var(--action-contrast); }
   button:disabled { opacity: .45; cursor: default; }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
   .startup-primary { background: var(--action); color: var(--action-contrast); }
-  .startup-primary:hover { background: var(--action-strong); }
-  .startup-intro { padding: 0 0 8px; }
-  .startup-options, .startup-diagnostics { border-top: 1px solid var(--line); }
-  summary { cursor: pointer; padding: 16px 0; font-size: 14px; }
-  .startup-diagnostic-actions { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
-  .startup-diagnostic-actions button { border-color: var(--line); }
-  #diagnostic-copy-status { color: var(--muted); font-size: 13px; }
-  #startup-progress-message { font-size: 14px; color: var(--muted); }
-  h1 { font: 500 clamp(26px, 4vw, 32px)/1.3 var(--font-display); margin: 12px 0; }
-  h2 { font-size: 16px; margin: 0; padding-bottom: 16px; border-bottom: 1px solid var(--line-strong); }
-  #status-message { font-size: 16px; line-height: 1.7; }
-  #status-detail { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-  .startup-component { padding: 18px 0; border-bottom: 1px solid var(--line); min-width: 0; }
-  .startup-component-heading, .startup-profile { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
-  .startup-component-heading { margin-bottom: 10px; }
-  .startup-component-heading label { font-weight: 700; }
-  .startup-component-heading span, #startup-profile { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-  .startup-component-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .startup-primary:hover:not(:disabled) { background: var(--surface); color: var(--text); }
+  h1 { font: 500 28px/1.3 var(--font-display); margin: 0 0 20px; }
+  #status-message, #startup-action-error { font-size: 14px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+  #startup-progress-message { font-size: 13px; color: var(--muted); }
+  .startup-component-controls { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 10px; }
   select { flex: 1; min-width: 160px; max-width: 100%; }
   progress { display: block; width: 100%; height: 4px; accent-color: var(--text); }
-  .startup-component p { font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
-  .startup-actions { display: flex; gap: 10px; flex-wrap: wrap; padding: 24px 0; }
-  #quit { margin-left: auto; border-color: transparent; }
-  #startup-action-error { padding: 12px; border-left: 3px solid var(--text); background: var(--surface-soft); overflow-wrap: anywhere; }
-  .startup-diagnostics { position: relative; border-top: 1px solid var(--line); font-size: 13px; }
-  .startup-diagnostics summary { cursor: pointer; padding: 16px 80px 16px 0; }
-
-  .startup-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: 240px; padding: 12px; background: var(--surface-soft); font: 12px/1.7 var(--font-mono); }
+  .startup-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; }
+  .startup-actions:not(:has(button:not([hidden]))) { display: none; }
+  #startup-resolution.has-error { margin-top: 8px; }
+  .startup-diagnostics { border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; }
+  .startup-diagnostic-actions { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: var(--surface-soft); }
+  .startup-diagnostic-actions strong { font-size: 12px; font-weight: 500; }
+  .startup-diagnostic-actions button { margin-left: auto; min-height: 32px; padding: 4px 8px; background: transparent; }
+  #diagnostic-copy-status { color: var(--muted); font-size: 12px; }
+  .startup-diagnostics pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; max-height: clamp(100px, 22vh, 180px); padding: 12px; font: 12px/1.6 var(--font-mono); }
+  .startup-footer { display: flex; gap: 20px; border-top: 1px solid var(--line); margin-top: 12px; }
+  .startup-footer button { border: 0; padding: 8px 0; color: var(--muted); background: transparent; font-size: 13px; }
+  #quit { margin-left: auto; }
 }
-@media (max-width: 540px) {
-  .startup-shell .startup-intro { padding-top: 24px; }
-  .startup-shell .startup-component-controls select { flex-basis: 100%; }
-  .startup-shell .startup-actions button { flex: 1 1 auto; }
-}
-
-.startup-shell { width: min(620px, 100%); }
-.startup-checks { list-style: none; padding: 12px 0 0; margin: 0; }
-.startup-checks li { display: flex; gap: 16px; position: relative; padding: 18px 0; min-height: 70px; }
-.startup-checks li:not(:last-child)::after { content: ""; position: absolute; left: 13px; top: 48px; bottom: -10px; width: 1px; background: var(--line); }
-.check-marker { flex: 0 0 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; font: 12px var(--font-body); color: var(--muted); }
+.startup-checks { list-style: none; padding: 0; margin: 0; }
+.startup-checks li { display: flex; gap: 12px; position: relative; padding: 10px 0; min-height: 48px; }
+.startup-checks li:not(:last-child)::after { content: ""; position: absolute; left: 12px; top: 38px; bottom: -6px; width: 1px; background: var(--line); }
+.check-marker { flex: 0 0 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; font: 12px var(--font-body); color: var(--muted); }
 .check-body { flex: 1; min-width: 0; }
-.check-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; min-height: 28px; }
-.check-heading strong { font-size: 15px; font-weight: 500; }
-.check-heading span { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+.check-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 26px; }
+.check-heading strong { font-size: 14px; font-weight: 500; }
+.check-heading span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; text-align: right; }
 [data-state="pending"] .check-heading { color: var(--muted); }
 [data-state="active"] .check-marker { border-color: var(--text); animation: check-pulse 1.6s ease-in-out infinite; }
 [data-state="done"] .check-marker { border-color: transparent; color: var(--text); }
 [data-state="failed"] .check-marker { border-color: var(--text); background: var(--text); color: var(--surface); }
-.startup-shell .startup-component-controls { padding-top: 12px; }
-.startup-shell .startup-footer { display: flex; gap: 20px; border-top: 1px solid var(--line); }
-.startup-shell .startup-footer button { border: 0; padding: 10px 0; color: var(--muted); background: transparent; font-size: 13px; }
-.startup-shell .startup-diagnostics pre { max-height: 260px; }
+.startup-restore-dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 24px; border: 1px solid var(--line); border-radius: var(--radius-surface); background: var(--surface); color: var(--text); overflow: auto; }
+.startup-restore-dialog::backdrop { background: #0006; }
+.startup-restore-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.startup-restore-dialog h2 { font-size: 20px; margin: 0; }
+.startup-restore-dialog .restore-points-panel { border: 0; padding: 12px 0 0; margin: 0; }
+.startup-restore-dialog .backup-row { padding: 16px 0; }
+.startup-restore-dialog .backup-row strong { font-size: 14px; }
+.startup-restore-dialog .manager-actions:empty, .startup-restore-dialog .manager-actions:not(:has(button:not([hidden]))), .startup-restore-dialog .status-detail:empty { display: none; }
 @keyframes check-pulse { 50% { box-shadow: 0 0 0 4px var(--line); } }
+@media (max-width: 540px) {
+  .startup-shell { padding: 20px 16px; }
+  .startup-shell .startup-component-controls select { flex-basis: 100%; }
+  .startup-shell .startup-actions button { flex: 1 1 auto; }
+  .startup-restore-dialog { padding: 16px; }
+}
 @media (prefers-reduced-motion: reduce) { .startup-checks .check-marker { animation: none; } }
+
+.startup-restore-dialog section.restore-point-preview { width: auto; max-width: none; margin: 0; padding: 12px 0 0; border: 0; }
+.startup-restore-dialog section.restore-point-preview pre { max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 var(--font-mono); }

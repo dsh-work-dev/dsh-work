@@ -53,7 +53,7 @@ Host process directory.
 ## ADR-0008 — Atomic Run-context switching
 
 Changing runtime, DSH data directory or profile replaces the complete Run
-context. The candidate becomes current only after readiness and gateway checks;
+context. The candidate becomes current only after readiness and authenticated channel checks;
 failure follows the user's recovery preference. Automatic recovery uses a
 verified version snapshot and is bounded to prevent retry loops. Normal plugin
 mutation requires the current healthy profile; recovery reapplies recorded
@@ -95,7 +95,8 @@ for Codex compatibility and is not exposed as a separate source format.
 ## ADR-0011 — Direct Pet scale control and handle-only movement
 
 Pet scaling is a direct trusted Settings slider from 50% to 300%, based on the
-192x208 canonical window at 100%. Native border resize is disabled. The native
+96x104 canonical sprite at 100%; window dimensions also reserve activity space.
+Native border resize is disabled. The native
 window receives pointer input so the drag affordance can appear on hover, but
 only the explicit handle moves the window. Position is persisted as a
 monitor-relative normalized anchor, and Host resize failure rolls back the
@@ -103,8 +104,6 @@ persisted dimensions.
 
 
 ## ADR-0012 — Verified version snapshots and package-manager recovery
-
-Accepted 2026-09-11 after implementation and Windows recovery verification.
 
 Record exact DSH and installed plugin versions plus bounded dependency inputs,
 using the existing atomic manager-state writer. Compare inputs captured before
@@ -125,8 +124,46 @@ and supported source types are defined in [Version recovery](version-recovery.md
 
 ## ADR-0013 — Persist native window dimensions in Host settings
 
-Accepted 2026-09-11. Workspace and Settings independently persist normal logical
+Workspace and Settings independently persist normal logical
 width/height and maximised state in the existing Host settings store. Wails
 native events supply observations; writes are debounced and flushed on close
 and shutdown. Preserve normal dimensions through minimisation and maximisation.
 Restore valid dimensions at creation and use defaults when absent or invalid.
+
+## ADR-0014 — Integrated authenticated desktop channel
+
+Use a per-generation current-user OS pipe for Host/Worker traffic, with mutual
+HMAC authentication and fixed trusted/Worker window roles. Wails byte streams
+carry bounded Fetch/WebSocket bodies; asset delivery uses native handlers.
+Generation ownership and backpressure are part of the contract. The Go Host
+owns cookies and native authority. HTTP remains the upstream route protocol
+inside the pipe, and its internal loopback authority is not a listening socket.
+
+Reuse go-winio, coder/websocket and Go/Node HTTP implementations. Keep this in
+the regular application lifecycle, including restart and safe mode. The tray
+Host is the current background owner; remote clients and a separate daemon
+remain deferred. See [Architecture](architecture.md).
+
+## ADR-0015 — Explicit version records and confined file access
+
+Store exact DSH/plugin versions, original dependency specifiers/groups, bundle
+order and lock/workspace inputs. Reconstruct dependency fields on recovery,
+preserving current non-dependency settings. Keep the lock authoritative and
+verify installed versions afterward. A version record is distinct from a profile
+backup. Supported recovery limits are in [Version recovery](version-recovery.md).
+
+Use google/safeopen for Windows version-file opening after the reproduced
+redirected-AppData os.Root failure; retain rooted publication/removal. Let pnpm
+reconcile its own acquisition staging metadata before package removal and
+reinstallation. Neither workaround permits unchecked path access or manual
+package-tree replacement.
+
+## ADR-0016 — Selective information hierarchy in Settings
+
+Reduce complexity through ordering, grouping and concise copy. Add a management
+view only for dense details or accumulating history. Overview version history
+and profile backups use focused dialogs; DSH and Node runtime controls stay
+on one page. Place failures, diagnostics and next actions near their source.
+Reuse the square monochrome system. [Settings and startup](settings.md) defines
+the current page layout; [Interface standards](standards/interface.md) governs
+future changes.

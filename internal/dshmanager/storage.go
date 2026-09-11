@@ -13,14 +13,12 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-// State persists the desired selection and the last verified recovery files.
+// State persists the desired selection and the verified version records.
 // Current remains process-local; persisted health is not a claim of a live Worker.
 type State struct {
 	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
 	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
-	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
-	RecoveryPending   bool                     `json:"recoveryPending,omitempty"`
 	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
 	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
 	Nodes             []NodeInstallationInfo   `json:"nodes,omitempty"`
@@ -73,9 +71,7 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 type persistedState struct {
 	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
 	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
-	Healthy           *HealthySnapshot         `json:"healthy,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
-	RecoveryPending   bool                     `json:"recoveryPending,omitempty"`
 	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
 	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
 	Nodes             []NodeInstallationInfo   `json:"nodes,omitempty"`
@@ -98,16 +94,16 @@ func decodeState(data []byte) (State, error) {
 		return State{}, err
 	}
 	state := State{
-		SafeMode:        persisted.SafeMode,
-		VersionRecovery: persisted.VersionRecovery,
-		Healthy:         persisted.Healthy, LastSwitchAttempt: persisted.LastSwitchAttempt, RecoveryPending: persisted.RecoveryPending,
-		DataDirectories:  persisted.DataDirectories,
-		Runtimes:         persisted.Runtimes,
-		Nodes:            persisted.Nodes,
-		LatestNode:       persisted.LatestNode,
-		DSHReleases:      persisted.DSHReleases,
-		PluginProvenance: persisted.PluginProvenance,
-		Configured:       persisted.Configured,
+		SafeMode:          persisted.SafeMode,
+		VersionRecovery:   persisted.VersionRecovery,
+		LastSwitchAttempt: persisted.LastSwitchAttempt,
+		DataDirectories:   persisted.DataDirectories,
+		Runtimes:          persisted.Runtimes,
+		Nodes:             persisted.Nodes,
+		LatestNode:        persisted.LatestNode,
+		DSHReleases:       persisted.DSHReleases,
+		PluginProvenance:  persisted.PluginProvenance,
+		Configured:        persisted.Configured,
 	}
 	for index := range state.Runtimes {
 		normalized, err := normalizeRuntime(state.Runtimes[index])
@@ -137,11 +133,15 @@ func validateVersionRecovery(s *VersionRecoveryState) error {
 		seen := map[string]bool{}
 		total := 0
 		for _, p := range s.Points {
-			total += len(p.Input.Manifest) + len(p.Input.Lock) + len(p.Input.Workspace)
+			input, err := json.Marshal(p.Input)
+			if err != nil {
+				return err
+			}
+			total += len(input)
 			if total > 32<<20 {
 				return errors.New("version snapshot inputs exceed the total size limit")
 			}
-			if p.ID == "" || seen[p.ID] || validateRunContext(p.Target) != nil || len(p.Input.Manifest)+len(p.Input.Lock)+len(p.Input.Workspace) > 12<<20 {
+			if p.ID == "" || seen[p.ID] || validateRunContext(p.Target) != nil || len(input) > 12<<20 {
 				return errors.New("invalid version snapshot record")
 			}
 			seen[p.ID] = true
@@ -174,14 +174,6 @@ func validateState(state State) error {
 		}
 		if state.SafeMode.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID || state.SafeMode.Target.Profile.Name != "web" || state.SafeMode.ReturnTo.Profile.DataDirectoryID == SafeModeDataDirectoryID {
 			return errors.New("invalid safe mode state")
-		}
-	}
-	if state.Healthy != nil {
-		if err := validateRunContext(state.Healthy.Launch.Target); err != nil {
-			return err
-		}
-		if !filepath.IsAbs(state.Healthy.Directory) || !filepath.IsAbs(state.Healthy.Launch.DataDirectory.Path) {
-			return errors.New("invalid healthy snapshot path")
 		}
 	}
 	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))

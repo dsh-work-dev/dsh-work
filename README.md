@@ -12,7 +12,7 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 - serialized Run-context switching with configurable recovery;
 - automatic and manual version snapshots for DSH and profile plugins;
 - supervised Worker startup, readiness and shutdown;
-- a trusted loopback gateway to the DSH Workspace;
+- authenticated local IPC and binary WebView streams to the DSH Workspace;
 - persistent locale, close-to-tray, recovery and desktop-notification preferences;
 - remembered Workspace and Settings window sizes and maximised state;
 - Windows Job Object ownership for the Worker process tree.

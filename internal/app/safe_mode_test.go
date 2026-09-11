@@ -43,8 +43,8 @@ func TestSafeModeSwitchAndFailedReturnRetainRecovery(t *testing.T) {
 	if err == nil {
 		t.Fatal("failed original environment accepted")
 	}
-	if snapshot.Current == nil || snapshot.Current.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID || snapshot.SafeMode == nil || f.host.Status().State != lifecycle.StateReady {
-		t.Fatalf("rescue was lost: %#v", snapshot)
+	if snapshot.Current != nil || snapshot.SafeMode == nil || snapshot.Configured == nil || snapshot.Configured.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID || f.host.Status().State != lifecycle.StateFailed {
+		t.Fatalf("failed return lost its safe-mode reservation: %#v", snapshot)
 	}
 	delete(f.supervisor.startErrors, "alpha")
 	snapshot, err = f.host.ExitSafeMode(context.Background())

@@ -82,7 +82,7 @@ func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer b.Close()
-	b.Start(ctx, server.URL)
+	b.Start(ctx, server.URL, http.DefaultTransport)
 	deadline := time.Now().Add(3 * time.Second)
 	for !b.Snapshot().Connected && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

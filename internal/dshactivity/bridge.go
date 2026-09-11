@@ -141,8 +141,11 @@ func (b *Bridge) Prepare(generation string) (string, error) {
 	return path, nil
 }
 
-// Start follows the existing authenticated Worker. It never starts another DSH.
-func (b *Bridge) Start(ctx context.Context, authURL string) {
+// Start observes the authenticated Worker through its owned transport.
+func (b *Bridge) Start(ctx context.Context, authURL string, transport http.RoundTripper) {
+	if transport == nil {
+		return
+	}
 	b.lifecycleMu.Lock()
 	defer b.lifecycleMu.Unlock()
 	u, err := url.Parse(authURL)
@@ -151,7 +154,7 @@ func (b *Bridge) Start(ctx context.Context, authURL string) {
 	}
 	b.stop()
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Jar: jar, Timeout: 3 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	client := &http.Client{Transport: transport, Jar: jar, Timeout: 3 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != u.Scheme || req.URL.Host != u.Host || len(via) > 3 {
 			return errors.New("invalid Worker redirect")
 		}

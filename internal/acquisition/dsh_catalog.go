@@ -52,7 +52,7 @@ func (c DSHCatalogClient) Refresh(ctx context.Context) ([]DSHRelease, error) {
 		return nil, err
 	}
 	data, readErr := os.ReadFile(result.PayloadPath)
-	cleanupErr := os.RemoveAll(result.StagingPath)
+	cleanupErr := removeMetadata(result)
 	if readErr != nil {
 		return nil, Failure{Kind: FailureLocalIO, Summary: "DSH release metadata could not be read", Cause: readErr}
 	}

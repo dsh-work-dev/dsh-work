@@ -65,6 +65,14 @@ func (i *RuntimeInstaller) ForceInstall(ctx context.Context, version string, nod
 			if e = ensureRestoreRuntimeManifest(manifest, version); e != nil {
 				return dshmanager.RuntimeInfo{}, e
 			}
+			// Acquisition publishes a staged package tree. pnpm may retain the
+			// staging virtual-store path in its own metadata, so remove refuses
+			// to run until pnpm reconciles that tree at its final location.
+			// Let pnpm repair its metadata; never rewrite its store paths ourselves.
+			reconcile := []string{"install", "--dir", destination, "--force", "--config.ignore-scripts=true", "--config.optimistic-repeat-install=false"}
+			if _, e = i.executor.Run(ctx, toolchain.packageManagerPath, reconcile, toolchain.env, destination); e != nil {
+				return dshmanager.RuntimeInfo{}, e
+			}
 			args = []string{"remove", "--dir", destination, "@deepseek-ai/dsh", "--config.ignore-scripts=true", "--config.optimistic-repeat-install=false"}
 		}
 		if _, e = i.executor.Run(ctx, toolchain.packageManagerPath, args, toolchain.env, destination); e != nil {

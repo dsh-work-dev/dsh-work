@@ -63,7 +63,7 @@ func TestVersionPointPersistenceManualRetentionAndFailedSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &versionFailStore{}
-	config := dshmanager.Config{EnableVersionRestorePoints: true, DisableHealthSnapshots: true, StatePath: filepath.Join(root, "manager.json"), StateStore: store, PluginCommands: dshadapter.NewPluginCommands(), Runtimes: []dshmanager.RuntimeInfo{{ID: "dsh", Version: "1.0.0", Path: runtime}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
+	config := dshmanager.Config{StatePath: filepath.Join(root, "manager.json"), StateStore: store, PluginCommands: dshadapter.NewPluginCommands(), Runtimes: []dshmanager.RuntimeInfo{{ID: "dsh", Version: "1.0.0", Path: runtime}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
 	m, err := dshmanager.New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +148,10 @@ func TestVersionPointPersistenceManualRetentionAndFailedSave(t *testing.T) {
 	}
 	if _, err = reloaded.ResumeVersionRecovery(ctx, true); err == nil || installer.calls != 1 || reloaded.PendingVersionRecovery().ResumeCount != 1 {
 		t.Fatalf("interrupted recovery was not attempted exactly once: calls=%d err=%v", installer.calls, err)
+	}
+	reloaded.FailVersionRecovery(ctx)
+	if reloaded.PendingVersionRecovery().Error != "download unavailable" {
+		t.Fatal("installation error was replaced by a generic startup failure")
 	}
 	persisted, _ = store.Load(ctx, config.StatePath)
 	persisted.VersionRecovery.Pending.Status = "running"

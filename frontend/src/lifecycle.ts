@@ -118,7 +118,7 @@ export function viewModel(status: LifecycleStatus, translate?: LifecycleTranslat
 			tone: "ready",
 			showCancel: true,
 			showRetry: false,
-			workspace: status.workspaceUrl ?? copy("status.loopbackOrigin", "Loopback origin accepted.")
+			workspace: status.workspace?.path ?? copy("status.workspaceReady", "Workspace ready.")
 		};
 	}
 	if (status.state === "Stopping") {

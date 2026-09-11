@@ -3,11 +3,9 @@
 ## Scope and status
 
 dsh-work owns the Desktop Pet as a Host-managed native surface outside the
-DSH Workspace WebView. This document records the implementation through commit
-`f06ed37`, including the preceding activity and presentation changes.
+DSH Workspace WebView. This document records the current activity, presentation and Settings behavior.
 
-Current stage: implemented and automatically verified; native release acceptance
-remains open. Windows is the reference platform. Browser verification and a
+Native release acceptance remains open. Windows is the reference platform. Browser verification and a
 successful desktop build do not establish native input, stacking, DPI,
 accessibility or packaging acceptance.
 
@@ -18,6 +16,8 @@ accessibility or packaging acceptance.
 - Trusted Pets Settings owns discovery, selection, preview, visibility, size
   and topmost preferences. Initially no pet is selected and the surface is
   hidden. An unavailable selected key is retained and reported as unavailable.
+- The Settings list shows thumbnail, name and source/current state. The preview
+  groups use, topmost and size controls before the full description.
 - The size slider ranges from 50% to 300% in 5% steps. The canonical sprite
   size is 96x104 pixels at 100%. Window sizing reserves 64 pixels for activity
   and uses a minimum width of 240 pixels; text does not scale with the sprite.
@@ -117,21 +117,8 @@ Resize and topmost changes coordinate native updates and persistence with
 rollback on failure. The frontend consumes the validated state rather than raw
 persisted data.
 
-## Verification and remaining acceptance
+## Native support limits
 
-Recorded implementation checks passed:
-
-- Full `go test ./...` and `go vet ./...`.
-- Frontend typecheck, 14 existing tests and production build.
-- Installed DSH integration fixtures for activity, pending interactions,
-  navigation, generation isolation, overlapping tools and recoverable errors.
-- Browser checks for bubble behavior and sprite containment at 50/100/200%.
-- Playwright with a mocked Wails bridge for local frame advance, manifest
-  fetch frequency, click delivery, phase text, hide/show, alpha bounds and
-  actual VP9 WebM decoding; no page errors in that playback check.
-- Desktop executable build and `git diff --check`.
-
-Native Windows pass-through/recovery, multi-monitor DPI, OS stacking, real-pet
-visual quality, keyboard/focus and packaging still need interactive acceptance.
-macOS and Linux remain capability-gated/fallback paths pending native evidence.
-RED structural checking could not run because the CLI is unavailable.
+Windows is the reference implementation. Native pass-through, multi-monitor DPI,
+OS stacking and complete keyboard/focus behavior still require acceptance.
+macOS and Linux remain capability-gated/fallback paths pending native support.

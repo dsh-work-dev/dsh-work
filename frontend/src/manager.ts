@@ -1,3 +1,4 @@
+import {transientStatus} from "./ui/transient-status";
 import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
@@ -239,15 +240,17 @@ export function mountManager() {
     result.setAttribute("role", "status");
     result.hidden = true;
     (section === "profiles" ? document.getElementById("manager-profile-detail")! : panel).append(result);
-    panel.prepend(result);
+
     let anchor: Element | null = null;
     const clear = () => { result.hidden = true; result.textContent = ""; };
-    panel.addEventListener("change", clear, true);
+    panel.addEventListener("change", event => {
+      clear(); anchor = (event.target as Element).closest(".setting-row, .runtime-install-card, .plugin-install-row") ?? event.target as Element;
+    }, true);
     panel.addEventListener("click", event => {
       const button = (event.target as Element).closest("button");
       if (button) {
         clear();
-        anchor = button.closest(".manager-list-item, .profile-actions, .profile-rename-row, .plugin-install-row, .manager-actions, .setting-row") ?? button;
+        anchor = button.closest(".manager-list-item, .profile-actions, .profile-rename-row, .plugin-install-row, .runtime-install-card, .manager-actions, .setting-row") ?? button;
       }
     }, true);
     return (message: string, tone: "neutral" | "success" | "error" = "neutral", persistent = false) => {
@@ -255,7 +258,7 @@ export function mountManager() {
       // results (backup filename or required restart) need accompanying text.
       if (!message) { clear(); return; }
       if (tone !== "error" && !persistent) { clear(); return; }
-      if (!scope && anchor?.isConnected && panel.contains(anchor)) anchor.after(result);
+      if (anchor?.isConnected && panel.contains(anchor)) anchor.after(result);
       else panel.append(result);
       result.textContent = message;
       result.hidden = false;
@@ -297,10 +300,24 @@ export function mountManager() {
     themeSyncTimer = window.setInterval(() => void syncTheme(), 1000);
   }
 
-  function showSection(next: ManagerSection) {
-    if (next !== currentSection) {
-      document.getElementById("manager-content")!.scrollTop = 0;
+  const sectionPositions = new Map<ManagerSection, number>();
+  const sectionFocus = new Map<ManagerSection, {element: HTMLElement; selector?: string}>();
+  const contentScroller = document.getElementById("manager-content")!;
+  contentScroller.addEventListener("focusin", event => {
+    const target = event.target as HTMLElement;
+    const panel = target.closest<HTMLElement>("[data-manager-panel]");
+    if (panel) {
+      let selector = target.id ? `#${CSS.escape(target.id)}` : undefined;
+      for (const key of ["data-pet-key", "data-profile-key"]) {
+        const value = target.closest<HTMLElement>(`[${key}]`)?.getAttribute(key);
+        if (!selector && value) selector = `[${key}="${CSS.escape(value)}"]`;
+      }
+      sectionFocus.set(sectionName(panel.dataset.managerPanel ?? null), {element: target, selector});
     }
+  });
+  function showSection(next: ManagerSection) {
+    const changed = next !== currentSection;
+    if (changed) sectionPositions.set(currentSection, contentScroller.scrollTop);
     currentSection = next;
     const sharedState = document.querySelector<HTMLElement>(".manager-load-state");
     if (sharedState) sharedState.style.display = ["overview", "profiles", "plugins", "runtimes"].includes(next) ? "" : "none";
@@ -317,6 +334,12 @@ export function mountManager() {
       } else {
         item.removeAttribute("aria-current");
       }
+    }
+    if (changed) {
+      contentScroller.scrollTop = sectionPositions.get(next) ?? 0;
+      const saved = sectionFocus.get(next);
+      const previous = saved?.element.isConnected ? saved.element : saved?.selector ? document.querySelector<HTMLElement>(saved.selector) : null;
+      if (previous?.isConnected && previous.getClientRects().length && !(previous as HTMLButtonElement).disabled) previous.focus({preventScroll: true});
     }
   }
 
@@ -387,7 +410,7 @@ export function mountManager() {
     const result = document.getElementById("about-result")!;
     try {
       await navigator.clipboard.writeText(JSON.stringify({version: __APP_VERSION__, state: hostStatus?.state, current: snapshot?.current, failure: snapshot?.lastSwitchAttempt}, null, 2));
-      result.textContent = t("logs.copied");
+      transientStatus(result, t("logs.copied"));
     } catch { result.textContent = t("logs.copyFailed"); }
   })());
 
@@ -491,7 +514,10 @@ export function mountManager() {
       const targetProfile = snapshot.profiles?.find(item => sameProfileRef(item.ref, attempt.target.profile));
       const reason = targetProfile?.launchable === false ? t("switch.incompatible") : switchReason(attempt.failure.code);
       switchFailureDetail.textContent = `${t("switch.failedTarget", {profile: attempt.target.profile.name})} ${reason} ${snapshot.current ? t("switch.stillRunning", {profile: snapshot.current.profile.name}) : t("switch.stopped")}`;
-      document.getElementById("manager-switch-diagnostic")!.textContent = JSON.stringify(attempt, null, 2);
+      const diagnostic = document.getElementById("manager-switch-diagnostic")!;
+      const report = JSON.stringify(attempt, null, 2);
+      if (diagnostic.textContent !== report) diagnostic.closest("details")!.open = true;
+      diagnostic.textContent = report;
       switchRetry.hidden = !attempt.failure.retryable || targetProfile?.launchable === false;
       switchRestore.hidden = !!snapshot.current || !snapshot.knownGood || attempt.rollback === "restored";
     }
@@ -1152,7 +1178,11 @@ export function mountManager() {
     let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);
     if (status.state === "active" && status.step.startsWith("detect-")) message = t("runtimes.checkingTools");
     if (status.state === "succeeded") message = t("runtimes.resultSucceeded");
-    if (kind === "plugin") document.getElementById("plugin-operation-status")!.textContent = message;
+    if (kind === "plugin") {
+      const result = document.getElementById("plugin-operation-status")!;
+      if (status.state === "succeeded") transientStatus(result, message);
+      else result.textContent = message;
+    }
     if (status.route) message += ` · ${runtimeArtifactSourceLabel(status.route)}`;
     if (status.artifact.version) message += ` · ${status.artifact.version}`;
     if (status.receivedBytes) message += ` · ${formatRuntimeBytes(status.receivedBytes)}${status.hasTotal ? ` / ${formatRuntimeBytes(status.totalBytes ?? 0)}` : ""}`;

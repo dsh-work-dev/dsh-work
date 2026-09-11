@@ -75,41 +75,27 @@ func versionManifest(raw []byte) (map[string]json.RawMessage, error) {
 	}
 	return manifest, nil
 }
-func captureFields(manifest map[string]json.RawMessage) map[string]json.RawMessage {
-	fields := map[string]json.RawMessage{}
-	for _, key := range dependencyFields {
-		if v, ok := manifest[key]; ok {
-			fields[key] = v
-		}
-	}
-	var dsh struct {
-		Profile struct {
-			Bundles json.RawMessage `json:"bundles"`
-		} `json:"profile"`
-	}
-	_ = json.Unmarshal(manifest["dsh"], &dsh)
-	if len(dsh.Profile.Bundles) > 0 {
-		fields["bundles"] = dsh.Profile.Bundles
-	}
-	return fields
-}
 func readVersionFile(root *os.Root, name string, optional bool) ([]byte, error) {
-	info, err := root.Lstat(name)
+	f, err := openVersionFile(root, name, os.O_RDONLY)
 	if optional && errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > versionInputLimit {
-		return nil, fmt.Errorf("unsupported snapshot input: %s", name)
-	}
-	f, err := root.Open(name)
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return io.ReadAll(io.LimitReader(f, versionInputLimit+1))
+	if !info.Mode().IsRegular() || info.Size() > versionInputLimit {
+		return nil, fmt.Errorf("unsupported snapshot input: %s", name)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, versionInputLimit+1))
+	if len(data) > versionInputLimit {
+		return nil, fmt.Errorf("snapshot input is too large: %s", name)
+	}
+	return data, err
 }
 func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmanager.ProfileVersionInput, error) {
 	var out dshmanager.ProfileVersionInput
@@ -129,9 +115,21 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 	if err != nil {
 		return out, err
 	}
-	out.Manifest, _ = json.Marshal(captureFields(manifest))
-	if privateVersionInput(out.Manifest) {
-		return out, errors.New("keep dependency credentials outside snapshot inputs")
+	var dsh struct {
+		Profile struct {
+			Bundles []string `json:"bundles"`
+		} `json:"profile"`
+	}
+	if b := manifest["dsh"]; len(b) > 0 {
+		if err = json.Unmarshal(b, &dsh); err != nil {
+			return out, err
+		}
+	}
+	out.Bundles = dsh.Profile.Bundles
+	for _, field := range []string{"peerDependencies", "peerDependenciesMeta", "overrides", "resolutions", "pnpm"} {
+		if b := manifest[field]; len(b) > 0 && string(b) != "{}" && string(b) != "null" {
+			out.Unavailable = "This profile needs additional dependency configuration"
+		}
 	}
 	out.Plugins = []dshmanager.VersionPlugin{}
 	seen := map[string]bool{}
@@ -150,8 +148,8 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 				continue
 			}
 			seen[name] = true
-			// Node modules may contain legitimate package-manager links. os.Root
-			// constrains manifest reads to this Profile's installed dependency tree.
+			// The supported DSH hoisted layout stores packages inside the profile.
+			// safeopen rejects external traversal (including Windows junctions).
 			data, e := readVersionFile(root, filepath.ToSlash(filepath.Join("node_modules", name, "package.json")), false)
 			if e != nil {
 				if field == "optionalDependencies" {
@@ -165,7 +163,7 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 			if json.Unmarshal(data, &pkg) != nil || pkg.Version == "" {
 				return out, fmt.Errorf("invalid installed version of %s", name)
 			}
-			out.Plugins = append(out.Plugins, dshmanager.VersionPlugin{Name: name, Version: pkg.Version, Source: spec})
+			out.Plugins = append(out.Plugins, dshmanager.VersionPlugin{Name: name, Version: pkg.Version, Source: spec, Group: field})
 			if strings.HasPrefix(spec, "file:") || strings.HasPrefix(spec, "link:") || strings.Contains(spec, "git") || strings.HasPrefix(spec, ".") || strings.Contains(spec, "://") || strings.HasPrefix(spec, "workspace:") {
 				out.Unavailable = "This snapshot needs the original local or Git plugin source"
 			}
@@ -177,9 +175,6 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 		return out, err
 	}
 	out.Lock = string(lock)
-	if len(out.Plugins) == 0 {
-		out.Lock = ""
-	}
 	if out.Lock == "" && len(out.Plugins) > 0 {
 		out.Unavailable = "The profile has no pnpm lockfile; install its dependencies before recording"
 	}
@@ -191,7 +186,11 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 	if privateVersionInput(lock) || privateVersionInput(workspace) {
 		return out, errors.New("keep dependency credentials outside snapshot inputs")
 	}
-	lower := strings.ToLower(out.Workspace + string(out.Manifest) + out.Lock)
+	list, _ := json.Marshal([]any{out.Plugins, out.Bundles})
+	if privateVersionInput(list) {
+		return out, errors.New("keep dependency credentials outside snapshot inputs")
+	}
+	lower := strings.ToLower(out.Workspace + string(list) + out.Lock)
 	for _, secret := range []string{"_auth", "password:", "token:", "token=", "://"} {
 		// Registry tarball URLs in a lock are normal; embedded URL credentials are not.
 		if secret != "://" && strings.Contains(lower, secret) {
@@ -219,16 +218,33 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 	return out, nil
 }
 
+func (PluginCommands) CheckVersionProfile(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, err := openVersionProfile(path)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	raw, err := readVersionFile(root, "package.json", false)
+	if err != nil {
+		return err
+	}
+	_, err = versionManifest(raw)
+	return err
+}
+
 func writeVersionFile(root *os.Root, name string, data []byte) error {
 	// os.Root confines both temporary publication and replacement to the selected
 	// profile. Replacing the directory entry does not follow an existing symlink.
 	temp := ".dsh-work-version-" + strings.ReplaceAll(name, ".", "-")
-	f, err := root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := openVersionFile(root, temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	if errors.Is(err, os.ErrExist) {
 		if err = root.Remove(temp); err != nil {
 			return err
 		}
-		f, err = root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		f, err = openVersionFile(root, temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL)
 	}
 	if err != nil {
 		return err
@@ -246,7 +262,8 @@ func (PluginCommands) ApplyVersions(ctx context.Context, path string, input dshm
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, data := range [][]byte{input.Manifest, []byte(input.Lock), []byte(input.Workspace)} {
+	list, _ := json.Marshal([]any{input.Plugins, input.Bundles})
+	for _, data := range [][]byte{list, []byte(input.Lock), []byte(input.Workspace)} {
 		if len(data) > versionInputLimit || privateVersionInput(data) {
 			return errors.New("snapshot dependency inputs are invalid or contain credentials")
 		}
@@ -264,15 +281,31 @@ func (PluginCommands) ApplyVersions(ctx context.Context, path string, input dshm
 	if err != nil {
 		return err
 	}
-	fields, err := versionManifest(input.Manifest)
-	if err != nil {
-		return err
+	groups := map[string]map[string]string{}
+	for _, plugin := range input.Plugins {
+		if !validPackageSpec(plugin.Name) || plugin.Version == "" || plugin.Source == "" {
+			return errors.New("invalid recorded plugin")
+		}
+		switch plugin.Group {
+		case "dependencies", "devDependencies", "optionalDependencies":
+		default:
+			return errors.New("invalid recorded dependency group")
+		}
+		if groups[plugin.Group] == nil {
+			groups[plugin.Group] = map[string]string{}
+		}
+		groups[plugin.Group][plugin.Name] = plugin.Source
 	}
 	for _, key := range dependencyFields {
 		delete(current, key)
-		if v, ok := fields[key]; ok {
-			current[key] = v
-		}
+	}
+	// Keep original specifiers for frozen-lockfile matching; the lock, checked
+	// against installed exact versions after installation, controls resolution.
+	for key, dependencies := range groups {
+		current[key], _ = json.Marshal(dependencies)
+	}
+	if len(groups) == 0 {
+		current["dependencies"] = json.RawMessage(`{}`)
 	}
 	var dsh map[string]json.RawMessage
 	_ = json.Unmarshal(current["dsh"], &dsh)
@@ -284,10 +317,7 @@ func (PluginCommands) ApplyVersions(ctx context.Context, path string, input dshm
 	if profile == nil {
 		profile = map[string]json.RawMessage{}
 	}
-	delete(profile, "bundles")
-	if b, ok := fields["bundles"]; ok {
-		profile["bundles"] = b
-	}
+	profile["bundles"], _ = json.Marshal(input.Bundles)
 	dsh["profile"], _ = json.Marshal(profile)
 	current["dsh"], _ = json.Marshal(dsh)
 	data, err := json.MarshalIndent(current, "", "  ")

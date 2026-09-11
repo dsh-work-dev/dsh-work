@@ -17,7 +17,7 @@ func TestBuildLaunchPlanRequiresAnExplicitBootstrapDirectory(t *testing.T) {
 		DataDirectory: `C:\Users\you\AppData\Local\dsh-work\dsh`,
 		Profile:       "web",
 		Workspace:     workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
-		Port:          4567,
+		HostPatch:     "host.patch.json",
 	})
 	if err == nil || !strings.Contains(err.Error(), "bootstrap directory") {
 		t.Fatalf("BuildLaunchPlan() error = %v, want explicit bootstrap-directory failure", err)
@@ -42,7 +42,7 @@ func TestBuildLaunchPlanCarriesAnExplicitWorkspaceContext(t *testing.T) {
 		DataDirectory:      filepath.Join(t.TempDir(), "dsh-data"),
 		Profile:            "web",
 		Workspace:          workspace,
-		Port:               4567,
+		HostPatch:          "host.patch.json",
 	})
 	if err != nil {
 		t.Fatal(err)

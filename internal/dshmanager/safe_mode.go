@@ -43,7 +43,7 @@ func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resul
 	m.mu.RLock()
 	state := m.stateLocked()
 	target := cloneRunContext(m.current)
-	if target == nil && m.config.EnableVersionRestorePoints {
+	if target == nil {
 		target = cloneRunContext(m.knownGood)
 	}
 	if target == nil {

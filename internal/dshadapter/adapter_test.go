@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,7 +42,7 @@ func TestDiscoverRequiresExactPinnedVersion(t *testing.T) {
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh 0.1.2-alpha.3\n"}}
+	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion + "\n"}}
 	adapter := New(executor, SupportedVersion)
 	adapter.SetExecutableOverride(path)
 	runtime, err := adapter.Discover(context.Background())
@@ -131,8 +130,6 @@ func TestParseAndValidateReadyAnnouncement(t *testing.T) {
 		Executable:       "dsh.cmd",
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:4321",
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     4321,
 	}
 	if err := adapter.ValidateReady(announcement, plan); err != nil {
 		t.Fatalf("ValidateReady() error = %v", err)
@@ -154,7 +151,7 @@ func TestParseAndValidateReadyAnnouncement(t *testing.T) {
 	}
 }
 
-func TestBuildLaunchPlanUsesExplicitLoopbackPortAndDataDirectory(t *testing.T) {
+func TestBuildLaunchPlanUsesHostChannelAndDataDirectory(t *testing.T) {
 	adapter := New(nil, SupportedVersion)
 	bootstrapDirectory := t.TempDir()
 	dataDirectory := filepath.Join(t.TempDir(), "dsh-data")
@@ -165,15 +162,15 @@ func TestBuildLaunchPlanUsesExplicitLoopbackPortAndDataDirectory(t *testing.T) {
 		DataDirectory:      dataDirectory,
 		Profile:            "web",
 		Workspace:          workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
-		Port:               4567,
+		HostPatch:          "host.patch.json",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(plan.Args, " ") != "--profile web --host 127.0.0.1 --port 4567 --no-open" {
+	if strings.Join(plan.Args, " ") != "--patch host.patch.json --profile web --host 127.0.0.1 --port 1 --no-open" {
 		t.Fatalf("unexpected DSH args: %#v", plan.Args)
 	}
-	if plan.Env["DSH_HOME"] == "" || plan.Env["DSH_HOME"] != dataDirectory || plan.WorkingDirectory != bootstrapDirectory || plan.ExpectedOrigin != "http://127.0.0.1:4567" {
+	if plan.Env["DSH_HOME"] == "" || plan.Env["DSH_HOME"] != dataDirectory || plan.WorkingDirectory != bootstrapDirectory || plan.ExpectedOrigin != "http://127.0.0.1:1" {
 		t.Fatalf("unexpected launch plan: %+v", plan)
 	}
 }
@@ -183,7 +180,7 @@ func TestBuildLaunchPlanAcceptsSelectedExactRuntimeVersion(t *testing.T) {
 	plan, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID: "generation", Runtime: Runtime{Path: `C:\tools\dsh-9.cmd`, Version: "9.8.7"},
 		BootstrapDirectory: t.TempDir(), DataDirectory: t.TempDir(), Profile: "web",
-		Workspace: workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired}, Port: 4567,
+		Workspace: workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired}, HostPatch: "host.patch.json",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +218,7 @@ func TestBuildLaunchPlanCarriesOnlyTheRuntimeToolchainOverlay(t *testing.T) {
 		DataDirectory:      filepath.Join(t.TempDir(), "dsh-data"),
 		Profile:            "web",
 		Workspace:          workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
-		Port:               4567,
+		HostPatch:          "host.patch.json",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,10 +284,8 @@ func TestProbeRequiresHTMLAtTheExpectedOrigin(t *testing.T) {
 		Executable:       "dsh.cmd",
 		WorkingDirectory: t.TempDir(),
 		ExpectedOrigin:   "http://127.0.0.1:" + strconv.Itoa(port),
-		ExpectedHost:     "127.0.0.1",
-		ExpectedPort:     port,
 	}
-	if err := adapter.Probe(context.Background(), ReadyAnnouncement{URL: plan.ExpectedOrigin + "/"}, plan); err != nil {
+	if err := adapter.Probe(context.Background(), ReadyAnnouncement{URL: plan.ExpectedOrigin + "/"}, plan, server.Client()); err != nil {
 		t.Fatalf("Probe() error = %v", err)
 	}
 }
@@ -311,22 +306,13 @@ func TestProbeCompletesDSHLaunchTokenExchange(t *testing.T) {
 		_, _ = w.Write([]byte("<!doctype html><html></html>"))
 	}))
 	defer server.Close()
-	serverURL, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, err := strconv.Atoi(serverURL.Port())
-	if err != nil {
-		t.Fatal(err)
-	}
+	server.Client().CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	plan := supervisor.LaunchPlan{
 		GenerationID:   "probe-token-exchange",
 		ExpectedOrigin: server.URL,
-		ExpectedHost:   serverURL.Hostname(),
-		ExpectedPort:   port,
 	}
 	adapter := New(nil, SupportedVersion)
-	if err := adapter.Probe(context.Background(), ReadyAnnouncement{URL: server.URL + "/?token=launch-token"}, plan); err != nil {
+	if err := adapter.Probe(context.Background(), ReadyAnnouncement{URL: server.URL + "/?token=launch-token"}, plan, server.Client()); err != nil {
 		t.Fatalf("Probe() did not complete token exchange: %v", err)
 	}
 }
