@@ -66,7 +66,19 @@ try {
     finally { Pop-Location }
     $installerPath = Join-Path $root "bin/dsh-work-$version-windows-$Arch-installer.exe"
     if (-not (Test-Path -LiteralPath $installerPath)) { throw "makensis reported success but did not create $installerPath" }
-    $hash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    # go-task can run PowerShell with module autoloading disabled, so the
+    # Get-FileHash cmdlet is not guaranteed to be available even though the
+    # same script works from an interactive shell. Use the BCL directly so
+    # the packaging result is identical in local and CI task environments.
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($installerPath)
+        try {
+            $hash = (($sha256.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '')
+        }
+        finally { $stream.Dispose() }
+    }
+    finally { $sha256.Dispose() }
     "$hash  $([System.IO.Path]::GetFileName($installerPath))" | Set-Content -LiteralPath "$installerPath.sha256" -Encoding ascii
     Write-Host "created Windows per-user installer for $Arch"
 }

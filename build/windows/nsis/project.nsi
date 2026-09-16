@@ -104,7 +104,6 @@ ${prefix}SIDFree:
     System::Free $4
 ${prefix}SIDClose:
     System::Call 'kernel32::CloseHandle(p r1)'
-${prefix}SIDDone:
     Return
 ${prefix}SIDFailed:
     Return
@@ -202,18 +201,6 @@ recoveryFailed:
 recoveryDone:
 FunctionEnd
 
-Function dshwork.cleanRecovery
-    IfFileExists "${DSH_WORK_RECOVERY_DIR}\*" 0 cleanRecoveryDone
-    ClearErrors
-    RMDir /r "${DSH_WORK_RECOVERY_DIR}"
-    IfErrors cleanRecoveryFailed
-cleanRecoveryDone:
-    Return
-cleanRecoveryFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not remove its recovery copy. Close dsh-work and run the installer again."
-    Abort
-FunctionEnd
-
 Function un.dshwork.cleanRecovery
     IfFileExists "${DSH_WORK_RECOVERY_DIR}\*" 0 unCleanRecoveryDone
     ClearErrors
@@ -230,6 +217,9 @@ FunctionEnd
     ; Extract both executables into a temporary directory first. Moving the
     ; complete directory makes a failed second move restorable instead of
     ; leaving a GUI/CLI pair from different releases.
+    ; SetOutPath changes the installer's current directory. Leave the staging
+    ; tree before moving it, otherwise Windows can keep the directory busy.
+    SetOutPath "$PLUGINSDIR"
     StrCpy $DshWorkStagingDir "$PLUGINSDIR\dsh-work-new"
     StrCpy $DshWorkBackupDir "${DSH_WORK_RECOVERY_DIR}"
     StrCpy $DshWorkHadOld "0"
@@ -248,7 +238,7 @@ noOldInstall:
         RMDir /r "$DshWorkBackupDir"
         IfErrors recoveryCleanupFailed
     ${EndIf}
-    Return
+    Goto replaceInstallDone
 oldInstallMoveFailed:
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not move the existing installation. Installation was cancelled."
     Abort
@@ -270,6 +260,7 @@ replaceFailed:
 recoveryCleanupFailed:
     MessageBox MB_OK|MB_ICONSTOP "dsh-work was installed but could not remove its recovery copy. Run the installer again to finish repair."
     Abort
+replaceInstallDone:
 !macroend
 
 Function .onInit
@@ -278,6 +269,13 @@ Function .onInit
 FunctionEnd
 
 Function un.onInit
+    ; NSIS may copy the uninstaller to a temporary directory before running
+    ; it. Restore the real user-selected install directory before any cleanup.
+    SetRegView 64
+    ReadRegStr $0 HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir"
+    ${If} $0 != ""
+        StrCpy $INSTDIR $0
+    ${EndIf}
     Call un.dshwork.acquireInstallerMutex
 FunctionEnd
 
@@ -323,7 +321,8 @@ Section "uninstall"
     !insertmacro wails.unassociateFiles
     !insertmacro wails.unassociateCustomProtocols
     !insertmacro wails.deleteUninstaller
-    DeleteRegValue HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir"
+    SetRegView 64
+    DeleteRegKey HKCU "${DSH_WORK_INSTALL_REG_KEY}"
     Goto uninstallDone
 uninstallInstallFailed:
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not remove its installation. Close dsh-work and run the uninstaller again."
