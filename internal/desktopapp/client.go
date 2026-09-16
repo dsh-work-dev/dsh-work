@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/local/dsh-work/internal/daemon"
@@ -55,6 +56,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	var workspace, worker, settingsWindow application.Window
 	var windowMu sync.Mutex
 	var mu sync.Mutex
+	var applicationShuttingDown atomic.Bool
 	current := state
 	workerSurface := &desktopbridge.Surface{Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
 		mu.Lock()
@@ -89,27 +91,27 @@ func runDesktopClient(identity string, resources Resources) error {
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		defer windowMu.Unlock()
-		if name == "workspace" && (workspace == nil || (window.ID() != workspace.ID() && window.ID() != worker.ID())) {
+		if name == "workspace" && (workspace == nil || worker == nil || (window.ID() != workspace.ID() && window.ID() != worker.ID())) {
 			return
 		}
+		if name == "settings" && (settingsWindow == nil || window.ID() != settingsWindow.ID()) {
+			return
+		}
+		if !applicationShuttingDown.Load() {
+			event.Cancel()
+		}
 		ledger.SetVisible(name, false)
-		// Destroy the native window. The workspace startup/Worker pair is one
-		// logical workbench; release its hidden companion as well on exit.
+		if applicationShuttingDown.Load() {
+			return
+		}
+		// Keep the native window and WebView alive while hidden. The workspace
+		// startup/Worker pair is one logical workbench, so hide its companion too.
 		if name == "settings" {
-			settingsWindow = nil
-			settingsSection = ""
-		} else if workspace != nil {
-			companion := workspace
-			if window.ID() == workspace.ID() {
-				companion = worker
-			}
-			workspace, worker = nil, nil
-			loadedWorkerURL = ""
-			go companion.Close()
+			window.Hide()
+			return
 		}
-		if ledger.VisibleCount() == 0 {
-			go desktop.Quit()
-		}
+		workspace.Hide()
+		worker.Hide()
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
@@ -148,12 +150,18 @@ func runDesktopClient(identity string, resources Resources) error {
 		worker.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorker, event) })
 	}
 	open = func(section string) {
+		if applicationShuttingDown.Load() || ledger.IsQuitting() {
+			return
+		}
 		if maintenance.InstallerInProgress() {
 			maintenance.ShowInstallerBusy()
 			return
 		}
 		windowMu.Lock()
 		defer windowMu.Unlock()
+		if applicationShuttingDown.Load() || ledger.IsQuitting() {
+			return
+		}
 		if section != "" {
 			if settingsWindow == nil {
 				options := newOptions("settings")
@@ -165,7 +173,9 @@ func runDesktopClient(identity string, resources Resources) error {
 				remember(window, options)
 				window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("settings", window, event) })
 			}
-			ledger.SetVisible("settings", true)
+			if !ledger.TryShow("settings") {
+				return
+			}
 			if settingsSection != section {
 				settingsWindow.SetURL(settingsURL(manager, section))
 				settingsSection = section
@@ -176,7 +186,9 @@ func runDesktopClient(identity string, resources Resources) error {
 		if workspace == nil {
 			createWorkspace()
 		}
-		ledger.SetVisible("workspace", true)
+		if !ledger.TryShow("workspace") {
+			return
+		}
 		mu.Lock()
 		ready := current.URL != "" && current.Status.State == lifecycle.StateReady
 		workerURL := current.URL
@@ -210,7 +222,11 @@ func runDesktopClient(identity string, resources Resources) error {
 	defer ipcServer.Close()
 	pollCtx, stopPoll := context.WithCancel(context.Background())
 	defer stopPoll()
-	desktop.OnShutdown(stopPoll)
+	desktop.OnShutdown(func() {
+		applicationShuttingDown.Store(true)
+		ledger.BeginQuit()
+		stopPoll()
+	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		open(section)
 		go func() { _ = ipcServer.Serve(listener) }()

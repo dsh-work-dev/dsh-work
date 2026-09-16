@@ -63,9 +63,10 @@ silently mutate DSH-owned data.
 - The Host can display a selected Desktop Pet in a transparent, always-on-top
   surface outside the Workspace window. Pets Settings exposes discovery,
   preview, visibility and direct 50%–300% size control.
-- Closing the last desktop window exits the UI client; closing or crashing that
-  client leaves background tasks running. “停止后台并退出” explicitly stops the
-  Worker and its children, releases locks and exits the tray and remaining UI.
+- Closing a desktop window hides it and retains its WebView for the next open;
+  closing or crashing the UI client leaves background tasks running. “停止后台并退出”
+  explicitly stops the Worker and its children, releases locks and exits the tray
+  and remaining UI.
 - The manager CLI shares the daemon for online operations and uses locked
   offline access when the daemon is unavailable.
 - Windows uses a Job Object to own the Worker process tree.
@@ -86,8 +87,9 @@ See [Settings and startup](settings.md) for the accepted interaction layout.
 - DSH activity integration supplies Pet reactions and conversation navigation.
   Overlay input, multi-monitor DPI, OS stacking and complete accessibility
   acceptance remain open.
-- Application installation and self-update are pending. Developer identities,
-  signing and update-feed credentials remain unconfigured placeholders.
+- The Windows per-user installer is available through the local Wails/NSIS
+  packaging task and the CI artifact workflow. Application self-update,
+  release signing and update-feed credentials remain unconfigured placeholders.
 - Mobile clients and remote access are deferred. The daemon and desktop UI run
   as separate invocations of the same executable; the local IPC endpoint is not
   a remote access service. Login startup and suspend/logoff behavior still need

@@ -191,9 +191,10 @@ capabilities.
    the durable success record only after a successful save. Recorder failure
    keeps the healthy Worker running and retains the previous durable record.
    A failed candidate is cleaned up before policy-controlled, bounded recovery.
-8. Closing the last desktop window exits only the UI client. Explicit background
-   Quit cancels owned work, verifies Worker/child cleanup, closes remaining UI,
-   releases locks and exits the tray. Legacy close preferences cannot invoke it.
+8. Closing a desktop window hides it while retaining its UI client and WebView;
+   reopening reuses that window and page state. Explicit background Quit cancels
+   owned work, verifies Worker/child cleanup, closes remaining UI, releases locks
+   and exits the tray. Legacy close preferences cannot invoke it.
 9. Pet size and position changes are applied through the Host. A failed native
    resize does not leave persisted dimensions claiming a state the native window
    did not reach.

@@ -2,11 +2,11 @@
 
 ## Window lifecycle and preferences
 
-Closing a desktop window closes that window. Closing the last workbench or
-Settings window exits the UI client while the daemon, Worker tasks, tray, Pet
-and notifications continue. Reopen from the tray to connect to the same daemon.
-Use “停止后台并退出” from the tray or application menu for Worker/child cleanup
-and complete background shutdown.
+Closing a desktop window hides it and keeps its WebView in the UI client.
+Reopening restores the same page state and connects to the same daemon. The
+daemon, Worker tasks, tray, Pet and notifications continue while all UI windows
+are hidden. Use “停止后台并退出” from the tray or application menu for
+Worker/child cleanup and complete background shutdown.
 
 There is no close-behavior setting. Legacy persisted `closeToTray` values are
 ignored and are omitted when preferences are saved. Locale, automatic recovery,

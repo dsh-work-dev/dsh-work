@@ -19,7 +19,8 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 - remembered Workspace and Settings window sizes and maximised state;
 - Windows Job Object ownership for the Worker process tree.
 
-Closing the last desktop window exits the UI client. The tray, Worker, Pet and
+Closing a desktop window hides it and keeps its WebView in the UI client, so
+reopening returns to the same page state. The tray, Worker, Pet and
 notifications remain with the background daemon. Use “停止后台并退出” in the
 tray or application menu to stop background work and exit.
 
@@ -33,9 +34,10 @@ Workspace.
 
 ## Status
 
-The Windows foundation is implemented. Shared contracts compile on Windows,
-macOS and Linux, while production process supervision and packaging are still
-Windows-first.
+The Windows foundation and per-user NSIS installer are implemented. Shared
+contracts compile on Windows, macOS and Linux, while production process
+supervision and packaging are still Windows-first. Application self-update,
+release signing and update-feed publication remain in the next delivery stage.
 
 See the [project documentation](docs/README.md) for the accepted product and
 architecture baseline. Build, test and contribution instructions are in

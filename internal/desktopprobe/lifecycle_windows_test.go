@@ -175,68 +175,107 @@ func TestRealDaemonLifecycle(t *testing.T) {
 
 	}
 	var uiPIDs []int
-	for round := 0; round < 2; round++ {
-		_ = os.Remove(report)
-		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-		err := client.JSON(ctx, "/open", "", nil)
-		cancel()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var result struct {
-			OK      bool   `json:"ok"`
-			UIPID   int    `json:"uiPID"`
-			Failure string `json:"failure"`
-		}
-		waitUntil(t, 160*time.Second, func() bool {
-			data, err := os.ReadFile(report)
-			return err == nil && json.Unmarshal(data, &result) == nil
-		})
-		if !result.OK {
-			t.Fatalf("WebView: %s; report=%s", result.Failure, report)
-		}
-		waitUntil(t, 15*time.Second, func() bool { return !processAlive(result.UIPID) })
-		uiPIDs = append(uiPIDs, result.UIPID)
-		assertSame()
-		t.Logf("round %d: native UI %d closed; daemon and Worker unchanged", round, result.UIPID)
-	}
-	if uiPIDs[0] == uiPIDs[1] {
-		t.Fatal("reopen reused exited UI PID")
-	}
-	// Crash a separate UI with real native windows, leaving the Worker task and
-	// its subprocess running. A subsequent tray/open request reattaches.
-	t.Setenv("DSH_WORK_UI_HOLD", "1")
-	multi := start("--ui")
-	multiClient := daemon.NewClient(root + "-ui")
-	waitUntil(t, 30*time.Second, func() bool {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		return multiClient.JSON(ctx, "/open", "settings", nil) == nil
-	})
-	waitUntil(t, 5*time.Second, func() bool {
-		return nativeWindowVisible(multi.Process.Pid, "dsh-work", "操作", "设置", "帮助") && nativeWindowVisible(multi.Process.Pid, "设置")
-	})
-	if err := multiClient.JSON(context.Background(), "/close", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(300 * time.Millisecond)
-	if !processAlive(multi.Process.Pid) {
-		t.Fatal("closing workbench also closed Settings")
-	}
-	if err := multiClient.JSON(context.Background(), "/close", "settings", nil); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, 10*time.Second, func() bool { return !processAlive(multi.Process.Pid) })
-	_ = multi.Wait()
-	multiClient.Close()
-	assertSame()
-	crash := start("--ui")
 	uiClient := daemon.NewClient(root + "-ui")
 	defer uiClient.Close()
+	for round := 0; round < 2; round++ {
+		var uiPID int
+		if round == 0 {
+			_ = os.Remove(report)
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			err := client.JSON(ctx, "/open", "", nil)
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				OK      bool   `json:"ok"`
+				UIPID   int    `json:"uiPID"`
+				Failure string `json:"failure"`
+			}
+			waitUntil(t, 160*time.Second, func() bool {
+				data, err := os.ReadFile(report)
+				return err == nil && json.Unmarshal(data, &result) == nil
+			})
+			if !result.OK {
+				t.Fatalf("WebView: %s; report=%s", result.Failure, report)
+			}
+			uiPID = result.UIPID
+			waitUntil(t, 15*time.Second, func() bool {
+				return !nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+			})
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			err := client.JSON(ctx, "/open", "", nil)
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var status struct{ PID int }
+			waitUntil(t, 15*time.Second, func() bool {
+				return uiClient.JSON(context.Background(), "/status", nil, &status) == nil && status.PID != 0
+			})
+			uiPID = status.PID
+			waitUntil(t, 10*time.Second, func() bool {
+				return nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+			})
+			if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+				t.Fatal(err)
+			}
+			waitUntil(t, 10*time.Second, func() bool {
+				return !nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+			})
+		}
+		if !processAlive(uiPID) {
+			t.Fatalf("closing workbench exited UI client %d", uiPID)
+		}
+		uiPIDs = append(uiPIDs, uiPID)
+		assertSame()
+		t.Logf("round %d: native UI %d hidden and reusable; daemon and Worker unchanged", round, uiPID)
+	}
+	if uiPIDs[0] != uiPIDs[1] {
+		t.Fatalf("reopen replaced hidden UI client: %v", uiPIDs)
+	}
+	// Reuse the hidden UI for a multi-window close. The UI singleton keeps this
+	// process alive, so a second --ui invocation is not expected to replace it.
+	uiPID := uiPIDs[0]
+	if err := uiClient.JSON(context.Background(), "/open", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := uiClient.JSON(context.Background(), "/open", "settings", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool {
+		return nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助") && nativeWindowVisible(uiPID, "设置")
+	})
+	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool { return nativeWindowVisible(uiPID, "设置") })
+	if !processAlive(uiPID) {
+		t.Fatal("closing workbench also closed Settings")
+	}
+	if err := uiClient.JSON(context.Background(), "/close", "settings", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool { return !nativeWindowVisible(uiPID, "设置") })
+	if !processAlive(uiPID) {
+		t.Fatal("closing Settings exited the hidden UI client")
+	}
+	if err := uiClient.JSON(context.Background(), "/stop", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 10*time.Second, func() bool { return !processAlive(uiPID) })
+	assertSame()
+	// Crash a new UI with real native windows, leaving the Worker task and its
+	// subprocess running. A subsequent tray/open request reattaches.
+	t.Setenv("DSH_WORK_UI_HOLD", "1")
+	crash := start("--ui")
+	crashClient := daemon.NewClient(root + "-ui")
+	defer crashClient.Close()
 	waitUntil(t, 30*time.Second, func() bool {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		return uiClient.JSON(ctx, "/open", "", nil) == nil
+		return crashClient.JSON(ctx, "/open", "", nil) == nil
 	})
 	if err := crash.Process.Kill(); err != nil {
 		t.Fatal(err)
@@ -264,7 +303,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	assertSame()
 	var finalUI struct{ PID int }
-	if err := uiClient.JSON(context.Background(), "/status", nil, &finalUI); err != nil {
+	if err := crashClient.JSON(context.Background(), "/status", nil, &finalUI); err != nil {
 		t.Fatal(err)
 	}
 	processSample := desktopprobe.Processes(baseline.Diagnostics.PID, baseline.PID, finalUI.PID)
@@ -322,7 +361,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if strings.Contains(string(logData), "does not match registered data type") {
 		t.Fatal("native UI rejected background events; see process.log")
 	}
-	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "checks": []string{"native WebView binary/WS/cancellation", "native last-window close exits UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI closed", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench close", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
+	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "checks": []string{"native WebView binary/WS/cancellation", "native last-window close hides and reuses UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI hidden", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench hide", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
 	raw, _ := json.MarshalIndent(evidence, "", "  ")
 	_ = os.WriteFile(filepath.Join(root, "lifecycle.json"), raw, 0600)
 	t.Logf("evidence: %s", filepath.Join(root, "lifecycle.json"))

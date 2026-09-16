@@ -26,8 +26,9 @@ A matching version alone does not skip repair.
 
 ## ADR-0004 — Global Settings and tray-aware lifecycle
 
-Persist versioned dsh-work settings separately from DSH data. Closing the last
-desktop window exits the UI client; explicit background Quit owns Worker cleanup.
+Persist versioned dsh-work settings separately from DSH data. Closing a desktop
+window hides it and retains its UI client/WebView; explicit background Quit owns
+Worker cleanup.
 Ignore legacy closeToTray values and omit that field on save. The daemon owns
 the tray and preferences independently of the client, as specified in ADR-0017.
 Windows persistence uses a native replace/write-through operation behind the
@@ -179,7 +180,7 @@ current-user local IPC, and Go HTTP for control and Worker forwarding. The onlin
 CLI uses the same serialized manager authority.
 
 This boundary preserves tasks through a whole UI-process crash as well as normal
-window closure. It adds a local transport hop and requires typed state/event
+window hiding. It adds a local transport hop and requires typed state/event
 projection. Portless communication alone does not require separate processes;
 the process split serves the UI-crash isolation contract. It does not implement
 remote access or a system-wide Windows service.
