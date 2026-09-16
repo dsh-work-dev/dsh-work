@@ -51,7 +51,6 @@ OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${INFO_PRODUCTVERSION}-windows-${ARCH}
     !error "dsh-work requires a per-user installer"
 !endif
 InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
-InstallDirRegKey HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir"
 ShowInstDetails show
 
 ; The CLI is a sibling executable in the same release unit. It keeps its
@@ -265,6 +264,14 @@ replaceInstallDone:
 
 Function .onInit
     !insertmacro wails.checkArchitecture
+    ; InstallDirRegKey is evaluated before .onInit and would use NSIS's
+    ; default registry view. Read the user-owned path explicitly after
+    ; selecting the 64-bit view used when the installer writes it.
+    SetRegView 64
+    ReadRegStr $0 HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir"
+    ${If} $0 != ""
+        StrCpy $INSTDIR $0
+    ${EndIf}
     Call dshwork.acquireInstallerMutex
 FunctionEnd
 
