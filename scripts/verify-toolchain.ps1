@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'resolve-nsis.ps1')
 
 $manifest = Get-Content -Raw (Join-Path $PSScriptRoot '..\toolchain.lock.json') | ConvertFrom-Json
 
@@ -25,12 +26,12 @@ if ($wails -ne $manifest.wails.cli) {
     throw "Wails mismatch: expected $($manifest.wails.cli), got $wails"
 }
 
-$makensis = Get-Command makensis -ErrorAction SilentlyContinue
-if ($env:OS -eq 'Windows_NT' -and -not $makensis) {
-    throw "NSIS $($manifest.nsis.version) is required on Windows"
+$makensisPath = if ($env:OS -eq 'Windows_NT') { Resolve-NsisCompiler } else { $null }
+if ($env:OS -eq 'Windows_NT' -and -not $makensisPath) {
+    throw "NSIS $($manifest.nsis.version) is required on Windows; add NSIS's Bin directory to PATH or install the official package in its standard location"
 }
-if ($makensis) {
-    $nsisVersionOutput = (& $makensis.Source /VERSION 2>&1 | Out-String).Trim()
+if ($makensisPath) {
+    $nsisVersionOutput = (& $makensisPath /VERSION 2>&1 | Out-String).Trim()
     $nsisVersion = ([regex]::Match($nsisVersionOutput, '(?<!\d)\d+\.\d+(?:\.\d+)?(?!\d)')).Value
     $normalizeNsisVersion = {
         param([string]$value)

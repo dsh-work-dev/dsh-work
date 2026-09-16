@@ -79,6 +79,11 @@ with the pinned NSIS version (`3.12.0`):
 wails3 task package:windows
 ```
 
+The packaging task discovers `makensis.exe` from PATH, the official default
+NSIS install directories, and the official uninstall registration. A newly
+installed NSIS can therefore be used from the current shell; custom install
+locations should add their `Bin` directory to PATH.
+
 The installer and its SHA-256 file are written to `bin`. The same amd64
 packaging flow can be started manually from GitHub Actions: open the
 `dsh-work PC` workflow, choose `Run workflow`, select the branch, and run it.

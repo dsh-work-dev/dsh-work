@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'resolve-nsis.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $nsisDir = Join-Path $root 'build/windows/nsis'
 $appPath = Join-Path $root 'bin/dsh-work.exe'
@@ -22,9 +23,11 @@ if ($expectedNsis -notmatch '^\d+\.\d+\.\d+$') { throw "toolchain.lock.json must
 
 $wails = Get-Command wails3 -ErrorAction SilentlyContinue
 if (-not $wails) { throw 'wails3 is required to generate the WebView2 bootstrapper' }
-$makensis = Get-Command makensis -ErrorAction SilentlyContinue
-if (-not $makensis) { throw 'makensis is required to create the Windows installer' }
-$nsisVersionOutput = (& $makensis.Source /VERSION 2>&1 | Out-String).Trim()
+$makensisPath = Resolve-NsisCompiler
+if (-not $makensisPath) {
+    throw "makensis is required to create the Windows installer. Add NSIS's Bin directory to PATH or install the official package in its standard location."
+}
+$nsisVersionOutput = (& $makensisPath /VERSION 2>&1 | Out-String).Trim()
 $nsisVersionMatch = [regex]::Match($nsisVersionOutput, '(?<!\d)\d+\.\d+(?:\.\d+)?(?!\d)')
 $normalizeNsisVersion = {
     param([string]$value)
@@ -60,7 +63,7 @@ try {
     )
     Push-Location $nsisDir
     try {
-        & $makensis.Source @arguments
+        & $makensisPath @arguments
         if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
     }
     finally { Pop-Location }
