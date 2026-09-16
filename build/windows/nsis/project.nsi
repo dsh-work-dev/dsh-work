@@ -109,6 +109,14 @@ ${prefix}SIDFailed:
 !macroend
 
 !macro dshwork.stopExisting
+    ; A clean first install has no executable to stop. Only stage the CLI and
+    ; run the maintenance handshake when this user already has an installed
+    ; release unit at the selected directory.
+    IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" stopExistingRequired
+    IfFileExists "$INSTDIR\${CLI_EXECUTABLE}" stopExistingRequired
+    IfFileExists "$INSTDIR\uninstall.exe" stopExistingRequired
+    Goto stopExistingDone
+stopExistingRequired:
     ; Stage the new CLI before replacing the old install. This keeps upgrades
     ; safe when the previous CLI predates the --wait coordination flag.
     IfSilent stopExistingContinue
@@ -122,6 +130,7 @@ stopExistingContinue:
         MessageBox MB_OK|MB_ICONSTOP "dsh-work could not stop its background process. Installation was cancelled."
         Abort
     ${EndIf}
+stopExistingDone:
 !macroend
 
 Function dshwork.acquireInstallerMutex
@@ -185,6 +194,7 @@ discardPartialInstall:
     Goto restoreRecovery
 restoreRecovery:
     CreateDirectory "$LOCALAPPDATA\Programs"
+    ClearErrors
     Rename "${DSH_WORK_RECOVERY_DIR}" "$INSTDIR"
     IfErrors recoveryFailed
     Return
@@ -225,11 +235,13 @@ FunctionEnd
     IfFileExists "$DshWorkBackupDir\*" backupConflict
     IfFileExists "$INSTDIR\*" 0 noOldInstall
     CreateDirectory "$LOCALAPPDATA\dsh-work"
+    ClearErrors
     Rename "$INSTDIR" "$DshWorkBackupDir"
     IfErrors oldInstallMoveFailed
     StrCpy $DshWorkHadOld "1"
 noOldInstall:
     CreateDirectory "$LOCALAPPDATA\Programs"
+    ClearErrors
     Rename "$DshWorkStagingDir" "$INSTDIR"
     IfErrors newInstallMoveFailed
     ${If} $DshWorkHadOld == "1"
