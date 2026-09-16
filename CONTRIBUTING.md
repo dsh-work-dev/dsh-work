@@ -72,6 +72,17 @@ wails3 task build
 wails3 task run
 ```
 
+To build the Windows per-user installer locally, use a Windows environment
+with the pinned NSIS version (`3.12.0`):
+
+```powershell
+wails3 task package:windows
+```
+
+The installer and its SHA-256 file are written to `bin`. The same amd64
+packaging flow can be started manually from GitHub Actions: open the
+`dsh-work PC` workflow, choose `Run workflow`, select the branch, and run it.
+
 The manager CLI is built by `wails3 task build:dsh-work`. It connects to the
 running per-user daemon for online operations. When no daemon is reachable,
 manager commands use offline access under the existing manager lock; they do
