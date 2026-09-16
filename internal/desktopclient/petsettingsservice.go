@@ -5,16 +5,28 @@ import (
 	"context"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/pet"
 )
 
 type PetSettingsService struct {
-	Client *daemon.Client
-	Local  *app.PetSettingsService
+	Client      *daemon.Client
+	Local       *app.PetSettingsService
+	Maintenance func() bool
+}
+
+func (s *PetSettingsService) localMaintenanceFailure() error {
+	if s.Maintenance == nil || !s.Maintenance() {
+		return nil
+	}
+	return lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: "dsh-work is being updated.", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: "Wait for the installer to finish, then retry the Pet action."}
 }
 
 func (s *PetSettingsService) SetPetHitRegions(ctx context.Context, regions []app.PetHitRegion) error {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return err
+		}
 		return s.Local.SetPetHitRegions(ctx, regions)
 	}
 	err := call(ctx, s.Client, "PetSettingsService", "SetPetHitRegions", []any{regions}, nil)
@@ -32,6 +44,9 @@ func (s *PetSettingsService) GetPetPlayback(ctx context.Context, known string) (
 
 func (s *PetSettingsService) PetGesture(ctx context.Context, kind string, x, y float64) error {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return err
+		}
 		return s.Local.PetGesture(ctx, kind, x, y)
 	}
 	err := call(ctx, s.Client, "PetSettingsService", "PetGesture", []any{kind, x, y}, nil)
@@ -40,6 +55,9 @@ func (s *PetSettingsService) PetGesture(ctx context.Context, kind string, x, y f
 
 func (s *PetSettingsService) OpenPetActivity(ctx context.Context, sessionID string) error {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return err
+		}
 		return s.Local.OpenPetActivity(ctx, sessionID)
 	}
 	err := call(ctx, s.Client, "PetSettingsService", "OpenPetActivity", []any{sessionID}, nil)
@@ -48,6 +66,9 @@ func (s *PetSettingsService) OpenPetActivity(ctx context.Context, sessionID stri
 
 func (s *PetSettingsService) SetPetReducedMotion(ctx context.Context, enabled bool) error {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return err
+		}
 		return s.Local.SetPetReducedMotion(ctx, enabled)
 	}
 	err := call(ctx, s.Client, "PetSettingsService", "SetPetReducedMotion", []any{enabled}, nil)
@@ -83,6 +104,9 @@ func (s *PetSettingsService) GetPetPresentation(ctx context.Context) (app.PetOve
 
 func (s *PetSettingsService) RefreshPetCatalog(ctx context.Context) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.RefreshPetCatalog(ctx)
 	}
 	var value app.PetPanel
@@ -92,6 +116,9 @@ func (s *PetSettingsService) RefreshPetCatalog(ctx context.Context) (app.PetPane
 
 func (s *PetSettingsService) PreviewPet(ctx context.Context, stableSourceKey string) (app.PetPreview, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPreview{}, err
+		}
 		return s.Local.PreviewPet(ctx, stableSourceKey)
 	}
 	var value app.PetPreview
@@ -110,6 +137,9 @@ func (s *PetSettingsService) GetPetPreview(ctx context.Context, previewRef strin
 
 func (s *PetSettingsService) SelectPet(ctx context.Context, stableSourceKey string) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.SelectPet(ctx, stableSourceKey)
 	}
 	var value app.PetPanel
@@ -119,6 +149,9 @@ func (s *PetSettingsService) SelectPet(ctx context.Context, stableSourceKey stri
 
 func (s *PetSettingsService) SetPetAlwaysOnTop(ctx context.Context, enabled bool) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.SetPetAlwaysOnTop(ctx, enabled)
 	}
 	var value app.PetPanel
@@ -128,6 +161,9 @@ func (s *PetSettingsService) SetPetAlwaysOnTop(ctx context.Context, enabled bool
 
 func (s *PetSettingsService) SetPetVisibility(ctx context.Context, visible bool) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.SetPetVisibility(ctx, visible)
 	}
 	var value app.PetPanel
@@ -137,6 +173,9 @@ func (s *PetSettingsService) SetPetVisibility(ctx context.Context, visible bool)
 
 func (s *PetSettingsService) SetPetSize(ctx context.Context, percent int) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.SetPetSize(ctx, percent)
 	}
 	var value app.PetPanel
@@ -146,6 +185,9 @@ func (s *PetSettingsService) SetPetSize(ctx context.Context, percent int) (app.P
 
 func (s *PetSettingsService) ClearPetSelection(ctx context.Context) (app.PetPanel, error) {
 	if s.Local != nil {
+		if err := s.localMaintenanceFailure(); err != nil {
+			return app.PetPanel{}, err
+		}
 		return s.Local.ClearPetSelection(ctx)
 	}
 	var value app.PetPanel

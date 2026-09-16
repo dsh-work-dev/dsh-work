@@ -17,6 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/desktopprobe"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -147,6 +148,10 @@ func runDesktopClient(identity string, resources Resources) error {
 		worker.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorker, event) })
 	}
 	open = func(section string) {
+		if maintenance.InstallerInProgress() {
+			maintenance.ShowInstallerBusy()
+			return
+		}
 		windowMu.Lock()
 		defer windowMu.Unlock()
 		if section != "" {

@@ -14,6 +14,7 @@ tasks:
     summary: Run all local checks that do not require a real DSH runtime
     deps:
       - verify:toolchain
+      - version:check
       - format:check
       - docs:check
       - dev:check
@@ -133,6 +134,38 @@ tasks:
     cmds:
       - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
       - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/dsh-work-cli{{exeExt}}" ./cmd/dsh-work
+
+  version:check:
+    summary: Check generated metadata against build/config.yml
+    cmds:
+      - node scripts/sync-version.mjs --check
+
+  version:sync:
+    summary: Synchronize generated application metadata from build/config.yml
+    cmds:
+      - node scripts/sync-version.mjs
+
+  package:
+    summary: Package a production build for the selected platform
+    cmds:
+      - task: 'package:{{.GOOS | default OS}}'
+
+  build:windows:
+    summary: Build the Windows GUI and CLI release binaries
+    platforms: [windows]
+    deps:
+      - version:sync
+      - frontend:build
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Arch "{{.ARCH | default "amd64"}}"
+
+  package:windows:
+    summary: Build a per-user Windows NSIS installer containing the GUI and CLI
+    platforms: [windows]
+    deps:
+      - build:windows
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Arch "{{.ARCH | default "amd64"}}"
 
   worker:assets:
     run: once

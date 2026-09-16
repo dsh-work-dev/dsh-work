@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
@@ -34,19 +35,28 @@ type Snapshot struct {
 	Diagnostics   supervisor.Diagnostics
 }
 type Server struct {
-	Services  map[string]any
-	Host      *app.Host
-	Channel   *workerchannel.Adapter
-	Settings  *settings.Manager
-	Root      string
-	PID       int
-	OpenUI    func(string) error
-	Media     http.Handler
-	mu        sync.Mutex
-	events    []Event
-	cursor    uint64
-	focused   bool
-	focusSeen time.Time
+	Services map[string]any
+	Host     *app.Host
+	Channel  *workerchannel.Adapter
+	Settings *settings.Manager
+	Root     string
+	PID      int
+	OpenUI   func(string) error
+	Media    http.Handler
+	// Maintenance reports whether the current-user installer owns the
+	// maintenance boundary. Read-only snapshots remain available while the
+	// boundary is held; all mutable service calls are rejected at this daemon
+	// authority. HostService.Quit is the one installer stop handshake.
+	Maintenance func() bool
+	mu          sync.Mutex
+	events      []Event
+	cursor      uint64
+	focused     bool
+	focusSeen   time.Time
+	draining    atomic.Bool
+	activeMu    sync.Mutex
+	active      map[uint64]context.CancelFunc
+	activeNext  uint64
 }
 
 func (s *Server) Publish(name string, data any) {
@@ -105,13 +115,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid call", 400)
 			return
 		}
+		if isQuitCall(call) {
+			// Quit is the installer's stop handshake. Mark the daemon draining
+			// before invoking it so a concurrent mutable call cannot pass the
+			// maintenance check, and cancel calls that were already in flight.
+			s.beginDrain()
+		}
+		if s.maintenanceBusy() && !maintenanceCallAllowed(call) {
+			writeJSON(w, Result{Error: maintenanceFailure().Error()})
+			return
+		}
 		value, err := s.invoke(r.Context(), call)
+		if isQuitCall(call) && err != nil {
+			s.ResetDrain()
+		}
 		result := Result{Value: value}
 		if err != nil {
 			result.Error = err.Error()
 		}
 		writeJSON(w, result)
 	case "/open":
+		if s.maintenanceBusy() {
+			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+			return
+		}
 		var section string
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&section) != nil {
 			http.Error(w, "invalid section", 400)
@@ -123,6 +150,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, true)
 	case "/geometry":
+		if s.maintenanceBusy() {
+			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+			return
+		}
 		var input struct {
 			Window   string
 			Geometry settings.WindowGeometry
@@ -141,6 +172,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, true)
 	default:
 		if r.URL.Path == "/worker" {
+			if s.maintenanceBusy() {
+				http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+				return
+			}
 			s.forwardWorker(w, r)
 			return
 		}
@@ -149,6 +184,98 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) maintenanceBusy() bool {
+	return s != nil && (s.draining.Load() || s.Maintenance != nil && s.Maintenance())
+}
+
+func isQuitCall(call Call) bool {
+	return call.Service == "HostService" && call.Method == "Quit" && call.Surface == "workspace" && len(call.Args) == 0
+}
+
+func (s *Server) beginDrain() {
+	if s == nil || s.draining.Swap(true) {
+		return
+	}
+	s.activeMu.Lock()
+	defer s.activeMu.Unlock()
+	for _, cancel := range s.active {
+		cancel()
+	}
+}
+
+// BeginDrain starts the daemon stop boundary for trusted in-process controls.
+// Remote HostService.Quit calls enter the same path through ServeHTTP.
+func (s *Server) BeginDrain() {
+	s.beginDrain()
+}
+
+// ResetDrain reopens mutable calls after a requested quit failed its cleanup
+// phase. A successful quit tears down the daemon, so only that recovery path
+// needs to clear the transient drain state.
+func (s *Server) ResetDrain() {
+	if s != nil {
+		s.draining.Store(false)
+	}
+}
+
+func (s *Server) trackCall(cancel context.CancelFunc) func() {
+	s.activeMu.Lock()
+	if s.active == nil {
+		s.active = make(map[uint64]context.CancelFunc)
+	}
+	s.activeNext++
+	id := s.activeNext
+	s.active[id] = cancel
+	draining := s.draining.Load()
+	s.activeMu.Unlock()
+	if draining {
+		cancel()
+	}
+	return func() {
+		s.activeMu.Lock()
+		delete(s.active, id)
+		s.activeMu.Unlock()
+	}
+}
+
+func maintenanceCallAllowed(call Call) bool {
+	if call.Service == "HostService" {
+		switch call.Method {
+		case "GetStatus", "GetWorkspaceStatus", "GetTheme", "GetLocale", "GetStartupOutput", "Quit":
+			return true
+		}
+	}
+	if call.Service == "ManagerService" {
+		switch call.Method {
+		case "GetSnapshot", "GetTheme", "ListProfileBackups", "PreviewRestorePoint":
+			return true
+		}
+	}
+	if call.Service == "SettingsService" && call.Method == "GetSettings" {
+		return true
+	}
+	if call.Service == "StorageService" {
+		return call.Method == "GetLocations" || call.Method == "DefaultUserDataPath"
+	}
+	if call.Service == "PetSettingsService" {
+		switch call.Method {
+		case "GetPetPanel", "GetPetOverlay", "GetPetPresentation", "GetPetPreview", "GetPetPlayback":
+			return true
+		}
+	}
+	return false
+}
+
+func maintenanceFailure() lifecycle.Failure {
+	return lifecycle.Failure{
+		Code:          lifecycle.ErrorManagerOperationBusy,
+		Summary:       "dsh-work is being updated.",
+		Retryable:     true,
+		CorrelationID: lifecycle.NewCorrelationID(),
+		Detail:        "Wait for the installer to finish, then retry the command.",
 	}
 }
 
@@ -176,11 +303,18 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 	if t.NumIn() == 0 || t.In(0) != reflect.TypeOf((*context.Context)(nil)).Elem() || t.NumIn() != len(call.Args)+1 {
 		return nil, errors.New("invalid arguments")
 	}
+	if s.draining.Load() && !maintenanceCallAllowed(call) {
+		return nil, maintenanceFailure()
+	}
 	// Accepted manager operations belong to the daemon, not to the lifetime of
-	// the HTTP connection. Existing service timeouts and explicit cancel methods
-	// bound them; loss of a UI cannot interrupt an in-flight restore/install.
-	ctx = app.LocalClientContext(context.WithoutCancel(ctx), call.Surface)
-	args := []reflect.Value{reflect.ValueOf(ctx)}
+	// the HTTP connection. Keep that property while retaining a daemon-level
+	// cancellation path for the installer stop handshake.
+	base := app.LocalClientContext(context.WithoutCancel(ctx), call.Surface)
+	operationCtx, cancel := context.WithCancel(base)
+	defer cancel()
+	stopTracking := s.trackCall(cancel)
+	defer stopTracking()
+	args := []reflect.Value{reflect.ValueOf(operationCtx)}
 	for i, raw := range call.Args {
 		value := reflect.New(t.In(i + 1))
 		if err := json.Unmarshal(raw, value.Interface()); err != nil {

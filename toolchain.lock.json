@@ -9,6 +9,10 @@
     "module": "v3.0.0-beta.16",
     "install": "go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16"
   },
+  "nsis": {
+    "package": "nsis",
+    "version": "3.12.0"
+  },
   "node": {
     "minimumMajor": 24
   },

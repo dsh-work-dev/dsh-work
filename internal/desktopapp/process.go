@@ -16,6 +16,8 @@ import (
 
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/maintenance"
 )
 
 type Resources struct {
@@ -24,6 +26,13 @@ type Resources struct {
 }
 
 func Run(resources Resources) {
+	if maintenance.InstallerInProgress() {
+		if len(os.Args) < 2 || os.Args[1] != "--daemon" {
+			maintenance.ShowInstallerBusy()
+		}
+		log.Printf("dsh-work installer is performing maintenance; reopen after it finishes")
+		os.Exit(1)
+	}
 	identity := filepath.Dir(app.DefaultConfig(currentDiscoveryRoot()).SettingsPath)
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		identity = root
@@ -33,12 +42,24 @@ func Run(resources Resources) {
 		return
 	}
 	if err := runDesktopClient(identity, resources); err != nil {
+		var failure lifecycle.Failure
+		if errors.As(err, &failure) && failure.Code == lifecycle.ErrorManagerOperationBusy {
+			maintenance.ShowInstallerBusy()
+		}
 		log.Printf("desktop: %v", err)
 		os.Exit(1)
 	}
 }
 
 func ensureDaemon(ctx context.Context, identity string) (*daemon.Client, daemon.Snapshot, error) {
+	if maintenance.InstallerInProgress() {
+		return nil, daemon.Snapshot{}, lifecycle.Failure{
+			Code:      lifecycle.ErrorManagerOperationBusy,
+			Summary:   "dsh-work is being updated.",
+			Retryable: true,
+			Detail:    "Wait for the installer to finish, then reopen dsh-work.",
+		}
+	}
 	client := daemon.NewClient(identity)
 	var state daemon.Snapshot
 	probe := func() error {

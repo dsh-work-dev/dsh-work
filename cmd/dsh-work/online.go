@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 type managerAPI interface {
@@ -79,8 +81,16 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var state daemon.Snapshot
+	waitForStop := args[0] == "stop" && hasFlag(args[1:], "--wait")
 	err := c.JSON(ctx, "/snapshot", nil, &state)
 	if err != nil {
+		if waitForStop {
+			requestDesktopUIStop(identity)
+			if waitErr := waitForDaemonStop(identity, state.Root, 30*time.Second); waitErr != nil {
+				return true, waitErr
+			}
+			return true, printValue(stdout, true, lifecycle.Status{State: lifecycle.StateStopped, Phase: lifecycle.PhaseIdle}, func() {})
+		}
 		if args[0] == "status" || args[0] == "stop" || args[0] == "restart" {
 			return true, err
 		}
@@ -98,10 +108,19 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 		if args[0] == "restart" {
 			method = "Restart"
 		}
+		if waitForStop {
+			requestDesktopUIStop(identity)
+		}
 		var status lifecycle.Status
 		err := c.Call(context.Background(), "HostService", method, "workspace", nil, &status)
 		if err != nil {
 			return true, err
+		}
+		if waitForStop {
+			c.Close()
+			if err := waitForDaemonStop(identity, state.Root, 30*time.Second); err != nil {
+				return true, err
+			}
 		}
 		return true, printValue(stdout, true, status, func() {})
 	case "runtime":
@@ -117,4 +136,113 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 	default:
 		return true, fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func hasFlag(args []string, wanted string) bool {
+	for _, arg := range args {
+		if arg == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func requestDesktopUIStop(identity string) {
+	client := daemon.NewClient(identity + "-ui")
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = client.JSON(ctx, "/stop", nil, nil)
+}
+
+// waitForDaemonStop waits for both the IPC endpoint and the manager lock to
+// disappear. A successful Quit RPC only requests shutdown; the daemon still
+// needs to close its Worker, Wails application and process locks.
+func waitForDaemonStop(identity, root string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	if root == "" {
+		var resolveErr error
+		root, resolveErr = resolveStorageRoot()
+		if resolveErr != nil {
+			return lifecycle.Failure{
+				Code:          lifecycle.ErrorProcessStopFailed,
+				Summary:       "dsh-work could not prove that the background stopped.",
+				Retryable:     true,
+				CorrelationID: lifecycle.NewCorrelationID(),
+				Detail:        "The current storage location could not be resolved safely; retry after checking the location file.",
+			}
+		}
+	}
+	if !filepath.IsAbs(root) {
+		return lifecycle.Failure{
+			Code:          lifecycle.ErrorProcessStopFailed,
+			Summary:       "dsh-work could not prove that the background stopped.",
+			Retryable:     true,
+			CorrelationID: lifecycle.NewCorrelationID(),
+			Detail:        "The current storage location is not an absolute user path; retry after repairing the location file.",
+		}
+	}
+	lastObservation := "the daemon and UI endpoints were not reachable"
+	for time.Now().Before(deadline) {
+		client := daemon.NewClient(identity)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		var state daemon.Snapshot
+		err := client.JSON(ctx, "/snapshot", nil, &state)
+		cancel()
+		client.Close()
+		if err == nil {
+			lastObservation = "the daemon endpoint was still reachable"
+			if state.Root != "" {
+				root = state.Root
+			}
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		uiClient := daemon.NewClient(identity + "-ui")
+		uiCtx, uiCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		var uiStatus struct{ PID int }
+		uiErr := uiClient.JSON(uiCtx, "/status", nil, &uiStatus)
+		uiCancel()
+		uiClient.Close()
+		if uiErr == nil {
+			lastObservation = "the desktop UI endpoint was still reachable"
+			time.Sleep(150 * time.Millisecond)
+			continue
+		}
+		lockPath := filepath.Join(root, "manager.lock")
+		if _, statErr := os.Stat(lockPath); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			lastObservation = "the manager lock could not be checked"
+		} else {
+			lastObservation = "the manager lock was still held"
+			lock, lockErr := app.AcquireManagerProcessLock(filepath.Join(root, "settings.json"))
+			if lockErr == nil {
+				return lock.Close()
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return lifecycle.Failure{
+		Code:          lifecycle.ErrorProcessStopFailed,
+		Summary:       "dsh-work background did not stop.",
+		Retryable:     true,
+		CorrelationID: lifecycle.NewCorrelationID(),
+		Detail:        fmt.Sprintf("%s after %s.", lastObservation, timeout.Round(time.Second)),
+	}
+}
+
+func resolveStorageRoot() (string, error) {
+	defaultRoot := filepath.Dir(app.DefaultConfig("").SettingsPath)
+	locator := filepath.Join(filepath.Dir(defaultRoot), "dsh-work-location", "locations.json")
+	locations, err := storagepaths.Open(locator, defaultRoot)
+	if err != nil {
+		return "", err
+	}
+	root := locations.Snapshot().Current.Root
+	if root == "" {
+		return "", errors.New("storage location has no current root")
+	}
+	return root, nil
 }

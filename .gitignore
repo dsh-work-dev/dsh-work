@@ -1,6 +1,7 @@
 # Local-only project material.
 .research/
 .evolve/
+.evolve-support/
 
 # Local browser verification artifacts.
 .playwright-cli/
@@ -17,3 +18,5 @@ tools/dsh/node_modules/
 
 # Temporary scaffolds used only while bootstrapping the repository.
 .tmp-wails-*/
+build/windows/nsis/wails_tools.nsh
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

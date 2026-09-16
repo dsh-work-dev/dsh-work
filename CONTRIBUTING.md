@@ -75,8 +75,10 @@ wails3 task run
 The manager CLI is built by `wails3 task build:dsh-work`. It connects to the
 running per-user daemon for online operations. When no daemon is reachable,
 manager commands use offline access under the existing manager lock; they do
-not bypass a lock held by another process. `status`, `restart` and `stop` require
-a running daemon. The CLI does not start the daemon automatically.
+not bypass a lock held by another process. `status` and `restart` require a
+running daemon. `stop --wait` is idempotent when no daemon is reachable: it
+waits for any UI endpoint and manager lock to disappear, then reports stopped.
+The CLI does not start the daemon automatically.
 
 ```powershell
 bin\dsh-work-cli.exe status

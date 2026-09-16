@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/settings"
 )
@@ -78,6 +79,29 @@ func TestPetVisibilityFromHostSharesTheSettingsTransaction(t *testing.T) {
 	if panel.Preference.VisibilityIntent != settings.PetVisibilityHidden || panel.Runtime.EffectiveVisibility != pet.VisibilityHidden {
 		t.Fatalf("host menu panel = %+v, want hidden visibility", panel)
 	}
+}
+
+func TestPetHostActionsRefuseInstallerMaintenance(t *testing.T) {
+	key := "codex:pets:maintenance"
+	manager := newPetServiceManager(t, petServiceValues(key, settings.PetVisibilityVisible))
+	catalog := &petServiceCatalog{snapshot: pet.CatalogSnapshot{
+		Revision:  1,
+		ScanState: pet.ScanReady,
+		Items:     []pet.PetListItem{{StableSourceKey: key, DisplayName: "Maintenance", Availability: pet.AvailabilityReady}},
+	}}
+	service := NewPetSettingsService(manager, catalog)
+	SetPetHostMaintenance(service, func() bool { return true })
+	if _, err := GetPetPanelFromHost(context.Background(), service); !isPetMaintenanceFailure(err) {
+		t.Fatalf("GetPetPanelFromHost() error = %v, want maintenance failure", err)
+	}
+	if _, err := SetPetVisibilityFromHost(context.Background(), service, false); !isPetMaintenanceFailure(err) {
+		t.Fatalf("SetPetVisibilityFromHost() error = %v, want maintenance failure", err)
+	}
+}
+
+func isPetMaintenanceFailure(err error) bool {
+	var failure lifecycle.Failure
+	return errors.As(err, &failure) && failure.Code == lifecycle.ErrorManagerOperationBusy
 }
 
 func TestPersistPetPositionSurvivesReloadWithoutWindowActions(t *testing.T) {

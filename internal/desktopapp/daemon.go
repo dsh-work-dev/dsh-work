@@ -22,6 +22,7 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
 	dshworkpet "github.com/local/dsh-work/internal/pet"
@@ -244,6 +245,7 @@ func runDaemon(identity string, resources Resources) {
 		automaticRuntimeRollback.Store,
 	)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
+	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
 	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
 		if showWorkspace != nil {
 			showWorkspace()
@@ -259,7 +261,7 @@ func runDaemon(identity string, resources Resources) {
 		func(currentPath string) (string, error) { return nativeui.ChooseDirectory(desktop, currentPath) })
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Services: map[string]any{
 		"HostService": hostService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService,
-	}}
+	}, Maintenance: maintenance.InstallerInProgress}
 	publishRemote = server.Publish
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)
@@ -281,7 +283,7 @@ func runDaemon(identity string, resources Resources) {
 			DisableQuitOnLastWindowClosed: true,
 		},
 		Services: []application.Service{
-			application.NewService(&desktopclient.PetSettingsService{Local: petSettingsService}),
+			application.NewService(&desktopclient.PetSettingsService{Local: petSettingsService, Maintenance: maintenance.InstallerInProgress}),
 			application.NewService(nativeNotificationHost),
 		},
 		Assets: application.AssetOptions{Handler: dshworkapp.PetMediaHandler(petSettingsService, application.AssetFileServerFS(resources.Assets))},
@@ -481,6 +483,10 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	showWorkspace = func() {
+		if maintenance.InstallerInProgress() {
+			maintenance.ShowInstallerBusy()
+			return
+		}
 		if err := launcher.Open(""); err != nil {
 			log.Printf("open UI: %v", err)
 		}
@@ -507,7 +513,7 @@ func runDaemon(identity string, resources Resources) {
 		return status.State == lifecycle.StateReady || status.State == lifecycle.StateFailed || status.State == lifecycle.StateStopped
 	}
 	restartDSH := func() {
-		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() || !restartActionBusy.CompareAndSwap(false, true) {
+		if maintenance.InstallerInProgress() || applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() || !restartActionBusy.CompareAndSwap(false, true) {
 			return
 		}
 		if refreshLifecycleMenu != nil {
@@ -525,6 +531,7 @@ func runDaemon(identity string, resources Resources) {
 		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
 			return
 		}
+		server.BeginDrain()
 		host.Quit()
 		if refreshLifecycleMenu != nil {
 			refreshLifecycleMenu()
@@ -577,6 +584,10 @@ func runDaemon(identity string, resources Resources) {
 	})
 	menuPetVisibility.OnClick(func(ctx *application.Context) {
 		requested := ctx.IsChecked()
+		if maintenance.InstallerInProgress() {
+			maintenance.ShowInstallerBusy()
+			return
+		}
 		if applicationShuttingDown.Load() || !petMenuActionBusy.CompareAndSwap(false, true) {
 			return
 		}
@@ -678,6 +689,10 @@ func runDaemon(identity string, resources Resources) {
 	}
 
 	openSettings = func(section string) {
+		if maintenance.InstallerInProgress() {
+			maintenance.ShowInstallerBusy()
+			return
+		}
 		if err := launcher.Open(section); err != nil {
 			log.Printf("open Settings: %v", err)
 		}
@@ -756,6 +771,7 @@ func runDaemon(identity string, resources Resources) {
 				if applicationShuttingDown.Load() {
 					return
 				}
+				server.ResetDrain()
 				windowLedger.CancelQuit()
 				if openSettings != nil {
 					openSettings("overview")
@@ -765,6 +781,7 @@ func runDaemon(identity string, resources Resources) {
 	})
 	petInputContext, stopPetInput := context.WithCancel(context.Background())
 	desktop.OnShutdown(func() {
+		server.BeginDrain()
 		stopPetInput()
 		applicationShuttingDown.Store(true)
 		server.Publish("background-stopping", true)
@@ -793,7 +810,9 @@ func runDaemon(identity string, resources Resources) {
 			})
 		}
 		dshworkapp.StartupPetService(petSettingsService)
-		host.Start()
+		if !maintenance.InstallerInProgress() {
+			host.Start()
+		}
 		go func() {
 			if err := ipcServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 				log.Printf("background IPC: %v", err)

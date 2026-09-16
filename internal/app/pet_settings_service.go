@@ -130,6 +130,9 @@ type PetSettingsService struct {
 	// production constructor always uses the existing Wails Settings-window
 	// check.
 	trustedSurface func(context.Context) bool
+	// hostMaintenance is checked for native Host actions that bypass the
+	// remote daemon transport, such as the background process's tray menu.
+	hostMaintenance func() bool
 }
 
 // SetPetActivity connects Host-owned conversation observation and navigation.
@@ -138,6 +141,18 @@ func SetPetActivity(s *PetSettingsService, bridge *dshactivity.Bridge, openWorks
 	defer s.mu.Unlock()
 	s.activity = bridge
 	s.openWorkspace = openWorkspace
+}
+
+// SetPetHostMaintenance connects the native Host composition boundary to the
+// installer lifecycle. Remote calls are gated by daemon.Server; this callback
+// covers trusted in-process Host actions using the same Pet service.
+func SetPetHostMaintenance(s *PetSettingsService, busy func() bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.hostMaintenance = busy
+	s.mu.Unlock()
 }
 
 // OpenPetActivity returns to an existing DSH conversation from the pet surface.
@@ -1198,6 +1213,9 @@ func (s *PetSettingsService) beginHostOperation(ctx context.Context) (context.Co
 	if s == nil || s.manager == nil || s.catalog == nil {
 		return nil, nil, petSettingsUnavailable()
 	}
+	if s.hostMaintenance != nil && s.hostMaintenance() {
+		return nil, nil, petMaintenanceBusy()
+	}
 	if s.closed {
 		return nil, nil, petSettingsUnavailable()
 	}
@@ -1582,6 +1600,16 @@ func petSettingsUnavailable() error {
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Restart dsh-work and try again.",
+	}
+}
+
+func petMaintenanceBusy() error {
+	return lifecycle.Failure{
+		Code:          lifecycle.ErrorManagerOperationBusy,
+		Summary:       "dsh-work is being updated.",
+		Retryable:     true,
+		CorrelationID: lifecycle.NewCorrelationID(),
+		Detail:        "Wait for the installer to finish, then retry the Pet action.",
 	}
 }
 

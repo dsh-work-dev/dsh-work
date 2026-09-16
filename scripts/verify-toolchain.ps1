@@ -25,4 +25,24 @@ if ($wails -ne $manifest.wails.cli) {
     throw "Wails mismatch: expected $($manifest.wails.cli), got $wails"
 }
 
+$makensis = Get-Command makensis -ErrorAction SilentlyContinue
+if ($env:OS -eq 'Windows_NT' -and -not $makensis) {
+    throw "NSIS $($manifest.nsis.version) is required on Windows"
+}
+if ($makensis) {
+    $nsisVersionOutput = (& $makensis.Source /VERSION 2>&1 | Out-String).Trim()
+    $nsisVersion = ([regex]::Match($nsisVersionOutput, '(?<!\d)\d+\.\d+(?:\.\d+)?(?!\d)')).Value
+    $normalizeNsisVersion = {
+        param([string]$value)
+        $parts = $value -split '\.'
+        if ($parts.Count -eq 2) { return "$value.0" }
+        return $value
+    }
+    $expectedNsisExact = & $normalizeNsisVersion ([string]$manifest.nsis.version)
+    $actualNsisExact = if ($nsisVersion) { & $normalizeNsisVersion $nsisVersion } else { '' }
+    if ($actualNsisExact -ne $expectedNsisExact) {
+        throw "NSIS mismatch: expected $($manifest.nsis.version), got $nsisVersionOutput"
+    }
+}
+
 Write-Output "toolchain: go=$go node=$node npm=$npm wails=$wails dsh=$($manifest.dsh.version)"

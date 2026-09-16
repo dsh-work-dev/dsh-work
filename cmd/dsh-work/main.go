@@ -15,8 +15,10 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/storagepaths"
+	"github.com/local/dsh-work/internal/version"
 )
 
 func main() {
@@ -27,9 +29,22 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) (runErr error) {
+	if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
+		fmt.Fprintln(stdout, version.String())
+		return nil
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printUsage(stdout)
 		return nil
+	}
+	if maintenance.InstallerInProgress() && !(args[0] == "stop" && hasFlag(args[1:], "--wait")) {
+		return lifecycle.Failure{
+			Code:          lifecycle.ErrorManagerOperationBusy,
+			Summary:       "dsh-work is being updated.",
+			Retryable:     true,
+			CorrelationID: lifecycle.NewCorrelationID(),
+			Detail:        "Wait for the installer to finish, then retry the command.",
+		}
 	}
 	if handled, err := tryOnline(args, stdout); handled {
 		return err
@@ -428,7 +443,8 @@ func executableExists(path string) bool {
 
 func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "dsh-work connects to the running background, or locks offline state when stopped.")
-	fmt.Fprintln(stdout, "Online commands: status, restart, stop.")
+	fmt.Fprintf(stdout, "Version: %s\n", version.String())
+	fmt.Fprintln(stdout, "Online commands: status, restart, stop [--wait].")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")

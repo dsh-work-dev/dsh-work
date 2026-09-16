@@ -83,8 +83,25 @@ jobs:
       - name: Verify Wails CLI
         run: wails3 version
 
+      - name: Install NSIS
+        run: |
+          $nsisVersion = (Get-Content toolchain.lock.json -Raw | ConvertFrom-Json).nsis.version
+          choco install nsis --version=$nsisVersion --yes --no-progress
+          makensis /VERSION
+
       - name: Build application
         run: wails3 build
+
+      - name: Build per-user Windows installer
+        run: wails3 package GOOS=windows ARCH=amd64
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-work-windows-amd64-installer
+          path: |
+            bin/dsh-work-*-windows-amd64-installer.exe
+            bin/dsh-work-*-windows-amd64-installer.exe.sha256
 
       - name: Run Windows Go suite
         run: go test . ./cmd/... ./internal/...
