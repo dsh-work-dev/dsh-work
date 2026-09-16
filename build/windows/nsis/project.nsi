@@ -41,6 +41,9 @@ ManifestDPIAware true
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_TEXT "Open dsh-work after installation"
+!define MUI_FINISHPAGE_RUN_FUNCTION dshwork.launch
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
@@ -285,6 +288,20 @@ Function .onInit
         StrCpy $INSTDIR $0
     ${EndIf}
     Call dshwork.acquireInstallerMutex
+FunctionEnd
+
+Function dshwork.launch
+    ; The finish callback runs before NSIS exits. Release the maintenance
+    ; boundary first so the GUI can reconnect to its daemon immediately.
+    Call dshwork.releaseInstallerMutex
+    ExecShell "open" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+FunctionEnd
+
+Function dshwork.releaseInstallerMutex
+    StrCmp $DshWorkInstallerMutex 0 releaseInstallerMutexDone
+    System::Call 'kernel32::CloseHandle(p $DshWorkInstallerMutex)'
+    StrCpy $DshWorkInstallerMutex 0
+releaseInstallerMutexDone:
 FunctionEnd
 
 Function un.onInit
