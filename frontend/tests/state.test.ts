@@ -207,6 +207,12 @@ test("acquisition terminal result copy exists in all locales", () => {
 	}
 });
 
+test("plugin disable and startup fault copy exists in all locales", () => {
+	for (const key of ["fault.title", "fault.confirmDisable", "fault.confirmRemove", "action.disable", "action.enable", "value.pluginDisabled", "feedback.pluginDisabled", "feedback.pluginEnabled"]) {
+		assert.equal(hasTranslationInEveryLocale(key), true, key);
+	}
+});
+
 test("startup profile follows candidate and rollback rather than last saved selection", () => {
   assert.equal(startupProfileName(status({launchSelection: {runtimeId: "dsh", nodeId: "system", profileName: "web 1"}}), "web"), "web 1");
   assert.equal(startupProfileName(status({launchSelection: {runtimeId: "dsh", nodeId: "system", profileName: "web"}}), "web 1"), "web");

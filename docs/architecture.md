@@ -37,8 +37,8 @@ cannot grant themselves Host capabilities.
 | `internal/supervisor` | platform-neutral Worker process contract |
 | `internal/platform` | production platform selection and native adapters |
 | `internal/platform/windows` | process creation, Job Object cleanup, atomic file replacement and explicit runtime installation |
-| `internal/dshadapter` | exact-version launch, readiness, profile and plugin command grammar |
-| `internal/dshmanager` | runtime catalog, profiles, version snapshots and serialized recovery state |
+| `internal/dshadapter` | exact-version launch, readiness, profile and plugin command grammar, startup-failure plugin attribution |
+| `internal/dshmanager` | runtime catalog, profiles, plugin disable records, version snapshots and serialized recovery state |
 | `internal/workspacecontext` | per-generation DSH Workspace context |
 | `internal/workerchannel` | per-generation channel, authentication cookies and activity lifetime |
 | `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |

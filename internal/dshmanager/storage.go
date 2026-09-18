@@ -25,6 +25,7 @@ type State struct {
 	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
 	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
 	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	PluginDisables    []PluginDisableRecord    `json:"pluginDisables,omitempty"`
 	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
@@ -78,6 +79,7 @@ type persistedState struct {
 	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
 	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
 	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
+	PluginDisables    []PluginDisableRecord    `json:"pluginDisables,omitempty"`
 	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
@@ -103,6 +105,7 @@ func decodeState(data []byte) (State, error) {
 		LatestNode:        persisted.LatestNode,
 		DSHReleases:       persisted.DSHReleases,
 		PluginProvenance:  persisted.PluginProvenance,
+		PluginDisables:    persisted.PluginDisables,
 		Configured:        persisted.Configured,
 	}
 	for index := range state.Runtimes {
@@ -221,6 +224,9 @@ func validateState(state State) error {
 		if record.SuccessfulRoute != "" && record.SuccessfulRoute != RuntimeArtifactSourceNone && record.SuccessfulRoute != RuntimeArtifactSourceOfficial && record.SuccessfulRoute != RuntimeArtifactSourceMirror && record.SuccessfulRoute != RuntimeArtifactSourceLocal {
 			return errors.New("plugin provenance route is invalid")
 		}
+	}
+	if err := validatePluginDisableRecords(state.PluginDisables); err != nil {
+		return err
 	}
 	if state.Configured != nil {
 		if err := validateRunContext(*state.Configured); err != nil {

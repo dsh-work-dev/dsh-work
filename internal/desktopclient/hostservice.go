@@ -132,6 +132,24 @@ func (s *HostService) Restart(ctx context.Context) lifecycle.Status {
 	return value
 }
 
+func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if s.Local != nil {
+		return s.Local.DisableFaultPlugin(ctx, packageName)
+	}
+	var value lifecycle.Status
+	err := call(ctx, s.Client, "HostService", "DisableFaultPlugin", []any{packageName}, &value)
+	return value, err
+}
+
+func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if s.Local != nil {
+		return s.Local.RemoveFaultPlugin(ctx, packageName)
+	}
+	var value lifecycle.Status
+	err := call(ctx, s.Client, "HostService", "RemoveFaultPlugin", []any{packageName}, &value)
+	return value, err
+}
+
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
 	if s.Local != nil {
 		return s.Local.Quit(ctx)

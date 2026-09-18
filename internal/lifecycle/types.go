@@ -139,6 +139,9 @@ const (
 	ErrorPluginSpecInvalid          ErrorCode = "PLUGIN_SPEC_INVALID"
 	ErrorPluginCommandUnavailable   ErrorCode = "PLUGIN_COMMAND_UNAVAILABLE"
 	ErrorPluginCommandFailed        ErrorCode = "PLUGIN_COMMAND_FAILED"
+	ErrorPluginProtected            ErrorCode = "PLUGIN_PROTECTED"
+	ErrorPluginNotInstalled         ErrorCode = "PLUGIN_NOT_INSTALLED"
+	ErrorPluginDisableFailed        ErrorCode = "PLUGIN_DISABLE_FAILED"
 	ErrorRuntimeInstallUnavailable  ErrorCode = "RUNTIME_INSTALL_UNAVAILABLE"
 	ErrorRuntimeInstallFailed       ErrorCode = "RUNTIME_INSTALL_FAILED"
 	ErrorTrustedSurfaceRequired     ErrorCode = "TRUSTED_SURFACE_REQUIRED"
@@ -174,6 +177,12 @@ type LaunchSelection struct {
 	NodeID            string `json:"nodeId"`
 }
 
+// PluginFault names the installed third-party plugins a failed start's output
+// pointed at. It is advisory: the user decides whether to disable or remove one.
+type PluginFault struct {
+	Plugins []string `json:"plugins"`
+}
+
 // Status is the immutable read model consumed by the frontend.
 type Status struct {
 	LaunchSelection    *LaunchSelection          `json:"launchSelection,omitempty"`
@@ -184,6 +193,7 @@ type Status struct {
 	Workspace          *workspacecontext.Context `json:"workspace,omitempty"`
 	RuntimePreparation *RuntimePreparation       `json:"runtimePreparation,omitempty"`
 	Error              *Failure                  `json:"error,omitempty"`
+	PluginFault        *PluginFault              `json:"pluginFault,omitempty"`
 	CanRetry           bool                      `json:"canRetry"`
 	CanCancel          bool                      `json:"canCancel"`
 	CorrelationID      string                    `json:"correlationId,omitempty"`

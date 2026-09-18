@@ -25,6 +25,10 @@ export function Cancel(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(1612573212);
 }
 
+export function DisableFaultPlugin(packageName: string): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(598114413, packageName);
+}
+
 export function GetLocale(): $CancellablePromise<settings$0.Locale> {
     return $Call.ByID(3068536916);
 }
@@ -51,6 +55,10 @@ export function OpenRuntimeSettings(): $CancellablePromise<void> {
 
 export function Quit(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(4034652397);
+}
+
+export function RemoveFaultPlugin(packageName: string): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(3791506921, packageName);
 }
 
 export function Restart(): $CancellablePromise<lifecycle$0.Status> {

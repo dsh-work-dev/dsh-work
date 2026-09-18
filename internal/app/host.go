@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/local/dsh-work/internal/dshadapter"
@@ -44,6 +45,7 @@ type ProfilePluginManager interface {
 	InstallPlugin(context.Context, dshmanager.PluginInstallRequest) (dshmanager.PluginResult, error)
 	UpgradePlugin(context.Context, dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error)
 	RemovePlugin(context.Context, dshmanager.PluginRemoveRequest) (dshmanager.PluginResult, error)
+	SetPluginDisabled(context.Context, dshmanager.PluginDisableRequest) (dshmanager.PluginResult, error)
 }
 
 // LaunchManager is the platform-neutral Run-context selection seam. The Host
@@ -196,7 +198,9 @@ type Host struct {
 	quit                 func()
 	shutdownMu           sync.Mutex
 	lastDiagnostics      supervisor.Diagnostics
-	debug                func(string)
+	// pluginFault is lock-free because Status() is read while h.mu is held.
+	pluginFault atomic.Pointer[failedPluginStart]
+	debug       func(string)
 }
 
 type generationRun struct {
@@ -276,7 +280,7 @@ func (h *Host) SetDebug(fn func(string)) {
 }
 
 func (h *Host) Status() lifecycle.Status {
-	return h.machine.Snapshot()
+	return h.withPluginFault(h.machine.Snapshot())
 }
 
 // Diagnostics returns the last bounded supervisor record. It is intentionally
@@ -589,15 +593,34 @@ func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemove
 func (h *Host) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error) {
 	return h.applyPlugin(ctx, request.Target, request.Package, "update")
 }
-func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, spec, operation string) (dshmanager.PluginResult, error) {
-	if failure := h.readyWorkerForPluginMutation(); failure != nil {
-		return dshmanager.PluginResult{}, failure
+
+// SetPluginDisabled disables or re-enables a plugin of the current profile
+// inside the same stopped-Worker transaction as install and remove.
+func (h *Host) SetPluginDisabled(ctx context.Context, request dshmanager.PluginDisableRequest) (dshmanager.PluginResult, error) {
+	manager, ok := h.deps.Manager.(PluginFaultManager)
+	if !ok {
+		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
 	}
+	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+		return manager.ApplyPluginDisabled(ctx, launch, request.Package, request.Disabled)
+	})
+}
+
+func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, spec, operation string) (dshmanager.PluginResult, error) {
 	manager, ok := h.deps.Manager.(interface {
 		ApplyPlugin(context.Context, dshmanager.ResolvedLaunch, string, string) (dshmanager.PluginResult, error)
 	})
 	if !ok {
 		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
+	}
+	return h.mutateProfilePlugins(ctx, target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+		return manager.ApplyPlugin(ctx, launch, spec, operation)
+	})
+}
+
+func (h *Host) mutateProfilePlugins(ctx context.Context, target dshmanager.PluginTarget, apply func(context.Context, dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error)) (dshmanager.PluginResult, error) {
+	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+		return dshmanager.PluginResult{}, failure
 	}
 	snapshot, err := h.deps.Manager.Snapshot(ctx)
 	if err != nil {
@@ -609,7 +632,7 @@ func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, 
 	var result dshmanager.PluginResult
 	_, err = h.applyRunContext(ctx, *snapshot.Current, func(ctx context.Context, launch dshmanager.ResolvedLaunch) error {
 		var err error
-		result, err = manager.ApplyPlugin(ctx, launch, spec, operation)
+		result, err = apply(ctx, launch)
 		return err
 	}, nil, false)
 	result.RestartRequired = false
@@ -1153,6 +1176,8 @@ func (h *Host) run(run *generationRun) {
 				failure.Detail = "DSH reported ERR_MODULE_NOT_FOUND while loading the selected profile."
 			}
 		}
+		diagnostics := worker.Diagnostics()
+		h.recordPluginFault(run, diagnostics.StdoutTail+"\n"+diagnostics.StderrTail)
 		h.finish(run, failure)
 		return
 	}
@@ -1237,6 +1262,11 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		}); ok {
 			captured := recorder.CaptureLaunchVersions(run.ctx, *launch.resolved)
 			launch.resolved = &captured
+		}
+		if enforcer, ok := h.deps.Manager.(pluginDisableEnforcer); ok {
+			if err := enforcer.EnforcePluginDisables(run.ctx, *launch.resolved); err != nil {
+				return nil, h.failureFor(err, lifecycle.ErrorPluginDisableFailed, "Disabled plugins could not be kept out of the profile.", true)
+			}
 		}
 		run.setLaunch(launch.resolved)
 		if status, err := h.machine.SetLaunchSelection(run.generation, launchSelection(*launch.resolved)); err == nil {
@@ -1905,7 +1935,7 @@ func (h *Host) emit(status lifecycle.Status) {
 	publish := h.publish
 	h.mu.Unlock()
 	if publish != nil {
-		publish(status)
+		publish(h.withPluginFault(status))
 	}
 }
 
@@ -2195,6 +2225,23 @@ func (s *HostService) Restart(ctx context.Context) lifecycle.Status {
 		return trustedSurfaceStatus()
 	}
 	return s.host.Restart()
+}
+
+// DisableFaultPlugin disables a plugin named by the current startup failure.
+// It is offered beside that failure, so it is authorized on the same surface.
+func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	}
+	return s.host.DisableFaultPlugin(ctx, packageName)
+}
+
+// RemoveFaultPlugin uninstalls a plugin named by the current startup failure.
+func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	}
+	return s.host.RemoveFaultPlugin(ctx, packageName)
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {

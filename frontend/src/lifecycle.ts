@@ -51,6 +51,7 @@ export interface LifecycleStatus {
   workspace?: WorkspaceContext;
   runtimePreparation?: RuntimePreparation;
   error?: LifecycleFailure;
+  pluginFault?: {plugins: string[]};
   canRetry: boolean;
   canCancel: boolean;
   correlationId?: string;

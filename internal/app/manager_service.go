@@ -478,6 +478,30 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	return s.manager.RemovePlugin(ctx, request)
 }
 
+// SetPluginDisabled keeps an installed plugin out of (or returns it to) the
+// current profile's layer stack without uninstalling it.
+func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanager.PluginDisableRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
+	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
+	defer func() {
+		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+	}()
+	if s.host != nil {
+		return s.host.SetPluginDisabled(ctx, request)
+	}
+	return s.manager.SetPluginDisabled(ctx, request)
+}
+
 func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
