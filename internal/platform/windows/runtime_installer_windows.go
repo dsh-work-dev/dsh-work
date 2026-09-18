@@ -324,6 +324,55 @@ func (i *RuntimeInstaller) Finalize(_ context.Context, runtime dshmanager.Runtim
 	return nil
 }
 
+// Remove deletes a managed runtime directory after the manager has checked that
+// no Run context uses it. The directory is first renamed aside so a locked file
+// leaves the runtime intact; a partial delete of the renamed copy is retried on
+// the next removal.
+func (i *RuntimeInstaller) Remove(_ context.Context, runtime dshmanager.RuntimeInfo) error {
+	if i == nil {
+		return nil
+	}
+	root, err := managedStoreRoot(i.storeRoot)
+	if err != nil {
+		return err
+	}
+	if runtime.Source != "" && runtime.Source != dshmanager.RuntimeSourceManaged {
+		return errors.New("runtime is not managed by dsh-work")
+	}
+	target := filepath.Join(root, runtime.ID)
+	if !strings.HasPrefix(runtime.ID, "dsh-") || !isDirectManagedChild(root, target) || !isWithinDirectory(target, runtime.Path) {
+		return errors.New("runtime is outside the managed store")
+	}
+	removeAbandonedRuntimes(root)
+	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	aside, err := os.MkdirTemp(root, ".removing-"+runtime.ID+"-")
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(aside); err != nil {
+		return err
+	}
+	if err := os.Rename(target, aside); err != nil {
+		return err
+	}
+	_ = os.RemoveAll(aside)
+	return nil
+}
+
+func removeAbandonedRuntimes(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), ".removing-") {
+			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		}
+	}
+}
+
 func (i *RuntimeInstaller) rememberPendingBackup(target, backup string) {
 	i.pendingMu.Lock()
 	i.pendingBackups[target] = backup

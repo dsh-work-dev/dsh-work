@@ -39,6 +39,17 @@ previous durable success point. Safe-mode startup never advances normal success
 pointers. After a failure, safe mode prefers the known-good return environment
 when no current Worker exists.
 
+Each safe-mode entry creates a fresh data directory under the app's
+`safe-mode` folder; nothing is copied from the failed environment. When a
+normal environment becomes healthy again — by returning or by any other
+switch — the safe-mode data directory is removed from the catalog and its
+folder is deleted. Startup also removes a stale safe-mode entry and any
+session folder not owned by an active safe mode. Deletion is best effort: a
+locked folder is retried on the next start.
+
+Removing a DSH runtime does not invalidate version records that name its
+version, because restore always reinstalls the recorded DSH version.
+
 ## Stored contract
 
 The manager's optional `versionRecovery` payload uses schema version 1. Each

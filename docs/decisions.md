@@ -24,6 +24,14 @@ Version recovery is a separate path that force-reinstalls the recorded DSH
 version into its managed directory through npm or pnpm; it may download packages.
 A matching version alone does not skip repair.
 
+The catalog owns its managed installations. Removing a catalog runtime first
+renames its directory aside inside the store, then deletes it, and updates
+the catalog only after the rename succeeds; a locked file fails the removal
+with the runtime intact, and an aside copy that could not be fully deleted is
+retried on the next removal. Directories not in the catalog are not swept
+automatically, because a lost or reset manager state would otherwise delete
+every installed runtime.
+
 ## ADR-0004 — Global Settings and tray-aware lifecycle
 
 Persist versioned dsh-work settings separately from DSH data. Closing a desktop

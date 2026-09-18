@@ -157,6 +157,49 @@ func (m *Manager) AbortPreparedSafeMode(ctx context.Context) (resultErr error) {
 	return os.RemoveAll(discarded)
 }
 
+// discardInactiveSafeMode drops the rescue data directory once safe mode no
+// longer owns the configured context, so leaving safe mode leaves nothing
+// selectable behind.
+func discardInactiveSafeMode(state *State) {
+	if state.SafeMode != nil || (state.Configured != nil && state.Configured.Profile.DataDirectoryID == SafeModeDataDirectoryID) {
+		return
+	}
+	state.DataDirectories = withoutSafeModeDataDirectory(state.DataDirectories)
+}
+
+func withoutSafeModeDataDirectory(directories []DataDirectoryInfo) []DataDirectoryInfo {
+	kept := make([]DataDirectoryInfo, 0, len(directories))
+	for _, directory := range directories {
+		if directory.ID != SafeModeDataDirectoryID {
+			kept = append(kept, directory)
+		}
+	}
+	return kept
+}
+
+// removeSafeModeSessions deletes app-created rescue homes other than the one
+// still registered. Deletion is best effort; a locked session is retried on
+// the next start.
+func removeSafeModeSessions(statePath string, directories []DataDirectoryInfo) {
+	root := filepath.Join(filepath.Dir(statePath), "safe-mode")
+	keep := ""
+	for _, directory := range directories {
+		if directory.ID == SafeModeDataDirectoryID {
+			keep = filepath.Clean(directory.Path)
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "session-") && !strings.EqualFold(path, keep) {
+			_ = os.RemoveAll(path)
+		}
+	}
+}
+
 func (m *Manager) SafeModeReturnTarget(ctx context.Context) (result RunContext, resultErr error) {
 	defer func() {
 		resultErr = recoveryFailure(resultErr, lifecycle.ErrorManagerStateInvalid, "The previous environment is unavailable.")

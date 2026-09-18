@@ -256,6 +256,7 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 	state.VersionRecovery = s
 	if launch.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID {
 		state.SafeMode = nil
+		discardInactiveSafeMode(&state)
 	}
 	if state.LastSwitchAttempt != nil && state.LastSwitchAttempt.Target == launch.Target {
 		state.LastSwitchAttempt = nil
@@ -273,11 +274,15 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 		m.versionRecovery = s
 		m.safeMode = cloneSafeMode(state.SafeMode)
 		m.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
+		m.config.DataDirectories = cloneDataDirectories(state.DataDirectories)
 	}
 	if launch.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID && verified != nil {
 		m.knownGood = cloneRunContext(&launch.Target)
 	}
 	m.mu.Unlock()
+	if err == nil {
+		removeSafeModeSessions(m.config.StatePath, state.DataDirectories)
+	}
 	return m.Snapshot(context.Background())
 }
 func pruneVersionPoints(s *VersionRecoveryState) {

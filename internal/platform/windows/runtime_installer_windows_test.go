@@ -408,3 +408,49 @@ func TestNodeArchiveRejectsTraversal(t *testing.T) {
 		t.Fatalf("extractNodeArchive() error = %v, want traversal rejection", err)
 	}
 }
+
+func TestRuntimeInstallerRemoveDeletesManagedRuntimeDirectory(t *testing.T) {
+	store := t.TempDir()
+	root := filepath.Join(store, "dsh-0.1.2-alpha.3")
+	launcher := filepath.Join(root, "node_modules", ".bin", "dsh.cmd")
+	if err := os.MkdirAll(filepath.Dir(launcher), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, []byte("runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer := NewRuntimeInstaller(nil, store)
+	runtime := dshmanager.RuntimeInfo{ID: "dsh-0.1.2-alpha.3", Version: "0.1.2-alpha.3", Path: launcher, Source: dshmanager.RuntimeSourceManaged, InstallSource: dshmanager.RuntimeArtifactSourceLocal}
+	if err := installer.Remove(context.Background(), runtime); err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("runtime directory still exists: %v", err)
+	}
+	entries, err := os.ReadDir(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("store retained entries after removal: %v", entries)
+	}
+	if err := installer.Remove(context.Background(), runtime); err != nil {
+		t.Fatalf("repeated Remove() error = %v", err)
+	}
+}
+
+func TestRuntimeInstallerRemoveRejectsRuntimeOutsideStore(t *testing.T) {
+	store := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(outside, []byte("runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installer := NewRuntimeInstaller(nil, store)
+	runtime := dshmanager.RuntimeInfo{ID: "dsh-0.1.2-alpha.3", Version: "0.1.2-alpha.3", Path: outside, Source: dshmanager.RuntimeSourceManaged}
+	if err := installer.Remove(context.Background(), runtime); err == nil {
+		t.Fatal("Remove() error = nil, want outside-store rejection")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside runtime was touched: %v", err)
+	}
+}

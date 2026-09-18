@@ -128,6 +128,12 @@ type RuntimeFinalizer interface {
 	Finalize(context.Context, RuntimeInfo) error
 }
 
+// RuntimeRemover deletes a removed runtime's managed installation. An
+// installation that is already absent is not an error.
+type RuntimeRemover interface {
+	Remove(context.Context, RuntimeInfo) error
+}
+
 // RuntimeVerifier is implemented by the selected DSH adapter. The manager
 // owns catalog identity and presence checks; only the adapter can verify that
 // an executable speaks the DSH contract expected by this dsh-work build.
@@ -430,6 +436,7 @@ func New(config Config) (*Manager, error) {
 		if err := validateState(*state); err != nil {
 			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted Run context has an unsupported shape")
 		}
+		discardInactiveSafeMode(state)
 		if len(state.DataDirectories) > 0 {
 			normalized.DataDirectories = mergeDataDirectories(normalized.DataDirectories, state.DataDirectories)
 		}
@@ -445,6 +452,7 @@ func New(config Config) (*Manager, error) {
 		}
 	}
 	manager.config = normalized
+	removeSafeModeSessions(normalized.StatePath, normalized.DataDirectories)
 	if state != nil {
 		manager.versionRecovery = cloneVersionRecovery(state.VersionRecovery)
 		if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
@@ -736,7 +744,13 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 	runtimes := cloneRuntimes(m.config.Runtimes)
 	state := m.stateLocked()
 	statePath := m.config.StatePath
+	remover, _ := m.config.RuntimeInstaller.(RuntimeRemover)
 	m.mu.RUnlock()
+	if remover != nil {
+		if err := remover.Remove(ctx, runtimes[index]); err != nil {
+			return Snapshot{}, preserveFailure(err, lifecycle.ErrorRuntimeInstallFailed, "DSH runtime removal failed", "the runtime files could not be removed; close programs using them and retry", true, false)
+		}
+	}
 	runtimes = append(runtimes[:index], runtimes[index+1:]...)
 	state.Runtimes = cloneRuntimes(runtimes)
 	if err := m.store.Save(ctx, statePath, state); err != nil {

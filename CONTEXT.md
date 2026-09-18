@@ -51,7 +51,7 @@ in the documents linked from `docs/README.md`.
 | Context switch | A user-requested change of runtime, DSH data directory or profile that takes effect by restarting the Worker and completes only after the new context is ready; failure follows the configured recovery policy. | Editing a deferred selection without applying it. |
 | Version record (internal: version snapshot) | Exact DSH and installed plugin versions/sources, dependency groups, bundle order, lock/workspace inputs and verification metadata used to reconstruct an environment. | A copy of installed package trees or conversation data. |
 | Last successful snapshot | The latest verified success record for a profile; a separate last-running pointer identifies the previous successful environment for switches. | Proof that a Worker is currently alive. |
-| Safe mode | A clean Host-prepared environment with a separate data directory and a saved return target. | A replacement for the normal environment's success record. |
+| Safe mode | A clean Host-prepared environment with a separate, disposable data directory and a saved return target. The data directory is discarded once a normal environment is healthy again. | A replacement for the normal environment's success record or a selectable data directory. |
 | Launch context | The per-generation handoff containing a resolved Run context plus its separately resolved Workspace context. | A durable global configuration document. |
 
 ## Ownership rules

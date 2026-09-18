@@ -47,7 +47,11 @@ silently mutate DSH-owned data.
   safe mode. In Settings Overview, “启动安全模式” sits beside “切换环境”.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
   manager, then verifies startup. Safe mode uses a separate clean data directory
-  and preserves normal-environment success records.
+  and preserves normal-environment success records. Once a normal environment
+  is running again, that data directory is discarded and no longer selectable.
+- Removing a DSH runtime deletes its installed files. A runtime used by the
+  configured, current, known-good or safe-mode return environment cannot be
+  removed.
 - Settings persist locale, recovery, Pet and notification preferences.
 - Workspace and Settings windows separately remember normal dimensions and
   maximised state. Minimisation does not replace the saved normal dimensions;
