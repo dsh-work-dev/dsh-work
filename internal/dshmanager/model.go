@@ -195,6 +195,9 @@ type PluginInfo struct {
 	CurrentVersion   string                `json:"currentVersion,omitempty"`
 	AvailableVersion string                `json:"availableVersion,omitempty"`
 	UpdateCheck      PluginUpdateCheck     `json:"updateCheck"`
+	// Disabled means the plugin stays installed but is kept out of the
+	// profile's layer stack, so DSH does not load it.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 type PluginSourceKind string
@@ -236,6 +239,23 @@ type PluginRemoveRequest struct {
 type PluginUpgradeRequest struct {
 	Target  PluginTarget `json:"target"`
 	Package string       `json:"package"`
+}
+
+// PluginDisableRequest disables (or, with Disabled false, re-enables) one
+// installed plugin without uninstalling it.
+type PluginDisableRequest struct {
+	Target   PluginTarget `json:"target"`
+	Package  string       `json:"package"`
+	Disabled bool         `json:"disabled"`
+}
+
+// PluginDisableRecord is app-owned state for one disabled plugin. BundleIndex
+// is the plugin's position in the profile layer list, restored on enable.
+type PluginDisableRecord struct {
+	Profile     ProfileRef `json:"profile"`
+	Package     string     `json:"package"`
+	BundleIndex int        `json:"bundleIndex"`
+	DisabledAt  string     `json:"disabledAt"`
 }
 
 // PluginProvenanceRecord is bounded app-owned evidence for a successful

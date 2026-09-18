@@ -194,6 +194,15 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	return value, err
 }
 
+func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanager.PluginDisableRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s.Local != nil {
+		return s.Local.SetPluginDisabled(ctx, request)
+	}
+	var value dshmanager.PluginResult
+	err := call(ctx, s.Client, "ManagerService", "SetPluginDisabled", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s.Local != nil {
 		return s.Local.UpgradePlugin(ctx, request)

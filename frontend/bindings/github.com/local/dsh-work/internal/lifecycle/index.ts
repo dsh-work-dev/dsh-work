@@ -13,6 +13,7 @@ export {
 export type {
     Failure,
     LaunchSelection,
+    PluginFault,
     RuntimePreparation,
     Status
 } from "./models.js";

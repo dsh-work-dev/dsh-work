@@ -114,6 +114,16 @@ export enum NodeSelectionKind {
     NodeSelectionManaged = "managed",
 };
 
+/**
+ * PluginDisableRequest disables (or, with Disabled false, re-enables) one
+ * installed plugin without uninstalling it.
+ */
+export interface PluginDisableRequest {
+    "target": PluginTarget;
+    "package": string;
+    "disabled": boolean;
+}
+
 export interface PluginInfo {
     "name": string;
     "version"?: string;
@@ -125,6 +135,12 @@ export interface PluginInfo {
     "currentVersion"?: string;
     "availableVersion"?: string;
     "updateCheck": PluginUpdateCheck;
+
+    /**
+     * Disabled means the plugin stays installed but is kept out of the
+     * profile's layer stack, so DSH does not load it.
+     */
+    "disabled"?: boolean;
 }
 
 export interface PluginInstallRequest {

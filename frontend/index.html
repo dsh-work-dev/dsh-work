@@ -29,6 +29,7 @@
       <div id="startup-progress" hidden><p id="startup-progress-message" role="status"></p><progress id="startup-progress-bar" data-i18n-aria-label="host.startupProgress"></progress></div>
       <section id="startup-resolution">
         <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
+        <section id="startup-plugin-fault" class="startup-plugin-fault" hidden aria-labelledby="startup-plugin-fault-title"><strong id="startup-plugin-fault-title" data-i18n="fault.title">可能是插件导致 DSH 无法启动</strong><ul id="startup-plugin-fault-list"></ul></section>
         <div class="startup-actions"><button id="retry" class="startup-primary" type="button" hidden>重试</button><button id="startup-safe-mode" type="button" data-i18n="safe.enter" hidden>启动安全模式</button><button id="open-startup-restore" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" type="button" data-i18n="common.cancel" hidden>取消</button></div>
         <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">
           <div class="startup-diagnostic-actions"><strong id="startup-log-title" data-i18n="startup.log">日志</strong><span id="diagnostic-copy-status" role="status"></span><button id="copy-startup-output" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button></div>

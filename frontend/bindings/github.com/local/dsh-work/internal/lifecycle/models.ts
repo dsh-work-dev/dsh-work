@@ -53,6 +53,9 @@ export enum ErrorCode {
     ErrorPluginSpecInvalid = "PLUGIN_SPEC_INVALID",
     ErrorPluginCommandUnavailable = "PLUGIN_COMMAND_UNAVAILABLE",
     ErrorPluginCommandFailed = "PLUGIN_COMMAND_FAILED",
+    ErrorPluginProtected = "PLUGIN_PROTECTED",
+    ErrorPluginNotInstalled = "PLUGIN_NOT_INSTALLED",
+    ErrorPluginDisableFailed = "PLUGIN_DISABLE_FAILED",
     ErrorRuntimeInstallUnavailable = "RUNTIME_INSTALL_UNAVAILABLE",
     ErrorRuntimeInstallFailed = "RUNTIME_INSTALL_FAILED",
     ErrorTrustedSurfaceRequired = "TRUSTED_SURFACE_REQUIRED",
@@ -106,6 +109,14 @@ export enum Phase {
     PhaseStopping = "stopping",
     PhaseFailed = "failed",
 };
+
+/**
+ * PluginFault names the installed third-party plugins a failed start's output
+ * pointed at. It is advisory: the user decides whether to disable or remove one.
+ */
+export interface PluginFault {
+    "plugins": string[] | null;
+}
 
 /**
  * RuntimePreparation is a bounded status projection for the trusted Host UI.
@@ -210,6 +221,7 @@ export interface Status {
     "workspace"?: workspacecontext$0.Context | null;
     "runtimePreparation"?: RuntimePreparation | null;
     "error"?: Failure | null;
+    "pluginFault"?: PluginFault | null;
     "canRetry": boolean;
     "canCancel": boolean;
     "correlationId"?: string;

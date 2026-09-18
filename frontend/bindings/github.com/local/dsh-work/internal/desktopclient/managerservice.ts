@@ -157,6 +157,10 @@ export function SaveRestorePoint(label: string): $CancellablePromise<dshmanager$
     return $Call.ByID(1651157004, label);
 }
 
+export function SetPluginDisabled(request: dshmanager$0.PluginDisableRequest): $CancellablePromise<dshmanager$0.PluginResult> {
+    return $Call.ByID(4269219424, request);
+}
+
 export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3418084503, target);
 }

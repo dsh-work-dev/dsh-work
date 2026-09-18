@@ -189,3 +189,28 @@ Only explicit background shutdown stops the Worker and its children, releases
 locks and exits native background surfaces. A desktop window close never
 substitutes for that operation. See [Architecture](architecture.md) for the
 transport and lifecycle contracts.
+
+## ADR-0018 — Plugin disable and startup-failure plugin actions
+
+An installed third-party plugin can be disabled without uninstalling it. A
+disable removes the package from the profile manifest's `dsh.profile.bundles`,
+so DSH loads neither the plugin's code nor its patches, and the package stays in
+`node_modules`. dsh-work records the disable in its manager state with the
+package's layer position. Enabling puts the package back at that position.
+Every `dsh plugin` command rebuilds the bundle list from the installed packages
+and would re-add the plugin, so the Host re-applies recorded disables before
+each launch. The manifest is edited through JSON Patch with the existing
+`tailscale/hujson` dependency, so other content is preserved byte for byte.
+`@deepseek-ai/*` distribution packages are never disabled.
+
+When a start fails, the DSH adapter reads the captured output for the packages
+it names. The Host keeps only third-party packages installed in the failed
+profile and offers to disable or remove each one from the startup window. If DSH
+rejected its own stored session data, no plugin is offered, because the plugin
+that reported the error did not cause it. These actions change only the failed
+profile, and only while no Worker is running and no Run context is current.
+Normal plugin changes on a running profile keep the stopped-Worker transaction
+from ADR-0008.
+
+This decision supersedes the earlier rule that dsh-work never edits DSH
+manifests. The one manifest field dsh-work writes is the bundle list.

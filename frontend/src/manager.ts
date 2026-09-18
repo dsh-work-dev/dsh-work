@@ -33,6 +33,7 @@ const setRunContext = ManagerService.SetRunContext;
 const installPlugin = ManagerService.InstallPlugin;
 const listPlugins = ManagerService.ListPlugins;
 const removePlugin = ManagerService.RemovePlugin;
+const setPluginDisabled = ManagerService.SetPluginDisabled;
 const upgradePlugin = ManagerService.UpgradePlugin;
 const renameProfile = ManagerService.RenameProfile;
 const cloneProfile = ManagerService.CloneProfile;
@@ -556,6 +557,7 @@ export function mountManager() {
       const detail = document.createElement("span");
       const currentVersion = plugin.currentVersion || plugin.version;
       detail.textContent = [
+        plugin.disabled ? t("value.pluginDisabled") : "",
         pluginSourceLabel(plugin),
         currentVersion ? t("value.currentVersion", {version: currentVersion}) : t("value.installed"),
         plugin.availableVersion ? t("value.availableVersion", {version: plugin.availableVersion}) : "",
@@ -572,15 +574,26 @@ export function mountManager() {
           upgradeButton.addEventListener("click", () => void mutatePlugin("upgrade", plugin.package || plugin.name, upgradeButton));
           row.append(text, upgradeButton);
         }
+        const packageName = plugin.package || plugin.name;
+        if (!row.contains(text)) {
+          row.append(text);
+        }
+        // DSH distribution packages are never disabled.
+        if (!packageName.startsWith("@deepseek-ai/")) {
+          const toggleButton = document.createElement("button");
+          toggleButton.className = "button button-secondary";
+          toggleButton.type = "button";
+          toggleButton.textContent = t(plugin.disabled ? "action.enable" : "action.disable");
+          toggleButton.dataset.pluginRemove = "true";
+          toggleButton.addEventListener("click", () => void mutatePlugin(plugin.disabled ? "enable" : "disable", packageName, toggleButton));
+          row.append(toggleButton);
+        }
         const removeButton = document.createElement("button");
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
         removeButton.textContent = t("action.remove");
         removeButton.dataset.pluginRemove = "true";
-        removeButton.addEventListener("click", () => void mutatePlugin("remove", plugin.package || plugin.name, removeButton));
-        if (!row.contains(text)) {
-          row.append(text);
-        }
+        removeButton.addEventListener("click", () => void mutatePlugin("remove", packageName, removeButton));
         row.append(removeButton);
       } else {
         row.append(text);
@@ -1249,7 +1262,7 @@ export function mountManager() {
     }
   }
 
-  async function mutatePlugin(operation: "install" | "upgrade" | "remove", packageOverride?: string, sourceButton?: HTMLButtonElement) {
+  async function mutatePlugin(operation: "install" | "upgrade" | "remove" | "disable" | "enable", packageOverride?: string, sourceButton?: HTMLButtonElement) {
     const packageSpec = (packageOverride ?? packageInput.value).trim();
     if (!packageSpec) {
       pluginsFeedback(t("error.enterPackage"), "error");
@@ -1268,12 +1281,15 @@ export function mountManager() {
         ? await installPlugin({target, package: packageSpec})
         : operation === "upgrade"
           ? await upgradePlugin({target, package: packageSpec})
-          : await removePlugin({target, package: packageSpec});
+          : operation === "remove"
+            ? await removePlugin({target, package: packageSpec})
+            : await setPluginDisabled({target, package: packageSpec, disabled: operation === "disable"});
       await refresh(target.profile);
       document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
+      const feedbackKey = {install: "feedback.pluginInstalled", upgrade: "feedback.pluginUpgraded", remove: "feedback.pluginRemoved", disable: "feedback.pluginDisabled", enable: "feedback.pluginEnabled"}[operation];
       pluginsFeedback(result.restartRequired
         ? t("feedback.pluginChangedRestart")
-        : t(operation === "install" ? "feedback.pluginInstalled" : operation === "upgrade" ? "feedback.pluginUpgraded" : "feedback.pluginRemoved", {profile: result.profile.name}), "success", result.restartRequired);
+        : t(feedbackKey, {profile: result.profile.name}), "success", result.restartRequired);
     } catch (error) {
       // A failed candidate may have restored the previous environment.
       await Promise.allSettled([refresh()]);

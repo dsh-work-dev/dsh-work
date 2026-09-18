@@ -46,6 +46,39 @@ export function mountHost() {
   const progressPanel = element("startup-progress");
   const progressMessage = element("startup-progress-message");
   const progressBar = element<HTMLProgressElement>("startup-progress-bar");
+  const pluginFault = element("startup-plugin-fault");
+  const pluginFaultList = element("startup-plugin-fault-list");
+
+  // Each plugin the failed start pointed at can be disabled or removed; either
+  // action starts DSH again right away.
+  function renderPluginFault(plugins: string[]) {
+    pluginFault.hidden = plugins.length === 0;
+    pluginFaultList.replaceChildren(...plugins.map(plugin => {
+      const row = document.createElement("li");
+      const name = document.createElement("span");
+      name.textContent = plugin;
+      const disable = document.createElement("button");
+      disable.type = "button";
+      disable.textContent = t("action.disable");
+      disable.disabled = busy;
+      disable.addEventListener("click", () => void resolvePluginFault(plugin, "disable"));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = t("action.remove");
+      remove.disabled = busy;
+      remove.addEventListener("click", () => void resolvePluginFault(plugin, "remove"));
+      row.append(name, disable, remove);
+      return row;
+    }));
+  }
+
+  function resolvePluginFault(plugin: string, operation: "disable" | "remove") {
+    if (!window.confirm(t(operation === "disable" ? "fault.confirmDisable" : "fault.confirmRemove", {plugin}))) return;
+    return action(async () => {
+      status = await (operation === "disable" ? HostService.DisableFaultPlugin(plugin) : HostService.RemoveFaultPlugin(plugin)) as LifecycleStatus;
+      await prepareAndStart();
+    });
+  }
 
   const installedNode = () => selectedNode === "system" ? !!snapshot?.systemNode : !!snapshot?.nodes?.some(n => n.id === selectedNode && n.installed && n.verified);
   const installedRuntime = () => snapshot?.runtimes?.find(r => r.id === selectedRuntime && r.installed);
@@ -100,6 +133,7 @@ export function mountHost() {
     element("dsh-controls").hidden = !(snapshot && installedNode() && (!installedRuntime()) && !active() && !busy);
     element("status-message").textContent = t(code.includes("PROFILE") && status.error?.detail?.includes("ERR_MODULE_NOT_FOUND") ? "startup.moduleFailure" : code.includes("PROFILE") ? "startup.profileFailure" : code === "DSH_READINESS_TIMEOUT" ? "startup.timeoutFailure" : "startup.failureMessage");
     element("status-message").hidden = !failed || !!missing || !!lastError;
+    renderPluginFault(failed && !missing ? status.pluginFault?.plugins ?? [] : []);
     node.disabled = dsh.disabled = releases.disabled = busy || active() || !snapshot;
     downloadNode.disabled = busy || active() || !snapshot;
     downloadDsh.disabled = busy || active() || !downloadableVersion() || !!installedRuntime();
