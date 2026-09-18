@@ -37,14 +37,19 @@ silently mutate DSH-owned data.
 - Runtime, DSH data-directory and profile switches are serialized. A candidate
   becomes current only when ready. Failure follows the automatic-recovery or
   user-choice preference; recovery requires an available version snapshot.
-- Current-profile plugin associations can be inspected and changed through DSH
-  commands. Non-current profiles are read-only.
+- Current-profile plugins can be inspected, installed, upgraded, disabled,
+  enabled and removed. A disabled plugin stays installed but DSH does not load
+  it; dsh-work keeps it disabled across later plugin commands. DSH distribution
+  packages cannot be disabled. Non-current profiles are read-only.
 - Successful normal startup records the last successful version snapshot.
   Settings Overview presents a compact record summary and save action, with
   history and selected-record management in a dedicated dialog.
 - Settings General offers automatic recovery of the last successful snapshot or
   user choice. The failed-startup surface offers retry, snapshot recovery and
-  safe mode. In Settings Overview, “启动安全模式” sits beside “切换环境”.
+  safe mode. When the failure output names installed third-party plugins, it
+  also offers to disable or remove each one and then starts again; a failure
+  caused by damaged DSH session data names no plugin. In Settings Overview,
+  “启动安全模式” sits beside “切换环境”.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
   manager, then verifies startup. Safe mode uses a separate clean data directory
   and preserves normal-environment success records. Once a normal environment

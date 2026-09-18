@@ -42,12 +42,13 @@ in the documents linked from `docs/README.md`.
 | DSH home | DSH's external technical name for a DSH data directory. dsh-work's domain term is DSH data directory. | A Configured Run context or a Workspace. |
 | DSH profile | A named configuration scope inside one DSH data directory. The profile owns the plugin association set used when that profile runs. | A runtime, a Workspace, or a global plugin set. |
 | DSH plugin | An extension package associated with a profile within a DSH data directory. Its association is not global to the runtime or dsh-work. | A runtime component or a dsh-work-global setting. |
+| Disabled plugin | An installed third-party plugin that dsh-work keeps out of its profile's layer list, so DSH loads neither its code nor its patches. It stays installed and can be enabled again at its previous position. | An uninstalled plugin, or a single loader entry turned off by a `disabled` patch row. |
 | DSH Workspace | A DSH-owned persistent record for a canonical directory, its identity/title and associated sessions. | The DSH data directory, a profile, or a dsh-work setting. |
 | Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. | A field in dsh-work's run context. |
 | Run context | The complete dsh-work selection of one DSH runtime, Node selection, DSH data directory and profile that defines one Worker generation. | A Workspace context or a durable settings document. |
 | Configured Run context | The Run context persisted as dsh-work's selected context. While dsh-work is running, changing it starts an immediate context switch rather than waiting for another launch. | A deferred or partially selected target. |
 | Known-good run context | The last run context that reached a healthy ready state whose recorded versions identify a recovery target; restoring it requires an available compatible snapshot. | An unverified candidate. |
-| Current profile | The profile in the current healthy Run context. Only this profile's plugin associations may be modified; non-current profiles are read-only. | The profile merely selected for inspection. |
+| Current profile | The profile in the current healthy Run context. Only this profile's plugin associations may be modified, apart from the startup-failure plugin actions in ownership rule 5; non-current profiles are read-only. | The profile merely selected for inspection. |
 | Context switch | A user-requested change of runtime, DSH data directory or profile that takes effect by restarting the Worker and completes only after the new context is ready; failure follows the configured recovery policy. | Editing a deferred selection without applying it. |
 | Version record (internal: version snapshot) | Exact DSH and installed plugin versions/sources, dependency groups, bundle order, lock/workspace inputs and verification metadata used to reconstruct an environment. | A copy of installed package trees or conversation data. |
 | Last successful snapshot | The latest verified success record for a profile; a separate last-running pointer identifies the previous successful environment for switches. | Proof that a Worker is currently alive. |
@@ -66,7 +67,10 @@ in the documents linked from `docs/README.md`.
 5. The profile in the current run context is the only DSH profile whose plugin
    associations dsh-work may modify. Non-current profiles are read-only until the
    user switches the run context to that profile. Snapshot recovery may reapply
-   recorded plugin inputs while the Worker is stopped.
+   recorded plugin inputs while the Worker is stopped. When a start fails,
+   dsh-work may also disable or remove a third-party plugin that the failure
+   output named, in the profile that failed, while no Worker is running and no
+   run context is current.
 6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch follows the configured recovery policy.

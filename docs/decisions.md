@@ -68,7 +68,8 @@ context. The candidate becomes current only after readiness and authenticated ch
 failure follows the user's recovery preference. Automatic recovery uses a
 verified version snapshot and is bounded to prevent retry loops. Normal plugin
 mutation requires the current healthy profile; recovery reapplies recorded
-inputs after the Worker has stopped. Manager operations are serialized across
+inputs after the Worker has stopped. The startup-failure plugin actions in
+ADR-0018 are the one exception. Manager operations are serialized across
 desktop and CLI.
 
 ## ADR-0009 — Field-compatible manager state
