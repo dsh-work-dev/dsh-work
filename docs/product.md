@@ -40,7 +40,10 @@ silently mutate DSH-owned data.
 - Current-profile plugins can be inspected, installed, upgraded, disabled,
   enabled and removed. A disabled plugin stays installed but DSH does not load
   it; dsh-work keeps it disabled across later plugin commands. DSH distribution
-  packages cannot be disabled. Non-current profiles are read-only.
+  packages cannot be disabled as a whole, but their individual loader entries
+  can be disabled and enabled. Non-current profiles are read-only.
+- Plugin update availability comes from a registry check that runs whenever
+  the current profile is running.
 - Successful normal startup records the last successful version snapshot.
   Settings Overview presents a compact record summary and save action, with
   history and selected-record management in a dedicated dialog.

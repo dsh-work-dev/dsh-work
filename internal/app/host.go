@@ -606,6 +606,20 @@ func (h *Host) SetPluginDisabled(ctx context.Context, request dshmanager.PluginD
 	})
 }
 
+// SetLoaderEntryDisabled turns an official loader entry of the current profile
+// off or back on inside the same stopped-Worker transaction.
+func (h *Host) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (dshmanager.PluginResult, error) {
+	manager, ok := h.deps.Manager.(interface {
+		ApplyLoaderEntryDisabled(context.Context, dshmanager.ResolvedLaunch, string, bool) (dshmanager.PluginResult, error)
+	})
+	if !ok {
+		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
+	}
+	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+		return manager.ApplyLoaderEntryDisabled(ctx, launch, request.ID, request.Disabled)
+	})
+}
+
 func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, spec, operation string) (dshmanager.PluginResult, error) {
 	manager, ok := h.deps.Manager.(interface {
 		ApplyPlugin(context.Context, dshmanager.ResolvedLaunch, string, string) (dshmanager.PluginResult, error)

@@ -165,7 +165,7 @@ type PluginCommandBuilder interface {
 	Prepare(string) ([]string, error)
 	Remove(string, string) ([]string, error)
 	List(string) ([]string, error)
-	Outdated(string, string) ([]string, error)
+	Outdated(string) ([]string, error)
 	Update(string, string, string) ([]string, error)
 }
 
@@ -1301,13 +1301,20 @@ func (a pluginAttemptAdapter) Attempt(ctx context.Context, request acquisition.A
 	} else if a.operation == "update" {
 		args, err = a.commands.Update(a.profile.Name, a.packageName, request.Candidate.Location)
 	} else {
-		args, err = a.commands.Outdated(a.profile.Name, request.Candidate.Location)
+		args, err = a.commands.Outdated(a.profile.Name)
 	}
 	if err != nil {
 		return acquisition.AttemptResult{}, acquisition.Failure{Kind: acquisition.FailureSemantic, Summary: "plugin command is invalid", Cause: err}
 	}
-	result, err := a.runner.Run(ctx, a.runtime.Path, args, cloneEnvironment(a.environment), a.dataDirectory.Path)
-	if err != nil {
+	environment := cloneEnvironment(a.environment)
+	if a.operation == "outdated" {
+		// pnpm outdated rejects --registry but reads the npm config environment.
+		environment["npm_config_registry"] = request.Candidate.Location
+	}
+	result, err := a.runner.Run(ctx, a.runtime.Path, args, environment, a.dataDirectory.Path)
+	// pnpm outdated exits non-zero whenever a package is outdated; its JSON
+	// report on stdout is still the result.
+	if err != nil && !(a.operation == "outdated" && isOutdatedReport(result.Stdout)) {
 		return acquisition.AttemptResult{}, classifyPluginAttemptFailure(result, err)
 	}
 	payload := ""
@@ -1318,6 +1325,11 @@ func (a pluginAttemptAdapter) Attempt(ctx context.Context, request acquisition.A
 		}
 	}
 	return acquisition.AttemptResult{ResolvedIdentity: request.Identity, PayloadPath: payload}, nil
+}
+
+func isOutdatedReport(stdout string) bool {
+	var report map[string]json.RawMessage
+	return json.Unmarshal([]byte(strings.TrimSpace(stdout)), &report) == nil
 }
 
 func classifyPluginAttemptFailure(result CommandResult, err error) acquisition.Failure {

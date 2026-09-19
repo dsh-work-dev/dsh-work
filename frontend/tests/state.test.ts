@@ -4,7 +4,7 @@ import test from "node:test";
 
 import {runningLaunchSelection, startupProfileName, viewModel, type LifecycleStatus} from "../src/lifecycle";
 import {buildOverviewModel, sameRunContext} from "../src/overview";
-import {runtimePreparationArtifactKind, runtimePreparationProgressPercent} from "../src/manager";
+import {filterLoaderLayers, mergePluginObservation, runtimePreparationArtifactKind, runtimePreparationProgressPercent} from "../src/manager";
 import {hasTranslationInEveryLocale, isStaticCopy} from "../src/i18n";
 import {DataDirectoryOwnership, NodeSelectionKind, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 
@@ -224,4 +224,42 @@ test("a failed attempt does not overwrite the next manual runtime selection", ()
   assert.equal(runningLaunchSelection(status({state: "Starting", launchSelection})), launchSelection);
   assert.equal(runningLaunchSelection(status({state: "Failed", launchSelection})), undefined);
   assert.equal(runningLaunchSelection(status({state: "Stopped", launchSelection})), undefined);
+});
+
+test("the loader tree search keeps only matching entries under their layer", () => {
+  const layers = [
+    {package: "@deepseek-ai/dsh-base", entries: [
+      {id: "web-search-deepseek", package: "@deepseek-ai/dsh-web-search-deepseek"},
+      {id: "tool-bash", package: "@deepseek-ai/dsh-bash-sandbox", defaultDisabled: true}
+    ]},
+    {package: "@deepseek-ai/dsh-web-app", entries: [{id: "workspace", package: "@deepseek-ai/dsh-api-workspace-controller"}]}
+  ] as never;
+  assert.equal(filterLoaderLayers(layers, "").length, 2);
+  const matches = filterLoaderLayers(layers, "  WEB-search ");
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].package, "@deepseek-ai/dsh-base");
+  assert.deepEqual(matches[0].entries.map(entry => entry.id), ["web-search-deepseek"]);
+  // Package names match too.
+  assert.deepEqual(filterLoaderLayers(layers, "bash-sandbox")[0].entries.map(entry => entry.id), ["tool-bash"]);
+  for (const key of ["plugins.official", "plugins.searchEntries", "plugins.noMatches", "value.defaultOff", "value.conditional"]) {
+    assert.equal(hasTranslationInEveryLocale(key), true, key);
+  }
+});
+
+test("a registry observation survives a snapshot refresh", () => {
+  const snapshotPlugins = [
+    {name: "dsh-rewind-plugin", package: "dsh-rewind-plugin", spec: "^0.12.2", version: "0.12.2", sourceKind: "public-registry", updateCheck: "unknown", disabled: true},
+    {name: "@acme/local", package: "@acme/local", spec: "link:../local", sourceKind: "local", updateCheck: "unknown"}
+  ] as never;
+  const observed = [
+    {name: "dsh-rewind-plugin", package: "dsh-rewind-plugin", version: "0.12.2", currentVersion: "0.12.2", availableVersion: "0.13.0", sourceKind: "public-registry", successfulRoute: "official", updateCheck: "available", disabled: false}
+  ] as never;
+  const merged = mergePluginObservation(snapshotPlugins, observed);
+  assert.equal(merged[0].successfulRoute, "official");
+  assert.equal(merged[0].updateCheck, "available");
+  assert.equal(merged[0].availableVersion, "0.13.0");
+  // Membership and disabled state come from the newer snapshot.
+  assert.equal(merged[0].disabled, true);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1].sourceKind, "local");
 });

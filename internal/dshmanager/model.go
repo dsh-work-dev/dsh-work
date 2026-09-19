@@ -241,6 +241,34 @@ type PluginUpgradeRequest struct {
 	Package string       `json:"package"`
 }
 
+// LoaderLayer is one official profile layer and the loader entries it
+// inserts into the profile's plugin tree.
+type LoaderLayer struct {
+	Package string        `json:"package"`
+	Entries []LoaderEntry `json:"entries"`
+}
+
+// LoaderEntry is one row of the loader tree. DefaultDisabled means the layers
+// turn it off outright; Conditional means a layer decides at load time.
+// Disabled means the profile's own patch layer turns it off.
+type LoaderEntry struct {
+	ID              string `json:"id"`
+	Package         string `json:"package"`
+	DefaultDisabled bool   `json:"defaultDisabled,omitempty"`
+	Conditional     bool   `json:"conditional,omitempty"`
+	Disabled        bool   `json:"disabled,omitempty"`
+}
+
+type LoaderEntryListRequest struct {
+	Target PluginTarget `json:"target"`
+}
+
+type LoaderEntryDisableRequest struct {
+	Target   PluginTarget `json:"target"`
+	ID       string       `json:"id"`
+	Disabled bool         `json:"disabled"`
+}
+
 // PluginDisableRequest disables (or, with Disabled false, re-enables) one
 // installed plugin without uninstalling it.
 type PluginDisableRequest struct {

@@ -203,6 +203,24 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	return value, err
 }
 
+func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error) {
+	if s.Local != nil {
+		return s.Local.ListLoaderEntries(ctx, request)
+	}
+	var value []dshmanager.LoaderLayer
+	err := call(ctx, s.Client, "ManagerService", "ListLoaderEntries", []any{request}, &value)
+	return value, err
+}
+
+func (s *ManagerService) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s.Local != nil {
+		return s.Local.SetLoaderEntryDisabled(ctx, request)
+	}
+	var value dshmanager.PluginResult
+	err := call(ctx, s.Client, "ManagerService", "SetLoaderEntryDisabled", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s.Local != nil {
 		return s.Local.UpgradePlugin(ctx, request)

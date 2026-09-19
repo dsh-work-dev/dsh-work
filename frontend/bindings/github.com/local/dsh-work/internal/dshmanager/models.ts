@@ -54,6 +54,38 @@ export interface LaunchRequest {
 }
 
 /**
+ * LoaderEntry is one row of the loader tree. DefaultDisabled means the layers
+ * turn it off outright; Conditional means a layer decides at load time.
+ * Disabled means the profile's own patch layer turns it off.
+ */
+export interface LoaderEntry {
+    "id": string;
+    "package": string;
+    "defaultDisabled"?: boolean;
+    "conditional"?: boolean;
+    "disabled"?: boolean;
+}
+
+export interface LoaderEntryDisableRequest {
+    "target": PluginTarget;
+    "id": string;
+    "disabled": boolean;
+}
+
+export interface LoaderEntryListRequest {
+    "target": PluginTarget;
+}
+
+/**
+ * LoaderLayer is one official profile layer and the loader entries it
+ * inserts into the profile's plugin tree.
+ */
+export interface LoaderLayer {
+    "package": string;
+    "entries": LoaderEntry[] | null;
+}
+
+/**
  * NodeInstallationInfo is one immutable managed installation or the current
  * system observation. Paths remain trusted-Settings data and are never copied
  * into acquisition provenance.

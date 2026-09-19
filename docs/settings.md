@@ -40,7 +40,7 @@ the current Settings instance.
 | Overview | Current/configured/recovery context, switch and safe-mode actions; compact version-record summary and save/history controls. |
 | Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. |
 | Profiles | Directory and selected-profile editor; backup is a primary action, with clone/export/delete grouped as secondary actions. Backup count/latest time leads to a history dialog. |
-| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Disable or Enable beside Remove, and a disabled plugin is marked in its details. Operation feedback sits near its controls. |
+| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Disable or Enable beside Remove, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry; each entry offers Disable or Enable unless the layers already turn it off. Operation feedback sits near its controls. |
 | Pets | Compact name/thumbnail/source/current-state list and preview. Use, topmost and size controls precede the full description. |
 | General and Notifications | Visible labels, aligned controls and short supporting text. |
 | Storage and About | Direct maintenance controls and contextual feedback. |

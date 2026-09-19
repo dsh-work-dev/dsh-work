@@ -77,6 +77,10 @@ export function InstallRuntime(version: string): $CancellablePromise<dshmanager$
     return $Call.ByID(778756996, version);
 }
 
+export function ListLoaderEntries(request: dshmanager$0.LoaderEntryListRequest): $CancellablePromise<dshmanager$0.LoaderLayer[] | null> {
+    return $Call.ByID(4173035054, request);
+}
+
 export function ListPlugins(request: dshmanager$0.PluginListRequest): $CancellablePromise<dshmanager$0.PluginInfo[] | null> {
     return $Call.ByID(2803065503, request);
 }
@@ -155,6 +159,10 @@ export function RetryLastSwitch(): $CancellablePromise<dshmanager$0.Snapshot> {
 
 export function SaveRestorePoint(label: string): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(1651157004, label);
+}
+
+export function SetLoaderEntryDisabled(request: dshmanager$0.LoaderEntryDisableRequest): $CancellablePromise<dshmanager$0.PluginResult> {
+    return $Call.ByID(3732322700, request);
 }
 
 export function SetPluginDisabled(request: dshmanager$0.PluginDisableRequest): $CancellablePromise<dshmanager$0.PluginResult> {

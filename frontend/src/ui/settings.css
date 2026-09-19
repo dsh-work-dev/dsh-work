@@ -188,6 +188,7 @@ html[data-surface="settings"] #host-surface { display: none; }
   .profile-directory .manager-list-item > div:first-child { grid-column: 1 / -1; }
   .profile-detail-heading { padding-top: 0; }
   .plugin-management { border-top: 0; }
+  .plugin-install-row { margin-top: 0; margin-bottom: 24px; }
   .manager-list-item { padding: 12px; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--line); transition: background-color var(--motion-fast); }
   .manager-list-item > div:first-child { flex: 1 1 180px; }
   .manager-list-item strong, .plugin-list-item strong { font-size: 15px; }
@@ -203,6 +204,12 @@ html[data-surface="settings"] #host-surface { display: none; }
   .plugin-list { border-top: 0; }
   .plugin-list-item { flex-wrap: wrap; }
   .plugin-list-item > div { min-width: 0; flex: 1 1 180px; }
+  .plugin-official { margin-top: 16px; border-top: 1px solid var(--line); }
+  .plugin-official > summary { min-height: 44px; padding: 10px 0; cursor: pointer; font-size: 14px; }
+  .plugin-official .loader-search { width: 100%; margin: 4px 0 8px; }
+  .loader-layer { margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .loader-layer > summary { min-height: 40px; padding: 8px 0; cursor: pointer; font-family: var(--font-mono); font-size: 13px; overflow-wrap: anywhere; }
+  .loader-layer .plugin-list-item span { overflow-wrap: anywhere; }
   .data-directory-register-card { padding-top: 0; }
   .data-directory-register-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
   .data-directory-register-grid .wide-field { grid-column: 1 / -1; }
