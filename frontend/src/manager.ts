@@ -5,7 +5,7 @@ import {Events} from "@wailsio/runtime";
 
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
-import {NodeSelectionKind, type DataDirectoryInfo, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {mountOperationLog} from "./operation-log";
 import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
@@ -34,6 +34,8 @@ const installPlugin = ManagerService.InstallPlugin;
 const listPlugins = ManagerService.ListPlugins;
 const removePlugin = ManagerService.RemovePlugin;
 const setPluginDisabled = ManagerService.SetPluginDisabled;
+const listLoaderEntries = ManagerService.ListLoaderEntries;
+const setLoaderEntryDisabled = ManagerService.SetLoaderEntryDisabled;
 const upgradePlugin = ManagerService.UpgradePlugin;
 const renameProfile = ManagerService.RenameProfile;
 const cloneProfile = ManagerService.CloneProfile;
@@ -130,6 +132,34 @@ function sectionName(value: string | null): ManagerSection {
   return "overview";
 }
 
+// filterLoaderLayers keeps the loader entries whose id or package matches the
+// query, dropping layers left without a match.
+export function filterLoaderLayers(layers: LoaderLayer[], query: string): Array<LoaderLayer & {entries: LoaderEntry[]}> {
+  const needle = query.trim().toLowerCase();
+  return layers
+    .map(layer => ({...layer, entries: (layer.entries ?? []).filter(entry => !needle || entry.id.toLowerCase().includes(needle) || entry.package.toLowerCase().includes(needle))}))
+    .filter(layer => !needle || layer.entries.length > 0);
+}
+
+// mergePluginObservation copies registry details from a ListPlugins result onto
+// a newer snapshot listing, which stays authoritative for membership and state.
+export function mergePluginObservation(plugins: PluginInfo[], observed: PluginInfo[]): PluginInfo[] {
+  const byPackage = new Map(observed.map(plugin => [plugin.package || plugin.name, plugin]));
+  return plugins.map(plugin => {
+    const match = byPackage.get(plugin.package || plugin.name);
+    if (!match) return plugin;
+    return {
+      ...plugin,
+      sourceKind: match.sourceKind,
+      successfulRoute: match.successfulRoute,
+      version: match.version || plugin.version,
+      currentVersion: match.currentVersion || plugin.currentVersion,
+      availableVersion: match.availableVersion,
+      updateCheck: match.updateCheck
+    };
+  });
+}
+
 export function mountManager() {
   const runtime = document.getElementById("manager-runtime") as HTMLSelectElement;
   const node = document.getElementById("manager-node") as HTMLSelectElement;
@@ -205,6 +235,11 @@ export function mountManager() {
   let currentSection = sectionName(query.get("section"));
   let snapshot: ManagerSnapshot | undefined;
   let hostStatus: HostLifecycleStatus | undefined;
+  let pluginObservation: {profile: string; plugins?: PluginInfo[]; layers?: LoaderLayer[]} | undefined;
+  let pluginObservationGeneration = 0;
+  let pluginObservationInFlight: string | undefined;
+  // The loader tree starts collapsed for each profile shown.
+  let loaderTree = {profile: "", open: false, query: "", openLayers: new Set<string>()};
   let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
     ? {dataDirectoryId: initialDataDirectory, name: initialProfile}
     : undefined;
@@ -546,60 +581,131 @@ export function mountManager() {
       empty.className = "manager-empty";
       empty.textContent = item.exists ? t("profiles.noPlugins") : t("value.notInitialized");
       profilePlugins.append(empty);
-      return;
     }
     for (const plugin of plugins) {
-      const row = document.createElement("div");
-      row.className = "plugin-list-item";
-      const text = document.createElement("div");
-      const name = document.createElement("strong");
-      name.textContent = plugin.name;
-      const detail = document.createElement("span");
-      const currentVersion = plugin.currentVersion || plugin.version;
-      detail.textContent = [
-        plugin.disabled ? t("value.pluginDisabled") : "",
-        pluginSourceLabel(plugin),
-        currentVersion ? t("value.currentVersion", {version: currentVersion}) : t("value.installed"),
-        plugin.availableVersion ? t("value.availableVersion", {version: plugin.availableVersion}) : "",
-      ].filter(Boolean).join(" · ");
-      if (!item.launchable) detail.textContent = t("profiles.noDesktop");
-      text.append(name, detail);
-      if (mutable) {
-        if (plugin.updateCheck === "available") {
-          const upgradeButton = document.createElement("button");
-          upgradeButton.className = "button button-primary";
-          upgradeButton.type = "button";
-          upgradeButton.textContent = t("action.upgrade");
-          upgradeButton.dataset.pluginRemove = "true";
-          upgradeButton.addEventListener("click", () => void mutatePlugin("upgrade", plugin.package || plugin.name, upgradeButton));
-          row.append(text, upgradeButton);
-        }
-        const packageName = plugin.package || plugin.name;
-        if (!row.contains(text)) {
-          row.append(text);
-        }
-        // DSH distribution packages are never disabled.
-        if (!packageName.startsWith("@deepseek-ai/")) {
-          const toggleButton = document.createElement("button");
-          toggleButton.className = "button button-secondary";
-          toggleButton.type = "button";
-          toggleButton.textContent = t(plugin.disabled ? "action.enable" : "action.disable");
-          toggleButton.dataset.pluginRemove = "true";
-          toggleButton.addEventListener("click", () => void mutatePlugin(plugin.disabled ? "enable" : "disable", packageName, toggleButton));
-          row.append(toggleButton);
-        }
-        const removeButton = document.createElement("button");
-        removeButton.className = "button button-secondary";
-        removeButton.type = "button";
-        removeButton.textContent = t("action.remove");
-        removeButton.dataset.pluginRemove = "true";
-        removeButton.addEventListener("click", () => void mutatePlugin("remove", packageName, removeButton));
-        row.append(removeButton);
-      } else {
-        row.append(text);
-      }
-      profilePlugins.append(row);
+      profilePlugins.append(pluginRow(item, plugin, mutable));
     }
+    renderLoaderTree(item, mutable);
+  }
+
+  function pluginRow(item: ManagerProfile, plugin: PluginInfo, mutable: boolean): HTMLDivElement {
+    const row = document.createElement("div");
+    row.className = "plugin-list-item";
+    const text = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = plugin.name;
+    const detail = document.createElement("span");
+    const currentVersion = plugin.currentVersion || plugin.version;
+    detail.textContent = [
+      plugin.disabled ? t("value.pluginDisabled") : "",
+      pluginSourceLabel(plugin),
+      currentVersion ? t("value.currentVersion", {version: currentVersion}) : t("value.installed"),
+      plugin.availableVersion ? t("value.availableVersion", {version: plugin.availableVersion}) : "",
+    ].filter(Boolean).join(" · ");
+    if (!item.launchable) detail.textContent = t("profiles.noDesktop");
+    text.append(name, detail);
+    row.append(text);
+    if (!mutable) return row;
+    const packageName = plugin.package || plugin.name;
+    if (plugin.updateCheck === "available") {
+      row.append(pluginButton("action.upgrade", "button-primary", () => mutatePlugin("upgrade", packageName)));
+    }
+    // DSH distribution packages are never disabled.
+    if (!packageName.startsWith("@deepseek-ai/")) {
+      row.append(pluginButton(plugin.disabled ? "action.enable" : "action.disable", "button-secondary", () => mutatePlugin(plugin.disabled ? "enable" : "disable", packageName)));
+    }
+    row.append(pluginButton("action.remove", "button-secondary", () => mutatePlugin("remove", packageName)));
+    return row;
+  }
+
+  function pluginButton(label: string, tone: string, action: () => Promise<void>): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.className = `button ${tone}`;
+    button.type = "button";
+    button.textContent = t(label);
+    button.dataset.pluginRemove = "true";
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      void action();
+    });
+    return button;
+  }
+
+  // renderLoaderTree shows the current profile's official loader entries as
+  // official layer -> entry, inside a section that starts collapsed.
+  function renderLoaderTree(item: ManagerProfile, mutable: boolean) {
+    const key = `${item.ref.dataDirectoryId}/${item.ref.name}`;
+    const layers = pluginObservation?.profile === key ? pluginObservation.layers : undefined;
+    if (!layers || layers.length === 0) return;
+    if (loaderTree.profile !== key) loaderTree = {profile: key, open: false, query: "", openLayers: new Set()};
+    const section = document.createElement("details");
+    section.className = "plugin-official";
+    section.open = loaderTree.open;
+    section.addEventListener("toggle", () => {
+      loaderTree.open = section.open;
+    });
+    const summary = document.createElement("summary");
+    summary.textContent = t("plugins.official", {count: layers.reduce((total, layer) => total + (layer.entries?.length ?? 0), 0)});
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "loader-search";
+    search.placeholder = t("plugins.searchEntries");
+    search.setAttribute("aria-label", t("plugins.searchEntries"));
+    search.value = loaderTree.query;
+    const tree = document.createElement("div");
+    tree.className = "loader-tree";
+    const renderTree = () => {
+      tree.replaceChildren();
+      const searching = !!loaderTree.query.trim();
+      const visible = filterLoaderLayers(layers, loaderTree.query);
+      if (visible.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "manager-empty";
+        empty.textContent = t("plugins.noMatches");
+        tree.append(empty);
+        return;
+      }
+      for (const layer of visible) {
+        const group = document.createElement("details");
+        group.className = "loader-layer";
+        // A search opens every layer with a match.
+        group.open = searching || loaderTree.openLayers.has(layer.package);
+        group.addEventListener("toggle", () => {
+          if (searching) return;
+          if (group.open) loaderTree.openLayers.add(layer.package);
+          else loaderTree.openLayers.delete(layer.package);
+        });
+        const title = document.createElement("summary");
+        title.textContent = `${layer.package} (${layer.entries.length})`;
+        group.append(title);
+        for (const entry of layer.entries) {
+          const row = document.createElement("div");
+          row.className = "plugin-list-item";
+          const text = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = entry.id;
+          const detail = document.createElement("span");
+          detail.textContent = [
+            entry.disabled ? t("value.pluginDisabled") : entry.defaultDisabled ? t("value.defaultOff") : entry.conditional ? t("value.conditional") : "",
+            entry.package
+          ].filter(Boolean).join(" · ");
+          text.append(name, detail);
+          row.append(text);
+          if (mutable && (entry.disabled || !entry.defaultDisabled)) {
+            row.append(pluginButton(entry.disabled ? "action.enable" : "action.disable", "button-secondary", () => mutatePlugin(entry.disabled ? "enable-entry" : "disable-entry", entry.id)));
+          }
+          group.append(row);
+        }
+        tree.append(group);
+      }
+    };
+    search.addEventListener("input", () => {
+      loaderTree.query = search.value;
+      renderTree();
+    });
+    renderTree();
+    section.append(summary, search, tree);
+    profilePlugins.append(section);
   }
 
   function renderProfileDetail() {
@@ -1119,22 +1225,65 @@ export function mountManager() {
     }
   }
 
+  // The snapshot lists plugins without their registry source or update check.
+  // ListPlugins observes both; the result is kept per profile and re-applied
+  // to each later snapshot until a plugin change invalidates it.
+  function currentPluginProfileKey(): string | undefined {
+    const current = snapshot?.current;
+    return current ? `${current.profile.dataDirectoryId}/${current.profile.name}` : undefined;
+  }
+
+  function applyPluginObservation() {
+    const current = snapshot?.current;
+    if (!current || !pluginObservation?.plugins || pluginObservation.profile !== currentPluginProfileKey()) return;
+    const item = snapshot?.profiles?.find((profileItem) => sameProfileRef(profileItem.ref, current.profile));
+    if (item) item.plugins = mergePluginObservation(item.plugins ?? [], pluginObservation.plugins);
+  }
+
+  function invalidatePluginObservation() {
+    pluginObservation = undefined;
+    pluginObservationGeneration++;
+  }
+
+  // Loader entries are local files and render first; the registry check
+  // behind the plugin details can take longer.
   async function refreshCurrentPluginObservation() {
-	const current = snapshot?.current;
-	if (!snapshot || !current || hostStatus?.state !== "Ready") return;
-	try {
-		const plugins = await listPlugins({target: {profile: current.profile}}) ?? [];
-		const item = snapshot.profiles?.find((profileItem) => sameProfileRef(profileItem.ref, current.profile));
-		if (item) { item.plugins = plugins; item.pluginCount = plugins.length; }
-	} catch (error) {
-		console.error("Could not refresh current plugin observation", error);
-	}
+    const current = snapshot?.current;
+    const profile = currentPluginProfileKey();
+    if (!snapshot || !current || !profile || hostStatus?.state !== "Ready") return;
+    const generation = ++pluginObservationGeneration;
+    const observation: {profile: string; plugins?: PluginInfo[]; layers?: LoaderLayer[]} = {profile};
+    pluginObservation = observation;
+    // A plugin change or newer observation supersedes this one.
+    const stale = () => generation !== pluginObservationGeneration;
+    const layers = listLoaderEntries({target: {profile: current.profile}}).then((result) => {
+      if (stale()) return;
+      observation.layers = result ?? [];
+      renderProfiles();
+    }, (error) => console.error("Could not list official loader entries", error));
+    const plugins = listPlugins({target: {profile: current.profile}}).then((result) => {
+      if (stale()) return;
+      observation.plugins = result ?? [];
+      applyPluginObservation();
+    }, (error) => console.error("Could not refresh current plugin observation", error));
+    await Promise.all([layers, plugins]);
+  }
+
+  function observePluginsIfNeeded() {
+    const profile = currentPluginProfileKey();
+    if (!profile || hostStatus?.state !== "Ready" || pluginObservation?.profile === profile || pluginObservationInFlight === profile) return;
+    pluginObservationInFlight = profile;
+    void refreshCurrentPluginObservation().finally(() => {
+      if (pluginObservationInFlight === profile) pluginObservationInFlight = undefined;
+      renderProfiles();
+    });
   }
 
   async function refresh(preferredProfile?: ManagerProfileRef) {
     loadRetry.disabled = true;
     try {
       [snapshot, hostStatus] = await Promise.all([getSnapshot(), getHostStatus()]);
+      applyPluginObservation();
       loadState.hidden = true;
       setContextControlsDisabled(mutationBlocked());
       applyTheme(snapshot.theme);
@@ -1146,6 +1295,7 @@ export function mountManager() {
       showSection(currentSection);
       themeSyncAvailable = true;
       startThemeSync();
+      observePluginsIfNeeded();
     } catch (error) {
       loadState.hidden = false; loadRetry.hidden = false;
       loadMessage.textContent = t("view.unavailable");
@@ -1262,7 +1412,7 @@ export function mountManager() {
     }
   }
 
-  async function mutatePlugin(operation: "install" | "upgrade" | "remove" | "disable" | "enable", packageOverride?: string, sourceButton?: HTMLButtonElement) {
+  async function mutatePlugin(operation: "install" | "upgrade" | "remove" | "disable" | "enable" | "disable-entry" | "enable-entry", packageOverride?: string) {
     const packageSpec = (packageOverride ?? packageInput.value).trim();
     if (!packageSpec) {
       pluginsFeedback(t("error.enterPackage"), "error");
@@ -1274,19 +1424,19 @@ export function mountManager() {
     try {
       const target = explicitPluginTarget();
       setPluginControlsDisabled(true);
-      if (sourceButton) {
-        sourceButton.disabled = true;
-      }
-      const result = operation === "install"
+      const result = operation === "disable-entry" || operation === "enable-entry"
+        ? await setLoaderEntryDisabled({target, id: packageSpec, disabled: operation === "disable-entry"})
+        : operation === "install"
         ? await installPlugin({target, package: packageSpec})
         : operation === "upgrade"
           ? await upgradePlugin({target, package: packageSpec})
           : operation === "remove"
             ? await removePlugin({target, package: packageSpec})
             : await setPluginDisabled({target, package: packageSpec, disabled: operation === "disable"});
+      invalidatePluginObservation();
       await refresh(target.profile);
       document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
-      const feedbackKey = {install: "feedback.pluginInstalled", upgrade: "feedback.pluginUpgraded", remove: "feedback.pluginRemoved", disable: "feedback.pluginDisabled", enable: "feedback.pluginEnabled"}[operation];
+      const feedbackKey = {install: "feedback.pluginInstalled", upgrade: "feedback.pluginUpgraded", remove: "feedback.pluginRemoved", disable: "feedback.pluginDisabled", enable: "feedback.pluginEnabled", "disable-entry": "feedback.entryDisabled", "enable-entry": "feedback.entryEnabled"}[operation];
       pluginsFeedback(result.restartRequired
         ? t("feedback.pluginChangedRestart")
         : t(feedbackKey, {profile: result.profile.name}), "success", result.restartRequired);

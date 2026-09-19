@@ -502,6 +502,36 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	return s.manager.SetPluginDisabled(ctx, request)
 }
 
+// ListLoaderEntries lists the current profile's official loader entries.
+func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error) {
+	if s == nil || s.manager == nil {
+		return nil, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return nil, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.ListLoaderEntries(ctx, request)
+}
+
+// SetLoaderEntryDisabled turns an official loader entry of the current
+// profile off or back on through the profile's own patch layer.
+func (s *ManagerService) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	if s.host != nil {
+		return s.host.SetLoaderEntryDisabled(ctx, request)
+	}
+	return s.manager.SetLoaderEntryDisabled(ctx, request)
+}
+
 func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()

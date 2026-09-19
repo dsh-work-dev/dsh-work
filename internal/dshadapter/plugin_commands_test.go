@@ -27,18 +27,19 @@ func TestPluginCommandsBuildProfileScopedDSHArguments(t *testing.T) {
 	if got, want := joinArgs(list), "plugin --profile coding list --depth 0 --json"; got != want {
 		t.Fatalf("list args = %q", got)
 	}
-	outdated, err := commands.Outdated("coding", "https://registry.npmjs.org/")
+	// pnpm outdated rejects --registry; the Host passes the registry by environment.
+	outdated, err := commands.Outdated("coding")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := joinArgs(outdated), "plugin --profile coding outdated --format json --registry https://registry.npmjs.org/"; got != want {
+	if got, want := joinArgs(outdated), "plugin --profile coding outdated --format json"; got != want {
 		t.Fatalf("outdated args = %q", got)
 	}
 	update, err := commands.Update("coding", "@example/plugin", "https://registry.npmmirror.com/")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := joinArgs(update), "plugin --profile coding update @example/plugin --registry https://registry.npmmirror.com/"; got != want {
+	if got, want := joinArgs(update), "plugin --profile coding update @example/plugin --latest --registry https://registry.npmmirror.com/"; got != want {
 		t.Fatalf("update args = %q", got)
 	}
 }

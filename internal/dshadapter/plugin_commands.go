@@ -29,19 +29,22 @@ func (PluginCommands) List(profile string) ([]string, error) {
 	return []string{"plugin", "--profile", profile, "list", "--depth", "0", "--json"}, nil
 }
 
-func (PluginCommands) Outdated(profile, registry string) ([]string, error) {
+// Outdated takes no registry flag: pnpm outdated rejects --registry, so the
+// Host passes the registry through the npm config environment.
+func (PluginCommands) Outdated(profile string) ([]string, error) {
 	if !validProfileName(profile) {
 		return nil, fmt.Errorf("invalid DSH plugin outdated target")
 	}
-	args := []string{"plugin", "--profile", profile, "outdated", "--format", "json"}
-	return appendRegistry(args, registry)
+	return []string{"plugin", "--profile", profile, "outdated", "--format", "json"}, nil
 }
 
 func (PluginCommands) Update(profile, packageName, registry string) ([]string, error) {
 	if !validProfileName(profile) || !validPackageSpec(packageName) {
 		return nil, fmt.Errorf("invalid DSH plugin update target")
 	}
-	return appendRegistry([]string{"plugin", "--profile", profile, "update", strings.TrimSpace(packageName)}, registry)
+	// --latest moves past the declared range (a `^0.0.x` range admits only that
+	// patch), matching the latest version the outdated check offers.
+	return appendRegistry([]string{"plugin", "--profile", profile, "update", strings.TrimSpace(packageName), "--latest"}, registry)
 }
 
 func (PluginCommands) InstallAt(profile, packageSpec, registry string) ([]string, error) {

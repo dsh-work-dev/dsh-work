@@ -223,3 +223,25 @@ from ADR-0008.
 
 This decision supersedes the earlier rule that dsh-work never edits DSH
 manifests. The one manifest field dsh-work writes is the bundle list.
+
+## ADR-0019 — Disabling official loader entries
+
+An official loader entry can be turned off without removing the layer that
+inserts it. dsh-work writes an id-targeted `disabled: true` row into the
+profile's own patch layer, `profiles/<name>/cordis.patch.yml`, which DSH applies
+after every layer; enabling removes that key, and the row too when nothing else
+is left in it. The file is edited as a YAML node tree with the existing
+`gopkg.in/yaml.v3` dependency, so the user's other rows, keys and comments stay.
+DSH's plugin commands rebuild only the bundle list, so no dsh-work record is
+needed to keep the row.
+
+dsh-work lists the entries by replaying the layer patches in `bundles` order
+from the profile's and the runtime's packages. Each entry sits under the
+official layer whose `insert` adds it; any later layer's row decides its default
+state. An entry the layers turn off outright cannot be disabled again; one with
+a `!!js` condition can. Changes use the stopped-Worker transaction from
+ADR-0008. `@deepseek-ai/*` layers themselves still cannot be disabled
+(ADR-0018).
+
+This decision extends ADR-0018: the profile's patch layer is the second file
+dsh-work writes in a DSH profile, after the bundle list.

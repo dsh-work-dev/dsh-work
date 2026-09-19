@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -779,6 +780,60 @@ func TestPluginObservationKeepsInstalledRowsWhenOutdatedFails(t *testing.T) {
 	}
 }
 
+// pnpm outdated exits 1 whenever a package is outdated and rejects --registry;
+// the registry reaches it through the environment instead.
+type outdatedExitRunner struct {
+	outdatedArgs []string
+	outdatedEnv  map[string]string
+}
+
+func (r *outdatedExitRunner) Run(_ context.Context, _ string, args []string, env map[string]string, _ string) (CommandResult, error) {
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, " outdated ") {
+		r.outdatedArgs, r.outdatedEnv = append([]string(nil), args...), env
+		return CommandResult{Stdout: `{"@example/public":{"current":"1.2.3","latest":"1.3.0"}}`, Stderr: "dsh: pnpm failed"}, errors.New("exit status 1")
+	}
+	return CommandResult{}, nil
+}
+
+func TestPluginOutdatedExitWithReportStillMarksUpdates(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "home")
+	profilePath := filepath.Join(homePath, "profiles", "alpha")
+	if err := os.MkdirAll(profilePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profilePath, "package.json"), []byte(`{"dependencies":{"@example/public":"^1.2.3"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &outdatedExitRunner{}
+	manager, err := New(Config{StatePath: filepath.Join(root, "manager.json"), DataDirectories: []DataDirectoryInfo{{ID: "home", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}}, Runtimes: []RuntimeInfo{{ID: "dsh", Version: "1.0.0", Path: runtimePath}}, CommandRunner: runner, PluginCommands: testPluginCommands{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := RunContext{RuntimeID: "dsh", Profile: ProfileRef{DataDirectoryID: "home", Name: "alpha"}}
+	if _, err := manager.CommitCurrent(context.Background(), &target); err != nil {
+		t.Fatal(err)
+	}
+	plugins, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: target.Profile}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].UpdateCheck != PluginUpdateAvailable || plugins[0].AvailableVersion != "1.3.0" || plugins[0].SuccessfulRoute != RuntimeArtifactSourceOfficial {
+		t.Fatalf("plugins = %#v", plugins)
+	}
+	if slices.Contains(runner.outdatedArgs, "--registry") {
+		t.Fatalf("outdated args = %q", runner.outdatedArgs)
+	}
+	if runner.outdatedEnv["npm_config_registry"] != "https://registry.npmjs.org/" {
+		t.Fatalf("outdated registry env = %q", runner.outdatedEnv["npm_config_registry"])
+	}
+}
+
 func TestPluginOutdatedMarksAvailableVersionWithoutChangingCurrentVersion(t *testing.T) {
 	plugins := []PluginInfo{{
 		Name: "@example/public", Package: "@example/public", Version: "1.2.3", CurrentVersion: "1.2.3",
@@ -1369,8 +1424,8 @@ func (testPluginCommands) List(profile string) ([]string, error) {
 	return []string{"plugin", "--profile", profile, "list", "--depth", "0", "--json"}, nil
 }
 
-func (testPluginCommands) Outdated(profile, registry string) ([]string, error) {
-	return []string{"plugin", "--profile", profile, "outdated", "--format", "json", "--registry", registry}, nil
+func (testPluginCommands) Outdated(profile string) ([]string, error) {
+	return []string{"plugin", "--profile", profile, "outdated", "--format", "json"}, nil
 }
 
 func (testPluginCommands) Update(profile, packageName, registry string) ([]string, error) {

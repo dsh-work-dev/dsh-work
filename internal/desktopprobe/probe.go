@@ -91,12 +91,19 @@ window.addEventListener('error',e=>results.errors.push(String(e.message).slice(0
 window.addEventListener('unhandledrejection',e=>results.errors.push(String(e.reason).slice(0,200)));
 const report=()=>{const c=WorkerBridge.Stream('probe-report');c.onopen=()=>c.send(new TextEncoder().encode(JSON.stringify(results)));};
 try{
- const started=performance.now();
  const input=new Uint8Array(2*1024*1024+13);for(let i=0;i<input.length;i++)input[i]=i%251;
- const response=await fetch('/__work/probe?action=echo',{method:'POST',body:input});
- const output=new Uint8Array(await response.arrayBuffer());
- if(output.length!==input.length||!output.every((v,i)=>v===input[i]))throw new Error('binary mismatch');
- results.timings.binaryRoundtripMs=performance.now()-started;results.checks.push('2MiB binary upload/download');
+ const binarySamplesMs=[];
+ for(let sample=0;sample<5;sample++){
+  const started=performance.now();
+  const response=await fetch('/__work/probe?action=echo',{method:'POST',body:input});
+  const output=new Uint8Array(await response.arrayBuffer());
+  if(output.length!==input.length||!output.every((v,i)=>v===input[i]))throw new Error('binary mismatch');
+  binarySamplesMs.push(performance.now()-started);
+ }
+ const sortedBinarySamples=[...binarySamplesMs].sort((a,b)=>a-b);
+ results.timings.binarySamplesMs=binarySamplesMs;
+ results.timings.binaryRoundtripMs=sortedBinarySamples[Math.floor(sortedBinarySamples.length/2)];
+ results.checks.push('2MiB binary upload/download (5 samples)');
  await new Promise((resolve,reject)=>{const ws=new WebSocket(location.href.replace(/^http/,'ws').replace(/[?].*$/,'')+'__work/probe-ws');ws.binaryType='arraybuffer';const timer=setTimeout(()=>{ws.close();reject(new Error('WebSocket timed out'));},10000);let binary=false;ws.onerror=()=>{clearTimeout(timer);reject(new Error('WebSocket failed'));};ws.onopen=()=>ws.send(input);ws.onmessage=e=>{if(!binary){const bytes=new Uint8Array(e.data);if(bytes.length!==input.length||!bytes.every((v,i)=>v===input[i])){clearTimeout(timer);reject(new Error('WebSocket binary mismatch'));return;}binary=true;ws.send('text ✓');}else{clearTimeout(timer);ws.close();if(e.data!=='text ✓')reject(new Error('WebSocket text mismatch'));else resolve();}};});results.checks.push('WebSocket binary/text');
  const forbidden=await fetch('/wails/runtime?object=0&method=0',{headers:{'x-wails-window-name':'settings','x-wails-window-id':'0'}});if(forbidden.status!==403)throw new Error('Worker reached privileged runtime');results.checks.push('privileged runtime denied with spoofed headers');
  await new Promise((resolve,reject)=>{const stream=WorkerBridge.Stream('worker-fetch');const timer=setTimeout(()=>reject(new Error('stale generation accepted')),2000);stream.onopen=()=>stream.send(new TextEncoder().encode(JSON.stringify({generation:'stale-generation',url:'/',method:'GET',headers:{},hasBody:false})));stream.onclose=()=>{clearTimeout(timer);resolve();};stream.onmessage=()=>{clearTimeout(timer);reject(new Error('stale document reached Worker'));};});results.checks.push('stale generation denied');
