@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,6 +76,12 @@ func (s *Server) Publish(name string, data any) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Body != nil && r.Body != http.NoBody {
+		// Request bodies can remain active while a duplex Worker response is
+		// being delivered. Do not let the HTTP/1 server reuse this pipe until
+		// its body reader has been torn down.
+		w.Header().Set("Connection", "close")
+	}
 	// Browser requests cannot supply this transport: the listener is an ACL-
 	// restricted local named pipe. Reject forwarded Web origins nonetheless.
 	if r.Header.Get("Origin") != "" && r.URL.Path != "/worker" {
@@ -359,20 +367,215 @@ func (s *Server) forwardWorker(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid Worker path", 400)
 		return
 	}
+	if isWorkerUpgrade(r) {
+		forwardWorkerUpgrade(w, r, current, decodedPath, path)
+		return
+	}
+	forwardWorkerRequest(w, r, current, decodedPath, path)
+}
+
+func isWorkerUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket") {
+		return false
+	}
+	for _, value := range r.Header.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func forwardWorkerUpgrade(w http.ResponseWriter, r *http.Request, current workerchannel.Session, decodedPath, rawPath string) {
 	proxy := httputil.ReverseProxy{Director: func(out *http.Request) {
 		out.URL.Scheme = "http"
 		out.URL.Host = "127.0.0.1:1"
 		out.Host = out.URL.Host
 		out.URL.Path = decodedPath
-		out.URL.RawPath = path
+		out.URL.RawPath = rawPath
 		out.Header.Del("X-DSH-Path")
 		out.Header.Del("X-DSH-Generation")
 		out.Header.Del("Cookie")
 		out.Header.Del("Authorization")
 		out.Header.Set("Origin", workeripc.Origin)
-	}, Transport: workerTransport{client: current.Client()}, FlushInterval: -1, ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) { http.Error(w, "Worker unavailable", 502) }}
+	}, Transport: workerTransport{client: current.Client()}, FlushInterval: -1, ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		http.Error(w, "Worker unavailable", http.StatusBadGateway)
+	}}
 	proxy.ServeHTTP(w, r)
 }
+
+// forwardWorkerRequest owns both sides of a full-duplex HTTP/1 request. The
+// standard ReverseProxy can return after the upstream response ends while its
+// transport goroutine is still reading the incoming request body. net/http then
+// starts its keep-alive read on the same connection and panics with
+// "invalid concurrent Body.Read call". Keeping the body read under our control
+// lets cancellation close it and wait for that read before the handler returns.
+func forwardWorkerRequest(w http.ResponseWriter, r *http.Request, current workerchannel.Session, decodedPath, rawPath string) {
+	ctx, cancel := context.WithCancel(r.Context())
+
+	var requestBody *trackedRequestBody
+	defer func() {
+		cancel()
+		if requestBody != nil {
+			// A full-duplex response may finish before the browser closes its
+			// upload stream. Interrupt an in-flight server-body read before
+			// closing it; Request.Body.Close itself waits for that read's mutex.
+			controller := http.NewResponseController(w)
+			_ = controller.SetReadDeadline(time.Now())
+			_ = requestBody.Close()
+			requestBody.Wait()
+			_ = controller.SetReadDeadline(time.Time{})
+		}
+	}()
+	out := r.Clone(ctx)
+	out.RequestURI = ""
+	out.URL = &url.URL{
+		Scheme:   "http",
+		Host:     "127.0.0.1:1",
+		Path:     decodedPath,
+		RawPath:  rawPath,
+		RawQuery: r.URL.RawQuery,
+	}
+	out.Host = out.URL.Host
+	out.Close = false
+	for _, name := range []string{
+		"X-DSH-Path", "X-DSH-Generation", "Cookie", "Authorization",
+		"Connection", "Upgrade", "Transfer-Encoding", "Content-Length",
+		"Proxy-Authorization", "Proxy-Connection",
+	} {
+		out.Header.Del(name)
+	}
+	out.Header.Set("Origin", workeripc.Origin)
+	if r.Body == nil || r.Body == http.NoBody {
+		out.Body = nil
+		out.ContentLength = 0
+	} else {
+		requestBody = newTrackedRequestBody(r.Body)
+		out.Body = requestBody
+		out.GetBody = nil
+		// The incoming named-pipe HTTP/1 connection cannot be reused while a
+		// browser upload is being cancelled. Mark it for close so net/http does
+		// not start its next keep-alive read before the body teardown settles.
+		w.Header().Set("Connection", "close")
+	}
+
+	response, err := (workerTransport{client: current.Client()}).RoundTrip(out)
+	if err != nil {
+		// RoundTrip can fail while the upload is still open (for example when
+		// the Worker is being replaced). Keep this daemon connection one-shot
+		// before writing the error so net/http never starts its next request
+		// read while the request body teardown is in progress.
+		w.Header().Set("Connection", "close")
+		http.Error(w, "Worker unavailable", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	if err := writeWorkerResponse(w, r, response); err != nil {
+		// The downstream UI may have cancelled after receiving enough of a
+		// stream. The deferred body close still synchronizes the upload reader.
+		return
+	}
+}
+
+func writeWorkerResponse(w http.ResponseWriter, request *http.Request, response *http.Response) error {
+	copyWorkerResponseHeaders(w.Header(), response.Header)
+	w.WriteHeader(response.StatusCode)
+	if request.Method == http.MethodHead || response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusResetContent || response.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	flush := http.NewResponseController(w).Flush
+	buffer := make([]byte, 32<<10)
+	for {
+		n, err := response.Body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+				return writeErr
+			}
+			_ = flush()
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func copyWorkerResponseHeaders(dst, src http.Header) {
+	hopByHop := map[string]struct{}{
+		"Connection": {}, "Keep-Alive": {}, "Proxy-Authenticate": {},
+		"Proxy-Authorization": {}, "Te": {}, "Trailer": {},
+		"Transfer-Encoding": {}, "Upgrade": {},
+	}
+	for _, value := range src.Values("Connection") {
+		for _, name := range strings.Split(value, ",") {
+			hopByHop[http.CanonicalHeaderKey(strings.TrimSpace(name))] = struct{}{}
+		}
+	}
+	for name, values := range src {
+		if _, skip := hopByHop[http.CanonicalHeaderKey(name)]; skip {
+			continue
+		}
+		dst[name] = append([]string(nil), values...)
+	}
+}
+
+type trackedRequestBody struct {
+	src       io.ReadCloser
+	done      chan struct{}
+	doneOnce  sync.Once
+	closeOnce sync.Once
+	mu        sync.Mutex
+	closed    bool
+	reading   bool
+}
+
+func newTrackedRequestBody(src io.ReadCloser) *trackedRequestBody {
+	return &trackedRequestBody{src: src, done: make(chan struct{})}
+}
+
+func (b *trackedRequestBody) Read(p []byte) (int, error) {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	b.reading = true
+	b.mu.Unlock()
+
+	n, err := b.src.Read(p)
+	b.mu.Lock()
+	b.reading = false
+	closed := b.closed
+	b.mu.Unlock()
+	if err != nil || closed {
+		b.finish()
+	}
+	return n, err
+}
+
+func (b *trackedRequestBody) Close() error {
+	b.mu.Lock()
+	wasClosed := b.closed
+	b.closed = true
+	reading := b.reading
+	b.mu.Unlock()
+	var closeErr error
+	if !wasClosed {
+		b.closeOnce.Do(func() { closeErr = b.src.Close() })
+	}
+	if !reading {
+		b.finish()
+	}
+	return closeErr
+}
+
+func (b *trackedRequestBody) finish() { b.doneOnce.Do(func() { close(b.done) }) }
+
+func (b *trackedRequestBody) Wait() { <-b.done }
 
 type workerTransport struct{ client *http.Client }
 

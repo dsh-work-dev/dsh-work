@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,6 +125,81 @@ func TestServerQuitCancelsInFlightCalls(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("in-flight call did not return")
 	}
+}
+
+func TestForwardWorkerWaitsForEarlyResponseUpload(t *testing.T) {
+	workerClient := &http.Client{Transport: earlyResponseTransport{}}
+	session := testWorkerSession{client: workerClient, generation: "test-generation"}
+
+	var serverLog bytes.Buffer
+	frontend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
+			t.Errorf("frontend full duplex: %v", err)
+			return
+		}
+		forwardWorkerRequest(w, r, session, "/early", "/early")
+	}))
+	frontend.Config.ErrorLog = log.New(&serverLog, "", 0)
+	defer frontend.Close()
+
+	reader, writer := io.Pipe()
+	request, err := http.NewRequest(http.MethodPost, frontend.URL, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := writer.Write([]byte("body that remains open while the worker answers"))
+		writeDone <- err
+	}()
+	response, err := frontend.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "early" {
+		t.Fatalf("body = %q, want early response", body)
+	}
+	_ = writer.Close()
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("upload body did not close after early response")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if logText := serverLog.String(); strings.Contains(logText, "invalid concurrent Body.Read call") || strings.Contains(logText, "ReverseProxy read error") {
+		t.Fatalf("unexpected proxy lifecycle error: %s", logText)
+	}
+}
+
+type testWorkerSession struct {
+	client     *http.Client
+	generation string
+}
+
+func (s testWorkerSession) URL() string          { return "http://127.0.0.1:1" }
+func (s testWorkerSession) Generation() string   { return s.generation }
+func (s testWorkerSession) Patch() string        { return "" }
+func (s testWorkerSession) Client() *http.Client { return s.client }
+func (s testWorkerSession) Activate(string)      {}
+func (s testWorkerSession) Close() error         { return nil }
+
+type earlyResponseTransport struct{}
+
+func (earlyResponseTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Length": []string{"5"}},
+		Body:          io.NopCloser(strings.NewReader("early")),
+		ContentLength: 5,
+	}, nil
 }
 
 func postCall(t *testing.T, server *Server, call Call) Result {
