@@ -10,6 +10,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as app$0 from "../app/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as daemon$0 from "../daemon/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as dshmanager$0 from "../dshmanager/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -45,6 +48,10 @@ export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
     return $Call.ByID(3636700019);
 }
 
+export function GetUpdateState(): $CancellablePromise<daemon$0.UpdateSnapshot> {
+    return $Call.ByID(1632872508);
+}
+
 export function GetWorkspaceStatus(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(210882421);
 }
@@ -71,4 +78,8 @@ export function Start(): $CancellablePromise<lifecycle$0.Status> {
 
 export function StartWithWorkspace(request: workspacecontext$0.Request): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(666163587, request);
+}
+
+export function Update(action: string): $CancellablePromise<void> {
+    return $Call.ByID(1523896463, action);
 }

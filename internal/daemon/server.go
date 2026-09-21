@@ -32,6 +32,7 @@ type Snapshot struct {
 	Root, URL     string
 	Status        lifecycle.Status
 	Preferences   settings.Values
+	Update        UpdateSnapshot
 	Events        []Event
 	Cursor        uint64
 	Diagnostics   supervisor.Diagnostics
@@ -44,11 +45,12 @@ type Server struct {
 	Root     string
 	PID      int
 	OpenUI   func(string) error
-	// CheckUpdates starts the daemon-owned application update flow. The UI
-	// client and the tray both use this callback so only the resident daemon
-	// coordinates the updater and process shutdown.
-	CheckUpdates func() error
-	Media        http.Handler
+	// UpdateState and UpdateCommand expose the daemon-owned updater to trusted
+	// local clients. The UI renders UpdateState and sends explicit actions;
+	// provider and staging details remain inside the daemon process.
+	UpdateState   func() UpdateSnapshot
+	UpdateCommand func(context.Context, UpdateAction) error
+	Media         http.Handler
 	// Maintenance reports whether the current-user installer owns the
 	// maintenance boundary. Read-only snapshots remain available while the
 	// boundary is held; all mutable service calls are rejected at this daemon
@@ -112,6 +114,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.Settings != nil {
 			state.Preferences, _ = s.Settings.Snapshot(r.Context())
 		}
+		if s.UpdateState != nil {
+			state.Update = s.UpdateState()
+		}
 		s.mu.Lock()
 		state.Cursor = s.cursor
 		for _, event := range s.events {
@@ -161,20 +166,35 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, true)
-	case "/update/check":
+	case "/update/action":
 		if s.maintenanceBusy() {
 			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
 			return
 		}
-		if s.CheckUpdates == nil {
-			http.Error(w, "update checking unavailable", http.StatusServiceUnavailable)
+		if s.UpdateCommand == nil {
+			http.Error(w, "update controls unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if err := s.CheckUpdates(); err != nil {
+		var input struct {
+			Action UpdateAction `json:"action"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+			http.Error(w, "invalid update action", http.StatusBadRequest)
+			return
+		}
+		if input.Action != UpdateActionCheck && input.Action != UpdateActionDownload && input.Action != UpdateActionInstall {
+			http.Error(w, "invalid update action", http.StatusBadRequest)
+			return
+		}
+		if err := s.UpdateCommand(r.Context(), input.Action); err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		writeJSON(w, true)
+		if s.UpdateState != nil {
+			writeJSON(w, s.UpdateState())
+		} else {
+			writeJSON(w, true)
+		}
 	case "/geometry":
 		if s.maintenanceBusy() {
 			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)

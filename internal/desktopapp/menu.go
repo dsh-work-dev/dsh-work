@@ -15,6 +15,17 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+func updateMenuLabel(labels nativeui.Labels, state daemon.UpdateSnapshot) string {
+	switch state.Phase {
+	case daemon.UpdateReady:
+		return labels.UpdateAvailableMenu
+	case daemon.UpdateChecking, daemon.UpdateDownloading, daemon.UpdateVerifying, daemon.UpdateInstalling:
+		return labels.UpdateInProgressMenu
+	default:
+		return labels.CheckUpdates
+	}
+}
+
 // The native menu belongs to the process that owns the workbench windows.
 // Its actions use the same background authority as Settings and the CLI.
 func installDesktopMenu(desktop *application.App, client *daemon.Client, initial daemon.Snapshot, open func(string)) func(daemon.Snapshot) {
@@ -30,17 +41,7 @@ func installDesktopMenu(desktop *application.App, client *daemon.Client, initial
 	settingsItem := menu.Add(labels.Settings).OnClick(func(*application.Context) { go open("settings") })
 	help := menu.AddSubmenu(labels.Help)
 	updates := help.Add(labels.CheckUpdates).OnClick(func(*application.Context) {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			if err := client.JSON(ctx, "/update/check", nil, nil); err != nil {
-				log.Printf("update request: %v", err)
-				mu.Lock()
-				copy := nativeui.LabelsFor(state.Preferences.Locale)
-				mu.Unlock()
-				desktop.Dialog.Error().SetTitle(copy.UpdateFailureTitle).SetMessage(copy.UpdateFailureMessage).Show()
-			}
-		}()
+		go open("about")
 	})
 	about := help.Add(labels.About).OnClick(func(*application.Context) { go open("about") })
 	var busy bool
@@ -65,6 +66,7 @@ func installDesktopMenu(desktop *application.App, client *daemon.Client, initial
 		if !applied || canPet != lastPetEnabled {
 			showPet.SetEnabled(canPet)
 		}
+		updates.SetLabel(updateMenuLabel(labels, state.Update))
 		applied, lastRestart, lastQuit, lastPetEnabled, lastPetVisible = true, idle, canQuit, canPet, petVisible
 	}
 	for method, item := range map[string]*application.MenuItem{"Restart": restart, "Quit": quit} {
@@ -130,13 +132,14 @@ func installDesktopMenu(desktop *application.App, client *daemon.Client, initial
 		mu.Lock()
 		if next.Preferences.Locale != state.Preferences.Locale {
 			copy := nativeui.LabelsFor(next.Preferences.Locale)
+			labels = copy
 			actions.SetLabel(copy.Actions)
 			settingsItem.SetLabel(copy.Settings)
 			showPet.SetLabel(copy.ShowPet)
 			restart.SetLabel(copy.RestartDSH)
 			quit.SetLabel(copy.Quit)
 			help.SetLabel(copy.Help)
-			updates.SetLabel(copy.CheckUpdates)
+			updates.SetLabel(updateMenuLabel(copy, next.Update))
 			about.SetLabel(copy.About)
 		}
 		state = next

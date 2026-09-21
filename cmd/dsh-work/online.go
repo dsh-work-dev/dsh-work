@@ -91,7 +91,7 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 			}
 			return true, printValue(stdout, true, lifecycle.Status{State: lifecycle.StateStopped, Phase: lifecycle.PhaseIdle}, func() {})
 		}
-		if args[0] == "status" || args[0] == "stop" || args[0] == "restart" {
+		if args[0] == "status" || args[0] == "stop" || args[0] == "restart" || args[0] == "update" {
 			return true, err
 		}
 		return false, nil
@@ -103,6 +103,8 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 	switch args[0] {
 	case "status":
 		return true, printValue(stdout, true, state, func() {})
+	case "update":
+		return true, runOnlineUpdate(c, args[1:], state, stdout)
 	case "stop", "restart":
 		method := "Quit"
 		if args[0] == "restart" {
@@ -136,6 +138,39 @@ func tryOnline(args []string, stdout io.Writer) (bool, error) {
 	default:
 		return true, fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runOnlineUpdate(client *daemon.Client, args []string, snapshot daemon.Snapshot, stdout io.Writer) error {
+	if len(args) == 0 || args[0] == "status" {
+		if len(args) > 1 {
+			return fmt.Errorf("unexpected arguments for update status: %v", args[1:])
+		}
+		return printValue(stdout, true, snapshot.Update, func() {})
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("usage: dsh-work update status|check|download|install")
+	}
+	var action daemon.UpdateAction
+	switch args[0] {
+	case string(daemon.UpdateActionCheck):
+		action = daemon.UpdateActionCheck
+	case string(daemon.UpdateActionDownload):
+		action = daemon.UpdateActionDownload
+	case string(daemon.UpdateActionInstall):
+		action = daemon.UpdateActionInstall
+	default:
+		return fmt.Errorf("unknown update action %q; use status, check, download, or install", args[0])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var update daemon.UpdateSnapshot
+	err := client.JSON(ctx, "/update/action", struct {
+		Action daemon.UpdateAction `json:"action"`
+	}{Action: action}, &update)
+	if err != nil {
+		return err
+	}
+	return printValue(stdout, true, update, func() {})
 }
 
 func hasFlag(args []string, wanted string) bool {

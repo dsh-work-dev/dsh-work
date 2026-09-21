@@ -194,6 +194,9 @@ func runDaemon(identity string, resources Resources) {
 	var quitFlow lifecycle.QuitFlow
 	var applicationShuttingDown atomic.Bool
 	var restartActionBusy atomic.Bool
+	var updateMenuApply func(daemon.UpdateSnapshot)
+	var updateMenuStateMu sync.RWMutex
+	var updateMenuState daemon.UpdateSnapshot
 	var petWindowCloseAllowed atomic.Bool
 	var petWindowRepositioning atomic.Bool
 	var petWindowPositionRestored atomic.Bool
@@ -291,13 +294,31 @@ func runDaemon(identity string, resources Resources) {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
-	updates := newUpdateRunner(desktop, func() dshworksettings.Locale {
-		return loadNativeLocale(&activeLocale)
-	}, launcher.Stop)
-	server.CheckUpdates = func() error {
-		updates.Trigger(context.Background(), true)
-		return nil
-	}
+	updates := newUpdateRunner(desktop, launcher.Stop, func(state daemon.UpdateSnapshot) {
+		server.Publish("update-state", state)
+		updateMenuStateMu.Lock()
+		updateMenuState = state
+		apply := updateMenuApply
+		updateMenuStateMu.Unlock()
+		if apply != nil {
+			apply(state)
+		}
+		if state.Phase == daemon.UpdateReady && state.TargetVersion != "" {
+			locale := loadNativeLocale(&activeLocale)
+			copy := nativeui.UpdateReadyNotification(locale, state.TargetVersion)
+			if err := notificationRouter.Publish(context.Background(), dshworknotifications.Event{
+				ID:     "dsh-work-update-ready:" + state.TargetVersion,
+				Class:  dshworknotifications.ClassActionRequired,
+				Title:  copy.Title,
+				Body:   copy.Body,
+				Target: "about",
+			}); err != nil {
+				log.Printf("update notification delivery: %v", err)
+			}
+		}
+	})
+	server.UpdateState = updates.Snapshot
+	server.UpdateCommand = updates.Action
 	var repositionPetWindow func()
 	var persistPetWindowPosition func()
 	if petOverlayCapabilities.Level != dshworkpet.OverlayFallback {
@@ -503,7 +524,14 @@ func runDaemon(identity string, resources Resources) {
 			log.Printf("desktop notification response: %v", result.Error)
 			return
 		}
-		if result.Response.ID != "" && showWorkspace != nil {
+		if result.Response.ID == "" {
+			return
+		}
+		if target, ok := result.Response.UserInfo["target"].(string); ok && target == "about" && openSettings != nil {
+			openSettings("about")
+			return
+		}
+		if showWorkspace != nil {
 			showWorkspace()
 		}
 	})
@@ -554,7 +582,7 @@ func runDaemon(identity string, resources Resources) {
 	})
 	trayMenu.AddSeparator()
 	trayCheckUpdates := trayMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
-		updates.Trigger(context.Background(), true)
+		openSettings("about")
 	})
 	trayMenu.AddSeparator()
 	trayRestartDSH := trayMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
@@ -612,8 +640,18 @@ func runDaemon(identity string, resources Resources) {
 	})
 	helpMenu := menu.AddSubmenu(initialNative.Help)
 	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
-		updates.Trigger(context.Background(), true)
+		openSettings("about")
 	})
+	updateMenuApply = func(state daemon.UpdateSnapshot) {
+		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
+		label := updateMenuLabel(labels, state)
+		trayCheckUpdates.SetLabel(label)
+		checkUpdates.SetLabel(label)
+	}
+	updateMenuStateMu.RLock()
+	initialUpdateState := updateMenuState
+	updateMenuStateMu.RUnlock()
+	updateMenuApply(initialUpdateState)
 	aboutDshWork := helpMenu.Add(initialNative.About).OnClick(func(*application.Context) {
 		openSettings("about")
 	})
@@ -690,8 +728,15 @@ func runDaemon(identity string, resources Resources) {
 		appMenuRestartDSH.SetLabel(labels.RestartDSH)
 		appMenuQuit.SetLabel(labels.Quit)
 		helpMenu.SetLabel(labels.Help)
-		checkUpdates.SetLabel(labels.CheckUpdates)
 		aboutDshWork.SetLabel(labels.About)
+		updateMenuStateMu.RLock()
+		state := updateMenuState
+		updateMenuStateMu.RUnlock()
+		if updateMenuApply != nil {
+			updateMenuApply(state)
+		} else {
+			checkUpdates.SetLabel(labels.CheckUpdates)
+		}
 	}
 	publishLocale = func(locale dshworksettings.Locale) {
 		updateNativeLocale(locale)

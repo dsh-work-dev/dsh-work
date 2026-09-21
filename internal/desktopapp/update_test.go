@@ -3,12 +3,11 @@ package desktopapp
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/daemon"
 	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 )
 
@@ -18,34 +17,38 @@ type updateBackendFake struct {
 
 	started chan struct{}
 	finish  chan struct{}
-	onStart func()
 
-	mu        sync.Mutex
-	canceled  bool
-	restarted bool
-	staged    string
+	mu            sync.Mutex
+	downloadCalls int
+	restarted     bool
+	checkCalls    int
 }
 
 func (f *updateBackendFake) Check(context.Context) (*wailsupdater.Release, error) {
+	f.mu.Lock()
+	f.checkCalls++
+	f.mu.Unlock()
 	return f.release, f.checkErr
 }
 
 func (f *updateBackendFake) DownloadAndInstall(ctx context.Context) error {
-	select {
-	case <-f.started:
-	default:
-		close(f.started)
+	f.mu.Lock()
+	f.downloadCalls++
+	f.mu.Unlock()
+	if f.started != nil {
+		select {
+		case <-f.started:
+		default:
+			close(f.started)
+		}
 	}
-	if f.onStart != nil {
-		f.onStart()
+	if f.finish == nil {
+		return nil
 	}
 	select {
 	case <-f.finish:
 		return nil
 	case <-ctx.Done():
-		f.mu.Lock()
-		f.canceled = true
-		f.mu.Unlock()
 		return ctx.Err()
 	}
 }
@@ -57,155 +60,110 @@ func (f *updateBackendFake) Restart(context.Context) error {
 	return nil
 }
 
-func (f *updateBackendFake) DownloadedPath() string { return f.staged }
-
-type updatePrompterFake struct {
-	choice chan bool
-	asked  chan struct{}
-	mu     sync.Mutex
-	infos  []string
-	errors []string
+func TestUpdateRunnerManualCheckStopsAtAvailable(t *testing.T) {
+	backend := &updateBackendFake{release: &wailsupdater.Release{Version: "2.0.0", Artifact: wailsupdater.Artifact{Size: 100}}}
+	runner := &updateRunner{backend: backend, current: "1.0.0", state: daemon.UpdateSnapshot{Phase: daemon.UpdateIdle, CurrentVersion: "1.0.0"}}
+	if err := runner.Action(context.Background(), daemon.UpdateActionCheck); err != nil {
+		t.Fatal(err)
+	}
+	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateAvailable })
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.downloadCalls != 0 {
+		t.Fatalf("manual check started %d downloads", backend.downloadCalls)
+	}
+	if got := runner.Snapshot().TargetVersion; got != "2.0.0" {
+		t.Fatalf("target version = %q, want 2.0.0", got)
+	}
 }
 
-func (p *updatePrompterFake) Confirm(*wailsupdater.Release) bool {
-	close(p.asked)
-	return <-p.choice
-}
-
-func (p *updatePrompterFake) Info(_, message string) {
-	p.mu.Lock()
-	p.infos = append(p.infos, message)
-	p.mu.Unlock()
-}
-
-func (p *updatePrompterFake) Error(_, message string) {
-	p.mu.Lock()
-	p.errors = append(p.errors, message)
-	p.mu.Unlock()
-}
-
-func TestUpdateRunnerWaitsForStagedDownloadBeforeRestart(t *testing.T) {
+func TestUpdateRunnerAutomaticCheckDownloadsWithoutRestart(t *testing.T) {
 	backend := &updateBackendFake{
-		release: &wailsupdater.Release{Version: "2.0.0"},
+		release: &wailsupdater.Release{Version: "2.0.0", Artifact: wailsupdater.Artifact{Size: 100}},
 		started: make(chan struct{}),
 		finish:  make(chan struct{}),
 	}
-	prompt := &updatePrompterFake{choice: make(chan bool, 1), asked: make(chan struct{})}
-	prompt.choice <- true
-	runner := &updateRunner{backend: backend, prompt: prompt}
-	backend.onStart = runner.notifyDownloadStarted
-
+	runner := &updateRunner{backend: backend, current: "1.0.0", state: daemon.UpdateSnapshot{Phase: daemon.UpdateIdle, CurrentVersion: "1.0.0"}}
 	runner.Trigger(context.Background(), true)
 	select {
-	case <-prompt.asked:
+	case <-backend.started:
 	case <-time.After(time.Second):
-		t.Fatal("update prompt did not open while download was staging")
+		t.Fatal("automatic update did not start downloading")
 	}
 	backend.mu.Lock()
 	if backend.restarted {
 		backend.mu.Unlock()
-		t.Fatal("restart happened before the staged download completed")
+		t.Fatal("automatic download restarted the application")
 	}
 	backend.mu.Unlock()
 	close(backend.finish)
+	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateReady })
+	if got := runner.Snapshot().InstallMode; got != daemon.UpdateInstallStagedRestart {
+		t.Fatalf("install mode = %q, want staged-restart", got)
+	}
+}
+
+func TestUpdateRunnerManualDownloadThenExplicitInstall(t *testing.T) {
+	backend := &updateBackendFake{release: &wailsupdater.Release{Version: "2.0.0"}}
+	var stopUICalled bool
+	runner := &updateRunner{
+		backend: backend,
+		current: "1.0.0",
+		state:   daemon.UpdateSnapshot{Phase: daemon.UpdateAvailable, CurrentVersion: "1.0.0", TargetVersion: "2.0.0"},
+		release: backend.release,
+		stopUI:  func() error { stopUICalled = true; return nil },
+	}
+	if err := runner.Action(context.Background(), daemon.UpdateActionDownload); err != nil {
+		t.Fatal(err)
+	}
+	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateReady })
+	if err := runner.Action(context.Background(), daemon.UpdateActionInstall); err != nil {
+		t.Fatal(err)
+	}
 	waitForUpdate(t, func() bool {
 		backend.mu.Lock()
 		defer backend.mu.Unlock()
 		return backend.restarted
 	})
-}
-
-func TestUpdateRunnerCancelStopsDownloadAndDoesNotRestart(t *testing.T) {
-	backend := &updateBackendFake{
-		release: &wailsupdater.Release{Version: "2.0.0"},
-		started: make(chan struct{}),
-		finish:  make(chan struct{}),
-	}
-	prompt := &updatePrompterFake{choice: make(chan bool, 1), asked: make(chan struct{})}
-	prompt.choice <- false
-	runner := &updateRunner{backend: backend, prompt: prompt}
-	backend.onStart = runner.notifyDownloadStarted
-
-	runner.Trigger(context.Background(), true)
-	select {
-	case <-prompt.asked:
-	case <-time.After(time.Second):
-		t.Fatal("update prompt did not open")
-	}
-	waitForUpdate(t, func() bool {
-		backend.mu.Lock()
-		defer backend.mu.Unlock()
-		return backend.canceled
-	})
-	backend.mu.Lock()
-	defer backend.mu.Unlock()
-	if backend.restarted {
-		t.Fatal("cancelled update restarted the application")
+	if !stopUICalled {
+		t.Fatal("explicit install did not stop the UI")
 	}
 }
 
-func TestUpdateRunnerRemovesCompletedStagingOnCancel(t *testing.T) {
-	artifactDir, err := os.MkdirTemp("", "wails-update-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(artifactDir) })
-	artifact := filepath.Join(artifactDir, "dsh-work.exe")
-	if err := os.WriteFile(artifact, []byte("staged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	backend := &updateBackendFake{
-		release: &wailsupdater.Release{Version: "2.0.0"},
-		started: make(chan struct{}),
-		finish:  make(chan struct{}),
-		staged:  artifact,
-	}
-	prompt := &updatePrompterFake{choice: make(chan bool, 1), asked: make(chan struct{})}
-	prompt.choice <- false
-	runner := &updateRunner{backend: backend, prompt: prompt}
-	backend.onStart = runner.notifyDownloadStarted
-
-	runner.Trigger(context.Background(), true)
-	select {
-	case <-prompt.asked:
-	case <-time.After(time.Second):
-		t.Fatal("update prompt did not open")
-	}
-	close(backend.finish)
-	waitForUpdate(t, func() bool { _, err := os.Stat(artifactDir); return errors.Is(err, os.ErrNotExist) })
-}
-
-func TestUpdateRunnerDoesNotRestartWhenUIStopFails(t *testing.T) {
-	backend := &updateBackendFake{
-		release: &wailsupdater.Release{Version: "2.0.0"},
-		started: make(chan struct{}),
-		finish:  make(chan struct{}),
-	}
-	prompt := &updatePrompterFake{choice: make(chan bool, 1), asked: make(chan struct{})}
-	prompt.choice <- true
+func TestUpdateRunnerDoesNotEnterInstallingWhenUIStopFails(t *testing.T) {
+	backend := &updateBackendFake{}
 	runner := &updateRunner{
 		backend: backend,
-		prompt:  prompt,
+		current: "1.0.0",
+		state:   daemon.UpdateSnapshot{Phase: daemon.UpdateReady, CurrentVersion: "1.0.0", TargetVersion: "2.0.0", InstallMode: daemon.UpdateInstallStagedRestart},
 		stopUI:  func() error { return errors.New("ui still running") },
 	}
-	backend.onStart = runner.notifyDownloadStarted
-
-	runner.Trigger(context.Background(), true)
-	select {
-	case <-prompt.asked:
-	case <-time.After(time.Second):
-		t.Fatal("update prompt did not open")
+	if err := runner.Action(context.Background(), daemon.UpdateActionInstall); err != nil {
+		t.Fatal(err)
 	}
-	close(backend.finish)
-	waitForUpdate(t, func() bool {
-		prompt.mu.Lock()
-		defer prompt.mu.Unlock()
-		return len(prompt.errors) > 0
-	})
+	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateError })
 	backend.mu.Lock()
-	defer backend.mu.Unlock()
-	if backend.restarted {
-		t.Fatal("update restarted while the UI was still running")
+	restarted := backend.restarted
+	backend.mu.Unlock()
+	if restarted {
+		t.Fatal("update restarted after the UI stop failed")
+	}
+}
+
+func TestUpdateRunnerCheckFailureIsVisibleWithoutRawError(t *testing.T) {
+	runner := &updateRunner{
+		backend: &updateBackendFake{checkErr: errors.New("private feed details")},
+		current: "1.0.0",
+		state:   daemon.UpdateSnapshot{Phase: daemon.UpdateIdle, CurrentVersion: "1.0.0"},
+	}
+	runner.Trigger(context.Background(), false)
+	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateError })
+	state := runner.Snapshot()
+	if state.ErrorCode != "check" {
+		t.Fatalf("error code = %q, want check", state.ErrorCode)
+	}
+	if state.ErrorCode == "private feed details" {
+		t.Fatal("raw provider error leaked into update state")
 	}
 }
 

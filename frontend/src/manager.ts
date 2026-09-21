@@ -16,6 +16,7 @@ import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
 import type {RuntimePreparation} from "./lifecycle";
 import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/dsh-work/internal/lifecycle/models";
+import {UpdateInstallMode, UpdatePhase, type UpdateSnapshot} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 
 export type ManagerProfileRef = ProfileRef;
 export type ManagerRunContext = RunContext;
@@ -124,6 +125,8 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
 
 type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "settings" | "notifications" | "pets" | "about";
 
+type DesktopUpdateState = UpdateSnapshot;
+
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
   if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
@@ -187,6 +190,13 @@ export function mountManager() {
     document.getElementById("manager-node-cancel") as HTMLButtonElement
   ];
   const managerTitle = document.getElementById("manager-title") as HTMLHeadingElement;
+  const aboutUpdateBadge = document.getElementById("about-update-badge") as HTMLElement;
+  const aboutUpdateStatus = document.getElementById("about-update-status") as HTMLParagraphElement;
+  const aboutUpdateTarget = document.getElementById("about-update-target") as HTMLElement;
+  const aboutUpdateProgress = document.getElementById("about-update-progress") as HTMLProgressElement;
+  const aboutUpdateProgressMeta = document.getElementById("about-update-progress-meta") as HTMLParagraphElement;
+  const aboutUpdateAction = document.getElementById("about-update-action") as HTMLButtonElement;
+  const aboutUpdateLastChecked = document.getElementById("about-update-last-checked") as HTMLSpanElement;
   const currentRuntime = document.getElementById("manager-current-runtime") as HTMLElement;
   const currentDataDirectory = document.getElementById("manager-current-data-directory") as HTMLElement;
   const currentProfile = document.getElementById("manager-current-profile") as HTMLElement;
@@ -235,6 +245,7 @@ export function mountManager() {
   let currentSection = sectionName(query.get("section"));
   let snapshot: ManagerSnapshot | undefined;
   let hostStatus: HostLifecycleStatus | undefined;
+  let updateState: DesktopUpdateState = {phase: UpdatePhase.UpdateUnconfigured, currentVersion: __APP_VERSION__, installMode: UpdateInstallMode.UpdateInstallNone};
   let pluginObservation: {profile: string; plugins?: PluginInfo[]; layers?: LoaderLayer[]} | undefined;
   let pluginObservationGeneration = 0;
   let pluginObservationInFlight: string | undefined;
@@ -379,6 +390,87 @@ export function mountManager() {
     }
   }
 
+  function updateActionForState(): "check" | "download" | "install" | undefined {
+    switch (updateState.phase) {
+      case UpdatePhase.UpdateAvailable: return "download";
+      case UpdatePhase.UpdateReady: return "install";
+      case UpdatePhase.UpdateIdle:
+      case UpdatePhase.UpdateUpToDate:
+      case UpdatePhase.UpdateError: return "check";
+      default: return undefined;
+    }
+  }
+
+  function updateMessage(state: DesktopUpdateState): string {
+    const target = state.targetVersion || "";
+    switch (state.phase) {
+      case UpdatePhase.UpdateChecking: return t("about.update.checking");
+      case UpdatePhase.UpdateUpToDate: return t("about.update.upToDate");
+      case UpdatePhase.UpdateAvailable: return t("about.update.available", {version: target});
+      case UpdatePhase.UpdateDownloading: return t("about.update.downloading", {version: target});
+      case UpdatePhase.UpdateVerifying: return t("about.update.verifying", {version: target});
+      case UpdatePhase.UpdateReady: return t("about.update.ready", {version: target});
+      case UpdatePhase.UpdateInstalling: return t("about.update.installing");
+      case UpdatePhase.UpdateError:
+        if (state.errorCode === "check") return t("about.update.errorCheck");
+        if (state.errorCode === "download") return t("about.update.errorDownload");
+        if (state.errorCode === "verify") return t("about.update.errorVerify");
+        if (state.errorCode === "install") return t("about.update.errorInstall");
+        return t("about.update.error");
+      case UpdatePhase.UpdateUnconfigured: return t("about.update.unconfigured");
+      default: return t("about.update.check");
+    }
+  }
+
+  function renderUpdate() {
+    const state = updateState;
+    const action = updateActionForState();
+    const target = state.targetVersion || "";
+    aboutUpdateStatus.textContent = updateMessage(state);
+    aboutUpdateTarget.textContent = target ? `v${target}` : "";
+    aboutUpdateBadge.hidden = state.phase !== UpdatePhase.UpdateReady;
+    aboutUpdateProgress.hidden = state.phase !== UpdatePhase.UpdateDownloading && state.phase !== UpdatePhase.UpdateVerifying;
+    aboutUpdateProgressMeta.hidden = aboutUpdateProgress.hidden;
+    if (!aboutUpdateProgress.hidden) {
+      const received = Math.max(0, state.receivedBytes ?? 0);
+      const total = Math.max(0, state.totalBytes ?? 0);
+      if (total > 0) {
+        aboutUpdateProgress.value = Math.min(100, Math.round(received / total * 100));
+        aboutUpdateProgressMeta.textContent = `${formatRuntimeBytes(received)} / ${formatRuntimeBytes(total)}`;
+      } else {
+        aboutUpdateProgress.removeAttribute("value");
+        aboutUpdateProgressMeta.textContent = formatRuntimeBytes(received);
+      }
+    }
+    if (state.lastCheckedAt) {
+      const checked = new Date(state.lastCheckedAt);
+      aboutUpdateLastChecked.textContent = Number.isNaN(checked.valueOf()) ? "" : t("about.update.lastChecked", {time: checked.toLocaleString()});
+    } else {
+      aboutUpdateLastChecked.textContent = "";
+    }
+    aboutUpdateAction.textContent = state.phase === UpdatePhase.UpdateReady && state.installMode === UpdateInstallMode.UpdateInstallInstaller
+      ? t("about.update.openInstaller")
+      : action === "download" ? t("about.update.download")
+        : action === "install" ? t("about.update.install")
+          : state.phase === UpdatePhase.UpdateError ? t("about.update.retry") : t("about.update.check");
+    aboutUpdateAction.disabled = action === undefined || state.phase === UpdatePhase.UpdateUnconfigured || state.phase === UpdatePhase.UpdateChecking || state.phase === UpdatePhase.UpdateDownloading || state.phase === UpdatePhase.UpdateVerifying || state.phase === UpdatePhase.UpdateInstalling;
+  }
+
+  async function performUpdateAction() {
+    const action = updateActionForState();
+    if (!action || aboutUpdateAction.disabled) return;
+    aboutUpdateAction.disabled = true;
+    try {
+      await HostService.Update(action);
+      updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
+      renderUpdate();
+    } catch (error) {
+      console.error("Could not start application update", error);
+      aboutUpdateStatus.textContent = t("about.update.error");
+      aboutUpdateAction.disabled = false;
+    }
+  }
+
   const stickyPanels = Array.from(document.querySelectorAll<HTMLElement>(".profile-editor, .pets-preview-panel"));
   const positionProfileEditor = () => {
     for (const panel of stickyPanels) panel.style.top = `${Math.min(0, window.innerHeight - 48 - panel.offsetHeight)}px`;
@@ -442,13 +534,15 @@ export function mountManager() {
   document.querySelector(".manager-topbar")!.after(loadState);
   loadRetry.addEventListener("click", () => void refresh());
   document.getElementById("about-version")!.textContent = `dsh-work ${__APP_VERSION__}`;
+  aboutUpdateAction.addEventListener("click", () => void performUpdateAction());
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;
     try {
-      await navigator.clipboard.writeText(JSON.stringify({version: __APP_VERSION__, state: hostStatus?.state, current: snapshot?.current, failure: snapshot?.lastSwitchAttempt}, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify({version: __APP_VERSION__, update: updateState, state: hostStatus?.state, current: snapshot?.current, failure: snapshot?.lastSwitchAttempt}, null, 2));
       transientStatus(result, t("logs.copied"));
     } catch { result.textContent = t("logs.copyFailed"); }
   })());
+  renderUpdate();
 
   function sameProfileRef(left: ManagerProfileRef | undefined, right: ManagerProfileRef | undefined): boolean {
     return !!left && !!right && left.dataDirectoryId === right.dataDirectoryId && left.name === right.name;
@@ -1283,6 +1377,11 @@ export function mountManager() {
     loadRetry.disabled = true;
     try {
       [snapshot, hostStatus] = await Promise.all([getSnapshot(), getHostStatus()]);
+      try {
+        updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
+      } catch (error) {
+        console.error("Could not read application update state", error);
+      }
       applyPluginObservation();
       loadState.hidden = true;
       setContextControlsDisabled(mutationBlocked());
@@ -1292,6 +1391,7 @@ export function mountManager() {
       renderOverview();
       renderProfiles();
       renderRuntimes();
+      renderUpdate();
       showSection(currentSection);
       themeSyncAvailable = true;
       startThemeSync();
@@ -1315,6 +1415,12 @@ export function mountManager() {
     item.addEventListener("click", () => showSection(sectionName(item.dataset.managerSection ?? null)));
   }
   Events.On("lifecycle", () => void refresh());
+  Events.On("update-state", (event) => {
+    if (event.data && typeof event.data === "object") {
+      updateState = event.data as DesktopUpdateState;
+      renderUpdate();
+    }
+  });
   const operationLogs = {
     node: mountOperationLog(nodePreparationPanel),
     dsh: mountOperationLog(dshPreparationPanel),
@@ -1368,6 +1474,7 @@ export function mountManager() {
     renderOverview();
     renderProfiles();
     renderRuntimes();
+    renderUpdate();
     pets.renderLocale();
   });
 

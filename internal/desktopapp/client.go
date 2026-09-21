@@ -234,6 +234,8 @@ func runDesktopClient(identity string, resources Resources) error {
 			cursor := state.Cursor
 			lastURL := state.URL
 			lastStatus, _ := json.Marshal(state.Status)
+			lastUpdate := state.Update
+			desktop.Event.Emit("update-state", state.Update)
 			ticker := time.NewTicker(350 * time.Millisecond)
 			defer ticker.Stop()
 			for {
@@ -309,6 +311,10 @@ func runDesktopClient(identity string, resources Resources) error {
 						}
 						windowMu.Unlock()
 						lastURL = next.URL
+					}
+					if next.Update != lastUpdate {
+						desktop.Event.Emit("update-state", next.Update)
+						lastUpdate = next.Update
 					}
 				}
 			}

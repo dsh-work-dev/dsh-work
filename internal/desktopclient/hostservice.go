@@ -3,6 +3,7 @@ package desktopclient
 
 import (
 	"context"
+	"errors"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/dshmanager"
@@ -160,4 +161,30 @@ func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
 		panic(err)
 	}
 	return value
+}
+
+func (s *HostService) GetUpdateState(ctx context.Context) (daemon.UpdateSnapshot, error) {
+	if s.Local != nil {
+		return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil
+	}
+	if s.Client == nil {
+		return daemon.UpdateSnapshot{}, errors.New("background client unavailable")
+	}
+	var snapshot daemon.Snapshot
+	err := callJSON(ctx, s.Client, "/snapshot", struct {
+		Cursor uint64 `json:"cursor"`
+	}{}, &snapshot)
+	return snapshot.Update, err
+}
+
+func (s *HostService) Update(ctx context.Context, action string) error {
+	if s.Local != nil {
+		return errors.New("background update controls unavailable")
+	}
+	if s.Client == nil {
+		return errors.New("background client unavailable")
+	}
+	return callJSON(ctx, s.Client, "/update/action", struct {
+		Action string `json:"action"`
+	}{Action: action}, nil)
 }

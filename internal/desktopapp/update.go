@@ -3,41 +3,41 @@ package desktopapp
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
-	"html"
+	"errors"
 	"log"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/local/dsh-work/internal/nativeui"
-	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
 	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 )
 
 const (
-	updateFeedEnv       = "DSH_WORK_UPDATE_FEED_URL"
-	updateChannelEnv    = "DSH_WORK_UPDATE_CHANNEL"
-	updatePublicKeyEnv  = "DSH_WORK_UPDATE_PUBLIC_KEY"
-	updatePublicKeyFile = "DSH_WORK_UPDATE_PUBLIC_KEY_FILE"
+	updateFeedEnv                 = "DSH_WORK_UPDATE_FEED_URL"
+	updateChannelEnv              = "DSH_WORK_UPDATE_CHANNEL"
+	updatePublicKeyEnv            = "DSH_WORK_UPDATE_PUBLIC_KEY"
+	updatePublicKeyFile           = "DSH_WORK_UPDATE_PUBLIC_KEY_FILE"
+	updateProgressPublishInterval = 250 * time.Millisecond
 )
 
-// updateBackend is the small part of the Wails updater used by the desktop
-// flow. Keeping the orchestration behind this interface makes the prompt,
-// cancellation and restart ordering testable without starting a WebView.
+var (
+	errUpdateUnavailable = errors.New("update controls unavailable")
+	errUpdateNoRelease   = errors.New("no update is available")
+)
+
+// updateBackend is the small part of the official Wails updater used by the
+// daemon-owned flow. UI state is maintained by updateRunner so it can be
+// projected over IPC without exposing provider or staging details.
 type updateBackend interface {
 	Check(context.Context) (*wailsupdater.Release, error)
 	DownloadAndInstall(context.Context) error
 	Restart(context.Context) error
-	DownloadedPath() string
 }
 
 type wailsUpdateBackend struct{ updater *wailsupdater.Updater }
@@ -49,272 +49,283 @@ func (b wailsUpdateBackend) DownloadAndInstall(ctx context.Context) error {
 	return b.updater.DownloadAndInstall(ctx)
 }
 func (b wailsUpdateBackend) Restart(ctx context.Context) error { return b.updater.Restart(ctx) }
-func (b wailsUpdateBackend) DownloadedPath() string            { return b.updater.DownloadedPath() }
 
-type updatePrompter interface {
-	Confirm(*wailsupdater.Release) bool
-	Info(title, message string)
-	Error(title, message string)
-}
-
-type nativeUpdatePrompter struct {
-	desktop *application.App
-	locale  func() settings.Locale
-}
-
-var updatePromptSequence atomic.Uint64
-
-func (p nativeUpdatePrompter) labels() nativeui.Labels {
-	locale := settings.DefaultLocale
-	if p.locale != nil {
-		locale = p.locale()
-	}
-	return nativeui.LabelsFor(locale)
-}
-
-func (p nativeUpdatePrompter) Confirm(release *wailsupdater.Release) bool {
-	labels := p.labels()
-	version := ""
-	if release != nil {
-		version = release.Version
-	}
-	message := fmt.Sprintf(labels.UpdateAvailableMessage, version)
-	sequence := updatePromptSequence.Add(1)
-	applyEvent := fmt.Sprintf("dsh-work:update:%d:apply", sequence)
-	cancelEvent := fmt.Sprintf("dsh-work:update:%d:cancel", sequence)
-	choice := make(chan bool, 1)
-	var choiceOnce sync.Once
-	choose := func(value bool) { choiceOnce.Do(func() { choice <- value }) }
-
-	prompt := p.desktop.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:                 fmt.Sprintf("dsh-work-update-prompt-%d", sequence),
-		Title:                labels.UpdateAvailableTitle,
-		Width:                460,
-		Height:               250,
-		MinWidth:             460,
-		MinHeight:            250,
-		MaxWidth:             460,
-		MaxHeight:            250,
-		AlwaysOnTop:          true,
-		DisableResize:        true,
-		InitialPosition:      application.WindowCentered,
-		BackgroundColour:     application.NewRGB(31, 37, 44),
-		HTML:                 updatePromptHTML(labels.UpdateAvailableTitle, message, labels.UpdateNow, labels.UpdateCancel, applyEvent, cancelEvent),
-		AllowSimpleEventEmit: true,
-	})
-	stopApply := p.desktop.Event.On(applyEvent, func(*application.CustomEvent) { choose(true) })
-	stopCancel := p.desktop.Event.On(cancelEvent, func(*application.CustomEvent) { choose(false) })
-	stopClose := prompt.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) { choose(false) })
-	prompt.Show().Focus()
-	selected := <-choice
-	stopApply()
-	stopCancel()
-	stopClose()
-	prompt.Close()
-	return selected
-}
-
-func updatePromptHTML(title, message, apply, cancel, applyEvent, cancelEvent string) string {
-	return fmt.Sprintf(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s</title><style>
-:root{color-scheme:dark;font-family:"Segoe UI",system-ui,sans-serif;background:#1f252c;color:#f5f7fa}
-body{margin:0;min-height:250px;display:flex;align-items:center;justify-content:center;background:#1f252c}
-main{box-sizing:border-box;width:100%%;padding:28px 32px}h1{font-size:20px;font-weight:600;margin:0 0 16px}
-p{font-size:14px;line-height:1.5;margin:0 0 28px;color:#d7dde5;white-space:pre-wrap}
-footer{display:flex;justify-content:flex-end;gap:10px}button{border:1px solid #586575;border-radius:6px;padding:9px 18px;font:inherit;color:#f5f7fa;background:#303946;cursor:pointer}
-button:focus{outline:2px solid #76a9fa;outline-offset:2px}button.primary{border-color:#76a9fa;background:#3478d4}
-</style></head><body><main role="dialog" aria-labelledby="title" aria-describedby="message">
-<h1 id="title">%s</h1><p id="message">%s</p><footer>
-<button id="cancel" type="button">%s</button><button id="apply" class="primary" type="button" autofocus>%s</button>
-</footer></main><script>
-(function(){var apply=%s,cancel=%s;function emit(name){if(window.wails&&window.wails.Events){window.wails.Events.Emit(name)}}
-document.getElementById("apply").addEventListener("click",function(){emit(apply)});
-document.getElementById("cancel").addEventListener("click",function(){emit(cancel)});
-document.addEventListener("keydown",function(e){if(e.key==="Escape"){emit(cancel)}})})();
-</script></body></html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(message), html.EscapeString(cancel), html.EscapeString(apply), strconv.Quote(applyEvent), strconv.Quote(cancelEvent))
-}
-
-func (p nativeUpdatePrompter) Info(title, message string) {
-	p.desktop.Dialog.Info().SetTitle(title).SetMessage(message).Show()
-}
-
-func (p nativeUpdatePrompter) Error(title, message string) {
-	p.desktop.Dialog.Error().SetTitle(title).SetMessage(message).Show()
-}
-
-// updateRunner owns one application update flow. It starts staging as soon
-// as a release is found, then asks whether the user wants to continue. A
-// cancel interrupts the temporary download and removes a completed staging
-// directory; an update choice waits for verification/staging before closing
-// the UI and asking the Wails helper to restart the daemon into the new app.
+// updateRunner is the daemon's single-flight update coordinator. Automatic
+// checks download silently; only an explicit install action stops the UI and
+// asks the Wails helper to restart into the staged executable.
 type updateRunner struct {
 	backend updateBackend
-	prompt  updatePrompter
+	current string
 	stopUI  func() error
-	locale  func() settings.Locale
+	publish func(daemon.UpdateSnapshot)
 
-	busy atomic.Bool
-	mu   sync.Mutex
-	// downloadStarted is replaced for each run. Wails emits its start event
-	// before the provider begins streaming, which lets the prompt appear while
-	// the artifact is being staged instead of after the network transfer.
-	downloadStarted chan<- struct{}
-	activeCancel    context.CancelFunc
-	startCancel     context.CancelFunc
+	busy        atomic.Bool
+	mu          sync.RWMutex
+	state       daemon.UpdateSnapshot
+	release     *wailsupdater.Release
+	lastPublish time.Time
+
+	activeCancel context.CancelFunc
+	startCancel  context.CancelFunc
 }
 
-func (r *updateRunner) notifyDownloadStarted() {
-	r.mu.Lock()
-	started := r.downloadStarted
-	r.mu.Unlock()
-	if started == nil {
+func (r *updateRunner) Snapshot() daemon.UpdateSnapshot {
+	if r == nil {
+		return daemon.UpdateSnapshot{Phase: daemon.UpdateUnconfigured}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.state
+}
+
+func (r *updateRunner) setState(next daemon.UpdateSnapshot) {
+	if r == nil {
 		return
 	}
-	select {
-	case started <- struct{}{}:
-	default:
+	if next.CurrentVersion == "" {
+		next.CurrentVersion = r.current
+	}
+	r.mu.Lock()
+	changed := r.state != next
+	r.state = next
+	publish := r.publish
+	if changed && publish != nil {
+		now := time.Now()
+		if next.Phase == daemon.UpdateDownloading && !r.lastPublish.IsZero() && now.Sub(r.lastPublish) < updateProgressPublishInterval {
+			publish = nil
+		} else {
+			r.lastPublish = now
+		}
+	}
+	r.mu.Unlock()
+	if changed && publish != nil {
+		publish(next)
 	}
 }
 
-func (r *updateRunner) Trigger(ctx context.Context, manual bool) {
-	if r == nil || r.backend == nil {
-		if manual && r != nil && r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Info(labels.UpdateTitle, labels.UpdateMessage)
+func (r *updateRunner) updateState(mutator func(*daemon.UpdateSnapshot)) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	next := r.state
+	mutator(&next)
+	if next.CurrentVersion == "" {
+		next.CurrentVersion = r.current
+	}
+	changed := r.state != next
+	r.state = next
+	publish := r.publish
+	if changed && publish != nil {
+		now := time.Now()
+		if next.Phase == daemon.UpdateDownloading && !r.lastPublish.IsZero() && now.Sub(r.lastPublish) < updateProgressPublishInterval {
+			publish = nil
+		} else {
+			r.lastPublish = now
 		}
+	}
+	r.mu.Unlock()
+	if changed && publish != nil {
+		publish(next)
+	}
+}
+
+func (r *updateRunner) setError(code string) {
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateError
+		state.ErrorCode = code
+		state.InstallMode = daemon.UpdateInstallNone
+	})
+}
+
+// Action starts the requested operation and returns quickly. Progress and
+// terminal state are projected asynchronously through Snapshot and events.
+func (r *updateRunner) Action(ctx context.Context, action daemon.UpdateAction) error {
+	if r == nil || r.backend == nil {
+		if r != nil {
+			r.setState(daemon.UpdateSnapshot{Phase: daemon.UpdateUnconfigured, CurrentVersion: r.current})
+		}
+		if action == daemon.UpdateActionCheck {
+			return nil
+		}
+		return errUpdateUnavailable
+	}
+	// HTTP action handlers return before the asynchronous operation completes;
+	// detach the operation from the request cancellation while Stop still owns
+	// the coordinator's explicit shutdown cancellation.
+	operationCtx := context.WithoutCancel(ctx)
+	switch action {
+	case daemon.UpdateActionCheck:
+		if phase := r.Snapshot().Phase; phase == daemon.UpdateReady || phase == daemon.UpdateInstalling {
+			return nil
+		}
+		r.Trigger(operationCtx, false)
+		return nil
+	case daemon.UpdateActionDownload:
+		phase := r.Snapshot().Phase
+		if phase == daemon.UpdateReady || phase == daemon.UpdateDownloading || phase == daemon.UpdateVerifying {
+			return nil
+		}
+		if !r.busy.CompareAndSwap(false, true) {
+			return nil
+		}
+		if r.Snapshot().Phase != daemon.UpdateAvailable {
+			r.busy.Store(false)
+			return errUpdateNoRelease
+		}
+		go func() {
+			defer r.busy.Store(false)
+			r.runDownload(operationCtx)
+		}()
+		return nil
+	case daemon.UpdateActionInstall:
+		phase := r.Snapshot().Phase
+		if phase == daemon.UpdateInstalling {
+			return nil
+		}
+		if phase != daemon.UpdateReady {
+			return errUpdateNoRelease
+		}
+		if !r.busy.CompareAndSwap(false, true) {
+			return nil
+		}
+		go func() {
+			defer r.busy.Store(false)
+			r.runInstall(operationCtx)
+		}()
+		return nil
+	default:
+		return errors.New("invalid update action")
+	}
+}
+
+// Trigger starts a check. Automatic checks continue into download when a
+// release is found; manual checks stop at available so the About button can
+// explicitly start the download.
+func (r *updateRunner) Trigger(ctx context.Context, automatic bool) {
+	if r == nil {
+		return
+	}
+	if r.backend == nil {
+		r.setState(daemon.UpdateSnapshot{Phase: daemon.UpdateUnconfigured, CurrentVersion: r.current})
+		return
+	}
+	if phase := r.Snapshot().Phase; phase == daemon.UpdateReady || phase == daemon.UpdateInstalling {
 		return
 	}
 	if !r.busy.CompareAndSwap(false, true) {
-		if manual && r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Info(labels.UpdateTitle, labels.UpdateBusyMessage)
-		}
 		return
 	}
-	go r.run(ctx, manual)
+	go func() {
+		defer r.busy.Store(false)
+		r.runCheck(ctx, automatic)
+	}()
 }
 
-func (r *updateRunner) run(ctx context.Context, manual bool) {
-	defer r.busy.Store(false)
+func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateChecking
+		state.TargetVersion = ""
+		state.ErrorCode = ""
+		state.ReceivedBytes = 0
+		state.TotalBytes = 0
+		state.InstallMode = daemon.UpdateInstallNone
+	})
 	release, err := r.backend.Check(ctx)
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.LastCheckedAt = time.Now().UTC().Format(time.RFC3339)
+	})
 	if err != nil {
 		log.Printf("update check: %v", err)
-		if manual && r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Error(labels.UpdateFailureTitle, labels.UpdateFailureMessage)
-		}
+		r.setError("check")
 		return
 	}
 	if release == nil {
-		if manual && r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Info(labels.UpdateTitle, labels.UpdateNoUpdateMessage)
-		}
+		r.updateState(func(state *daemon.UpdateSnapshot) {
+			state.Phase = daemon.UpdateUpToDate
+			state.TargetVersion = ""
+			state.ErrorCode = ""
+			state.InstallMode = daemon.UpdateInstallNone
+		})
 		return
 	}
+	r.mu.Lock()
+	r.release = release
+	r.mu.Unlock()
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateAvailable
+		state.TargetVersion = release.Version
+		state.TotalBytes = release.Artifact.Size
+		state.ReceivedBytes = 0
+		state.ErrorCode = ""
+		state.InstallMode = daemon.UpdateInstallNone
+	})
+	if automatic {
+		r.runDownload(ctx)
+	}
+}
 
+func (r *updateRunner) runDownload(ctx context.Context) {
 	downloadCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
-	started := make(chan struct{}, 1)
-	r.downloadStarted = started
 	r.activeCancel = cancel
+	release := r.release
 	r.mu.Unlock()
-	done := make(chan error, 1)
-	go func() { done <- r.backend.DownloadAndInstall(downloadCtx) }()
-
-	// Give the updater a chance to emit DownloadStarted. The timeout keeps a
-	// slow or unusual provider from blocking the user prompt indefinitely.
-	finished := false
-	var downloadErr error
-	startTimer := time.NewTimer(2 * time.Second)
-	select {
-	case <-started:
-	case downloadErr = <-done:
-		finished = true
-	case <-startTimer.C:
-	}
-	if !startTimer.Stop() {
-		select {
-		case <-startTimer.C:
-		default:
-		}
-	}
-
-	accepted := r.prompt != nil && r.prompt.Confirm(release)
-	if !accepted {
+	defer func() {
 		cancel()
-		if !finished {
-			downloadErr = <-done
-		}
-		r.discardStaged()
-		r.clearActive()
+		r.mu.Lock()
+		r.activeCancel = nil
+		r.mu.Unlock()
+	}()
+	if release == nil {
+		r.setError("download")
 		return
 	}
-	if !finished {
-		downloadErr = <-done
-	}
-	r.clearActive()
-	if downloadErr != nil {
-		log.Printf("update download: %v", downloadErr)
-		if r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Error(labels.UpdateFailureTitle, labels.UpdateFailureMessage)
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateDownloading
+		state.TargetVersion = release.Version
+		state.ErrorCode = ""
+		state.InstallMode = daemon.UpdateInstallNone
+	})
+	if err := r.backend.DownloadAndInstall(downloadCtx); err != nil {
+		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+			return
 		}
+		log.Printf("update download: %v", err)
+		r.setError("download")
 		return
 	}
+	// The Wails updater normally emits EventUpdateReady after verification. A
+	// backend that completes without that event still receives a truthful ready
+	// projection here.
+	if r.Snapshot().Phase != daemon.UpdateReady {
+		r.updateState(func(state *daemon.UpdateSnapshot) {
+			state.Phase = daemon.UpdateReady
+			state.ReceivedBytes = state.TotalBytes
+			state.InstallMode = daemon.UpdateInstallStagedRestart
+		})
+	}
+}
 
-	// The UI is a separate process using the same installed executable. Close
-	// it before the daemon's updater helper swaps the executable on Windows.
+func (r *updateRunner) runInstall(ctx context.Context) {
 	if r.stopUI != nil {
 		if err := r.stopUI(); err != nil {
 			log.Printf("stop UI before update: %v", err)
-			r.discardStaged()
-			if r.prompt != nil {
-				labels := r.labels()
-				r.prompt.Error(labels.UpdateFailureTitle, labels.UpdateFailureMessage)
-			}
+			r.setError("install")
 			return
 		}
 	}
-	if err := r.backend.Restart(context.Background()); err != nil {
+	// The UI stop is the daemon's update boundary. Only after that handshake
+	// succeeds do we expose installing and let the Wails helper replace the
+	// staged executable.
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateInstalling
+		state.ErrorCode = ""
+	})
+	if err := r.backend.Restart(ctx); err != nil {
 		log.Printf("restart after update: %v", err)
-		if r.prompt != nil {
-			labels := r.labels()
-			r.prompt.Error(labels.UpdateFailureTitle, labels.UpdateFailureMessage)
-		}
+		r.setError("install")
 	}
-}
-
-func (r *updateRunner) labels() nativeui.Labels {
-	locale := settings.DefaultLocale
-	if r != nil && r.locale != nil {
-		locale = r.locale()
-	}
-	return nativeui.LabelsFor(locale)
-}
-
-func (r *updateRunner) clearActive() {
-	r.mu.Lock()
-	// The runner serializes flows with busy, so the active cancellation belongs
-	// to this run when it reaches either terminal path.
-	r.activeCancel = nil
-	r.downloadStarted = nil
-	r.mu.Unlock()
-}
-
-func (r *updateRunner) discardStaged() {
-	path := r.backend.DownloadedPath()
-	if path == "" {
-		return
-	}
-	dir := filepath.Dir(path)
-	tmp := filepath.Clean(os.TempDir())
-	rel, err := filepath.Rel(tmp, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !strings.HasPrefix(filepath.Base(dir), "wails-update-") {
-		return
-	}
-	_ = os.RemoveAll(dir)
 }
 
 func (r *updateRunner) Stop() {
@@ -326,7 +337,6 @@ func (r *updateRunner) Stop() {
 	startCancel := r.startCancel
 	r.activeCancel = nil
 	r.startCancel = nil
-	r.downloadStarted = nil
 	r.mu.Unlock()
 	if startCancel != nil {
 		startCancel()
@@ -337,8 +347,8 @@ func (r *updateRunner) Stop() {
 }
 
 // Start schedules the quiet startup check and the periodic background checks
-// used by the resident daemon. Manual menu requests share the same runner and
-// are serialized with these checks.
+// used by the resident daemon. Manual requests share the same single-flight
+// coordinator.
 func (r *updateRunner) Start() {
 	if r == nil || r.backend == nil {
 		return
@@ -356,7 +366,7 @@ func (r *updateRunner) Start() {
 		defer initial.Stop()
 		select {
 		case <-initial.C:
-			r.Trigger(ctx, false)
+			r.Trigger(ctx, true)
 		case <-ctx.Done():
 			return
 		}
@@ -365,7 +375,7 @@ func (r *updateRunner) Start() {
 		for {
 			select {
 			case <-ticker.C:
-				r.Trigger(ctx, false)
+				r.Trigger(ctx, true)
 			case <-ctx.Done():
 				return
 			}
@@ -375,23 +385,28 @@ func (r *updateRunner) Start() {
 
 // newUpdateRunner configures the official Wails endpoint provider when a
 // feed URL is supplied. Release signing remains optional for local/testing
-// feeds, while production feeds should provide both a digest and a pinned key.
-func newUpdateRunner(desktop *application.App, locale func() settings.Locale, stopUI func() error) *updateRunner {
-	prompt := nativeUpdatePrompter{desktop: desktop, locale: locale}
+// feeds; production feeds should provide both a digest and a pinned key.
+func newUpdateRunner(desktop *application.App, stopUI func() error, publish func(daemon.UpdateSnapshot)) *updateRunner {
+	runner := &updateRunner{
+		current: version.String(),
+		stopUI:  stopUI,
+		publish: publish,
+		state:   daemon.UpdateSnapshot{Phase: daemon.UpdateUnconfigured, CurrentVersion: version.String()},
+	}
 	feed := strings.TrimSpace(os.Getenv(updateFeedEnv))
 	if feed == "" {
-		return &updateRunner{prompt: prompt, stopUI: stopUI, locale: locale}
+		return runner
 	}
 	channel := strings.TrimSpace(os.Getenv(updateChannelEnv))
 	provider, err := endpoint.New(endpoint.Config{URL: feed, Channel: channel})
 	if err != nil {
 		log.Printf("update feed unavailable: %v", err)
-		return &updateRunner{prompt: prompt, stopUI: stopUI, locale: locale}
+		return runner
 	}
 	publicKey, err := updatePublicKey()
 	if err != nil {
 		log.Printf("update public key unavailable: %v", err)
-		return &updateRunner{prompt: prompt, stopUI: stopUI, locale: locale}
+		return runner
 	}
 	if err := desktop.Updater.Init(wailsupdater.Config{
 		CurrentVersion: version.String(),
@@ -400,18 +415,132 @@ func newUpdateRunner(desktop *application.App, locale func() settings.Locale, st
 		Window:         wailsupdater.WindowNone,
 	}); err != nil {
 		log.Printf("update initializer unavailable: %v", err)
-		return &updateRunner{prompt: prompt, stopUI: stopUI, locale: locale}
+		return runner
 	}
-	runner := &updateRunner{
-		backend: wailsUpdateBackend{updater: desktop.Updater},
-		prompt:  prompt,
-		stopUI:  stopUI,
-		locale:  locale,
-	}
-	desktop.Event.On(wailsupdater.EventDownloadStarted, func(*application.CustomEvent) {
-		runner.notifyDownloadStarted()
-	})
+	runner.backend = wailsUpdateBackend{updater: desktop.Updater}
+	runner.state.Phase = daemon.UpdateIdle
+	registerUpdaterEvents(desktop, runner)
 	return runner
+}
+
+func registerUpdaterEvents(desktop *application.App, runner *updateRunner) {
+	desktop.Event.On(wailsupdater.EventCheckStarted, func(*application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateChecking })
+	})
+	desktop.Event.On(wailsupdater.EventUpdateAvailable, func(event *application.CustomEvent) {
+		if release, ok := updaterRelease(event); ok {
+			runner.mu.Lock()
+			runner.release = release
+			runner.mu.Unlock()
+			runner.updateState(func(state *daemon.UpdateSnapshot) {
+				state.Phase = daemon.UpdateAvailable
+				state.TargetVersion = release.Version
+				state.TotalBytes = release.Artifact.Size
+			})
+		}
+	})
+	desktop.Event.On(wailsupdater.EventNoUpdate, func(*application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) {
+			state.Phase = daemon.UpdateUpToDate
+			state.TargetVersion = ""
+			state.ErrorCode = ""
+		})
+	})
+	desktop.Event.On(wailsupdater.EventDownloadStarted, func(event *application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) {
+			state.Phase = daemon.UpdateDownloading
+			state.ReceivedBytes = 0
+			if release, ok := updaterRelease(event); ok {
+				state.TargetVersion = release.Version
+				state.TotalBytes = release.Artifact.Size
+			}
+		})
+	})
+	desktop.Event.On(wailsupdater.EventDownloadProgress, func(event *application.CustomEvent) {
+		if progress, ok := updaterProgress(event); ok {
+			runner.updateState(func(state *daemon.UpdateSnapshot) {
+				state.Phase = daemon.UpdateDownloading
+				state.ReceivedBytes = progress.Written
+				if progress.Total > 0 {
+					state.TotalBytes = progress.Total
+				}
+			})
+		}
+	})
+	desktop.Event.On(wailsupdater.EventDownloadComplete, func(*application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
+	})
+	desktop.Event.On(wailsupdater.EventVerifying, func(*application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
+	})
+	desktop.Event.On(wailsupdater.EventInstalling, func(*application.CustomEvent) {
+		if runner.Snapshot().Phase == daemon.UpdateInstalling {
+			return
+		}
+		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
+	})
+	desktop.Event.On(wailsupdater.EventUpdateReady, func(event *application.CustomEvent) {
+		runner.updateState(func(state *daemon.UpdateSnapshot) {
+			state.Phase = daemon.UpdateReady
+			state.InstallMode = daemon.UpdateInstallStagedRestart
+			state.ErrorCode = ""
+			if release, ok := updaterRelease(event); ok {
+				state.TargetVersion = release.Version
+				state.TotalBytes = release.Artifact.Size
+				state.ReceivedBytes = state.TotalBytes
+			}
+		})
+	})
+	desktop.Event.On(wailsupdater.EventError, func(event *application.CustomEvent) {
+		code := "update"
+		if info, ok := updaterErrorInfo(event); ok && info.Stage != "" {
+			code = string(info.Stage)
+		}
+		runner.setError(code)
+	})
+}
+
+func updaterRelease(event *application.CustomEvent) (*wailsupdater.Release, bool) {
+	if event == nil {
+		return nil, false
+	}
+	switch value := event.Data.(type) {
+	case *wailsupdater.Release:
+		return value, value != nil
+	case wailsupdater.Release:
+		copy := value
+		return &copy, true
+	default:
+		return nil, false
+	}
+}
+
+func updaterProgress(event *application.CustomEvent) (wailsupdater.Progress, bool) {
+	if event == nil {
+		return wailsupdater.Progress{}, false
+	}
+	switch value := event.Data.(type) {
+	case wailsupdater.Progress:
+		return value, true
+	case *wailsupdater.Progress:
+		return *value, value != nil
+	default:
+		return wailsupdater.Progress{}, false
+	}
+}
+
+func updaterErrorInfo(event *application.CustomEvent) (wailsupdater.ErrorInfo, bool) {
+	if event == nil {
+		return wailsupdater.ErrorInfo{}, false
+	}
+	switch value := event.Data.(type) {
+	case wailsupdater.ErrorInfo:
+		return value, true
+	case *wailsupdater.ErrorInfo:
+		return *value, value != nil
+	default:
+		return wailsupdater.ErrorInfo{}, false
+	}
 }
 
 func updatePublicKey() ([]byte, error) {

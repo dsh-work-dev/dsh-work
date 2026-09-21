@@ -78,7 +78,7 @@ func TestServerBlocksMutableCallsDuringInstallerMaintenance(t *testing.T) {
 
 func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	server := &Server{Maintenance: func() bool { return true }}
-	for _, path := range []string{"/open", "/update/check", "/geometry", "/worker"} {
+	for _, path := range []string{"/open", "/update/action", "/geometry", "/worker"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
 		server.ServeHTTP(recorder, request)
@@ -91,23 +91,35 @@ func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	}
 }
 
-func TestServerStartsUpdateCheck(t *testing.T) {
-	called := false
-	server := &Server{CheckUpdates: func() error {
-		called = true
-		return nil
-	}}
+func TestServerStartsUpdateAction(t *testing.T) {
+	var called UpdateAction
+	server := &Server{
+		UpdateCommand: func(_ context.Context, action UpdateAction) error {
+			called = action
+			return nil
+		},
+		UpdateState: func() UpdateSnapshot { return UpdateSnapshot{Phase: UpdateChecking} },
+	}
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/update/check", nil)
+	request := httptest.NewRequest(http.MethodPost, "/update/action", strings.NewReader(`{"action":"check"}`))
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("update check status = %d, body=%q", recorder.Code, recorder.Body.String())
+		t.Fatalf("update action status = %d, body=%q", recorder.Code, recorder.Body.String())
 	}
-	if !called {
-		t.Fatal("update check callback was not invoked")
+	if called != UpdateActionCheck {
+		t.Fatalf("update action = %q, want check", called)
 	}
-	if got := strings.TrimSpace(recorder.Body.String()); got != "true" {
-		t.Fatalf("update check body = %q, want true", got)
+	if got := strings.TrimSpace(recorder.Body.String()); !strings.Contains(got, `"phase":"checking"`) {
+		t.Fatalf("update action body = %q, want checking state", got)
+	}
+}
+
+func TestServerDoesNotKeepLegacyUpdateRoute(t *testing.T) {
+	server := &Server{}
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/update/check", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("legacy update route status = %d, want 404", recorder.Code)
 	}
 }
 

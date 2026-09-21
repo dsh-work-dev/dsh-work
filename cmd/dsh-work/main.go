@@ -444,7 +444,7 @@ func executableExists(path string) bool {
 func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "dsh-work connects to the running background, or locks offline state when stopped.")
 	fmt.Fprintf(stdout, "Version: %s\n", version.String())
-	fmt.Fprintln(stdout, "Online commands: status, restart, stop [--wait].")
+	fmt.Fprintln(stdout, "Online commands: status, update status|check|download|install, restart, stop [--wait].")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Usage:")
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")
@@ -455,4 +455,5 @@ func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  dsh-work profile list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")
 	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME ...")
+	fmt.Fprintln(stdout, "  dsh-work update status|check|download|install")
 }

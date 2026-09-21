@@ -90,7 +90,7 @@
           <section class="manager-nav-group" aria-labelledby="settings-group-maintenance">
           <h2 id="settings-group-maintenance" class="manager-nav-heading" data-i18n="manager.groupMaintenance">Maintenance</h2>
           <button class="manager-nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
-          <button class="manager-nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span></button>
+          <button class="manager-nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span><span id="about-update-badge" class="manager-nav-badge" data-i18n="about.updateBadge" hidden>更新</span></button>
           </section>
         </nav>
       </aside>
@@ -438,7 +438,16 @@
         </section>
         <section class="manager-section about-section" aria-labelledby="manager-title" data-manager-panel="about" hidden>
           <div class="about-brand"><img class="brand-mark" src="/branding/dsh-work-mark-black.png" alt="" /><h2>dsh-work</h2></div>
-          <p id="about-version"></p><a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer" data-i18n="about.help">DSH help</a><button id="about-copy" class="button button-secondary" data-i18n="startup.copyDiagnostics" type="button">Copy diagnostics</button><p id="about-result" role="status"></p>
+          <p id="about-description" data-i18n="about.description">dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It makes a versioned external DSH runtime startable, observable, and recoverable.</p>
+          <p id="about-version"></p>
+          <section class="about-update-card" aria-labelledby="about-update-title">
+            <div class="about-update-heading"><div><h3 id="about-update-title" data-i18n="about.updateTitle">Application update</h3><p id="about-update-status" class="manager-note" role="status" aria-live="polite"></p></div><span id="about-update-target" class="about-update-target"></span></div>
+            <progress id="about-update-progress" max="100" value="0" hidden data-i18n-aria-label="about.updateProgress"></progress>
+            <p id="about-update-progress-meta" class="manager-note" hidden></p>
+            <div class="about-update-actions"><button id="about-update-action" class="button button-primary" type="button"></button><span id="about-update-last-checked" class="manager-note"></span></div>
+          </section>
+          <div class="about-actions"><a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer" data-i18n="about.help">DSH help</a><button id="about-copy" class="button button-secondary" data-i18n="startup.copyDiagnostics" type="button">Copy diagnostics</button></div>
+          <p id="about-result" role="status"></p>
         </section>
       </div>
     </main>

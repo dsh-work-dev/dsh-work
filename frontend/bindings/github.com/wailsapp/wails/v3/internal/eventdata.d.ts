@@ -13,6 +13,9 @@ import type * as acquisition$0 from "../../../../local/dsh-work/internal/acquisi
 import type * as app$0 from "../../../../local/dsh-work/internal/app/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import type * as daemon$0 from "../../../../local/dsh-work/internal/daemon/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import type * as lifecycle$0 from "../../../../local/dsh-work/internal/lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -26,6 +29,7 @@ declare module "@wailsio/runtime" {
             "locale": settings$0.Locale;
             "notification-failure": boolean;
             "pet-state": app$0.PetOverlayState;
+            "update-state": daemon$0.UpdateSnapshot;
         }
     }
 }
