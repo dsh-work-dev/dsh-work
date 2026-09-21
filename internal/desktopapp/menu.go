@@ -30,10 +30,17 @@ func installDesktopMenu(desktop *application.App, client *daemon.Client, initial
 	settingsItem := menu.Add(labels.Settings).OnClick(func(*application.Context) { go open("settings") })
 	help := menu.AddSubmenu(labels.Help)
 	updates := help.Add(labels.CheckUpdates).OnClick(func(*application.Context) {
-		mu.Lock()
-		copy := nativeui.LabelsFor(state.Preferences.Locale)
-		mu.Unlock()
-		desktop.Dialog.Info().SetTitle(copy.UpdateTitle).SetMessage(copy.UpdateMessage).Show()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := client.JSON(ctx, "/update/check", nil, nil); err != nil {
+				log.Printf("update request: %v", err)
+				mu.Lock()
+				copy := nativeui.LabelsFor(state.Preferences.Locale)
+				mu.Unlock()
+				desktop.Dialog.Error().SetTitle(copy.UpdateFailureTitle).SetMessage(copy.UpdateFailureMessage).Show()
+			}
+		}()
 	})
 	about := help.Add(labels.About).OnClick(func(*application.Context) { go open("about") })
 	var busy bool

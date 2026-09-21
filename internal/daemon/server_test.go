@@ -78,7 +78,7 @@ func TestServerBlocksMutableCallsDuringInstallerMaintenance(t *testing.T) {
 
 func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	server := &Server{Maintenance: func() bool { return true }}
-	for _, path := range []string{"/open", "/geometry", "/worker"} {
+	for _, path := range []string{"/open", "/update/check", "/geometry", "/worker"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
 		server.ServeHTTP(recorder, request)
@@ -88,6 +88,26 @@ func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 		if !strings.Contains(recorder.Body.String(), "MANAGER_OPERATION_BUSY") {
 			t.Fatalf("%s body = %q, want typed maintenance error", path, recorder.Body.String())
 		}
+	}
+}
+
+func TestServerStartsUpdateCheck(t *testing.T) {
+	called := false
+	server := &Server{CheckUpdates: func() error {
+		called = true
+		return nil
+	}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/update/check", nil)
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("update check status = %d, body=%q", recorder.Code, recorder.Body.String())
+	}
+	if !called {
+		t.Fatal("update check callback was not invoked")
+	}
+	if got := strings.TrimSpace(recorder.Body.String()); got != "true" {
+		t.Fatalf("update check body = %q, want true", got)
 	}
 }
 

@@ -153,7 +153,27 @@ func (l *uiLauncher) Stop() error {
 	defer cancel()
 	c := daemon.NewClient(l.identity + "-ui")
 	defer c.Close()
-	return c.JSON(ctx, "/stop", nil, nil)
+	var status struct{ PID int }
+	if err := c.JSON(ctx, "/status", nil, &status); err != nil {
+		// No UI listener means there is no UI process holding the installed
+		// executable. Treat that as an already-stopped client.
+		return nil
+	}
+	if err := c.JSON(ctx, "/stop", nil, nil); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := c.JSON(ctx, "/status", nil, &status); err != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func uiHandler(open func(string), closeWindow func(string), stop func()) http.Handler {

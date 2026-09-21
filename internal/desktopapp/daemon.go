@@ -291,6 +291,13 @@ func runDaemon(identity string, resources Resources) {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
+	updates := newUpdateRunner(desktop, func() dshworksettings.Locale {
+		return loadNativeLocale(&activeLocale)
+	}, launcher.Stop)
+	server.CheckUpdates = func() error {
+		updates.Trigger(context.Background(), true)
+		return nil
+	}
 	var repositionPetWindow func()
 	var persistPetWindowPosition func()
 	if petOverlayCapabilities.Level != dshworkpet.OverlayFallback {
@@ -546,6 +553,10 @@ func runDaemon(identity string, resources Resources) {
 		openSettings("settings")
 	})
 	trayMenu.AddSeparator()
+	trayCheckUpdates := trayMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
+		updates.Trigger(context.Background(), true)
+	})
+	trayMenu.AddSeparator()
 	trayRestartDSH := trayMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
 		restartDSH()
 	})
@@ -568,6 +579,7 @@ func runDaemon(identity string, resources Resources) {
 	})
 	refreshLifecycleMenu = func() {
 		enabled := !applicationShuttingDown.Load() && !quitFlow.InProgress() && !windowLedger.IsQuitting() && !restartActionBusy.Load()
+		trayCheckUpdates.SetEnabled(enabled)
 		trayRestartDSH.SetEnabled(enabled)
 		trayQuit.SetEnabled(enabled)
 		appMenuRestartDSH.SetEnabled(enabled)
@@ -600,8 +612,7 @@ func runDaemon(identity string, resources Resources) {
 	})
 	helpMenu := menu.AddSubmenu(initialNative.Help)
 	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
-		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
-		desktop.Dialog.Info().SetTitle(labels.UpdateTitle).SetMessage(labels.UpdateMessage).Show()
+		updates.Trigger(context.Background(), true)
 	})
 	aboutDshWork := helpMenu.Add(initialNative.About).OnClick(func(*application.Context) {
 		openSettings("about")
@@ -784,6 +795,7 @@ func runDaemon(identity string, resources Resources) {
 		server.BeginDrain()
 		stopPetInput()
 		applicationShuttingDown.Store(true)
+		updates.Stop()
 		server.Publish("background-stopping", true)
 		_ = launcher.Stop()
 		if stopPetMenuRefresh != nil {
@@ -812,6 +824,7 @@ func runDaemon(identity string, resources Resources) {
 		dshworkapp.StartupPetService(petSettingsService)
 		if !maintenance.InstallerInProgress() {
 			host.Start()
+			updates.Start()
 		}
 		go func() {
 			if err := ipcServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {

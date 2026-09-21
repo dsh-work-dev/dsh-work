@@ -44,7 +44,11 @@ type Server struct {
 	Root     string
 	PID      int
 	OpenUI   func(string) error
-	Media    http.Handler
+	// CheckUpdates starts the daemon-owned application update flow. The UI
+	// client and the tray both use this callback so only the resident daemon
+	// coordinates the updater and process shutdown.
+	CheckUpdates func() error
+	Media        http.Handler
 	// Maintenance reports whether the current-user installer owns the
 	// maintenance boundary. Read-only snapshots remain available while the
 	// boundary is held; all mutable service calls are rejected at this daemon
@@ -154,6 +158,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.OpenUI(section); err != nil {
 			http.Error(w, err.Error(), 503)
+			return
+		}
+		writeJSON(w, true)
+	case "/update/check":
+		if s.maintenanceBusy() {
+			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+			return
+		}
+		if s.CheckUpdates == nil {
+			http.Error(w, "update checking unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := s.CheckUpdates(); err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
 		writeJSON(w, true)
