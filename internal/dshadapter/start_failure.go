@@ -12,6 +12,7 @@ import (
 var (
 	startLoaderEntry   = regexp.MustCompile(`failed to apply loader entry \S+ \(([^)\s]+)\)`)
 	startLoadFailed    = regexp.MustCompile(`plugin\(s\) failed to load:\s*([^;\n]+)`)
+	startWebEntry      = regexp.MustCompile(`(?m)(?:^|did not activate\s+)((?:@[a-zA-Z0-9._~-]+/)?[a-zA-Z0-9._~-]+): (?:pending \(waiting for services?:|failed\b|import failed\b)`)
 	startMissingModule = regexp.MustCompile(`(?:Cannot find (?:module|package)|ERR_MODULE_NOT_FOUND[^'\n]*)\s*'([^'\n]+)'`)
 	startImportedFrom  = regexp.MustCompile(`imported from (\S+)`)
 	// The last node_modules segment of a path names the package that owns the
@@ -57,6 +58,27 @@ func PluginFailureCandidates(output string) []string {
 	}
 	for _, match := range startLoaderEntry.FindAllStringSubmatch(output, -1) {
 		add(match[1])
+	}
+	for _, match := range startWebEntry.FindAllStringSubmatch(output, -1) {
+		add(match[1])
+	}
+	// BootPage can report failed imports before its final activation audit.
+	// Those entries are separate lines under the failure title, without a status.
+	webFailureList := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "Failed to load plugins" {
+			webFailureList = true
+			continue
+		}
+		if !webFailureList || line == "" {
+			continue
+		}
+		if !npmPackageName.MatchString(line) {
+			webFailureList = false
+			continue
+		}
+		add(line)
 	}
 	for _, match := range startLoadFailed.FindAllStringSubmatch(output, -1) {
 		for _, name := range strings.Split(match[1], ",") {

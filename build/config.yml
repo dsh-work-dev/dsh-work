@@ -9,6 +9,10 @@ info:
   comments: "dsh-work desktop foundation"
   version: "0.1.0"
 
+protocols:
+  - scheme: dsh
+    description: DeepSeek Harness Desktop
+
 dev_mode:
   root_path: .
   log_level: warn

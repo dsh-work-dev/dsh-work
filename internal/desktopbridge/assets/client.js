@@ -105,38 +105,7 @@ async function i(i, a) {
 globalThis.fetch = i, globalThis.WorkerBridge = {
 	Stream: e,
 	workerFetch: i
-}, globalThis.__DSH_TRANSPORT__ = {
-	ownsHost: !0,
-	async *openStream(e, t, n) {
-		let r = await i(new URL("/.dsh/remote-stream", location.href), {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				endpoint: e,
-				payload: t
-			}),
-			signal: n
-		});
-		if (!r.ok || !r.body) throw Error(`Worker stream HTTP ${r.status}`);
-		let a = r.body.getReader(), o = new TextDecoder(), s = "";
-		try {
-			for (;;) {
-				let { done: e, value: t } = await a.read();
-				s += o.decode(t, { stream: !e });
-				let n;
-				for (; (n = s.indexOf("\n")) >= 0;) {
-					let e = s.slice(0, n);
-					s = s.slice(n + 1), e && (yield JSON.parse(e));
-				}
-				if (s.length > 16 * 1024 * 1024) throw Error("Worker stream item too large");
-				if (e) break;
-			}
-			s && (yield JSON.parse(s));
-		} finally {
-			await a.cancel().catch(() => {}), a.releaseLock();
-		}
-	}
-};
+}, globalThis.__DSH_TRANSPORT__ = { ownsHost: !0 };
 var a = globalThis.WebSocket, o = class extends EventTarget {
 	static {
 		this.CONNECTING = 0;

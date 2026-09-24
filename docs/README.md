@@ -7,8 +7,8 @@ preserve.
 ## Reading map
 
 1. [Product](product.md) — purpose, ownership and current capabilities.
-2. [Architecture](architecture.md) — implemented modules, dependency direction
-   and runtime invariants.
+2. [Architecture](architecture.md) — implemented modules, dependency direction,
+   transport boundaries and runtime invariants.
 3. [Decisions](decisions.md) — accepted architectural choices that explain the
    current shape.
 4. [Desktop Pet](desktop-pet.md) — the Host-owned Pet surface, persistence,

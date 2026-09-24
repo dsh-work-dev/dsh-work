@@ -95,6 +95,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/web-boot":
+		var input struct {
+			Generation string
+			Detail     string
+		}
+		if r.Method != http.MethodPost || json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&input) != nil {
+			http.Error(w, "invalid web boot report", 400)
+			return
+		}
+		if err := s.Host.ReportWebBoot(input.Generation, input.Detail); err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		writeJSON(w, true)
 	case "/snapshot":
 		var input struct {
 			Cursor  uint64
@@ -110,6 +124,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics()}
 		if state.Status.State == lifecycle.StateReady {
 			state.URL = state.Status.WorkspaceURL
+		} else if state.Status.State == lifecycle.StateStarting {
+			state.URL = s.Host.WebBootURL()
 		}
 		if s.Settings != nil {
 			state.Preferences, _ = s.Settings.Snapshot(r.Context())

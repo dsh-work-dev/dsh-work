@@ -185,7 +185,6 @@ type Manager struct {
 	latestNode        *NodeReleaseInfo
 	dshReleases       []DSHReleaseInfo
 	pluginProvenance  []PluginProvenanceRecord
-	pluginDisables    []PluginDisableRecord
 	lastSwitchAttempt *SwitchAttempt
 	switching         bool
 	operationGate     chan struct{}
@@ -463,7 +462,6 @@ func New(config Config) (*Manager, error) {
 		manager.latestNode = cloneNodeRelease(state.LatestNode)
 		manager.dshReleases = cloneDSHReleases(state.DSHReleases)
 		manager.pluginProvenance = append([]PluginProvenanceRecord(nil), state.PluginProvenance...)
-		manager.pluginDisables = append([]PluginDisableRecord(nil), state.PluginDisables...)
 	}
 	if state != nil && state.Configured != nil {
 		configured := *state.Configured
@@ -746,7 +744,10 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 	statePath := m.config.StatePath
 	remover, _ := m.config.RuntimeInstaller.(RuntimeRemover)
 	m.mu.RUnlock()
-	if remover != nil {
+	if runtimes[index].Source == RuntimeSourceManaged {
+		if remover == nil {
+			return Snapshot{}, failure(lifecycle.ErrorRuntimeInstallFailed, "DSH runtime removal is unavailable", "the platform does not provide a managed runtime file remover")
+		}
 		if err := remover.Remove(ctx, runtimes[index]); err != nil {
 			return Snapshot{}, preserveFailure(err, lifecycle.ErrorRuntimeInstallFailed, "DSH runtime removal failed", "the runtime files could not be removed; close programs using them and retry", true, false)
 		}
@@ -866,9 +867,6 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	m.mu.RUnlock()
 
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader, current, configured, knownGood, lastSwitchAttempt)
-	for i := range profiles {
-		m.markDisabledPlugins(profiles[i].Ref, profiles[i].Plugins)
-	}
 	if safeMode != nil {
 		for i := range profiles {
 			if profiles[i].Ref == safeMode.ReturnTo.Profile {
@@ -938,12 +936,12 @@ func (m *Manager) ListPlugins(ctx context.Context, request PluginListRequest) ([
 	if err != nil {
 		return nil, err
 	}
-	return m.markDisabledPlugins(request.Target.Profile, m.observePluginUpdates(ctx, dataDirectory, runtime, request.Target.Profile, plugins, environment)), nil
+	return m.observePluginUpdates(ctx, dataDirectory, runtime, request.Target.Profile, plugins, environment), nil
 }
 
 // InstallPlugin delegates profile composition to DSH's supported plugin
 // command. dsh-work validates the target and package spec and never runs pnpm
-// directly; the only manifest field it writes is the bundle list (plugin_disable.go).
+// directly.
 func (m *Manager) InstallPlugin(ctx context.Context, request PluginInstallRequest) (PluginResult, error) {
 	return m.runPluginCommand(ctx, request.Target, request.Package, "add")
 }
@@ -1146,18 +1144,12 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 			}
 		}
 	}
-	if operation == "remove" {
-		// An uninstalled plugin has nothing left to keep disabled.
-		if err := m.forgetPluginDisable(ctx, target.Profile, pluginPackageName(packageSpec)); err != nil {
-			return PluginResult{}, err
-		}
-	}
 	plugins, err := m.profilePlugins(ctx, filepath.Join(dataDirectory.Path, "profiles", target.Profile.Name))
 	if err != nil {
 		return PluginResult{}, err
 	}
 	restartRequired := current != nil && current.Profile == target.Profile
-	return PluginResult{Profile: target.Profile, Plugins: m.markDisabledPlugins(target.Profile, plugins), RestartRequired: restartRequired}, nil
+	return PluginResult{Profile: target.Profile, Plugins: plugins, RestartRequired: restartRequired}, nil
 }
 
 func (m *Manager) recordPluginProvenance(ctx context.Context, record PluginProvenanceRecord) error {
@@ -2130,7 +2122,6 @@ func (m *Manager) stateLocked() State {
 		LatestNode:        cloneNodeRelease(m.latestNode),
 		DSHReleases:       cloneDSHReleases(m.dshReleases),
 		PluginProvenance:  append([]PluginProvenanceRecord(nil), m.pluginProvenance...),
-		PluginDisables:    append([]PluginDisableRecord(nil), m.pluginDisables...),
 		Configured:        cloneRunContext(m.configured),
 	}
 }

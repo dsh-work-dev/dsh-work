@@ -146,7 +146,8 @@ Restore valid dimensions at creation and use defaults when absent or invalid.
 
 Use a per-generation current-user OS pipe for Host/Worker traffic, with mutual
 HMAC authentication and fixed trusted/Worker window roles. Wails byte streams
-carry bounded Fetch/WebSocket bodies; asset delivery uses native handlers.
+carry bounded streaming Fetch/WebSocket bodies; finite-request HTTP routing is
+the route-selected extension in ADR-0020. Asset delivery uses native handlers.
 Generation ownership and backpressure are part of the contract. The Go Host
 owns cookies and native authority. HTTP remains the upstream route protocol
 inside the pipe, and its internal loopback authority is not a listening socket.
@@ -245,3 +246,28 @@ ADR-0008. `@deepseek-ai/*` layers themselves still cannot be disabled
 
 This decision extends ADR-0018: the profile's patch layer is the second file
 dsh-work writes in a DSH profile, after the bundle list.
+
+## ADR-0020 — Route-selected WebView transport over one authenticated pipe
+
+Keep the authenticated per-generation named pipe as the only transport between
+the Host, daemon and DSH Worker. Select the WebView carrier by request needs:
+ordinary finite HTTP may use Wails' internal HTTP handler, while streaming,
+cancellation-sensitive requests and WebSocket upgrades use the bounded Wails
+byte streams. Both paths forward to the same daemon and Worker pipe; the choice
+does not introduce a TCP listener or a second DSH protocol.
+
+The standard HTTP path remains opt-in through `DSH_WORK_STANDARD_HTTP=1` while
+the platform response semantics are limited. On Windows, Wails' AssetServer
+buffers the response until the handler completes and does not implement
+`http.Flusher`, so it cannot preserve early chunks or cancellation before
+end-of-body and cannot carry WebSocket upgrades. The stream path is therefore
+the default and the required path for long-running DSH output. Revisit the
+default only when the Wails HTTP handler provides equivalent streaming and
+upgrade behavior.
+
+The HTTP proxy accepts only relative Worker paths, rejects CONNECT and TRACE,
+strips hop-by-hop, cookie and proxy headers, sets the internal Origin and keeps
+generation validation at the WebView boundary. DSH continues to expose its
+normal Node HTTP routes; only the carrier beneath those routes is the named
+pipe. `http://127.0.0.1:1` remains an internal origin and is never bound as a
+listening socket.

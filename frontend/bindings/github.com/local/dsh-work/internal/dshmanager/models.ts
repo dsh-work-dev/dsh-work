@@ -56,18 +56,24 @@ export interface LaunchRequest {
 /**
  * LoaderEntry is one row of the loader tree. DefaultDisabled means the layers
  * turn it off outright; Conditional means a layer decides at load time.
- * Disabled means the profile's own patch layer turns it off.
+ * Disabled reflects DSH's PluginManager state when a live Worker is available.
  */
 export interface LoaderEntry {
     "id": string;
+    "entryId"?: string;
     "package": string;
     "defaultDisabled"?: boolean;
     "conditional"?: boolean;
     "disabled"?: boolean;
+    "canToggle"?: boolean;
 }
 
 export interface LoaderEntryDisableRequest {
     "target": PluginTarget;
+
+    /**
+     * The DSH PluginManager entryId, not the profile patch row id.
+     */
     "id": string;
     "disabled": boolean;
 }
@@ -147,8 +153,7 @@ export enum NodeSelectionKind {
 };
 
 /**
- * PluginDisableRequest disables (or, with Disabled false, re-enables) one
- * installed plugin without uninstalling it.
+ * PluginDisableRequest asks DSH's live PluginManager to toggle an installed bundle.
  */
 export interface PluginDisableRequest {
     "target": PluginTarget;
@@ -169,10 +174,10 @@ export interface PluginInfo {
     "updateCheck": PluginUpdateCheck;
 
     /**
-     * Disabled means the plugin stays installed but is kept out of the
-     * profile's layer stack, so DSH does not load it.
+     * Disabled reflects DSH's selected-bundle state.
      */
     "disabled"?: boolean;
+    "canToggle"?: boolean;
 }
 
 export interface PluginInstallRequest {

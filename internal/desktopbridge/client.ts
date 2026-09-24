@@ -92,23 +92,8 @@ globalThis.fetch = workerFetch;
 
 (globalThis as any).__DSH_TRANSPORT__ = {
   ownsHost:true,
-  async *openStream(endpoint:string,payload:unknown,signal:AbortSignal) {
-    const response=await workerFetch(new URL('/.dsh/remote-stream',location.href),{
-      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({endpoint,payload}),signal,
-    });
-    if(!response.ok||!response.body)throw new Error(`Worker stream HTTP ${response.status}`);
-    const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
-    try{
-      for(;;){
-        const {done,value}=await reader.read();pending+=decoder.decode(value,{stream:!done});
-        let index:number;
-        while((index=pending.indexOf('\n'))>=0){const row=pending.slice(0,index);pending=pending.slice(index+1);if(row)yield JSON.parse(row);}
-        if(pending.length>16*1024*1024)throw new Error('Worker stream item too large');
-        if(done)break;
-      }
-      if(pending)yield JSON.parse(pending);
-    }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
-  },
+  // DSH owns Remote stream framing, uplinks and peer admission on its
+  // published WebSocket route. The WorkerSocket below carries those bytes.
 };
 
 const NativeWebSocket=globalThis.WebSocket;

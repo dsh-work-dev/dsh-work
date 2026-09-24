@@ -225,7 +225,7 @@ func runRuntime(manager managerAPI, args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "unregistered runtime %s from the catalog; managed files are retained\n", *id)
+		fmt.Fprintf(stdout, "removed runtime %s\n", *id)
 		return nil
 	default:
 		return fmt.Errorf("unknown runtime command %q", args[0])
@@ -450,7 +450,7 @@ func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  dsh-work runtime list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work runtime install --version VERSION")
 	fmt.Fprintln(stdout, "  dsh-work runtime add --id ID --version VERSION --path PATH")
-	fmt.Fprintln(stdout, "  dsh-work runtime remove --id ID    # unregisters catalog entry; retains files")
+	fmt.Fprintln(stdout, "  dsh-work runtime remove --id ID    # removes catalog entry and managed files")
 	fmt.Fprintln(stdout, "  dsh-work data-directory list|add|remove ...  # removal retains files")
 	fmt.Fprintln(stdout, "  dsh-work profile list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")

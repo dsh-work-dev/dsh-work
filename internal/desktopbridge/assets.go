@@ -11,9 +11,32 @@ import (
 //go:embed assets/client.js
 var clientScript string
 
+//go:embed boot.js
+var bootScript string
+
 // Assets serves a dedicated Worker-only WebView. Do not attach management
 // bindings to this surface: DSH plugins share its origin.
 func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/__work/web-boot" {
+		var report struct {
+			Generation string
+			Detail     string
+		}
+		if r.Method != http.MethodPost || json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&report) != nil {
+			http.Error(w, "invalid boot report", 400)
+			return
+		}
+		if report.Generation != b.Generation || b.ReportBoot == nil {
+			http.Error(w, "expired boot report", 409)
+			return
+		}
+		if err := b.ReportBoot(r.Context(), report.Generation, report.Detail); err != nil {
+			http.Error(w, "boot report unavailable", 503)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method != "GET" && r.Method != "HEAD" {
 		http.Error(w, "method not allowed", 405)
 		return
@@ -68,6 +91,11 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "index too large", 502)
 			return
 		}
+		if b.StandardHTTP && b.ReportBoot == nil {
+			w.WriteHeader(response.StatusCode)
+			io.WriteString(w, string(data))
+			return
+		}
 		body := string(data)
 		at := strings.Index(strings.ToLower(body), "<head>")
 		if at < 0 {
@@ -76,11 +104,31 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		}
 		at += len("<head>")
 		generation, _ := json.Marshal(b.Generation)
-		body = body[:at] + `<script>globalThis.__WORK_GENERATION__=` + string(generation) + `;</script><script type="module" src="/__work/bridge.js"></script>` + body[at:]
+		injection := `<script>globalThis.__WORK_GENERATION__=` + string(generation) + `;</script>`
+		if b.ReportBoot != nil {
+			injection += `<script>` + bootScript + `</script>`
+		}
+		if !b.StandardHTTP {
+			injection += `<script type="module" src="/__work/bridge.js"></script>`
+		}
+		body = body[:at] + injection + body[at:]
 		w.WriteHeader(response.StatusCode)
 		io.WriteString(w, body)
 		return
 	}
 	w.WriteHeader(response.StatusCode)
-	io.Copy(w, response.Body)
+	flush := http.NewResponseController(w).Flush
+	buffer := make([]byte, 32<<10)
+	for {
+		n, readErr := response.Body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+			_ = flush()
+		}
+		if readErr == io.EOF || readErr != nil {
+			return
+		}
+	}
 }

@@ -9,16 +9,10 @@ import (
 	"github.com/local/dsh-work/internal/pet"
 )
 
-type PetSettingsService struct {
-	Client      *daemon.Client
-	Local       *app.PetSettingsService
-	Maintenance func() bool
-}
+type PetSettingsService struct { Client *daemon.Client; Local *app.PetSettingsService; Maintenance func() bool }
 
 func (s *PetSettingsService) localMaintenanceFailure() error {
-	if s.Maintenance == nil || !s.Maintenance() {
-		return nil
-	}
+	if s.Maintenance == nil || !s.Maintenance() { return nil }
 	return lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: "dsh-work is being updated.", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: "Wait for the installer to finish, then retry the Pet action."}
 }
 
@@ -34,9 +28,7 @@ func (s *PetSettingsService) SetPetHitRegions(ctx context.Context, regions []app
 }
 
 func (s *PetSettingsService) GetPetPlayback(ctx context.Context, known string) (*pet.Playback, error) {
-	if s.Local != nil {
-		return s.Local.GetPetPlayback(ctx, known)
-	}
+	if s.Local != nil { return s.Local.GetPetPlayback(ctx, known) }
 	var value *pet.Playback
 	err := call(ctx, s.Client, "PetSettingsService", "GetPetPlayback", []any{known}, &value)
 	return value, err
@@ -76,27 +68,21 @@ func (s *PetSettingsService) SetPetReducedMotion(ctx context.Context, enabled bo
 }
 
 func (s *PetSettingsService) GetPetPanel(ctx context.Context) (app.PetPanel, error) {
-	if s.Local != nil {
-		return s.Local.GetPetPanel(ctx)
-	}
+	if s.Local != nil { return s.Local.GetPetPanel(ctx) }
 	var value app.PetPanel
 	err := call(ctx, s.Client, "PetSettingsService", "GetPetPanel", []any{}, &value)
 	return value, err
 }
 
 func (s *PetSettingsService) GetPetOverlay(ctx context.Context) (app.PetOverlayState, error) {
-	if s.Local != nil {
-		return s.Local.GetPetOverlay(ctx)
-	}
+	if s.Local != nil { return s.Local.GetPetOverlay(ctx) }
 	var value app.PetOverlayState
 	err := call(ctx, s.Client, "PetSettingsService", "GetPetOverlay", []any{}, &value)
 	return value, err
 }
 
 func (s *PetSettingsService) GetPetPresentation(ctx context.Context) (app.PetOverlayState, error) {
-	if s.Local != nil {
-		return s.Local.GetPetPresentation(ctx)
-	}
+	if s.Local != nil { return s.Local.GetPetPresentation(ctx) }
 	var value app.PetOverlayState
 	err := call(ctx, s.Client, "PetSettingsService", "GetPetPresentation", []any{}, &value)
 	return value, err
@@ -127,9 +113,7 @@ func (s *PetSettingsService) PreviewPet(ctx context.Context, stableSourceKey str
 }
 
 func (s *PetSettingsService) GetPetPreview(ctx context.Context, previewRef string) (string, error) {
-	if s.Local != nil {
-		return s.Local.GetPetPreview(ctx, previewRef)
-	}
+	if s.Local != nil { return s.Local.GetPetPreview(ctx, previewRef) }
 	var value string
 	err := call(ctx, s.Client, "PetSettingsService", "GetPetPreview", []any{previewRef}, &value)
 	return value, err

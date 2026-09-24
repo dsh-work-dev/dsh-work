@@ -13,7 +13,7 @@ import (
 )
 
 const Origin = "http://daemon.local"
-const Protocol = 1
+const Protocol = 2
 
 type Client struct{ HTTP *http.Client }
 

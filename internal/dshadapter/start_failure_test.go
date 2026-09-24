@@ -34,6 +34,14 @@ func TestPluginFailureCandidatesReadLoadAndModuleFailures(t *testing.T) {
 		output string
 		want   []string
 	}{
+		"web boot failed import list": {
+			output: "HARNESS\nFailed to load plugins\ndsh-univer-office",
+			want:   []string{"dsh-univer-office"},
+		},
+		"web boot pending service": {
+			output: "web boot: 1 entry did not activate\ndsh-just-chat: pending (waiting for service: settingsScope)",
+			want:   []string{"dsh-just-chat"},
+		},
 		"failed to load list": {
 			output: `dsh: 2 plugin(s) failed to load: @acme/widget, plain-plugin`,
 			want:   []string{"@acme/widget", "plain-plugin"},

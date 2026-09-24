@@ -8,7 +8,7 @@ User
   v
 Desktop UI client (Go + Wails)
   |-- trusted startup and Settings WebViews, application menu
-  |-- Worker WebView --> Wails byte streams
+  |-- Worker WebView --> Wails HTTP handler or bounded byte streams
   `-- current-user local IPC --------------------+
 Manager CLI --> current-user local IPC ----------|
                                                 v
@@ -82,13 +82,46 @@ index and upgrade contracts without calling TCP listen. The HTTP authority
 the pipe. Credentials and carrier modules live in an owned temporary directory
 and are removed with the generation.
 
+The DSH process still uses its normal Node HTTP server and route semantics. The
+carrier changes the server's listening transport to the authenticated generation
+pipe; it does not replace DSH routes with a second application protocol. The
+`127.0.0.1:1` authority is therefore an origin used for relative URLs and request
+routing, not a TCP listener. A WebView cannot dial the named pipe directly.
+The daemon is the resident Host and forwarding owner; each DSH launch is a
+separately supervised Worker generation behind that boundary.
+
+The Worker WebView has two Host-side request paths, selected by route semantics:
+
+| Request shape | WebView to Host | Host to daemon and Worker | Contract |
+|---|---|---|---|
+| Ordinary finite HTTP | Wails' internal HTTP asset handler and `fetch` | Existing authenticated generation pipe | Normal HTTP request and response bodies |
+| Streaming or cancellable HTTP | Wails bounded byte stream (`worker-fetch`) | Existing authenticated generation pipe | Backpressure, early chunks and cancellation |
+| WebSocket upgrade | Wails bounded byte stream (`worker-websocket`) | Existing authenticated generation pipe | Bidirectional WebSocket frames |
+
+The standard HTTP path is an opt-in diagnostic path (`DSH_WORK_STANDARD_HTTP=1`).
+It removes the injected Worker fetch bridge for ordinary requests and lets the
+Wails HTTP handler call the same daemon transport used by the stream path. This
+does not add a port and does not change DSH or daemon pipe authentication. The
+regular application keeps the stream path as its default so that all existing
+streaming and WebSocket behavior remains available.
+
+On Windows, the Wails 3 AssetServer response writer buffers its output until the
+handler finishes and does not expose `http.Flusher`. Consequently the standard
+HTTP path cannot provide early response chunks, cancellation before end-of-body,
+or WebSocket upgrades on that platform. Long-running DSH output, tool streams and
+WebSocket routes must continue to use the bounded byte streams until Wails offers
+a stream-capable HTTP handler. The Go proxy still validates relative paths,
+removes hop-by-hop and credential headers, sets the internal Origin and preserves
+the same generation checks as the stream path.
+
 The startup window (`workspace`) and Settings have fixed trusted roles.
 The DSH window (`worker`) has an immutable role. Native-stamped window identity
 selects resource handlers and denies its management runtime requests. Worker
 service-worker registration is blocked to protect the shared WebView origin.
-Resources use the native asset handler and daemon Worker forwarding; Fetch and
-WebSocket bodies use Wails Streams with 64 KiB chunks, upload acknowledgements
-and download credits. The daemon forwards traffic to the generation pipe.
+Resources use the native asset handler and daemon Worker forwarding. The default
+Fetch and WebSocket bodies use Wails Streams with 64 KiB chunks, upload
+acknowledgements and download credits. The daemon forwards traffic to the
+generation pipe; the optional finite-request HTTP path is described below.
 HTTP full duplex and an independent bounded upload writer keep download credits
 and cancellation live while an upload is in progress.
 Every stream names its document generation. Worker authentication cookies stay

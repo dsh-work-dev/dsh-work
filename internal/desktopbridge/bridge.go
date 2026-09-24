@@ -19,6 +19,11 @@ type Bridge struct {
 	Origin       string
 	Generation   string
 	OpenExternal func(string) error
+	ReportBoot   func(context.Context, string, string) error
+	// StandardHTTP routes ordinary WebView requests through the Wails asset
+	// server instead of the JavaScript worker-fetch stream. The daemon and
+	// Worker named-pipe transports remain unchanged.
+	StandardHTTP bool
 }
 
 // ByteConn permits exercising the same Fetch implementation without a WebView.
@@ -206,5 +211,94 @@ func (b *Bridge) Serve(c ByteConn) error {
 			default:
 			}
 		}
+	}
+}
+
+// ProxyHTTP forwards a normal WebView HTTP request through the daemon and
+// Worker named-pipe transports. It keeps the request and response loops
+// streaming where the platform ResponseWriter supports Flush. Wails' Windows
+// AssetServer buffers responses until Finish, so that platform still needs a
+// stream-capable transport for long-running responses.
+func (b *Bridge) ProxyHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect || r.Method == http.MethodTrace {
+		http.Error(w, "unsupported method", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL == nil || r.URL.IsAbs() || r.URL.Host != "" || !strings.HasPrefix(r.URL.Path, "/") || strings.HasPrefix(r.URL.Path, "//") {
+		http.Error(w, "invalid Worker path", http.StatusBadRequest)
+		return
+	}
+	u := *r.URL
+	if u.Path == "/" {
+		query := u.Query()
+		query.Del("generation")
+		u.RawQuery = query.Encode()
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, b.Origin+u.String(), r.Body)
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	req.RequestURI = ""
+	req.Header = r.Header.Clone()
+	for _, name := range []string{
+		"Cookie", "Host", "Connection", "Upgrade", "Transfer-Encoding", "Content-Length",
+		"Proxy-Authorization", "Proxy-Connection", "X-DSH-Path", "X-DSH-Generation",
+	} {
+		req.Header.Del(name)
+	}
+	req.Header.Set("Origin", b.Origin)
+	if r.Body != nil && r.Body != http.NoBody {
+		// Wails' asset server wraps its writer. ResponseController unwraps that
+		// wrapper and enables a full-duplex request when the platform supports it.
+		// The request can then upload while the Worker starts streaming a reply.
+		_ = http.NewResponseController(w).EnableFullDuplex()
+	}
+	response, err := b.Client.Do(req)
+	if err != nil {
+		http.Error(w, "Worker unavailable", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	copyProxyResponseHeaders(w.Header(), response.Header)
+	w.WriteHeader(response.StatusCode)
+	if r.Method == http.MethodHead || response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusResetContent || response.StatusCode == http.StatusNotModified {
+		return
+	}
+	flush := http.NewResponseController(w).Flush
+	buffer := make([]byte, 32<<10)
+	for {
+		n, readErr := response.Body.Read(buffer)
+		if n > 0 {
+			if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+				return
+			}
+			_ = flush()
+		}
+		if readErr == io.EOF {
+			return
+		}
+		if readErr != nil {
+			return
+		}
+	}
+}
+
+func copyProxyResponseHeaders(dst, src http.Header) {
+	hopByHop := map[string]struct{}{
+		"Connection": {}, "Keep-Alive": {}, "Proxy-Authenticate": {},
+		"Proxy-Authorization": {}, "Te": {}, "Trailer": {},
+		"Transfer-Encoding": {}, "Upgrade": {},
+	}
+	for _, value := range src.Values("Connection") {
+		for _, name := range strings.Split(value, ",") {
+			hopByHop[http.CanonicalHeaderKey(strings.TrimSpace(name))] = struct{}{}
+		}
+	}
+	for name, values := range src {
+		if _, skip := hopByHop[http.CanonicalHeaderKey(name)]; skip {
+			continue
+		}
+		dst[name] = append([]string(nil), values...)
 	}
 }

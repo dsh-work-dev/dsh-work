@@ -881,19 +881,19 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
-.plugin-list-item strong,
-.plugin-list-item span {
+.plugin-list-item > div strong,
+.plugin-list-item > div span {
   display: block;
   overflow-wrap: anywhere;
 }
 
-.plugin-list-item strong {
+.plugin-list-item > div strong {
   color: var(--text-soft);
   font-size: 13px;
   font-weight: 650;
 }
 
-.plugin-list-item span {
+.plugin-list-item > div span {
   margin-top: 4px;
   color: var(--muted);
   font-family: var(--font-mono);

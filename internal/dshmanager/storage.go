@@ -25,7 +25,6 @@ type State struct {
 	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
 	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
 	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
-	PluginDisables    []PluginDisableRecord    `json:"pluginDisables,omitempty"`
 	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
@@ -79,7 +78,6 @@ type persistedState struct {
 	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
 	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
 	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
-	PluginDisables    []PluginDisableRecord    `json:"pluginDisables,omitempty"`
 	Configured        *RunContext              `json:"configured,omitempty"`
 }
 
@@ -105,7 +103,6 @@ func decodeState(data []byte) (State, error) {
 		LatestNode:        persisted.LatestNode,
 		DSHReleases:       persisted.DSHReleases,
 		PluginProvenance:  persisted.PluginProvenance,
-		PluginDisables:    persisted.PluginDisables,
 		Configured:        persisted.Configured,
 	}
 	for index := range state.Runtimes {
@@ -225,9 +222,6 @@ func validateState(state State) error {
 			return errors.New("plugin provenance route is invalid")
 		}
 	}
-	if err := validatePluginDisableRecords(state.PluginDisables); err != nil {
-		return err
-	}
 	if state.Configured != nil {
 		if err := validateRunContext(*state.Configured); err != nil {
 			return err
@@ -331,6 +325,11 @@ func (FileProfileReader) Read(ctx context.Context, profilePath string) ([]Plugin
 	var manifest struct {
 		Dependencies    map[string]string `json:"dependencies"`
 		DevDependencies map[string]string `json:"devDependencies"`
+		DSH             struct {
+			Profile struct {
+				Bundles []string `json:"bundles"`
+			} `json:"profile"`
+		} `json:"dsh"`
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, err
@@ -354,14 +353,36 @@ func (FileProfileReader) Read(ctx context.Context, profilePath string) ([]Plugin
 	}
 	sort.Strings(names)
 	plugins := make([]PluginInfo, 0, len(names))
+	selectedBundles := make(map[string]bool, len(manifest.DSH.Profile.Bundles))
+	for _, bundle := range manifest.DSH.Profile.Bundles {
+		selectedBundles[bundle] = true
+	}
 	for _, name := range names {
 		resolvedVersion := installedPackageVersion(profilePath, name)
 		plugins = append(plugins, PluginInfo{
 			Name: name, Package: name, Spec: versions[name], Version: resolvedVersion, CurrentVersion: resolvedVersion,
 			Installed: true, SourceKind: classifyPluginSource(versions[name]), UpdateCheck: PluginUpdateUnknown,
+			Disabled: installedPackageHasBundle(profilePath, name) && !selectedBundles[name],
 		})
 	}
 	return plugins, nil
+}
+
+func installedPackageHasBundle(profilePath, packageName string) bool {
+	parts := strings.Split(filepath.ToSlash(packageName), "/")
+	pathParts := append([]string{profilePath, "node_modules"}, parts...)
+	data, err := os.ReadFile(filepath.Join(append(pathParts, "package.json")...))
+	if err != nil {
+		return false
+	}
+	var manifest struct {
+		DSH struct {
+			Bundle struct {
+				Patch string `json:"patch"`
+			} `json:"bundle"`
+		} `json:"dsh"`
+	}
+	return json.Unmarshal(data, &manifest) == nil && manifest.DSH.Bundle.Patch != ""
 }
 
 func installedPackageVersion(profilePath, packageName string) string {

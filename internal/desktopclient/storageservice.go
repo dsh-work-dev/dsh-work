@@ -8,59 +8,44 @@ import (
 	"github.com/local/dsh-work/internal/storagepaths"
 )
 
-type StorageService struct {
-	Client *daemon.Client
-	Local  *app.StorageService
-}
+type StorageService struct { Client *daemon.Client; Local *app.StorageService }
 
 func (s *StorageService) DefaultUserDataPath(ctx context.Context, root string) (string, error) {
-	if s.Local != nil {
-		return s.Local.DefaultUserDataPath(ctx, root)
-	}
+	if s.Local != nil { return s.Local.DefaultUserDataPath(ctx, root) }
 	var value string
 	err := call(ctx, s.Client, "StorageService", "DefaultUserDataPath", []any{root}, &value)
 	return value, err
 }
 
 func (s *StorageService) OpenLocation(ctx context.Context, userData bool) error {
-	if s.Local != nil {
-		return s.Local.OpenLocation(ctx, userData)
-	}
+	if s.Local != nil { return s.Local.OpenLocation(ctx, userData) }
 	err := call(ctx, s.Client, "StorageService", "OpenLocation", []any{userData}, nil)
 	return err
 }
 
 func (s *StorageService) ChooseDirectory(ctx context.Context, currentPath string) (string, error) {
-	if s.Local != nil {
-		return s.Local.ChooseDirectory(ctx, currentPath)
-	}
+	if s.Local != nil { return s.Local.ChooseDirectory(ctx, currentPath) }
 	var value string
 	err := call(ctx, s.Client, "StorageService", "ChooseDirectory", []any{currentPath}, &value)
 	return value, err
 }
 
 func (s *StorageService) GetLocations(ctx context.Context) (storagepaths.State, error) {
-	if s.Local != nil {
-		return s.Local.GetLocations(ctx)
-	}
+	if s.Local != nil { return s.Local.GetLocations(ctx) }
 	var value storagepaths.State
 	err := call(ctx, s.Client, "StorageService", "GetLocations", []any{}, &value)
 	return value, err
 }
 
 func (s *StorageService) SaveLocations(ctx context.Context, locations storagepaths.Locations) (storagepaths.State, error) {
-	if s.Local != nil {
-		return s.Local.SaveLocations(ctx, locations)
-	}
+	if s.Local != nil { return s.Local.SaveLocations(ctx, locations) }
 	var value storagepaths.State
 	err := call(ctx, s.Client, "StorageService", "SaveLocations", []any{locations}, &value)
 	return value, err
 }
 
 func (s *StorageService) CancelMigration(ctx context.Context) (storagepaths.State, error) {
-	if s.Local != nil {
-		return s.Local.CancelMigration(ctx)
-	}
+	if s.Local != nil { return s.Local.CancelMigration(ctx) }
 	var value storagepaths.State
 	err := call(ctx, s.Client, "StorageService", "CancelMigration", []any{}, &value)
 	return value, err

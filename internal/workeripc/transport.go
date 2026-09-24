@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-//go:embed host.mjs remote.mjs
+//go:embed host.mjs
 var hostSource embed.FS
 
 const Origin = "http://127.0.0.1:1" // Routing identity only; never dialled as TCP.
@@ -183,10 +183,6 @@ func (t *Transport) Prepare(root, profileRoot, previousPatch string) (string, er
 	if err := os.WriteFile(path, source, 0600); err != nil {
 		return "", err
 	}
-	remotePath, err := writeRemote(root)
-	if err != nil {
-		return "", err
-	}
 	var rows []any
 	if previousPatch != "" {
 		b, err := os.ReadFile(previousPatch)
@@ -198,7 +194,7 @@ func (t *Transport) Prepare(root, profileRoot, previousPatch string) (string, er
 		}
 	}
 	u := (&url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(path)}).String()
-	rows = append(rows, remoteRow(remotePath), map[string]any{"id": "webserver", "disabled": true}, map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pipe", "name": u, "config": map[string]any{"host": "127.0.0.1", "port": 1, "compression": "none"}}}})
+	rows = append(rows, map[string]any{"id": "webserver", "disabled": true}, map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pipe", "name": u, "config": map[string]any{"host": "127.0.0.1", "port": 1, "compression": "none"}}}})
 	// Module imports happen before schema processing. Per-launch sidecar owns
 	// credentials and module resolution; only its path enters the patch graph.
 	config, _ := json.Marshal(map[string]string{"pipe": t.path, "token": t.token, "profileRoot": profileRoot})
@@ -211,20 +207,4 @@ func (t *Transport) Prepare(root, profileRoot, previousPatch string) (string, er
 	}
 	patch := filepath.Join(root, "launch.patch.json")
 	return patch, os.WriteFile(patch, data, 0600)
-}
-
-func writeRemote(root string) (string, error) {
-	path, err := filepath.Abs(filepath.Join(root, "remote.mjs"))
-	if err != nil {
-		return "", err
-	}
-	data, err := hostSource.ReadFile("remote.mjs")
-	if err != nil {
-		return "", err
-	}
-	return path, os.WriteFile(path, data, 0600)
-}
-func remoteRow(path string) any {
-	u := (&url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(path)}).String()
-	return map[string]any{"insert": []any{map[string]any{"id": "dsh-work-remote-stream", "name": u}}}
 }

@@ -88,6 +88,7 @@ type Dependencies struct {
 }
 
 type Config struct {
+	RequireWebBoot      bool
 	DiscoveryRoot       string
 	BootstrapDirectory  string
 	DSHDataDirectory    string
@@ -204,12 +205,14 @@ type Host struct {
 }
 
 type generationRun struct {
-	generation string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	done       chan struct{}
-	ready      chan struct{}
-	readyOnce  sync.Once
+	generation  string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	ready       chan struct{}
+	readyOnce   sync.Once
+	webBoot     chan string
+	webBootOnce sync.Once
 
 	mu                sync.RWMutex
 	worker            supervisor.Worker
@@ -374,6 +377,7 @@ func (h *Host) beginRunLocked(parent context.Context, workspaceRequest workspace
 		cancel:           cancel,
 		done:             make(chan struct{}),
 		ready:            make(chan struct{}),
+		webBoot:          make(chan string, 1),
 		workspaceRequest: workspaceRequest,
 		launch:           cloneResolvedLaunch(launch),
 	}
@@ -594,30 +598,139 @@ func (h *Host) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgra
 	return h.applyPlugin(ctx, request.Target, request.Package, "update")
 }
 
-// SetPluginDisabled disables or re-enables a plugin of the current profile
-// inside the same stopped-Worker transaction as install and remove.
+// SetPluginDisabled delegates bundle activation to DSH's live PluginManager.
 func (h *Host) SetPluginDisabled(ctx context.Context, request dshmanager.PluginDisableRequest) (dshmanager.PluginResult, error) {
-	manager, ok := h.deps.Manager.(PluginFaultManager)
-	if !ok {
-		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
-	}
-	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
-		return manager.ApplyPluginDisabled(ctx, launch, request.Package, request.Disabled)
+	return h.mutateOfficialPlugin(ctx, request.Target, "setBundleEnabled", map[string]any{
+		"name": request.Package, "enabled": !request.Disabled,
 	})
 }
 
-// SetLoaderEntryDisabled turns an official loader entry of the current profile
-// off or back on inside the same stopped-Worker transaction.
+// SetLoaderEntryDisabled delegates entry activation to DSH's live PluginManager.
 func (h *Host) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (dshmanager.PluginResult, error) {
+	return h.mutateOfficialPlugin(ctx, request.Target, "setPluginEnabled", map[string]any{
+		"id": request.ID, "enabled": !request.Disabled,
+	})
+}
+
+// ListPlugins enriches the profile file listing with DSH's live bundle state
+// and read-only decisions. Activation controls are available only for the
+// current Ready Worker, whose authenticated PluginManager owns those changes.
+func (h *Host) ListPlugins(ctx context.Context, request dshmanager.PluginListRequest) ([]dshmanager.PluginInfo, error) {
 	manager, ok := h.deps.Manager.(interface {
-		ApplyLoaderEntryDisabled(context.Context, dshmanager.ResolvedLaunch, string, bool) (dshmanager.PluginResult, error)
+		ListPlugins(context.Context, dshmanager.PluginListRequest) ([]dshmanager.PluginInfo, error)
 	})
 	if !ok {
-		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
+		return nil, errors.New("profile plugin list is unavailable")
 	}
-	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
-		return manager.ApplyLoaderEntryDisabled(ctx, launch, request.ID, request.Disabled)
+	plugins, err := manager.ListPlugins(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	for index := range plugins {
+		plugins[index].CanToggle = false
+	}
+	if h.Status().State != lifecycle.StateReady {
+		return plugins, nil
+	}
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Current == nil || snapshot.Current.Profile != request.Target.Profile {
+		return plugins, nil
+	}
+	var bundles []pluginManagerBundle
+	if err := h.callPluginManager(ctx, "listBundles", map[string]any{}, &bundles); err != nil {
+		return nil, err
+	}
+	byName := make(map[string]pluginManagerBundle, len(bundles))
+	for _, bundle := range bundles {
+		byName[bundle.Name] = bundle
+	}
+	for index := range plugins {
+		bundle, found := byName[plugins[index].Package]
+		if !found || !bundle.Installed {
+			continue
+		}
+		plugins[index].Disabled = !bundle.Enabled
+		plugins[index].CanToggle = bundle.ReadOnlyReason == "" && bundle.Error == nil
+	}
+	return plugins, nil
+}
+
+func (h *Host) mutateOfficialPlugin(ctx context.Context, target dshmanager.PluginTarget, method string, args map[string]any) (dshmanager.PluginResult, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+		return dshmanager.PluginResult{}, failure
+	}
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return dshmanager.PluginResult{}, err
+	}
+	if snapshot.Current == nil || snapshot.Current.Profile != target.Profile {
+		return dshmanager.PluginResult{}, h.failureFor(errors.New("switch to this profile before changing plugins"), lifecycle.ErrorManagerOperationBusy, "The current profile is unavailable for plugin changes.", true)
+	}
+	var change pluginManagerChange
+	if err := h.callPluginManager(ctx, method, args, &change); err != nil {
+		return dshmanager.PluginResult{}, err
+	}
+	if err := pluginManagerChangeFailure(change); err != nil {
+		return dshmanager.PluginResult{}, err
+	}
+	plugins, err := h.ListPlugins(ctx, dshmanager.PluginListRequest{Target: target})
+	if err != nil {
+		return dshmanager.PluginResult{}, err
+	}
+	return dshmanager.PluginResult{Profile: target.Profile, Plugins: plugins, RestartRequired: change.Application == "restart-required"}, nil
+}
+
+// ListLoaderEntries joins the profile layer tree to DSH's live entry identities
+// so the UI sends the stable ids accepted by PluginManager.setPluginEnabled.
+func (h *Host) ListLoaderEntries(ctx context.Context, request dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error) {
+	manager, ok := h.deps.Manager.(interface {
+		ListLoaderEntries(context.Context, dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error)
 	})
+	if !ok {
+		return nil, errors.New("loader entry list is unavailable")
+	}
+	layers, err := manager.ListLoaderEntries(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if h.Status().State != lifecycle.StateReady {
+		return layers, nil
+	}
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Current == nil || snapshot.Current.Profile != request.Target.Profile {
+		return layers, nil
+	}
+	var entries []pluginManagerRemote
+	if err := h.callPluginManager(ctx, "listPlugins", map[string]any{}, &entries); err != nil {
+		return nil, err
+	}
+	byPatch := make(map[string]pluginManagerRemote, len(entries))
+	for _, entry := range entries {
+		if entry.PatchID != "" {
+			byPatch[entry.PatchID] = entry
+		}
+	}
+	for layerIndex := range layers {
+		for entryIndex := range layers[layerIndex].Entries {
+			entry := &layers[layerIndex].Entries[entryIndex]
+			remote, found := byPatch[entry.ID]
+			if !found {
+				continue
+			}
+			entry.EntryID = remote.EntryID
+			entry.Disabled = !remote.Enabled
+			entry.CanToggle = remote.EntryID != "" && remote.ReadOnlyReason == ""
+		}
+	}
+	return layers, nil
 }
 
 func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, spec, operation string) (dshmanager.PluginResult, error) {
@@ -1175,6 +1288,9 @@ func (h *Host) run(run *generationRun) {
 	run.setWorker(worker)
 
 	announcement, failure := h.waitReady(run, worker)
+	if failure == nil && run.ctx.Err() == nil && h.config.RequireWebBoot {
+		failure = h.waitWebBoot(run, worker)
+	}
 	if failure != nil {
 		cleanupFailure := h.cleanupWorker(run, worker)
 		if cleanupFailure != nil {
@@ -1191,7 +1307,7 @@ func (h *Host) run(run *generationRun) {
 			}
 		}
 		diagnostics := worker.Diagnostics()
-		h.recordPluginFault(run, diagnostics.StdoutTail+"\n"+diagnostics.StderrTail)
+		h.recordPluginFault(run, diagnostics.StdoutTail+"\n"+diagnostics.StderrTail+"\n"+failure.Detail)
 		h.finish(run, failure)
 		return
 	}
@@ -1276,11 +1392,6 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		}); ok {
 			captured := recorder.CaptureLaunchVersions(run.ctx, *launch.resolved)
 			launch.resolved = &captured
-		}
-		if enforcer, ok := h.deps.Manager.(pluginDisableEnforcer); ok {
-			if err := enforcer.EnforcePluginDisables(run.ctx, *launch.resolved); err != nil {
-				return nil, h.failureFor(err, lifecycle.ErrorPluginDisableFailed, "Disabled plugins could not be kept out of the profile.", true)
-			}
 		}
 		run.setLaunch(launch.resolved)
 		if status, err := h.machine.SetLaunchSelection(run.generation, launchSelection(*launch.resolved)); err == nil {
@@ -2241,21 +2352,20 @@ func (s *HostService) Restart(ctx context.Context) lifecycle.Status {
 	return s.host.Restart()
 }
 
-// DisableFaultPlugin disables a plugin named by the current startup failure.
-// It is offered beside that failure, so it is authorized on the same surface.
-func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
-	if !s.authorized(ctx) {
-		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
-	}
-	return s.host.DisableFaultPlugin(ctx, packageName)
-}
-
 // RemoveFaultPlugin uninstalls a plugin named by the current startup failure.
 func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
 	if !s.authorized(ctx) {
 		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
 	}
 	return s.host.RemoveFaultPlugin(ctx, packageName)
+}
+
+// DisableFaultPlugin disables a plugin named by the current startup failure.
+func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	}
+	return s.host.DisableFaultPlugin(ctx, packageName)
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {

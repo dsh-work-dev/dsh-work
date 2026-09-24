@@ -1,13 +1,10 @@
 package dshmanager
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 // The layer patches mirror DSH's shape: an insert list introduces rows, and
@@ -51,12 +48,13 @@ func writeLayer(t *testing.T, root, name, patch string) {
 	}
 }
 
-func newLoaderTestManager(t *testing.T) (*Manager, ResolvedLaunch, string) {
+func newLoaderTestProfile(t *testing.T) (ResolvedLaunch, string) {
 	t.Helper()
-	manager, launch, _, profilePath := newDisableTestManager(t)
-	runtimeRoot := filepath.Dir(launch.Runtime.Path)
-	writeLayer(t, runtimeRoot, "@deepseek-ai/dsh-base", basePatch)
-	writeLayer(t, runtimeRoot, "@deepseek-ai/dsh-web-app", appPatch)
+	root := t.TempDir()
+	profilePath := filepath.Join(root, "dsh-home", "profiles", "web")
+	if err := os.MkdirAll(profilePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	manifest := `{
   "dependencies": {"@acme/widget": "1.0.0"},
   "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@acme/widget"]}}
@@ -65,14 +63,16 @@ func newLoaderTestManager(t *testing.T) (*Manager, ResolvedLaunch, string) {
 	if err := os.WriteFile(filepath.Join(profilePath, "package.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Installed runtimes point at their npm shim, as manager state records them.
-	launch.Runtime.Path = filepath.Join(runtimeRoot, "node_modules", ".bin", "dsh.cmd")
+	launch := ResolvedLaunch{Runtime: RuntimeInfo{Path: filepath.Join(root, "dsh.cmd")}}
+	runtimeRoot := filepath.Dir(launch.Runtime.Path)
+	writeLayer(t, runtimeRoot, "@deepseek-ai/dsh-base", basePatch)
+	writeLayer(t, runtimeRoot, "@deepseek-ai/dsh-web-app", appPatch)
 	// A third-party layer may override an official row too.
 	writeLayer(t, profilePath, "@acme/widget", "- id: workspace\n  disabled: true\n")
 	if err := os.WriteFile(filepath.Join(profilePath, "cordis.patch.yml"), []byte(userPatchDefault), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return manager, launch, profilePath
+	return launch, profilePath
 }
 
 func loaderEntry(t *testing.T, layers []LoaderLayer, id string) LoaderEntry {
@@ -89,7 +89,7 @@ func loaderEntry(t *testing.T, layers []LoaderLayer, id string) LoaderEntry {
 }
 
 func TestOfficialLoaderEntriesAreGroupedByTheLayerThatInsertsThem(t *testing.T) {
-	_, launch, profilePath := newLoaderTestManager(t)
+	launch, profilePath := newLoaderTestProfile(t)
 	layers, err := officialLoaderLayers(profilePath, launch.Runtime)
 	if err != nil {
 		t.Fatal(err)
@@ -113,75 +113,5 @@ func TestOfficialLoaderEntriesAreGroupedByTheLayerThatInsertsThem(t *testing.T) 
 	}
 	if workspace := loaderEntry(t, layers, "workspace"); !workspace.DefaultDisabled {
 		t.Fatalf("third-party override was ignored: %#v", workspace)
-	}
-}
-
-func TestDisablingALoaderEntryWritesTheUserPatchAndEnablingRemovesIt(t *testing.T) {
-	manager, launch, profilePath := newLoaderTestManager(t)
-	if _, err := manager.ApplyLoaderEntryDisabled(context.Background(), launch, "web-search-deepseek", true); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(profilePath, "cordis.patch.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	if !strings.Contains(text, "# Your patch layer for this dsh profile.") || !strings.Contains(text, "- id: web-search-deepseek\n  disabled: true") {
-		t.Fatalf("user patch after disable:\n%s", text)
-	}
-	layers, err := officialLoaderLayers(profilePath, launch.Runtime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !loaderEntry(t, layers, "web-search-deepseek").Disabled {
-		t.Fatal("disabled entry is not reported disabled")
-	}
-	if _, err := manager.ApplyLoaderEntryDisabled(context.Background(), launch, "web-search-deepseek", false); err != nil {
-		t.Fatal(err)
-	}
-	data, err = os.ReadFile(filepath.Join(profilePath, "cordis.patch.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "web-search-deepseek") || !strings.Contains(string(data), "[]") || !strings.Contains(string(data), "# Your patch layer for this dsh profile.") {
-		t.Fatalf("user patch after enable:\n%s", data)
-	}
-}
-
-func TestLoaderEntryDisableKeepsTheUsersOwnRowForThatID(t *testing.T) {
-	manager, launch, profilePath := newLoaderTestManager(t)
-	own := "# mine\n- id: web-search-deepseek\n  config:\n    apiKeyEnv: MY_KEY\n- id: other\n  disabled: !!js \"true\"\n"
-	if err := os.WriteFile(filepath.Join(profilePath, "cordis.patch.yml"), []byte(own), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.ApplyLoaderEntryDisabled(context.Background(), launch, "web-search-deepseek", true); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(filepath.Join(profilePath, "cordis.patch.yml"))
-	if strings.Count(string(data), "id: web-search-deepseek") != 1 || !strings.Contains(string(data), "apiKeyEnv: MY_KEY") || !strings.Contains(string(data), "disabled: true") || !strings.Contains(string(data), `!!js "true"`) {
-		t.Fatalf("user patch after disable:\n%s", data)
-	}
-	if _, err := manager.ApplyLoaderEntryDisabled(context.Background(), launch, "web-search-deepseek", false); err != nil {
-		t.Fatal(err)
-	}
-	data, _ = os.ReadFile(filepath.Join(profilePath, "cordis.patch.yml"))
-	if !strings.Contains(string(data), "apiKeyEnv: MY_KEY") || strings.Contains(string(data), "disabled: true") {
-		t.Fatalf("enable removed the user's own row or kept the disable:\n%s", data)
-	}
-}
-
-func TestLoaderEntryDisableRefusesUnknownAndDefaultOffEntries(t *testing.T) {
-	manager, launch, profilePath := newLoaderTestManager(t)
-	for id, code := range map[string]lifecycle.ErrorCode{
-		"no-such-entry": lifecycle.ErrorPluginNotInstalled,
-		"tool-bash":     lifecycle.ErrorPluginProtected,
-		"":              lifecycle.ErrorPluginSpecInvalid,
-	} {
-		_, err := manager.ApplyLoaderEntryDisabled(context.Background(), launch, id, true)
-		assertFailureCode(t, err, code)
-	}
-	data, _ := os.ReadFile(filepath.Join(profilePath, "cordis.patch.yml"))
-	if string(data) != userPatchDefault {
-		t.Fatalf("refused changes wrote the user patch:\n%s", data)
 	}
 }

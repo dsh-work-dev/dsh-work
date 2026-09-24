@@ -195,9 +195,9 @@ type PluginInfo struct {
 	CurrentVersion   string                `json:"currentVersion,omitempty"`
 	AvailableVersion string                `json:"availableVersion,omitempty"`
 	UpdateCheck      PluginUpdateCheck     `json:"updateCheck"`
-	// Disabled means the plugin stays installed but is kept out of the
-	// profile's layer stack, so DSH does not load it.
-	Disabled bool `json:"disabled,omitempty"`
+	// Disabled reflects DSH's selected-bundle state.
+	Disabled  bool `json:"disabled,omitempty"`
+	CanToggle bool `json:"canToggle,omitempty"`
 }
 
 type PluginSourceKind string
@@ -250,13 +250,15 @@ type LoaderLayer struct {
 
 // LoaderEntry is one row of the loader tree. DefaultDisabled means the layers
 // turn it off outright; Conditional means a layer decides at load time.
-// Disabled means the profile's own patch layer turns it off.
+// Disabled reflects DSH's PluginManager state when a live Worker is available.
 type LoaderEntry struct {
 	ID              string `json:"id"`
+	EntryID         string `json:"entryId,omitempty"`
 	Package         string `json:"package"`
 	DefaultDisabled bool   `json:"defaultDisabled,omitempty"`
 	Conditional     bool   `json:"conditional,omitempty"`
 	Disabled        bool   `json:"disabled,omitempty"`
+	CanToggle       bool   `json:"canToggle,omitempty"`
 }
 
 type LoaderEntryListRequest struct {
@@ -265,25 +267,15 @@ type LoaderEntryListRequest struct {
 
 type LoaderEntryDisableRequest struct {
 	Target   PluginTarget `json:"target"`
-	ID       string       `json:"id"`
+	ID       string       `json:"id"` // The DSH PluginManager entryId, not the profile patch row id.
 	Disabled bool         `json:"disabled"`
 }
 
-// PluginDisableRequest disables (or, with Disabled false, re-enables) one
-// installed plugin without uninstalling it.
+// PluginDisableRequest asks DSH's live PluginManager to toggle an installed bundle.
 type PluginDisableRequest struct {
 	Target   PluginTarget `json:"target"`
 	Package  string       `json:"package"`
 	Disabled bool         `json:"disabled"`
-}
-
-// PluginDisableRecord is app-owned state for one disabled plugin. BundleIndex
-// is the plugin's position in the profile layer list, restored on enable.
-type PluginDisableRecord struct {
-	Profile     ProfileRef `json:"profile"`
-	Package     string     `json:"package"`
-	BundleIndex int        `json:"bundleIndex"`
-	DisabledAt  string     `json:"disabledAt"`
 }
 
 // PluginProvenanceRecord is bounded app-owned evidence for a successful

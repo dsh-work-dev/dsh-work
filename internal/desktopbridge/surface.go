@@ -11,9 +11,10 @@ import (
 // Surface is a permanent Worker window role. Native-stamped IDs select the
 // boundary before Wails dispatches runtime calls or serves application files.
 type Surface struct {
-	Window  func() application.Window
-	Current func() *Bridge
-	Assets  func(*Bridge) http.Handler
+	Window       func() application.Window
+	Current      func() *Bridge
+	Assets       func(*Bridge) http.Handler
+	StandardHTTP bool
 }
 
 func (s *Surface) forWindow(window application.Window) *Bridge {
@@ -61,6 +62,10 @@ func (s *Surface) Middleware(next http.Handler) http.Handler {
 		}
 		if generation := r.URL.Query().Get("generation"); generation != "" && generation != bridge.Generation {
 			http.Error(w, "Worker expired", http.StatusGone)
+			return
+		}
+		if s.StandardHTTP && r.URL.Path != "/__work/web-boot" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			bridge.ProxyHTTP(w, r)
 			return
 		}
 		if s.Assets != nil {

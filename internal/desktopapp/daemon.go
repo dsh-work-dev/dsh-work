@@ -38,6 +38,7 @@ import (
 func runDaemon(identity string, resources Resources) {
 	dependencies := platform.New()
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
+	config.RequireWebBoot = true
 	defaultRoot := filepath.Dir(config.SettingsPath)
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		defaultRoot = root
@@ -754,6 +755,13 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	host.SetPublish(func(status lifecycle.Status) {
+		if status.State == lifecycle.StateStarting && status.Phase == lifecycle.PhaseCheckpoint {
+			go func() {
+				if err := launcher.Open("__boot"); err != nil {
+					log.Printf("open boot WebView: %v", err)
+				}
+			}()
+		}
 		if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && status.Error != nil {
 			log.Printf("Host failure: %+v diagnostics=%+v", status.Error, host.Diagnostics())
 		}

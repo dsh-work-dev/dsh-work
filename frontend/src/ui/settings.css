@@ -151,10 +151,10 @@ html[data-surface="settings"] #host-surface { display: none; }
   .setting-copy strong { font-size: 14px; font-weight: 500; }
   .setting-copy label { cursor: pointer; }
   .setting-control select { min-width: 160px; }
-  .switch { width: 52px; height: var(--control-height); align-items: center; cursor: pointer; }
-  .switch-track { width: 52px; height: 28px; border-radius: 0; padding: 4px; background: var(--surface); transition: background-color var(--motion-fast); }
-  .switch-thumb { width: 18px; height: 18px; border-radius: 0; background: var(--text); transition: transform var(--motion-fast); }
-  .switch input:checked + .switch-track .switch-thumb { transform: translateX(24px); }
+  .switch { width: 39px; height: calc(var(--control-height) * .75); align-items: center; cursor: pointer; }
+  .switch-track { width: 39px; height: 21px; border-radius: 0; padding: 3px; background: var(--surface); transition: background-color var(--motion-fast); }
+  .switch-thumb { width: 13px; height: 13px; border-radius: 0; background: var(--text); transition: transform var(--motion-fast); }
+  .switch input:checked + .switch-track .switch-thumb { transform: translateX(18px); }
   .switch input:focus-visible + .switch-track { outline: 3px solid var(--focus); outline-offset: 3px; }
   .switch input:disabled + .switch-track { cursor: not-allowed; }
 

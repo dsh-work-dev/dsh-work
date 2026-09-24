@@ -6,8 +6,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,16 +58,28 @@ func runDesktopClient(identity string, resources Resources) error {
 	var workspace, worker, settingsWindow application.Window
 	var windowMu sync.Mutex
 	var mu sync.Mutex
+	var protocolMu sync.Mutex
+	applicationStarted, protocolOpenPending := false, false
 	var applicationShuttingDown atomic.Bool
 	current := state
-	workerSurface := &desktopbridge.Surface{Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
+	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
+	workerSurface := &desktopbridge.Surface{StandardHTTP: standardHTTP, Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
 		mu.Lock()
 		snapshot := current
 		mu.Unlock()
 		if snapshot.URL == "" {
 			return nil
 		}
-		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) }}
+		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) }, StandardHTTP: standardHTTP,
+			ReportBoot: func(ctx context.Context, generation, detail string) error {
+				ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				defer cancel()
+				return client.JSON(ctx, "/web-boot", struct {
+					Generation string
+					Detail     string
+				}{generation, detail}, nil)
+			},
+		}
 	}}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
@@ -127,6 +141,9 @@ func runDesktopClient(identity string, resources Resources) error {
 		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences})
 	}
 	createWorkspace := func() {
+		if workspace != nil {
+			return
+		}
 		workOptions := newOptions("workspace")
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
@@ -134,7 +151,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		workerOptions := workOptions
 		workerOptions.Name = "worker"
 		mu.Lock()
-		if current.URL != "" && current.Status.State == lifecycle.StateReady {
+		if current.URL != "" {
 			workerOptions.URL = current.URL
 			loadedWorkerURL = current.URL
 		}
@@ -150,6 +167,9 @@ func runDesktopClient(identity string, resources Resources) error {
 		worker.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorker, event) })
 	}
 	open = func(section string) {
+		if section == "__boot" {
+			return
+		}
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
 			return
 		}
@@ -190,7 +210,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		mu.Lock()
-		ready := current.URL != "" && current.Status.State == lifecycle.StateReady
+		ready := current.URL != ""
 		workerURL := current.URL
 		mu.Unlock()
 		if ready {
@@ -205,6 +225,21 @@ func runDesktopClient(identity string, resources Resources) error {
 			worker.Hide()
 		}
 	}
+	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
+		launched, err := url.Parse(event.Context().URL())
+		if err != nil || !strings.EqualFold(launched.Scheme, "dsh") || !strings.EqualFold(launched.Hostname(), "open") || launched.User != nil || launched.Port() != "" {
+			return
+		}
+		protocolMu.Lock()
+		started := applicationStarted
+		if !started {
+			protocolOpenPending = true
+		}
+		protocolMu.Unlock()
+		if started {
+			open("")
+		}
+	})
 	refreshMenu := installDesktopMenu(desktop, client, state, open)
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
 		windowMu.Lock()
@@ -228,7 +263,19 @@ func runDesktopClient(identity string, resources Resources) error {
 		stopPoll()
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		protocolMu.Lock()
+		applicationStarted = true
+		openRequestedByProtocol := protocolOpenPending
+		protocolOpenPending = false
+		protocolMu.Unlock()
+		// Settings-only launches also need a hidden Worker WebView to complete boot.
+		windowMu.Lock()
+		createWorkspace()
+		windowMu.Unlock()
 		open(section)
+		if openRequestedByProtocol {
+			open("")
+		}
 		go func() { _ = ipcServer.Serve(listener) }()
 		go func() {
 			cursor := state.Cursor

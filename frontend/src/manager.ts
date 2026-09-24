@@ -6,6 +6,7 @@ import {Events} from "@wailsio/runtime";
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {createSettingSwitch} from "./ui/setting-switch";
 import {mountOperationLog} from "./operation-log";
 import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
@@ -144,8 +145,8 @@ export function filterLoaderLayers(layers: LoaderLayer[], query: string): Array<
     .filter(layer => !needle || layer.entries.length > 0);
 }
 
-// mergePluginObservation copies registry details from a ListPlugins result onto
-// a newer snapshot listing, which stays authoritative for membership and state.
+// mergePluginObservation adds live DSH activation state and registry details to
+// a snapshot listing, which stays authoritative for plugin membership.
 export function mergePluginObservation(plugins: PluginInfo[], observed: PluginInfo[]): PluginInfo[] {
   const byPackage = new Map(observed.map(plugin => [plugin.package || plugin.name, plugin]));
   return plugins.map(plugin => {
@@ -153,6 +154,8 @@ export function mergePluginObservation(plugins: PluginInfo[], observed: PluginIn
     if (!match) return plugin;
     return {
       ...plugin,
+      disabled: match.canToggle ? match.disabled : plugin.disabled,
+      canToggle: match.canToggle,
       sourceKind: match.sourceKind,
       successfulRoute: match.successfulRoute,
       version: match.version || plugin.version,
@@ -704,11 +707,10 @@ export function mountManager() {
     if (plugin.updateCheck === "available") {
       row.append(pluginButton("action.upgrade", "button-primary", () => mutatePlugin("upgrade", packageName)));
     }
-    // DSH distribution packages are never disabled.
-    if (!packageName.startsWith("@deepseek-ai/")) {
-      row.append(pluginButton(plugin.disabled ? "action.enable" : "action.disable", "button-secondary", () => mutatePlugin(plugin.disabled ? "enable" : "disable", packageName)));
-    }
     row.append(pluginButton("action.remove", "button-secondary", () => mutatePlugin("remove", packageName)));
+    if (plugin.canToggle) {
+      row.append(pluginToggleSwitch(!plugin.disabled, plugin.name, (enabled) => mutatePlugin(enabled ? "enable" : "disable", packageName)));
+    }
     return row;
   }
 
@@ -717,12 +719,26 @@ export function mountManager() {
     button.className = `button ${tone}`;
     button.type = "button";
     button.textContent = t(label);
-    button.dataset.pluginRemove = "true";
+    button.dataset.pluginControl = "true";
     button.addEventListener("click", () => {
       button.disabled = true;
       void action();
     });
     return button;
+  }
+
+  function pluginToggleSwitch(enabled: boolean, label: string, action: (enabled: boolean) => Promise<void>): HTMLLabelElement {
+    const control = createSettingSwitch({
+      checked: enabled,
+      ariaLabel: label,
+      onChange: (nextEnabled) => {
+        const input = control.querySelector<HTMLInputElement>("input");
+        if (input) input.disabled = true;
+        void action(nextEnabled);
+      },
+    });
+    control.querySelector<HTMLInputElement>("input")!.dataset.pluginControl = "true";
+    return control;
   }
 
   // renderLoaderTree shows the current profile's official loader entries as
@@ -785,8 +801,8 @@ export function mountManager() {
           ].filter(Boolean).join(" · ");
           text.append(name, detail);
           row.append(text);
-          if (mutable && (entry.disabled || !entry.defaultDisabled)) {
-            row.append(pluginButton(entry.disabled ? "action.enable" : "action.disable", "button-secondary", () => mutatePlugin(entry.disabled ? "enable-entry" : "disable-entry", entry.id)));
+          if (mutable && entry.canToggle && entry.entryId) {
+            row.append(pluginToggleSwitch(!entry.disabled, entry.id, (enabled) => mutatePlugin(enabled ? "enable-entry" : "disable-entry", entry.entryId)));
           }
           group.append(row);
         }
@@ -1514,8 +1530,8 @@ export function mountManager() {
     profileClone.disabled = disabled || (!item?.exists && !item?.autoInitialize) || mutationBlocked();
     profileBackup.disabled = disabled || !item?.exists || mutationBlocked();
     profileDelete.disabled = disabled || !item?.deletable || mutationBlocked();
-    for (const button of Array.from(profilePlugins.querySelectorAll<HTMLButtonElement>("[data-plugin-remove]"))) {
-      button.disabled = disabled;
+    for (const control of Array.from(profilePlugins.querySelectorAll<HTMLButtonElement | HTMLInputElement>("[data-plugin-control]"))) {
+      control.disabled = disabled;
     }
   }
 

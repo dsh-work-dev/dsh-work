@@ -431,6 +431,9 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	if s.host != nil {
+		return s.host.ListPlugins(ctx, request)
+	}
 	return s.manager.ListPlugins(ctx, request)
 }
 
@@ -478,8 +481,7 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	return s.manager.RemovePlugin(ctx, request)
 }
 
-// SetPluginDisabled keeps an installed plugin out of (or returns it to) the
-// current profile's layer stack without uninstalling it.
+// SetPluginDisabled changes bundle activation through DSH's live PluginManager.
 func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanager.PluginDisableRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
@@ -489,17 +491,10 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	operationID := lifecycle.NewCorrelationID()
-	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
-	ctx = s.commandLogContext(ctx, operationID, artifact)
-	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
-	defer func() {
-		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
-	}()
-	if s.host != nil {
-		return s.host.SetPluginDisabled(ctx, request)
+	if s.host == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	return s.manager.SetPluginDisabled(ctx, request)
+	return s.host.SetPluginDisabled(ctx, request)
 }
 
 // ListLoaderEntries lists the current profile's official loader entries.
@@ -512,11 +507,13 @@ func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanag
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
+	if s.host != nil {
+		return s.host.ListLoaderEntries(ctx, request)
+	}
 	return s.manager.ListLoaderEntries(ctx, request)
 }
 
-// SetLoaderEntryDisabled turns an official loader entry of the current
-// profile off or back on through the profile's own patch layer.
+// SetLoaderEntryDisabled changes entry activation through DSH's live PluginManager.
 func (s *ManagerService) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
@@ -526,10 +523,10 @@ func (s *ManagerService) SetLoaderEntryDisabled(ctx context.Context, request dsh
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
-	if s.host != nil {
-		return s.host.SetLoaderEntryDisabled(ctx, request)
+	if s.host == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	return s.manager.SetLoaderEntryDisabled(ctx, request)
+	return s.host.SetLoaderEntryDisabled(ctx, request)
 }
 
 func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (result dshmanager.PluginResult, resultErr error) {

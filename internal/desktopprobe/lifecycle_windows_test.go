@@ -13,11 +13,13 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
@@ -41,6 +43,38 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
+	var directTCPRequests atomic.Int32
+	directTCPServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "content-type")
+			w.Header().Set("Access-Control-Allow-Private-Network", "true")
+			w.Header().Set("Vary", "Origin")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/__direct/ping" {
+			directTCPRequests.Add(1)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "ok")
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/__direct/echo" {
+			http.NotFound(w, r)
+			return
+		}
+		directTCPRequests.Add(1)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.Copy(w, r.Body)
+	}))
+	defer directTCPServer.Close()
+	t.Setenv("DSH_WORK_DIRECT_TCP_ORIGIN", directTCPServer.URL)
 	report := filepath.Join(root, "webview.json")
 	writeLifecyclePet(t, root)
 	t.Setenv("DSH_WORK_DESKTOP_ROOT", root)
@@ -54,6 +88,9 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	exe, _ := filepath.Abs(binary)
 	cli, _ := filepath.Abs("bin/dsh-work-cli.exe")
+	if selected := os.Getenv("DSH_WORK_TEST_CLI_BINARY"); selected != "" {
+		cli, _ = filepath.Abs(selected)
+	}
 	logFile, err := os.Create(filepath.Join(root, "process.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -181,16 +218,18 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	var uiPIDs []int
 	var webViewTimings struct {
-		BinaryRoundtripMs float64   `json:"binaryRoundtripMs"`
-		BinarySamplesMs   []float64 `json:"binarySamplesMs"`
-		FirstChunkMs      float64   `json:"firstChunkMs"`
+		BinaryRoundtripMs      float64   `json:"binaryRoundtripMs"`
+		BinarySamplesMs        []float64 `json:"binarySamplesMs"`
+		DirectTCPPingMs        float64   `json:"directTcpPingMs"`
+		DirectTCPPingSamplesMs []float64 `json:"directTcpPingSamplesMs"`
+		FirstChunkMs           float64   `json:"firstChunkMs"`
 	}
 	uiClient := daemon.NewClient(root + "-ui")
 	defer uiClient.Close()
 	for round := 0; round < 2; round++ {
 		var uiPID int
 		if round == 0 {
-			_ = os.Remove(report)
+			// Startup may already have completed the probe in the hidden boot WebView.
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			err := client.JSON(ctx, "/open", "", nil)
 			cancel()
@@ -202,9 +241,11 @@ func TestRealDaemonLifecycle(t *testing.T) {
 				UIPID   int    `json:"uiPID"`
 				Failure string `json:"failure"`
 				Timings struct {
-					BinaryRoundtripMs float64   `json:"binaryRoundtripMs"`
-					BinarySamplesMs   []float64 `json:"binarySamplesMs"`
-					FirstChunkMs      float64   `json:"firstChunkMs"`
+					BinaryRoundtripMs      float64   `json:"binaryRoundtripMs"`
+					BinarySamplesMs        []float64 `json:"binarySamplesMs"`
+					DirectTCPPingMs        float64   `json:"directTcpPingMs"`
+					DirectTCPPingSamplesMs []float64 `json:"directTcpPingSamplesMs"`
+					FirstChunkMs           float64   `json:"firstChunkMs"`
 				} `json:"timings"`
 			}
 			waitUntil(t, 160*time.Second, func() bool {
@@ -216,8 +257,13 @@ func TestRealDaemonLifecycle(t *testing.T) {
 			}
 			webViewTimings.BinaryRoundtripMs = result.Timings.BinaryRoundtripMs
 			webViewTimings.BinarySamplesMs = result.Timings.BinarySamplesMs
+			webViewTimings.DirectTCPPingMs = result.Timings.DirectTCPPingMs
+			webViewTimings.DirectTCPPingSamplesMs = result.Timings.DirectTCPPingSamplesMs
 			webViewTimings.FirstChunkMs = result.Timings.FirstChunkMs
 			uiPID = result.UIPID
+			if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+				t.Fatal(err)
+			}
 			waitUntil(t, 15*time.Second, func() bool {
 				return !nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
 			})
@@ -379,6 +425,9 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if strings.Contains(string(logData), "does not match registered data type") {
 		t.Fatal("native UI rejected background events; see process.log")
 	}
+	if directTCPRequests.Load() < 5 {
+		t.Fatalf("native WebView did not complete direct TCP samples: %d", directTCPRequests.Load())
+	}
 	fullWebViewSamples := webViewTimings.BinarySamplesMs
 	fullWebViewColdMs := 0.0
 	fullWebViewWarmMedianMs := webViewTimings.BinaryRoundtripMs
@@ -389,20 +438,22 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		fullWebViewWarmMedianMs = median(fullWebViewSamples[1:])
 	}
 	transportEvidence := map[string]any{
-		"payloadBytes":            2<<20 + 13,
-		"directDaemonWorkerMs":    directBinaryMs,
-		"directSamplesMs":         directBinarySamplesMs,
-		"fullWebViewMs":           webViewTimings.BinaryRoundtripMs,
-		"fullWebViewSamplesMs":    webViewTimings.BinarySamplesMs,
-		"fullWebViewColdMs":       fullWebViewColdMs,
-		"fullWebViewWarmMedianMs": fullWebViewWarmMedianMs,
-		"firstChunkMs":            webViewTimings.FirstChunkMs,
-		"bridgeAndWebViewMs":      webViewTimings.BinaryRoundtripMs - directBinaryMs,
-		"note":                    "direct path uses the daemon HTTP client and Worker named-pipe carrier; full path adds WebView/Wails 64 KiB framing, ACKs, and response credits",
+		"payloadBytes":                 2<<20 + 13,
+		"directDaemonWorkerMs":         directBinaryMs,
+		"directSamplesMs":              directBinarySamplesMs,
+		"nativeDirectTCPPingMs":        webViewTimings.DirectTCPPingMs,
+		"nativeDirectTCPPingSamplesMs": webViewTimings.DirectTCPPingSamplesMs,
+		"fullWebViewMs":                webViewTimings.BinaryRoundtripMs,
+		"fullWebViewSamplesMs":         webViewTimings.BinarySamplesMs,
+		"fullWebViewColdMs":            fullWebViewColdMs,
+		"fullWebViewWarmMedianMs":      fullWebViewWarmMedianMs,
+		"firstChunkMs":                 webViewTimings.FirstChunkMs,
+		"bridgeAndWebViewMs":           webViewTimings.BinaryRoundtripMs - directBinaryMs,
+		"note":                         "direct path uses the daemon HTTP client and Worker named-pipe carrier; full path adds WebView/Wails 64 KiB framing, ACKs, and response credits",
 	}
 	transportRaw, _ := json.MarshalIndent(transportEvidence, "", "  ")
 	_ = os.WriteFile(filepath.Join(root, "transport.json"), transportRaw, 0600)
-	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "transport": transportEvidence, "checks": []string{"native WebView binary/WS/cancellation", "native last-window close hides and reuses UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI hidden", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench hide", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
+	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "transport": transportEvidence, "checks": []string{"native WebView binary/WS/cancellation", "native WebView direct TCP loopback", "native last-window close hides and reuses UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI hidden", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench hide", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
 	raw, _ := json.MarshalIndent(evidence, "", "  ")
 	_ = os.WriteFile(filepath.Join(root, "lifecycle.json"), raw, 0600)
 	t.Logf("evidence: %s", filepath.Join(root, "lifecycle.json"))

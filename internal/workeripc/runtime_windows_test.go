@@ -5,6 +5,7 @@ package workeripc_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/coder/websocket"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -44,8 +45,12 @@ func TestRealWorkerPipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := platform.New()
-	adapter := dshadapter.New(deps.CommandExecutor, dshadapter.SupportedVersion)
-	plan, err := adapter.BuildLaunchPlan(dshadapter.LaunchContext{GenerationID: "pipe-test", Runtime: dshadapter.Runtime{Path: filepath.Join(root, "tools/dsh/run-dsh.cmd"), Version: dshadapter.SupportedVersion}, BootstrapDirectory: home, DataDirectory: filepath.Join(home, "data"), Profile: "web", HostPatch: patch, Workspace: workspacecontext.Context{GenerationID: "pipe-test", State: workspacecontext.StateSelectionRequired}})
+	runtimePath, runtimeVersion := filepath.Join(root, "tools/dsh/run-dsh.cmd"), dshadapter.SupportedVersion
+	if selected := os.Getenv("DSH_WORK_PIPE_RUNTIME"); selected != "" {
+		runtimePath, runtimeVersion = selected, os.Getenv("DSH_WORK_PIPE_VERSION")
+	}
+	adapter := dshadapter.New(deps.CommandExecutor, runtimeVersion)
+	plan, err := adapter.BuildLaunchPlan(dshadapter.LaunchContext{GenerationID: "pipe-test", Runtime: dshadapter.Runtime{Path: runtimePath, Version: runtimeVersion}, BootstrapDirectory: home, DataDirectory: filepath.Join(home, "data"), Profile: "web", HostPatch: patch, Workspace: workspacecontext.Context{GenerationID: "pipe-test", State: workspacecontext.StateSelectionRequired}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,27 +105,32 @@ func TestRealWorkerPipe(t *testing.T) {
 	if !activity.Snapshot().Connected {
 		t.Fatal("activity plugin did not connect over pipe")
 	}
-	request, _ := http.NewRequestWithContext(ctx, "POST", workeripc.Origin+"/.dsh/remote-stream", strings.NewReader(`{"endpoint":"missing-endpoint","payload":{}}`))
-	request.Header.Set("Origin", workeripc.Origin)
-	request.Header.Set("Content-Type", "application/json")
-	res, err = client.Do(request)
+	ws, _, err := websocket.Dial(ctx, "ws://127.0.0.1:1/api/remote.mux", &websocket.DialOptions{HTTPClient: client, HTTPHeader: http.Header{"Origin": {workeripc.Origin}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	res.Body.Close()
-	if res.StatusCode != 400 {
-		t.Fatalf("unknown stream endpoint: %d", res.StatusCode)
+	defer ws.CloseNow()
+	if err := ws.Write(ctx, websocket.MessageText, []byte(`{"type":"open","streamId":"events","endpoint":"$events","payload":{"args":{}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, first, err := ws.Read(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame struct {
+		Type, StreamID string
+		Value          struct{ Type, ClientID string }
+	}
+	if json.Unmarshal(first, &frame) != nil || frame.Type != "item" || frame.StreamID != "events" || frame.Value.Type != "ready" || frame.Value.ClientID == "" {
+		t.Fatalf("event subscription did not connect: %s", first)
 	}
 	anonymous := &http.Client{Transport: transport.HTTP, Timeout: time.Second}
-	request, _ = http.NewRequestWithContext(ctx, "POST", workeripc.Origin+"/.dsh/remote-stream", strings.NewReader(`{}`))
-	request.Header.Set("Origin", workeripc.Origin)
-	res, err = anonymous.Do(request)
-	if err != nil {
-		t.Fatal(err)
+	anonymousSocket, rejected, err := websocket.Dial(ctx, "ws://127.0.0.1:1/api/remote.mux", &websocket.DialOptions{HTTPClient: anonymous, HTTPHeader: http.Header{"Origin": {workeripc.Origin}}})
+	if anonymousSocket != nil {
+		anonymousSocket.CloseNow()
 	}
-	res.Body.Close()
-	if res.StatusCode != 401 {
-		t.Fatalf("anonymous remote stream: %d", res.StatusCode)
+	if err == nil || rejected == nil || rejected.StatusCode != 401 {
+		t.Fatalf("anonymous stream was not rejected: %v %v", rejected, err)
 	}
 	encoded, _ := json.Marshal(map[string]any{"htmlBytes": len(data), "activityConnected": true, "workerPID": worker.Diagnostics().PID})
 	t.Log(string(encoded))

@@ -3,188 +3,127 @@ package desktopclient
 
 import (
 	"context"
-	"errors"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/workspacecontext"
+	"errors"
 )
 
-type HostService struct {
-	Client *daemon.Client
-	Local  *app.HostService
-}
+type HostService struct { Client *daemon.Client; Local *app.HostService }
 
 func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.GetStatus(ctx)
-	}
+	if s.Local != nil { return s.Local.GetStatus(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "GetStatus", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetWorkspaceStatus(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.GetWorkspaceStatus(ctx)
-	}
+	if s.Local != nil { return s.Local.GetWorkspaceStatus(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "GetWorkspaceStatus", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
-	if s.Local != nil {
-		return s.Local.GetTheme(ctx)
-	}
+	if s.Local != nil { return s.Local.GetTheme(ctx) }
 	var value dshmanager.ThemePreference
 	err := call(ctx, s.Client, "HostService", "GetTheme", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetLocale(ctx context.Context) settings.Locale {
-	if s.Local != nil {
-		return s.Local.GetLocale(ctx)
-	}
+	if s.Local != nil { return s.Local.GetLocale(ctx) }
 	var value settings.Locale
 	err := call(ctx, s.Client, "HostService", "GetLocale", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetStartupOutput(ctx context.Context) app.StartupOutput {
-	if s.Local != nil {
-		return s.Local.GetStartupOutput(ctx)
-	}
+	if s.Local != nil { return s.Local.GetStartupOutput(ctx) }
 	var value app.StartupOutput
 	err := call(ctx, s.Client, "HostService", "GetStartupOutput", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) OpenRuntimeSettings(ctx context.Context) error {
-	if s.Local != nil {
-		return s.Local.OpenRuntimeSettings(ctx)
-	}
+	if s.Local != nil { return s.Local.OpenRuntimeSettings(ctx) }
 	err := call(ctx, s.Client, "HostService", "OpenRuntimeSettings", []any{}, nil)
 	return err
 }
 
 func (s *HostService) Start(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.Start(ctx)
-	}
+	if s.Local != nil { return s.Local.Start(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "Start", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) StartWithWorkspace(ctx context.Context, request workspacecontext.Request) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.StartWithWorkspace(ctx, request)
-	}
+	if s.Local != nil { return s.Local.StartWithWorkspace(ctx, request) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "StartWithWorkspace", []any{request}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) Cancel(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.Cancel(ctx)
-	}
+	if s.Local != nil { return s.Local.Cancel(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "Cancel", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) Restart(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.Restart(ctx)
-	}
+	if s.Local != nil { return s.Local.Restart(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "Restart", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
-func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
-	if s.Local != nil {
-		return s.Local.DisableFaultPlugin(ctx, packageName)
-	}
-	var value lifecycle.Status
-	err := call(ctx, s.Client, "HostService", "DisableFaultPlugin", []any{packageName}, &value)
-	return value, err
-}
-
 func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
-	if s.Local != nil {
-		return s.Local.RemoveFaultPlugin(ctx, packageName)
-	}
+	if s.Local != nil { return s.Local.RemoveFaultPlugin(ctx, packageName) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "RemoveFaultPlugin", []any{packageName}, &value)
 	return value, err
 }
 
+func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
+	if s.Local != nil { return s.Local.DisableFaultPlugin(ctx, packageName) }
+	var value lifecycle.Status
+	err := call(ctx, s.Client, "HostService", "DisableFaultPlugin", []any{packageName}, &value)
+	return value, err
+}
+
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
-	if s.Local != nil {
-		return s.Local.Quit(ctx)
-	}
+	if s.Local != nil { return s.Local.Quit(ctx) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "Quit", []any{}, &value)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetUpdateState(ctx context.Context) (daemon.UpdateSnapshot, error) {
-	if s.Local != nil {
-		return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil
-	}
-	if s.Client == nil {
-		return daemon.UpdateSnapshot{}, errors.New("background client unavailable")
-	}
+	if s.Local != nil { return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil }
+	if s.Client == nil { return daemon.UpdateSnapshot{}, errors.New("background client unavailable") }
 	var snapshot daemon.Snapshot
-	err := callJSON(ctx, s.Client, "/snapshot", struct {
-		Cursor uint64 `json:"cursor"`
-	}{}, &snapshot)
+	err := callJSON(ctx, s.Client, "/snapshot", struct { Cursor uint64 `json:"cursor"` }{}, &snapshot)
 	return snapshot.Update, err
 }
 
 func (s *HostService) Update(ctx context.Context, action string) error {
-	if s.Local != nil {
-		return errors.New("background update controls unavailable")
-	}
-	if s.Client == nil {
-		return errors.New("background client unavailable")
-	}
-	return callJSON(ctx, s.Client, "/update/action", struct {
-		Action string `json:"action"`
-	}{Action: action}, nil)
+	if s.Local != nil { return errors.New("background update controls unavailable") }
+	if s.Client == nil { return errors.New("background client unavailable") }
+	return callJSON(ctx, s.Client, "/update/action", struct { Action string `json:"action"` }{Action: action}, nil)
 }

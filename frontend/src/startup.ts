@@ -49,8 +49,8 @@ export function mountHost() {
   const pluginFault = element("startup-plugin-fault");
   const pluginFaultList = element("startup-plugin-fault-list");
 
-  // Each plugin the failed start pointed at can be disabled or removed; either
-  // action starts DSH again right away.
+  // A failed Worker has no live PluginManager connection, so recovery offers
+  // a persisted bundle disable or uninstall before retrying startup.
   function renderPluginFault(plugins: string[]) {
     pluginFault.hidden = plugins.length === 0;
     pluginFaultList.replaceChildren(...plugins.map(plugin => {
@@ -75,7 +75,9 @@ export function mountHost() {
   function resolvePluginFault(plugin: string, operation: "disable" | "remove") {
     if (!window.confirm(t(operation === "disable" ? "fault.confirmDisable" : "fault.confirmRemove", {plugin}))) return;
     return action(async () => {
-      status = await (operation === "disable" ? HostService.DisableFaultPlugin(plugin) : HostService.RemoveFaultPlugin(plugin)) as LifecycleStatus;
+      status = await (operation === "disable"
+        ? HostService.DisableFaultPlugin(plugin)
+        : HostService.RemoveFaultPlugin(plugin)) as LifecycleStatus;
       await prepareAndStart();
     });
   }

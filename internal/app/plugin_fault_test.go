@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 
@@ -84,62 +82,6 @@ func newFaultTestHost(t *testing.T, stderr string) (*Host, *exitingSupervisor, c
 	statuses := make(chan lifecycle.Status, 32)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
 	return host, supervisorAdapter, statuses, profilePath
-}
-
-func faultBundles(t *testing.T, profilePath string) []string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(profilePath, "package.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		DSH struct {
-			Profile struct {
-				Bundles []string `json:"bundles"`
-			} `json:"profile"`
-		} `json:"dsh"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
-	return manifest.DSH.Profile.Bundles
-}
-
-func TestFailedStartNamesInstalledPluginAndDisablesIt(t *testing.T) {
-	host, supervisorAdapter, statuses, profilePath := newFaultTestHost(t, "Error: dsh: plugin tree failed to load: failed to apply loader entry ui-widget (@acme/widget): boom\n    at init (file:///C:/x/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:1:1)")
-	host.Start()
-	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
-	if failed.PluginFault == nil || !slices.Equal(failed.PluginFault.Plugins, []string{"@acme/widget"}) {
-		t.Fatalf("plugin fault = %+v, want only the installed third-party plugin", failed.PluginFault)
-	}
-
-	if _, err := host.DisableFaultPlugin(context.Background(), "@acme/other"); err == nil {
-		t.Fatal("a plugin the failure did not name was changed")
-	}
-	status, err := host.DisableFaultPlugin(context.Background(), "@acme/widget")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status.PluginFault != nil {
-		t.Fatalf("handled plugin is still offered: %+v", status.PluginFault)
-	}
-	if got := faultBundles(t, profilePath); !slices.Equal(got, []string{"@deepseek-ai/dsh-web-app", "@acme/other"}) {
-		t.Fatalf("bundles after disable = %v", got)
-	}
-
-	// DSH's own plugin commands put every installed layer back; the next launch
-	// must take the disabled plugin out again before the Worker starts.
-	if err := os.WriteFile(filepath.Join(profilePath, "package.json"), []byte(faultProfileManifest), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	host.Start()
-	waitForStatus(t, statuses, lifecycle.StateFailed)
-	if supervisorAdapter.starts != 2 {
-		t.Fatalf("worker starts = %d, want 2", supervisorAdapter.starts)
-	}
-	if got := faultBundles(t, profilePath); !slices.Equal(got, []string{"@deepseek-ai/dsh-web-app", "@acme/other"}) {
-		t.Fatalf("bundles at relaunch = %v, want the disabled plugin kept out", got)
-	}
 }
 
 func TestStoredDataRejectionOffersNoPlugin(t *testing.T) {
