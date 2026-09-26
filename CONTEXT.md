@@ -42,9 +42,9 @@ in the documents linked from `docs/README.md`.
 | DSH home | DSH's external technical name for a DSH data directory. dsh-work's domain term is DSH data directory. | A Configured Run context or a Workspace. |
 | DSH profile | A named configuration scope inside one DSH data directory. The profile owns the plugin association set used when that profile runs. | A runtime, a Workspace, or a global plugin set. |
 | DSH plugin | An extension package associated with a profile within a DSH data directory. Its association is not global to the runtime or dsh-work. | A runtime component or a dsh-work-global setting. |
-| Disabled plugin | An installed third-party plugin that dsh-work keeps out of its profile's layer list, so DSH loads neither its code nor its patches. It stays installed and can be enabled again at its previous position. | An uninstalled plugin, or a disabled loader entry. |
+| Disabled plugin | An installed third-party plugin that DSH's plugin manager has deselected, so DSH loads neither its code nor its patches. It stays installed and can be enabled again while the profile runs. | An uninstalled plugin, or a disabled loader entry. |
 | Loader entry | One row of a profile's plugin tree, identified by `id` and naming the package it loads. Official layers insert most entries; later layers and the profile's own patch layer may override them by id. | A plugin package or a profile layer. |
-| Disabled loader entry | An official loader entry that the profile's own patch layer (`cordis.patch.yml`) turns off with a `disabled: true` row. Its layer stays in the layer list and every other entry still loads. | A disabled plugin, which removes a whole layer. |
+| Disabled loader entry | An official loader entry that DSH's plugin manager has turned off. Its layer stays in the layer list and every other entry still loads. | A disabled plugin, which removes a whole layer. |
 | DSH Workspace | A DSH-owned persistent record for a canonical directory, its identity/title and associated sessions. | The DSH data directory, a profile, or a dsh-work setting. |
 | Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. | A field in dsh-work's run context. |
 | Run context | The complete dsh-work selection of one DSH runtime, Node selection, DSH data directory and profile that defines one Worker generation. | A Workspace context or a durable settings document. |
@@ -69,10 +69,11 @@ in the documents linked from `docs/README.md`.
 5. The profile in the current run context is the only DSH profile whose plugin
    associations dsh-work may modify. Non-current profiles are read-only until the
    user switches the run context to that profile. Snapshot recovery may reapply
-   recorded plugin inputs while the Worker is stopped. When a start fails,
-   dsh-work may also disable or remove a third-party plugin that the failure
-   output named, in the profile that failed, while no Worker is running and no
-   run context is current.
+   recorded plugin inputs while the Worker is stopped. While the profile runs,
+   enabling and disabling go through DSH's own plugin manager. When a start
+   fails, dsh-work may also disable or remove a third-party plugin that the
+   failure output named, in the profile that failed, while no Worker is running
+   and no run context is current.
 6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch follows the configured recovery policy.

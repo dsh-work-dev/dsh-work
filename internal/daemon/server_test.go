@@ -211,6 +211,17 @@ func TestForwardWorkerWaitsForEarlyResponseUpload(t *testing.T) {
 	}
 }
 
+func TestForwardWorkerPreservesAccountCompletionRedirect(t *testing.T) {
+	const completionURL = "https://chat.deepseek.com/desktop/complete"
+	session := testWorkerSession{client: &http.Client{Transport: completionRedirectTransport{location: completionURL}}, generation: "test-generation"}
+	request := httptest.NewRequest(http.MethodGet, "/worker?code=code&state=state", nil)
+	recorder := httptest.NewRecorder()
+	forwardWorkerRequest(recorder, request, session, "/oauth/callback", "/oauth/callback")
+	if recorder.Code != http.StatusFound || recorder.Header().Get("Location") != completionURL {
+		t.Fatalf("callback redirect returned status %d with location %q", recorder.Code, recorder.Header().Get("Location"))
+	}
+}
+
 type testWorkerSession struct {
 	client     *http.Client
 	generation string
@@ -231,6 +242,16 @@ func (earlyResponseTransport) RoundTrip(*http.Request) (*http.Response, error) {
 		Header:        http.Header{"Content-Length": []string{"5"}},
 		Body:          io.NopCloser(strings.NewReader("early")),
 		ContentLength: 5,
+	}, nil
+}
+
+type completionRedirectTransport struct{ location string }
+
+func (t completionRedirectTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusFound,
+		Header:     http.Header{"Location": []string{t.location}},
+		Body:       io.NopCloser(strings.NewReader("")),
 	}, nil
 }
 

@@ -325,8 +325,11 @@ func (i *RuntimeInstaller) Finalize(_ context.Context, runtime dshmanager.Runtim
 }
 
 // Remove deletes a managed runtime directory after the manager has checked that
-// no Run context uses it. The directory is first renamed aside so an incomplete
-// deletion remains discoverable and can be retried on the next removal.
+// no Run context uses it. The directory is first renamed aside; once it has left
+// its install path the runtime is removed. pnpm hard-links one store file into
+// every runtime, and Windows refuses to delete any link of a native module that
+// another running runtime has mapped. Such leftovers are retried by later
+// removals and never block them.
 func (i *RuntimeInstaller) Remove(_ context.Context, runtime dshmanager.RuntimeInfo) error {
 	if i == nil {
 		return errors.New("runtime installer is unavailable")
@@ -342,9 +345,7 @@ func (i *RuntimeInstaller) Remove(_ context.Context, runtime dshmanager.RuntimeI
 	if !strings.HasPrefix(runtime.ID, "dsh-") || !isDirectManagedChild(root, target) || !isWithinDirectory(target, runtime.Path) {
 		return errors.New("runtime is outside the managed store")
 	}
-	if err := removeAbandonedRuntimes(root); err != nil {
-		return err
-	}
+	removeAbandonedRuntimes(root)
 	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -360,30 +361,22 @@ func (i *RuntimeInstaller) Remove(_ context.Context, runtime dshmanager.RuntimeI
 	if err := os.Rename(target, aside); err != nil {
 		return err
 	}
-	if err := removePathCompletely(aside); err != nil {
-		return fmt.Errorf("runtime deletion is incomplete: %w", err)
-	}
+	_ = removePathCompletely(aside)
 	return nil
 }
 
-func removeAbandonedRuntimes(root string) error {
+// removeAbandonedRuntimes deletes what earlier removals left aside, as far as
+// files no longer in use allow.
+func removeAbandonedRuntimes(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("read managed runtime store: %w", err)
+		return
 	}
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), ".removing-") {
-			continue
-		}
-		path := filepath.Join(root, entry.Name())
-		if err := removePathCompletely(path); err != nil {
-			return fmt.Errorf("remove abandoned runtime %q: %w", entry.Name(), err)
+		if strings.HasPrefix(entry.Name(), ".removing-") {
+			_ = removePathCompletely(filepath.Join(root, entry.Name()))
 		}
 	}
-	return nil
 }
 
 func removePathCompletely(path string) error {
@@ -557,8 +550,14 @@ func (i *RuntimeInstaller) installPackage(ctx context.Context, stagingRoot, vers
 func packageInstallArgs(kind dshmanager.RuntimeToolchain, stage, version, registry string) []string {
 	packageSpec := "@deepseek-ai/dsh@" + version
 	if kind == dshmanager.RuntimeToolchainSystemPNPM {
+		// pnpm otherwise hard-links store files into the runtime. A running
+		// Worker maps native modules, and Windows then refuses to delete any
+		// link of them, so a shared file would block removing other runtimes.
+		// clone-or-copy gives each runtime its own files (copy-on-write where
+		// the volume supports it) without changing the user's store location.
 		args := []string{
 			"add", "--dir", stage, "--config.lockfile=false", "--config.node-linker=hoisted",
+			"--config.package-import-method=clone-or-copy",
 		}
 		for _, packageName := range pnpmAllowedBuildPackages {
 			args = append(args, "--allow-build="+packageName)

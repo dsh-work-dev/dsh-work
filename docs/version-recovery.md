@@ -119,8 +119,9 @@ a currently live Worker.
 
 ## Compatibility and recovery limits
 
-The supported reference environment is Windows with the DSH 0.1.5-rc.2
-development fixture and its pnpm profile workflow. Compatibility is validated against
+The supported reference environment is Windows with DSH 0.1.7-rc.2 (the
+version pinned as `SupportedVersion` and in `toolchain.lock.json`) and its pnpm
+profile workflow. Compatibility is validated against
 exact DSH versions; this is not a promise that future releases work unchanged.
 Registry dependencies with usable lock inputs are supported. Local or
 Git sources, advanced manifest dependency configuration (such as overrides or

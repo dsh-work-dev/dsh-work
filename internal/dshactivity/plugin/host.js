@@ -31,6 +31,10 @@ export function apply(ctx, config) {
   }
   function onEvent(session, event, replay = false) {
     const r = row(session.id);
+    if (r?.seeding && !replay) {
+      if (r.seedEvents.length < 512) r.seedEvents.push(event);
+      return;
+    }
     if (!r || event.seq <= r.seq) return;
     r.seq = event.seq;
     const data = event.data ?? {};
@@ -68,16 +72,35 @@ export function apply(ctx, config) {
     r.updatedAt = event.time || Date.now();
     changed();
   }
-  // Seed restored sessions quietly; live events alone create new unread completions.
-  function seed(session) {
-    const r = row(session.id);
-    for (const event of (session.events ?? []).slice(-512)) onEvent(session, event, true);
-    // A historical open turn is not evidence of a live execution after restart.
-    if (r) r.running = false;
-  }
-  for (const session of ctx.sessions.list().slice(-64)) seed(session);
-  // Cold sessions remain navigable without activating agents or replaying old alerts.
+  // Restore visible history through DSH's cold-safe Session API. The deprecated
+  // synchronous Session.events reader is unavailable for some restored sessions.
   const lifetime = new AbortController();
+  const seeding = new Map();
+  const runningBaseline = new Map();
+  function seed(sessionId) {
+    const r = row(sessionId);
+    if (!r || seeding.has(sessionId)) return seeding.get(sessionId);
+    r.seeding = true;
+    r.seedEvents = [];
+    const work = ctx.sessionController.inspect(sessionId, AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)]))
+      .then(inspection => {
+        for (const event of inspection.events.slice(-512)) onEvent({id: sessionId}, event, true);
+      })
+      .catch(() => { /* Live events remain available if persisted history cannot be read. */ })
+      .finally(() => {
+        const buffered = r.seedEvents.splice(0).sort((a, b) => a.seq - b.seq);
+        r.seeding = false;
+        for (const event of buffered) onEvent({id: sessionId}, event);
+        delete r.seedEvents;
+        if (runningBaseline.has(sessionId)) r.running = runningBaseline.get(sessionId);
+        else if (buffered.length === 0) r.running = false;
+        seeding.delete(sessionId);
+      });
+    seeding.set(sessionId, work);
+    return work;
+  }
+  for (const session of ctx.sessions.list().slice(-64)) void seed(session.id);
+  // Cold sessions remain navigable without activating agents or replaying old alerts.
   ctx.effect(() => () => lifetime.abort());
   void ctx.sessionController.list({}, AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)])).then(baseline => {
     if (lifetime.signal.aborted) return;
@@ -85,7 +108,10 @@ export function apply(ctx, config) {
       const r = row(s.sessionId); if (!r) continue;
       r.parentSessionId = text(s.parentSessionId, 256);
       r.hints = s.projections?.values ?? {};
-      if (r.seq < 0) { r.running = s.running; r.updatedAt = s.updatedAt; }
+      runningBaseline.set(s.sessionId, s.running);
+      r.running = s.running;
+      if (r.seq < 0) r.updatedAt = s.updatedAt;
+      if (r.seq < 0) void seed(s.sessionId);
     }
     changed();
   }).catch(() => { /* Live sessions continue; the authenticated client can reconcile its list. */ });

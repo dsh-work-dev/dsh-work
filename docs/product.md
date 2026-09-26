@@ -37,11 +37,11 @@ silently mutate DSH-owned data.
 - Runtime, DSH data-directory and profile switches are serialized. A candidate
   becomes current only when ready. Failure follows the automatic-recovery or
   user-choice preference; recovery requires an available version snapshot.
-- Current-profile plugins can be inspected, installed, upgraded, disabled,
-  enabled and removed. A disabled plugin stays installed but DSH does not load
-  it; dsh-work keeps it disabled across later plugin commands. DSH distribution
-  packages cannot be disabled as a whole, but their individual loader entries
-  can be disabled and enabled. Non-current profiles are read-only.
+- Current-profile plugins can be inspected, installed, upgraded and removed.
+  While the profile is running, third-party plugins and individual official
+  loader entries can be switched on and off. DSH's own plugin manager saves and
+  applies the change. A disabled plugin stays installed. DSH distribution
+  packages cannot be disabled as a whole. Non-current profiles are read-only.
 - Plugin update availability comes from a registry check that runs whenever
   the current profile is running.
 - Successful normal startup records the last successful version snapshot.
@@ -60,6 +60,12 @@ silently mutate DSH-owned data.
 - Removing a DSH runtime deletes its installed files. A runtime used by the
   configured, current, known-good or safe-mode return environment cannot be
   removed.
+- DSH's DeepSeek account sign-in works in the Workspace. Starting sign-in
+  opens the authorization page in the system browser. After authorization,
+  the browser shows a result page with a link back to dsh-work.
+- dsh-work handles `dsh://open` and its own `dsh-work://open` links by
+  focusing or opening the Workspace. The installer takes over the `dsh://`
+  scheme and restores the previous handler on uninstall.
 - Settings persist locale, recovery, Pet and notification preferences.
 - Workspace and Settings windows separately remember normal dimensions and
   maximised state. Minimisation does not replace the saved normal dimensions;
@@ -100,8 +106,12 @@ See [Settings and startup](settings.md) for the accepted interaction layout.
   Overlay input, multi-monitor DPI, OS stacking and complete accessibility
   acceptance remain open.
 - The Windows per-user installer is available through the local Wails/NSIS
-  packaging task and the CI artifact workflow. Application self-update,
-  release signing and update-feed credentials remain unconfigured placeholders.
+  packaging task and the CI artifact workflow. About can check for, download
+  and install a signed update through the daemon, but the flow stays inactive
+  until an update feed and public key are configured
+  (`DSH_WORK_UPDATE_FEED_URL`, `DSH_WORK_UPDATE_PUBLIC_KEY` or
+  `DSH_WORK_UPDATE_PUBLIC_KEY_FILE`). No release feed, signing identity or
+  public key is configured yet.
 - Mobile clients and remote access are deferred. The daemon and desktop UI run
   as separate invocations of the same executable; the local IPC endpoint is not
   a remote access service. Login startup and suspend/logoff behavior still need

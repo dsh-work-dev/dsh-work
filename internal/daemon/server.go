@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
@@ -38,13 +40,14 @@ type Snapshot struct {
 	Diagnostics   supervisor.Diagnostics
 }
 type Server struct {
-	Services map[string]any
-	Host     *app.Host
-	Channel  *workerchannel.Adapter
-	Settings *settings.Manager
-	Root     string
-	PID      int
-	OpenUI   func(string) error
+	Services        map[string]any
+	Host            *app.Host
+	Channel         *workerchannel.Adapter
+	AccountCallback *accountcallback.AccountCallbackServer
+	Settings        *settings.Manager
+	Root            string
+	PID             int
+	OpenUI          func(string) error
 	// UpdateState and UpdateCommand expose the daemon-owned updater to trusted
 	// local clients. The UI renders UpdateState and sends explicit actions;
 	// provider and staging details remain inside the daemon process.
@@ -402,7 +405,9 @@ func (s *Server) forwardWorker(w http.ResponseWriter, r *http.Request) {
 	// The Worker may produce response chunks before consuming the upload.
 	// Go HTTP/1 otherwise drains the request on the first response write,
 	// deadlocking the existing Wails upload acknowledgements/download credits.
-	if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
+	// Bodyless requests, such as the OAuth callback relayed from the daemon's
+	// own listener, have no upload to interleave and need no duplex writer.
+	if err := http.NewResponseController(w).EnableFullDuplex(); err != nil && r.Body != nil && r.Body != http.NoBody {
 		http.Error(w, "duplex transport unavailable", http.StatusInternalServerError)
 		return
 	}
@@ -421,11 +426,60 @@ func (s *Server) forwardWorker(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid Worker path", 400)
 		return
 	}
+	if err := s.prepareAccountSignInRequest(r, decodedPath, current.Generation()); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, errAccountCallbackUnavailable) {
+			status = http.StatusServiceUnavailable
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
 	if isWorkerUpgrade(r) {
 		forwardWorkerUpgrade(w, r, current, decodedPath, path)
 		return
 	}
 	forwardWorkerRequest(w, r, current, decodedPath, path)
+}
+
+var errAccountCallbackUnavailable = errors.New("account sign-in callback unavailable")
+
+func (s *Server) prepareAccountSignInRequest(r *http.Request, path, generation string) error {
+	if r.Method != http.MethodPost || path != "/api/account/startSignIn" {
+		return nil
+	}
+	if s.AccountCallback == nil || s.AccountCallback.Origin() == "" {
+		return errAccountCallbackUnavailable
+	}
+	body, err := accountcallback.RewriteSignInBody(r.Body, s.AccountCallback.Origin())
+	if r.Body != nil {
+		_ = r.Body.Close()
+	}
+	if err != nil {
+		return errors.New("invalid account sign-in request")
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	r.TransferEncoding = nil
+	s.AccountCallback.SetGeneration(generation)
+	return nil
+}
+
+// ServeAccountCallback routes the OAuth return through the daemon's active
+// Worker generation. The listener is daemon-owned so a UI client restart does
+// not invalidate DSH's in-flight browser authorization URL.
+func (s *Server) ServeAccountCallback(w http.ResponseWriter, r *http.Request, generation string) {
+	s.ServeHTTP(w, accountCallbackWorkerRequest(r, generation))
+}
+
+func accountCallbackWorkerRequest(r *http.Request, generation string) *http.Request {
+	forwarded := r.Clone(r.Context())
+	callbackPath := r.URL.EscapedPath()
+	forwarded.URL = &url.URL{Path: "/worker", RawQuery: r.URL.RawQuery}
+	forwarded.RequestURI = ""
+	forwarded.Header = make(http.Header)
+	forwarded.Header.Set("X-DSH-Path", callbackPath)
+	forwarded.Header.Set("X-DSH-Generation", generation)
+	return forwarded
 }
 
 func isWorkerUpgrade(r *http.Request) bool {

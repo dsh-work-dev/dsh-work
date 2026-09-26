@@ -1,7 +1,7 @@
 Unicode true
 
 ; The Wails macro file is generated immediately before packaging and owns the
-; WebView2 and architecture setup. dsh-work owns scoped dsh:// registration below.
+; WebView2 and architecture setup. dsh-work owns dsh:// and dsh-work:// below.
 !include "wails_tools.nsh"
 
 !ifndef CLI_EXECUTABLE
@@ -13,6 +13,7 @@ Unicode true
 !define DSH_WORK_RECOVERY_DIR "$LOCALAPPDATA\dsh-work\installer-recovery"
 !define DSH_WORK_INSTALL_REG_KEY "Software\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !define DSH_WORK_PROTOCOL_KEY "Software\Classes\dsh"
+!define DSH_WORK_RETURN_PROTOCOL_KEY "Software\Classes\dsh-work"
 !define DSH_WORK_PROTOCOL_BACKUP_KEY "${DSH_WORK_INSTALL_REG_KEY}\ProtocolBackup"
 
 Var DshWorkInstallerMutex
@@ -22,8 +23,9 @@ Var DshWorkStagingDir
 Var DshWorkBackupDir
 Var DshWorkHadOld
 
-; Preserve the string values we replace in the user's existing dsh:// class.
-; The values are captured once and survive upgrades until the final uninstall.
+; Preserve existing protocol handlers once, then keep both registrations owned
+; by this install through upgrades. The unique return scheme remains reliable
+; even if another app later claims dsh://.
 !macro dshwork.backupProtocolValue REGKEY VALUE NAME
     ClearErrors
     ReadRegStr $R0 SHELL_CONTEXT "${REGKEY}" "${VALUE}"
@@ -74,18 +76,36 @@ dshworkBackupExternalProtocol:
     !insertmacro dshwork.backupProtocolValue "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" "DelegateExecute" "DelegateExecute"
     WriteRegDWORD SHELL_CONTEXT "${DSH_WORK_PROTOCOL_BACKUP_KEY}" "Captured" 1
 dshworkRegisterProtocolAssociation:
+    ClearErrors
+    ReadRegDWORD $R0 SHELL_CONTEXT "${DSH_WORK_PROTOCOL_BACKUP_KEY}" "ReturnCaptured"
+    StrCmp $R0 "1" dshworkRegisterProtocolValues
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" "" "ReturnDescription"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" "URL Protocol" "ReturnURLProtocol"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\DefaultIcon" "" "ReturnDefaultIcon"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell" "" "ReturnShellDefault"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open" "" "ReturnOpenDefault"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "" "ReturnOpenCommand"
+    !insertmacro dshwork.backupProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "DelegateExecute" "ReturnDelegateExecute"
+    WriteRegDWORD SHELL_CONTEXT "${DSH_WORK_PROTOCOL_BACKUP_KEY}" "ReturnCaptured" 1
+dshworkRegisterProtocolValues:
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}" "" "URL: DeepSeek Harness Desktop Protocol"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}" "URL Protocol" ""
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXECUTABLE},0"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell" "" "open"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell\open" "" ""
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" "" "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}" "" "URL: dsh-work Desktop Return Link"
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}" "URL Protocol" ""
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXECUTABLE},0"
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell" "" "open"
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open" "" ""
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "" "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
 FunctionEnd
 
 Function un.dshwork.restoreProtocol
     ReadRegStr $R0 SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" ""
     StrCpy $R1 "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
-    StrCmp $R0 $R1 unDshWorkRestoreProtocolOwned unDshWorkRestoreProtocolDone
+    StrCmp $R0 $R1 unDshWorkRestoreProtocolOwned unDshWorkRestoreReturnProtocol
 unDshWorkRestoreProtocolOwned:
     !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_PROTOCOL_KEY}" ""
     !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_PROTOCOL_KEY}" "URL Protocol"
@@ -101,6 +121,25 @@ unDshWorkRestoreProtocolOwned:
     !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_PROTOCOL_KEY}\shell\open" "" "OpenDefault"
     !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" "" "OpenCommand"
     !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" "DelegateExecute" "DelegateExecute"
+unDshWorkRestoreReturnProtocol:
+    ReadRegStr $R0 SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" ""
+    StrCpy $R1 "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
+    StrCmp $R0 $R1 unDshWorkRestoreReturnProtocolOwned unDshWorkRestoreProtocolDone
+unDshWorkRestoreReturnProtocolOwned:
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" ""
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" "URL Protocol"
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\DefaultIcon" ""
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell" ""
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open" ""
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" ""
+    !insertmacro dshwork.deleteProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "DelegateExecute"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" "" "ReturnDescription"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}" "URL Protocol" "ReturnURLProtocol"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\DefaultIcon" "" "ReturnDefaultIcon"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell" "" "ReturnShellDefault"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open" "" "ReturnOpenDefault"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "" "ReturnOpenCommand"
+    !insertmacro dshwork.restoreProtocolValue "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell\open\command" "DelegateExecute" "ReturnDelegateExecute"
 unDshWorkRestoreProtocolDone:
 FunctionEnd
 

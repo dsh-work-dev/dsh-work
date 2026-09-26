@@ -38,9 +38,9 @@ the current Settings instance.
 | Page | Current layout |
 |---|---|
 | Overview | Current/configured/recovery context, switch and safe-mode actions; compact version-record summary and save/history controls. |
-| Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. |
+| Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. Removing a runtime shows a short confirmation below the runtime list. |
 | Profiles | Directory and selected-profile editor; backup is a primary action, with clone/export/delete grouped as secondary actions. Backup count/latest time leads to a history dialog. |
-| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Disable or Enable beside Remove, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry; each entry offers Disable or Enable unless the layers already turn it off. Operation feedback sits near its controls. |
+| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry. Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. |
 | Pets | Compact name/thumbnail/source/current-state list and preview. Use, topmost and size controls precede the full description. |
 | General and Notifications | Visible labels, aligned controls and short supporting text. |
 | Storage and About | Direct maintenance controls and contextual feedback. |
@@ -59,7 +59,8 @@ appear together. Copy is available beside the diagnostics. A failure with no
 known step is presented as a general failure rather than assigned to Node.
 When the failure output names installed third-party plugins, a panel lists up
 to three of them with Disable and Remove. Each action asks for confirmation and
-then starts again.
+then starts again. Disable keeps the plugin installed; turn it back on in
+Plugins once DSH is running.
 
 Normal startup exposes optional logs and cancellation. Failed startup exposes
 logs automatically and initially positions them at the error. Manual log scroll

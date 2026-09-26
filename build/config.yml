@@ -10,6 +10,8 @@ info:
   version: "0.1.0"
 
 protocols:
+  - scheme: dsh-work
+    description: dsh-work Desktop Return Link
   - scheme: dsh
     description: DeepSeek Harness Desktop
 

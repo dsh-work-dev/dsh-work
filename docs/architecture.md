@@ -38,11 +38,13 @@ cannot grant themselves Host capabilities.
 | `internal/platform` | production platform selection and native adapters |
 | `internal/platform/windows` | process creation, Job Object cleanup, atomic file replacement and explicit runtime installation |
 | `internal/dshadapter` | exact-version launch, readiness, profile and plugin command grammar, startup-failure plugin attribution |
-| `internal/dshmanager` | runtime catalog, profiles, plugin disable records, version snapshots and serialized recovery state |
+| `internal/dshmanager` | runtime catalog, profiles, plugin commands, startup-failure bundle deselection, version snapshots and serialized recovery state |
 | `internal/workspacecontext` | per-generation DSH Workspace context |
 | `internal/workerchannel` | per-generation channel, authentication cookies and activity lifetime |
 | `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |
-| `internal/desktopbridge` | resource delivery, Fetch and WebSocket over bounded Wails byte streams |
+| `internal/desktopbridge` | resource delivery, Fetch and WebSocket over bounded Wails byte streams, desktop renderer marker and external-link opening |
+| `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
+| `internal/dshactivity` | per-launch DSH plugin for activity events, conversation navigation and account-browser opening |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
@@ -65,7 +67,9 @@ the existing client, while reopening after UI exit creates a fresh client of
 the same daemon. Both endpoints use go-winio with a current-user SID ACL and
 remote-client rejection. The daemon protocol marker is checked before use.
 The online CLI uses the same control endpoint; offline access still requires
-the manager lock. These local endpoints open no TCP or UDP listener.
+the manager lock. These local endpoints open no TCP or UDP listener. The only
+loopback listener is the account sign-in callback described under
+[Account sign-in](#account-sign-in).
 
 The UI binds generated `internal/desktopclient` services. Native window identity
 selects the allowed role before forwarding management calls. Snapshot polling
@@ -137,6 +141,54 @@ The OS transport uses `go-winio`, HTTP uses the Go/Node standard libraries and
 WebSocket uses `coder/websocket` plus the selected profile's upstream routes.
 Application code adapts those libraries to Wails and DSH ownership contracts;
 it does not implement HTTP, WebSocket framing or named-pipe security itself.
+
+DSH Remote calls and streams use DSH's own published `/api/remote.mux`
+WebSocket route, carried by the `worker-websocket` stream like any other
+upgrade. DSH owns the frame format, bidirectional streams, peer admission and
+stream lifetime. dsh-work does not install a private stream adapter or depend
+on version-specific internal stream signatures, and it does not parse Remote
+frames to drive Host behaviour.
+
+### Account sign-in
+
+DSH mounts its account UI only in a desktop renderer, so the Worker bridge
+defines the `dshDesktop` marker before DSH's entry modules load. Sign-in then
+spans three owners:
+
+| Step | Owner | Behaviour |
+|---|---|---|
+| Start | DSH account UI | Calls `account/startSignIn` with a loopback callback origin. The call returns before an authorization URL exists. |
+| Open the browser | dsh-work client plugin | Follows the official `account/watch` stream. When an attempt reaches `waiting-browser`, it calls `window.open` with that attempt's HTTPS `authorizeUrl` once. The Worker bridge routes the call to the system browser. |
+| Return | Daemon callback listener | Receives the browser redirect, relays it to the current Worker generation and shows a dsh-work result page. |
+
+The browser must reach the callback, and DSH accepts only an
+`http://localhost|127.0.0.1|[::1]:<port>` origin. The daemon therefore owns one
+listener on `127.0.0.1` with an ephemeral port for its whole lifetime, so a UI
+client restart does not invalidate an authorization URL that is already open. It
+serves only `GET /` (a waiting page) and `GET /oauth/callback` with `state` and
+`code` or `error`. The request's `Host` header must match the listener and the
+peer must be loopback. When the daemon forwards `POST /api/account/startSignIn`
+to the Worker, it replaces `callbackOrigin` with the listener origin and
+records the Worker generation. A callback for another generation, or with no
+generation, gets an expired page.
+
+The callback is relayed through the same daemon Worker route as WebView
+requests. DSH holds that response until the code exchange finishes and answers
+`302` on success. The listener treats any 2xx or 3xx without an `error` query
+as success and never follows DSH's redirect or buffers its body. The result page
+links to `dsh-work://open`, which reopens the workspace.
+
+The attempt is opened from `account/watch` because the URL arrives only there.
+An attempt that is already waiting when the page connects is not reopened,
+which covers page reloads. DSH's desktop shells open the browser the same way.
+
+The installer registers `dsh://` and `dsh-work://` for the current user and
+overwrites any existing `dsh://` handler. It backs up the previous values once
+and restores them on uninstall only if the registration still points at this
+installation. `dsh-work://open` is the reliable return link even if another
+application later claims `dsh://`. Both `dsh://open` and `dsh-work://open`
+focus or open the workspace. macOS and Linux declare the same schemes through
+the Wails build configuration.
 
 ## Launch adapter and byte semantics
 
@@ -220,7 +272,14 @@ capabilities.
 5. Workspace navigation occurs only after authenticated readiness checks.
 6. Run-context switching stops and verifies the old generation before starting
    a candidate. Candidate and previous Worker generations never overlap.
-7. Readiness establishes the current Worker. Verified version inputs advance
+7. Readiness establishes the current Worker. It requires the authenticated
+   channel checks and a terminal report from the current generation's WebView.
+   The report says whether DSH replaced its boot placeholder
+   (`data-dsh-boot`) with the mounted application. A plugin activation error,
+   the 60-second deadline, cancellation or an obsolete generation is a failed
+   start, not readiness. During this phase only the candidate page is exposed.
+   When no UI client is open, the daemon uses a hidden Worker WebView to
+   confirm. Verified version inputs advance
    the durable success record only after a successful save. Recorder failure
    keeps the healthy Worker running and retains the previous durable record.
    A failed candidate is cleaned up before policy-controlled, bounded recovery.

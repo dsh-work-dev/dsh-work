@@ -25,10 +25,19 @@ version into its managed directory through npm or pnpm; it may download packages
 A matching version alone does not skip repair.
 
 The catalog owns its managed installations. Removing a catalog runtime first
-renames its directory aside inside the store, then deletes it, and updates
-the catalog only after the rename succeeds; a locked file fails the removal
-with the runtime intact, and an aside copy that could not be fully deleted is
-retried on the next removal. Directories not in the catalog are not swept
+renames its directory aside inside the store, then deletes it. The catalog is
+updated once the rename succeeds, and a locked file that blocks the rename
+fails the removal with the runtime intact.
+
+Each runtime owns independent files. pnpm installs use
+`package-import-method=clone-or-copy` instead of hard-linking from the user's
+store, because Windows refuses to delete any link of a native module that a
+running Worker has mapped, so a shared file would pin every other runtime.
+Copy-on-write clones are used where the volume supports them; otherwise each
+runtime costs a full copy on disk. The store location is left to the user's
+pnpm configuration. After the rename, deletion is best effort: a file still
+held open, for example by a runtime installed before this rule, stays aside and
+is retried on later removals without blocking them. Directories not in the catalog are not swept
 automatically, because a lost or reset manager state would otherwise delete
 every installed runtime.
 
@@ -202,6 +211,9 @@ transport and lifecycle contracts.
 
 ## ADR-0018 — Plugin disable and startup-failure plugin actions
 
+*Superseded by ADR-0021, apart from the startup-failure attribution rules,
+which ADR-0021 keeps.*
+
 An installed third-party plugin can be disabled without uninstalling it. A
 disable removes the package from the profile manifest's `dsh.profile.bundles`,
 so DSH loads neither the plugin's code nor its patches, and the package stays in
@@ -226,6 +238,9 @@ This decision supersedes the earlier rule that dsh-work never edits DSH
 manifests. The one manifest field dsh-work writes is the bundle list.
 
 ## ADR-0019 — Disabling official loader entries
+
+*Superseded by ADR-0021. dsh-work still reads the layer patches to list
+loader entries, but no longer writes the profile patch layer.*
 
 An official loader entry can be turned off without removing the layer that
 inserts it. dsh-work writes an id-targeted `disabled: true` row into the
@@ -270,4 +285,60 @@ strips hop-by-hop, cookie and proxy headers, sets the internal Origin and keeps
 generation validation at the WebView boundary. DSH continues to expose its
 normal Node HTTP routes; only the carrier beneath those routes is the named
 pipe. `http://127.0.0.1:1` remains an internal origin and is never bound as a
-listening socket.
+listening socket. The account sign-in callback in ADR-0022 is the only
+loopback listener. It is a browser entry point, not a Worker transport.
+
+## ADR-0021 — DSH PluginManager owns plugin activation
+
+When a profile's Worker is Ready, enabling or disabling a plugin bundle or an
+official loader entry calls DSH's own PluginManager Remote methods,
+`setBundleEnabled` and `setPluginEnabled`. The Host sends them over the current
+Ready Worker's authenticated session. It checks that the session generation
+matches the current Host generation and that the target is the running profile.
+DSH saves and applies the change, including dependency retention and runtime
+unload. The switches appear only when PluginManager reports that an item can
+be toggled. Non-running profiles and a Worker that is not Ready show no
+switches. dsh-work keeps no disable ledger of its own and does not reapply
+disables before launch. Install, upgrade and uninstall still use DSH's plugin
+commands through the manager.
+
+A failed start has no Worker to call. In that case the startup window can still
+disable a third-party bundle that the failure output names. It does this with
+the switch lock held, no Run context current, and the package confirmed as an
+installed, non-`@deepseek-ai` bundle of the failed profile. It removes the
+package from the profile manifest's `dsh.profile.bundles`, keeps the installed
+files and loader patches, and then starts again. This is the same persisted
+choice as `setBundleEnabled(name, false)`. Re-enabling happens in normal plugin
+management once DSH is running. Attribution rules from ADR-0018 still apply:
+only third-party packages installed in the failed profile are offered, and
+failures caused by DSH session data offer none.
+
+Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
+unload semantics as they change. The cost is that activation changes need a
+running Worker, except for the startup-failure path.
+
+## ADR-0022 — Desktop account sign-in
+
+DSH's account UI appears only when the renderer is marked as a desktop shell,
+and a desktop shell must open the browser and receive the OAuth return.
+dsh-work provides both around DSH's official account API:
+
+- The Worker bridge defines `dshDesktop` so DSH mounts its account UI.
+- dsh-work's per-launch client plugin follows `account/watch` and opens an
+  attempt's `authorizeUrl` in the system browser once, when the attempt
+  reaches `waiting-browser`. The URL is not available when `startSignIn`
+  returns, so the watch stream is the only reliable trigger. DSH's desktop
+  shells use the same trigger.
+- The daemon owns a `127.0.0.1` callback listener with an ephemeral port and
+  substitutes its origin as `callbackOrigin` in `account/startSignIn`. DSH
+  accepts only loopback HTTP callback origins, and the browser cannot reach the
+  named pipe. The listener serves only the callback and a waiting page, checks
+  `Host` and a loopback peer, and relays the callback to the current Worker
+  generation. Its result page returns to the app through `dsh-work://open`.
+- The installer registers `dsh://` and a dsh-work-specific `dsh-work://`,
+  overwriting an existing `dsh://` handler and restoring it on uninstall.
+
+The listener is an exception to "no TCP listener". It accepts no Worker
+traffic, lives with the daemon so an open authorization survives a UI restart,
+and is limited to requests from the local machine. Revisit it if DSH offers a
+callback that does not need a loopback origin.

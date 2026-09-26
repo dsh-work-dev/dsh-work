@@ -19,7 +19,7 @@ import (
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
-const SupportedVersion = "0.1.7-alpha.2"
+const SupportedVersion = "0.1.7-rc.2"
 
 var exactRuntimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 

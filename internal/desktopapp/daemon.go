@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/acquisition"
 	dshworkapp "github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
@@ -266,6 +267,15 @@ func runDaemon(identity string, resources Resources) {
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Services: map[string]any{
 		"HostService": hostService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService,
 	}, Maintenance: maintenance.InstallerInProgress}
+	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
+		server.ServeAccountCallback(w, r, generation)
+	})
+	if callbackErr != nil {
+		log.Printf("account sign-in callback listener unavailable: %v", callbackErr)
+	} else {
+		server.AccountCallback = accountCallback
+		defer accountCallback.Close()
+	}
 	publishRemote = server.Publish
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)

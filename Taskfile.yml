@@ -3,7 +3,7 @@ version: '3'
 vars:
   APP_NAME: dsh-work
   BIN_DIR: bin
-  DSH_VERSION: 0.1.7-alpha.2
+  DSH_VERSION: 0.1.7-rc.2
 
 tasks:
   default:

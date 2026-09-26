@@ -1,9 +1,14 @@
 import {Stream} from '@wailsio/runtime';
+import {finishAccountSignOutFeedback, showAccountSignOutPending} from './account_feedback';
 export {Stream};
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const generation = (globalThis as unknown as {__WORK_GENERATION__:string}).__WORK_GENERATION__;
 const chunkSize = 64 * 1024;
+// RC1 mounts its official account UI only inside a desktop renderer. dsh-work
+// supplies the native OAuth callback transport below without claiming the
+// optional Electron-only browser or update APIs.
+(globalThis as typeof globalThis & {dshDesktop?: Record<string, unknown>}).dshDesktop ??= {};
 
 export async function workerFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = new Request(input, init);
@@ -83,7 +88,17 @@ export async function workerFetch(input: RequestInfo | URL, init?: RequestInit):
     };
   });
   signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
-  return response;
+  const accountSignOut = request.method === 'POST' && url.pathname === '/api/account/signOut';
+  if (accountSignOut) showAccountSignOutPending();
+  let result: Response;
+  try {
+    result = await response;
+  } catch (error) {
+    if (accountSignOut) finishAccountSignOutFeedback(false);
+    throw error;
+  }
+	if (accountSignOut) void finishAccountSignOutFeedback(result);
+  return result;
 }
 
 // Install only in the dedicated Worker surface, before the DSH entry modules.
@@ -136,7 +151,17 @@ class WorkerSocket extends EventTarget {
 }
 globalThis.WebSocket=new Proxy(NativeWebSocket,{construct(target,args){const u=new URL(args[0],location.href);const local=new URL(location.href);if(u.host===local.host)return new WorkerSocket(args[0],args[1]);return Reflect.construct(target,args);}});
 
-function openExternal(raw:string){const u=new URL(raw,location.href);if(!['http:','https:'].includes(u.protocol))return;void workerFetch('/__work/external?url='+encodeURIComponent(u.href),{method:'POST'}).catch(()=>{});}
+const recentlyOpenedExternal = new Map<string, number>();
+function openExternal(raw:string){
+ const u=new URL(raw,location.href);if(!['http:','https:'].includes(u.protocol))return;
+ const now=Date.now();
+ recentlyOpenedExternal.forEach((openedAt,url)=>{if(now-openedAt>3000)recentlyOpenedExternal.delete(url);});
+ if(now-(recentlyOpenedExternal.get(u.href)??0)<3000)return;
+ recentlyOpenedExternal.set(u.href,now);
+ void workerFetch('/__work/external?url='+encodeURIComponent(u.href),{method:'POST'})
+  .then(response=>{if(!response.ok)console.warn('Could not open the external browser.');})
+  .catch(()=>console.warn('Could not open the external browser.'));
+}
 document.addEventListener('click',event=>{const anchor=(event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement|null;if(!anchor)return;const u=new URL(anchor.href,location.href);if(u.origin!==location.origin){event.preventDefault();openExternal(u.href);}},true);
 const nativeOpen=window.open.bind(window);
 window.open=((url?:string|URL,target?:string,features?:string)=>{if(url){const u=new URL(url,location.href);if(u.origin!==location.origin){openExternal(u.href);return null;}}return nativeOpen(url,target,features);}) as typeof window.open;

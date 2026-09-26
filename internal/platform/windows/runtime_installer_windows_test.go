@@ -454,3 +454,13 @@ func TestRuntimeInstallerRemoveRejectsRuntimeOutsideStore(t *testing.T) {
 		t.Fatalf("outside runtime was touched: %v", err)
 	}
 }
+
+// A running Worker maps native modules; a runtime hard-linked from the pnpm
+// store would share those files with every other runtime and block their
+// removal. Each managed runtime must own independent file copies.
+func TestPackageInstallArgsGiveEachPNPMRuntimeIndependentFiles(t *testing.T) {
+	args := packageInstallArgs(dshmanager.RuntimeToolchainSystemPNPM, filepath.Join(t.TempDir(), "stage"), "2.4.6", defaultOfficialRegistry)
+	if !slices.Contains(args, "--config.package-import-method=clone-or-copy") {
+		t.Fatalf("pnpm install args may hard-link store files into the runtime: %#v", args)
+	}
+}

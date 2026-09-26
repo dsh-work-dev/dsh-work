@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
@@ -26,6 +27,22 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
+
+func webviewPermissions(surface string) map[application.PermissionType]application.Permission {
+	microphone := application.PermissionDeny
+	if surface == "workspace" {
+		// The interactive surface uses DSH Voice Input. Wails maps this to the
+		// platform permission contract (including macOS TCC).
+		microphone = application.PermissionAllow
+	}
+	return map[application.PermissionType]application.Permission{
+		application.PermissionMicrophone:    microphone,
+		application.PermissionCamera:        application.PermissionDeny,
+		application.PermissionGeolocation:   application.PermissionDeny,
+		application.PermissionNotifications: application.PermissionDeny,
+		application.PermissionClipboardRead: application.PermissionDeny,
+	}
+}
 
 func runDesktopClient(identity string, resources Resources) error {
 	section := ""
@@ -63,7 +80,8 @@ func runDesktopClient(identity string, resources Resources) error {
 	var applicationShuttingDown atomic.Bool
 	current := state
 	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
-	workerSurface := &desktopbridge.Surface{StandardHTTP: standardHTTP, Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
+	var workerSurface *desktopbridge.Surface
+	workerSurface = &desktopbridge.Surface{StandardHTTP: standardHTTP, Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
 		mu.Lock()
 		snapshot := current
 		mu.Unlock()
@@ -129,6 +147,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
+		options.Permissions = webviewPermissions(name)
 		options.Windows.Theme = nativeTheme
 		options.UseApplicationMenu = name != "settings"
 		if name == "settings" {
@@ -150,6 +169,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		remember(workspace, workOptions)
 		workerOptions := workOptions
 		workerOptions.Name = "worker"
+		workerOptions.Permissions = webviewPermissions("worker")
 		mu.Lock()
 		if current.URL != "" {
 			workerOptions.URL = current.URL
@@ -226,8 +246,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
-		launched, err := url.Parse(event.Context().URL())
-		if err != nil || !strings.EqualFold(launched.Scheme, "dsh") || !strings.EqualFold(launched.Hostname(), "open") || launched.User != nil || launched.Port() != "" {
+		if !isWorkspaceOpenURL(event.Context().URL()) {
 			return
 		}
 		protocolMu.Lock()
@@ -368,6 +387,14 @@ func runDesktopClient(identity string, resources Resources) error {
 		}()
 	})
 	return desktop.Run()
+}
+
+func isWorkspaceOpenURL(raw string) bool {
+	launched, err := url.Parse(raw)
+	if err != nil || launched.User != nil || launched.Port() != "" || launched.Path != "" || launched.RawQuery != "" || launched.Fragment != "" || !strings.EqualFold(launched.Hostname(), "open") {
+		return false
+	}
+	return strings.EqualFold(launched.Scheme, "dsh") || strings.EqualFold(launched.Scheme, accountcallback.DesktopReturnScheme)
 }
 
 type uiWorkerTransport struct {

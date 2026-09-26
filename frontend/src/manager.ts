@@ -283,7 +283,9 @@ export function mountManager() {
   };
 
   // Feedback belongs to the initiating panel, including asynchronous failures.
-  function feedbackFor(section: ManagerSection, scope?: HTMLElement) {
+  // fallback places the message when the control that triggered it is gone,
+  // for example after the removed item's row has been re-rendered away.
+  function feedbackFor(section: ManagerSection, scope?: HTMLElement, fallback?: Element) {
     const panel = scope ?? panels.find(item => item.dataset.managerPanel === section)!;
     const result = document.createElement("p");
     result.className = "panel-result";
@@ -292,7 +294,8 @@ export function mountManager() {
     (section === "profiles" ? document.getElementById("manager-profile-detail")! : panel).append(result);
 
     let anchor: Element | null = null;
-    const clear = () => { result.hidden = true; result.textContent = ""; };
+    let expiry: number | undefined;
+    const clear = () => { window.clearTimeout(expiry); result.hidden = true; result.textContent = ""; };
     panel.addEventListener("change", event => {
       clear(); anchor = (event.target as Element).closest(".setting-row, .runtime-install-card, .plugin-install-row") ?? event.target as Element;
     }, true);
@@ -303,15 +306,18 @@ export function mountManager() {
         anchor = button.closest(".manager-list-item, .profile-actions, .profile-rename-row, .plugin-install-row, .runtime-install-card, .manager-actions, .setting-row") ?? button;
       }
     }, true);
-    return (message: string, tone: "neutral" | "success" | "error" = "neutral", persistent = false) => {
-      // Controls already show successful changes. Only failures and actionable
-      // results (backup filename or required restart) need accompanying text.
-      if (!message) { clear(); return; }
-      if (tone !== "error" && !persistent) { clear(); return; }
+    // Controls already show most successful changes, so other success text is
+    // dropped. Failures and actionable results stay; "transient" is for a
+    // success whose control disappears and clears after five seconds.
+    return (message: string, tone: "neutral" | "success" | "error" = "neutral", display: boolean | "transient" = false) => {
+      clear();
+      if (!message || (tone !== "error" && !display)) return;
       if (anchor?.isConnected && panel.contains(anchor)) anchor.after(result);
+      else if (fallback?.isConnected) fallback.after(result);
       else panel.append(result);
       result.textContent = message;
       result.hidden = false;
+      if (display === "transient") expiry = window.setTimeout(() => { if (result.textContent === message) clear(); }, 5000);
     };
   }
   const setFeedback = feedbackFor("overview");
@@ -325,7 +331,7 @@ export function mountManager() {
     if (restored) { selectedProfileLabel.tabIndex = -1; selectedProfileLabel.focus(); }
   });
   const pluginsFeedback = feedbackFor("plugins");
-  const runtimesFeedback = feedbackFor("runtimes", document.getElementById("manager-dsh-group")!);
+  const runtimesFeedback = feedbackFor("runtimes", document.getElementById("manager-dsh-group")!, document.getElementById("manager-runtimes")!);
   const nodeFeedback = feedbackFor("runtimes", document.getElementById("manager-node-group")!);
   const settings = mountSettings(settingsFeedback);
   mountStorage();
@@ -1235,7 +1241,7 @@ export function mountManager() {
           renderRuntimes();
           try {
             snapshot = await removeRuntime(item.id);
-            runtimesFeedback(t("feedback.removedRuntime", {version: item.version}), "success");
+            runtimesFeedback(t("feedback.removedRuntime", {version: item.version}), "success", "transient");
             runtimePreparations.dsh = undefined;
             operationLogs.dsh.clear();
             renderSelection();
