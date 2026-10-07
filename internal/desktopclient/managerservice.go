@@ -24,14 +24,6 @@ func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, 
 	return value, err
 }
 
-func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
-	if s.Local != nil { return s.Local.GetTheme(ctx) }
-	var value dshmanager.ThemePreference
-	err := call(ctx, s.Client, "ManagerService", "GetTheme", []any{}, &value)
-	if err != nil { panic(err) }
-	return value
-}
-
 func (s *ManagerService) SetRunContext(ctx context.Context, target dshmanager.RunContext) (dshmanager.Snapshot, error) {
 	if s.Local != nil { return s.Local.SetRunContext(ctx, target) }
 	var value dshmanager.Snapshot

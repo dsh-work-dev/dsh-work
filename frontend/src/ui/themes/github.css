@@ -1,0 +1,164 @@
+/*
+ * GitHub style — GitHub's Primer design tokens (@primer/primitives 11.10,
+ * functional light and dark themes) laid out like github.com settings: a
+ * white or #0d1117 canvas, 6px boxes outlined in #d1d9e0 / #3d444d, a 24px
+ * regular page title over a hairline, sidebar items marked by a 4px accent
+ * bar, grey bordered buttons with a faint resting shadow, a green primary,
+ * blue (#0969da / #1f6feb) checked switches and focus outlines, square-knob
+ * toggles and pill labels. Text, muted text and the green primary meet normal
+ * contrast as Primer ships them.
+ */
+:root[data-theme-id="github"] {
+  color-scheme: light;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --heading-weight: 600;
+  --title-weight: 400;
+  --fs-title: 24px;
+  --fs-section: 16px;
+
+  --canvas: #ffffff;
+  --text: #1f2328;
+  --muted: #59636e;
+  --line: #d1d9e0;
+  --ink: #1f2328;
+  --on-ink: #ffffff;
+  --hover: #f6f8fa;
+  --wash: #f6f8fa;
+  --selection: #ddf4ff;
+  --selection-bar: 0;
+  --focus: #0969da;
+  --backdrop: #c8d1da66;
+
+  --accent: #0969da;
+  --on-accent: #ffffff;
+  --outline: #d1d9e0;
+  --failed: #cf222e;
+  --on-failed: #ffffff;
+  --danger: #d1242f;
+
+  --nav-bg: transparent;
+  --nav-hover-bg: #818b981a;
+  --nav-active-bg: #818b981a;
+  --nav-active-fg: var(--text);
+  --nav-active-bar: 0;
+  --nav-active-weight: 600;
+  --nav-item-h: 32px;
+  --nav-pad-x: 8px;
+  --nav-heading-fg: var(--muted);
+  --nav-heading-size: 12px;
+  --nav-heading-weight: 600;
+  --page-head-border: 1px solid #d1d9e0b3;
+  --page-head-pad: 8px;
+  --row-title-weight: 600;
+
+  --group-bg: #ffffff;
+  --group-border: 1px solid #d1d9e0;
+  --group-shadow: none;
+  --group-foot-bg: #f6f8fa;
+  --row-divider: 1px solid #d1d9e0b3;
+  --row-min-h: 56px;
+  --row-pad-y: 12px;
+  --row-pad-x: 16px;
+
+  --radius-control: 6px;
+  --radius-group: 6px;
+  --radius-tag: 999px;
+  --radius-switch: 6px;
+  --radius-marker: 50%;
+  --control-h: 32px;
+  --button-pad-x: 12px;
+  --button-border: 1px solid #d1d9e0;
+  --button-bg: #f6f8fa;
+  --button-fg: #25292e;
+  --button-hover-bg: #eff2f5;
+  --button-shadow: 0 1px 0 0 #1f23280a;
+  --primary-bg: #1f883d;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #1f232826;
+  --primary-hover-bg: #1c8139;
+  --input-border: 1px solid #d1d9e0;
+  --input-bg: #ffffff;
+  --select-bg: #f6f8fa;
+  --select-hover-bg: #eff2f5;
+  --dialog-border: 1px solid #d1d9e080;
+  --dialog-shadow: 0 0 0 1px #d1d9e000, 0 40px 80px 0 #25292e3d;
+  --notice-border: 1px solid #ff818266;
+  --notice-icon: #d1242f;
+  --tag-bg: transparent;
+  --switch-off-bg: #e6eaef;
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 1px solid #d1d9e0;
+  --switch-w: 40px;
+  --switch-h: 24px;
+  --switch-gap: 0px;
+  --icon-stroke: 1.75;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="github"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0d1117;
+  --text: #f0f6fc;
+  --muted: #9198a1;
+  --line: #3d444d;
+  --ink: #f0f6fc;
+  --on-ink: #0d1117;
+  --hover: #151b23;
+  --wash: #151b23;
+  --selection: #388bfd1a;
+  --focus: #1f6feb;
+  --backdrop: #21283066;
+
+  --accent: #1f6feb;
+  --on-accent: #ffffff;
+  --outline: #3d444d;
+  --failed: #da3633;
+  --on-failed: #ffffff;
+  --danger: #fa5e55;
+
+  --nav-hover-bg: #656c7633;
+  --nav-active-bg: #656c7633;
+  --page-head-border: 1px solid #3d444db3;
+
+  --group-bg: #0d1117;
+  --group-border: 1px solid #3d444d;
+  --group-foot-bg: #151b23;
+  --row-divider: 1px solid #3d444db3;
+
+  --button-border: 1px solid #3d444d;
+  --button-bg: #212830;
+  --button-fg: #f0f6fc;
+  --button-hover-bg: #262c36;
+  --button-shadow: none;
+  --primary-bg: #238636;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #ffffff26;
+  --primary-hover-bg: #1f7d33;
+  --input-border: 1px solid #3d444d;
+  --input-bg: #0d1117;
+  --select-bg: #212830;
+  --select-hover-bg: #262c36;
+  --dialog-border: 1px solid #3d444db3;
+  --dialog-shadow: 0 0 0 1px #3d444d, 0 24px 48px 0 #010409;
+  --notice-border: 1px solid #f8514966;
+  --notice-icon: #f85149;
+  --switch-off-bg: #010409;
+  --switch-off-thumb: #262c36;
+  --switch-thumb-border: 1px solid #3d444d;
+  --brand-filter: invert(1);
+}
+
+/* the current sidebar item carries GitHub's 4px accent bar outside its box */
+:root[data-theme-id="github"] .nav-item[aria-current]::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 12px);
+  left: -8px;
+  width: 4px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--accent);
+}

@@ -1,46 +1,65 @@
-export type Theme = "system" | "light" | "dark";
+import {Events} from "@wailsio/runtime";
 
-let activePreference: Theme = "system";
+import type {Appearance} from "../bindings/github.com/local/dsh-work/internal/settings/models";
+import {supportedMode, themeInfo} from "./themes";
+
+export type AppearanceMode = "system" | "light" | "dark";
+
+// dsh-work owns the appearance of its own windows; the Host persists it and
+// publishes "appearance" after every saved change. The copy in localStorage is
+// only a paint cache read by index.html before scripts load.
+const cacheKey = "dsh-work.appearance";
+let current: {theme: string; mode: AppearanceMode} = {theme: "monochrome", mode: "system"};
 let systemMedia: MediaQueryList | undefined;
-let systemListenerMounted = false;
+let mounted = false;
 
-function normalizeTheme(value: unknown): Theme {
-  return value === "light" || value === "dark" || value === "system" ? value : "system";
+type AppearanceInput = {theme?: string; mode?: string} | undefined;
+
+function normalize(value: AppearanceInput): {theme: string; mode: AppearanceMode} {
+  const theme = themeInfo(value?.theme).id;
+  return {theme, mode: supportedMode(theme, value?.mode)};
 }
 
-function resolvedTheme(preference: Theme): "light" | "dark" {
-  return preference === "system"
-    ? (systemMedia?.matches ? "dark" : "light")
-    : preference;
+function resolved(mode: AppearanceMode): "light" | "dark" {
+  return mode === "system" ? (systemMedia?.matches ? "dark" : "light") : mode;
 }
 
-/** Apply the appearance preference owned by the selected DSH data directory. */
-export function applyTheme(value: unknown) {
-  const preference = normalizeTheme(value);
-  activePreference = preference;
-  const resolved = resolvedTheme(preference);
+/** Paint an appearance on this document and remember it for the next load. */
+export function applyAppearance(value: AppearanceInput) {
+  current = normalize(value);
   const root = document.documentElement;
-  root.dataset.themePreference = preference;
-  root.dataset.theme = resolved;
-  root.style.colorScheme = resolved;
+  const theme = resolved(current.mode);
+  root.dataset.themeId = current.theme;
+  root.dataset.themePreference = current.mode;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+  try { localStorage.setItem(cacheKey, JSON.stringify(current)); } catch { /* cache only */ }
+}
+
+export function currentAppearance() {
+  return {...current};
 }
 
 /**
- * dsh-work has no appearance setting of its own. The host asks DSH for its
- * preference, then this listener only resolves the DSH `system` choice when
- * the operating system changes.
+ * Follow the Host appearance: read it once, apply published changes, and
+ * re-resolve "system" when the operating system switches light/dark.
  */
-export function mountTheme(initialPreference: unknown = "system") {
+export function mountAppearance(read: () => Promise<Appearance>) {
   if (!systemMedia && typeof window.matchMedia === "function") {
     systemMedia = window.matchMedia("(prefers-color-scheme: dark)");
   }
-  applyTheme(initialPreference);
-  if (!systemListenerMounted && typeof systemMedia?.addEventListener === "function") {
-    systemMedia.addEventListener("change", () => {
-      if (activePreference === "system") {
-        applyTheme("system");
-      }
-    });
-    systemListenerMounted = true;
-  }
+  let cached: AppearanceInput;
+  try { cached = JSON.parse(localStorage.getItem(cacheKey) ?? "null") ?? undefined; } catch { cached = undefined; }
+  applyAppearance(cached);
+  if (mounted) return;
+  mounted = true;
+  systemMedia?.addEventListener("change", () => {
+    if (current.mode === "system") applyAppearance(current);
+  });
+  // A published change is newer than an initial read still in flight.
+  let published = false;
+  Events.On("appearance", event => { published = true; applyAppearance(event.data as Appearance); });
+  void read()
+    .then(value => { if (!published) applyAppearance(value); })
+    .catch(error => console.error("Could not read dsh-work appearance", error));
 }

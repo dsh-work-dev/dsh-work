@@ -1,0 +1,158 @@
+/*
+ * ChatGPT style — measured from the chatgpt.com settings page in both modes:
+ * one #fcfcfc surface for page, sidebar and groups, groups outlined by a 10%
+ * hairline with a 16px radius and inset row dividers, grey pill selects and
+ * buttons, a near-black primary, #3a83f7 for switches, focus and selection,
+ * 24px regular page titles, regular-weight navigation with only a 5% wash on
+ * the current item. Dark uses #000 surface, #ededed ink, #cdcdcd secondary
+ * text, #303030 controls and 15% outlines. Sidebar headings and badges are a
+ * step darker than the original so text keeps normal contrast.
+ */
+:root[data-theme-id="chatgpt"] {
+  color-scheme: light;
+  --font-body: -apple-system, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  --heading-weight: 500;
+  --fs-title: 24px;
+  --fs-section: 14px;
+
+  --canvas: #fcfcfc;
+  --text: #0d0d0d;
+  --muted: #5d5d5d;
+  --line: rgb(0 0 0 / 10%);
+  --ink: #0d0d0d;
+  --on-ink: #ffffff;
+  --hover: rgb(0 0 0 / 5%);
+  --wash: #f3f3f3;
+  --selection: #e8f3fe;
+  --selection-bar: 0;
+  --focus: #3a83f7;
+  --backdrop: rgb(0 0 0 / 50%);
+  --divider: rgb(0 0 0 / 10%);
+  --accent-strong: #2c67c5;
+
+  --accent: #3a83f7;
+  --on-accent: #ffffff;
+  --outline: rgb(0 0 0 / 15%);
+  --failed: #ba2623;
+  --on-failed: #ffffff;
+  --danger: #ba2623;
+
+  --nav-bg: #fcfcfc;
+  --nav-hover-bg: rgb(0 0 0 / 4%);
+  --nav-active-bg: rgb(0 0 0 / 5%);
+  --nav-active-fg: var(--text);
+  --nav-active-bar: 0;
+  --nav-active-weight: 400;
+  --nav-border: 1px solid var(--line);
+  --nav-item-h: 35px;
+  --nav-pad-x: 10px;
+  --nav-list-gap: 1px;
+  --nav-heading-fg: #767676;
+  --nav-heading-size: 14px;
+  --nav-heading-weight: 500;
+  --title-weight: 400;
+
+  --group-bg: #fcfcfc;
+  --group-border: 1px solid rgb(0 0 0 / 10%);
+  --group-shadow: none;
+  --group-foot-bg: transparent;
+  --row-divider: 0 solid transparent;
+  --row-min-h: 60px;
+  --row-pad-y: 12px;
+  --row-pad-x: 16px;
+
+  --radius-control: 8px;
+  --radius-group: 16px;
+  --radius-tag: 999px;
+  --radius-switch: 999px;
+  --radius-button: 999px;
+  --radius-select: 999px;
+  --radius-marker: 50%;
+  --control-h: 36px;
+  --button-pad-x: 14px;
+  --button-border: 1px solid rgb(0 0 0 / 10%);
+  --button-bg: #f3f3f3;
+  --button-fg: #0d0d0d;
+  --button-hover-bg: #e8e8e8;
+  --primary-bg: #0d0d0d;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #0d0d0d;
+  --primary-hover-bg: #3d3d3d;
+  --input-border: 1px solid rgb(0 0 0 / 10%);
+  --input-bg: #ffffff;
+  --select-bg: var(--button-bg);
+  --select-border: var(--button-border);
+  --dialog-border: 1px solid rgb(0 0 0 / 10%);
+  --dialog-shadow: 0 16px 48px rgb(0 0 0 / 12%);
+  --notice-border: 1px solid rgb(186 38 35 / 35%);
+  --notice-icon: #ba2623;
+  --tag-bg: transparent;
+  --switch-off-bg: rgb(0 0 0 / 15%);
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --switch-w: 32px;
+  --switch-h: 20px;
+  --switch-gap: 2px;
+  --badge-bg: var(--accent-strong);
+  --icon-stroke: 1.75;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="chatgpt"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #000000;
+  --text: #ededed;
+  --muted: #cdcdcd;
+  --line: rgb(255 255 255 / 15%);
+  --ink: #ededed;
+  --on-ink: #0d0d0d;
+  --hover: rgb(255 255 255 / 6%);
+  --wash: #1b1b1b;
+  --selection: rgb(58 131 247 / 16%);
+  --focus: #3a83f7;
+  --backdrop: rgb(0 0 0 / 60%);
+  --divider: rgb(255 255 255 / 12%);
+
+  --outline: rgb(255 255 255 / 20%);
+  --failed: #fa423e;
+  --on-failed: #000000;
+  --danger: #ff6b66;
+
+  --nav-bg: #000000;
+  --nav-hover-bg: rgb(255 255 255 / 6%);
+  --nav-active-bg: rgb(255 255 255 / 10%);
+  --nav-heading-fg: #afafaf;
+
+  --group-bg: #000000;
+  --group-border: 1px solid rgb(255 255 255 / 15%);
+
+  --button-border: 1px solid rgb(255 255 255 / 15%);
+  --button-bg: #303030;
+  --button-fg: #ededed;
+  --button-hover-bg: #3a3a3a;
+  --primary-bg: #ededed;
+  --primary-fg: #0d0d0d;
+  --primary-border: 1px solid #ededed;
+  --primary-hover-bg: #cccccc;
+  --input-border: 1px solid rgb(255 255 255 / 10%);
+  --input-bg: #212121;
+  --dialog-border: 1px solid rgb(255 255 255 / 15%);
+  --dialog-shadow: 0 16px 48px rgb(0 0 0 / 60%);
+  --notice-border: 1px solid rgb(250 66 62 / 40%);
+  --notice-icon: #fa423e;
+  --switch-off-bg: rgb(255 255 255 / 22%);
+  --switch-off-thumb: #ffffff;
+  --brand-filter: invert(1);
+}
+
+/* row dividers stop at the row padding, as in ChatGPT's settings groups */
+:root[data-theme-id="chatgpt"] :is(.group, .rows, .notice) > * + *:not(.sr-only + *) {
+  background-image: linear-gradient(var(--divider), var(--divider));
+  background-position: top center;
+  background-size: calc(100% - 2 * var(--row-pad-x)) 1px;
+  background-repeat: no-repeat;
+}

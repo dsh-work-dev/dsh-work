@@ -15,6 +15,7 @@ func init() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
 	application.RegisterEvent[acquisition.OperationStatus]("acquisition")
 	application.RegisterEvent[settings.Locale]("locale")
+	application.RegisterEvent[settings.Appearance]("appearance")
 	application.RegisterEvent[bool]("notification-failure")
 	application.RegisterEvent[app.PetOverlayState]("pet-state")
 	application.RegisterEvent[daemon.UpdateSnapshot]("update-state")
@@ -28,6 +29,8 @@ func replayEvent(event daemon.Event, emit func(*application.CustomEvent) error) 
 		return replayTypedEvent[acquisition.OperationStatus](event, emit)
 	case "locale":
 		return replayTypedEvent[settings.Locale](event, emit)
+	case "appearance":
+		return replayTypedEvent[settings.Appearance](event, emit)
 	case "notification-failure":
 		return replayTypedEvent[bool](event, emit)
 	case "pet-state":

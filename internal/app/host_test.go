@@ -283,6 +283,49 @@ func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {
 	}
 }
 
+func TestHostRestartGenerationRestartsOnlyTheCurrentReadyWorker(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	manager := newHostTestManager(t, "web")
+	supervisorAdapter := &testSupervisor{}
+	statuses := make(chan lifecycle.Status, 32)
+	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server}}, Config{
+		BootstrapDirectory:  t.TempDir(),
+		ReadinessTimeout:    time.Second,
+		ProbeTimeout:        time.Second,
+		GracefulStopTimeout: time.Second,
+		ForceStopTimeout:    time.Second,
+		EmptyTimeout:        time.Second,
+		ShutdownTimeout:     time.Second,
+	})
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	if status := host.Start(); status.State != lifecycle.StateStarting {
+		t.Fatalf("Start() status = %+v", status)
+	}
+	ready := waitForStatus(t, statuses, lifecycle.StateReady)
+
+	if status, err := host.RestartGeneration(context.Background(), "expired-generation"); err == nil || status.GenerationID != ready.GenerationID || host.Status().State != lifecycle.StateReady {
+		t.Fatalf("stale generation restart = %+v, %v; current = %+v", status, err, host.Status())
+	}
+	status, err := host.RestartGeneration(context.Background(), ready.GenerationID)
+	if err != nil || status.GenerationID == ready.GenerationID || (status.State != lifecycle.StateStarting && status.State != lifecycle.StateReady) {
+		t.Fatalf("current generation restart = %+v, %v", status, err)
+	}
+	for {
+		next := <-statuses
+		if next.State == lifecycle.StateReady && next.GenerationID != ready.GenerationID {
+			break
+		}
+	}
+	if supervisorAdapter.starts != 2 {
+		t.Fatalf("Worker starts = %d, want initial start and one restart", supervisorAdapter.starts)
+	}
+	if status := host.Cancel(); status.State != lifecycle.StateStopping {
+		t.Fatalf("Cancel() status = %+v", status)
+	}
+	waitForStatus(t, statuses, lifecycle.StateStopped)
+}
+
 func TestHostDoesNotPullMissingRuntimeDuringStartup(t *testing.T) {
 	dsh := newTestDSH()
 	defer dsh.server.Close()

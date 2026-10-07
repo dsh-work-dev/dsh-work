@@ -309,13 +309,13 @@ func (s *Server) trackCall(cancel context.CancelFunc) func() {
 func maintenanceCallAllowed(call Call) bool {
 	if call.Service == "HostService" {
 		switch call.Method {
-		case "GetStatus", "GetWorkspaceStatus", "GetTheme", "GetLocale", "GetStartupOutput", "Quit":
+		case "GetStatus", "GetWorkspaceStatus", "GetAppearance", "GetLocale", "GetStartupOutput", "Quit":
 			return true
 		}
 	}
 	if call.Service == "ManagerService" {
 		switch call.Method {
-		case "GetSnapshot", "GetTheme", "ListProfileBackups", "PreviewRestorePoint":
+		case "GetSnapshot", "ListProfileBackups", "PreviewRestorePoint":
 			return true
 		}
 	}
@@ -424,6 +424,10 @@ func (s *Server) forwardWorker(w http.ResponseWriter, r *http.Request) {
 	decodedPath, err := url.PathUnescape(path)
 	if err != nil {
 		http.Error(w, "invalid Worker path", 400)
+		return
+	}
+	if isPluginRestartPath(decodedPath) {
+		servePluginRestart(w, r, current, decodedPath, s.Host.RestartGeneration)
 		return
 	}
 	if err := s.prepareAccountSignInRequest(r, decodedPath, current.Generation()); err != nil {

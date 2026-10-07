@@ -1,0 +1,93 @@
+/*
+ * Swiss — International Typographic Style. Grid and type carry the hierarchy:
+ * groups are unboxed and hang from a heavy rule, rows align flush with their
+ * headings, one red accent. Light and dark.
+ */
+:root[data-theme-id="swiss"] {
+  color-scheme: light;
+  --font-body: "Helvetica Neue", Helvetica, Arial, "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-heading: var(--font-body);
+  --heading-weight: 700;
+  --fs-title: 30px;
+  --fs-section: 13px;
+  --title-tracking: -0.02em;
+
+  --canvas: #ffffff;
+  --text: #111111;
+  --muted: #595959;
+  --line: #d6d6d6;
+  --ink: #111111;
+  --on-ink: #ffffff;
+  --hover: #f3f3f3;
+  --wash: #f3f3f3;
+  --selection: transparent;
+  --selection-bar: 0;
+  --focus: #e30613;
+
+  --accent: #e30613;
+  --on-accent: #ffffff;
+  --outline: #111111;
+  --failed: #e30613;
+  --on-failed: #ffffff;
+  --danger: #e30613;
+
+  --nav-bg: var(--canvas);
+  --nav-hover-bg: #f3f3f3;
+  --nav-active-bg: transparent;
+  --nav-active-bar: 0;
+
+  --group-bg: transparent;
+  --group-border: 0;
+  --group-foot-bg: transparent;
+  --row-divider: 1px solid #d6d6d6;
+  --row-pad-x: 0px;
+  --row-min-h: 52px;
+
+  --radius-control: 0;
+  --button-border: 1px solid #111111;
+  --primary-bg: #e30613;
+  --primary-hover-bg: #b8000f;
+  --notice-border: 2px solid #e30613;
+  --notice-icon: #e30613;
+}
+
+:root[data-theme-id="swiss"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0e0e0e;
+  --text: #f2f2f2;
+  --muted: #a6a6a6;
+  --line: #333333;
+  --ink: #f2f2f2;
+  --on-ink: #0e0e0e;
+  --hover: #1b1b1b;
+  --wash: #1b1b1b;
+  --focus: #ff3b30;
+  --accent: #ff3b30;
+  --on-accent: #0e0e0e;
+  --outline: #f2f2f2;
+  --failed: #ff3b30;
+  --on-failed: #0e0e0e;
+  --danger: #ff6a61;
+  --nav-hover-bg: #1b1b1b;
+  --row-divider: 1px solid #333333;
+  --button-border: 1px solid #f2f2f2;
+  --primary-bg: #ff3b30;
+  --primary-hover-bg: #ff6a61;
+  --input-border: 1px solid #f2f2f2;
+  --notice-border: 2px solid #ff3b30;
+  --notice-icon: #ff3b30;
+  --brand-filter: invert(1);
+}
+
+/* heavy rule above every group; hairline below */
+:root[data-theme-id="swiss"] .group { overflow: visible; border-top: 3px solid var(--text); border-bottom: 1px solid var(--line); border-radius: 0; }
+:root[data-theme-id="swiss"] .section-head { margin-bottom: 4px; }
+:root[data-theme-id="swiss"] .section-head h2 { letter-spacing: 0.02em; }
+:root[data-theme-id="swiss"] .row:is(.is-selected, [aria-selected="true"]) .row-main > :is(strong, label) { color: var(--accent); }
+:root[data-theme-id="swiss"] .nav-item[aria-current] { padding-left: 16px; }
+:root[data-theme-id="swiss"] .startup-check { padding-inline: 0; }
+:root[data-theme-id="swiss"] .step-more, :root[data-theme-id="swiss"] .check-body { padding-left: 0; }
+/* red is kept for the primary action, failure and current place */
+:root[data-theme-id="swiss"] { --marker-done-bg: var(--ink); --marker-done-fg: var(--on-ink); }
+/* flush rows only in unboxed groups; bordered containers keep an inset */
+:root[data-theme-id="swiss"] :is(.notice, dialog, .startup-diagnostics, .restore-point-list, .version-overview-header + .note) { --row-pad-x: 12px; }

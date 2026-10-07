@@ -70,22 +70,6 @@ func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, 
 	return s.manager.Snapshot(ctx)
 }
 
-// GetTheme reads the selected DSH data directory's appearance preference. Settings uses
-// it while both trusted windows are open so its surface follows changes made
-// by DSH.
-func (s *ManagerService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
-	if s == nil || s.manager == nil || !isTrustedWindow(ctx, "settings") {
-		return dshmanager.ThemePreferenceSystem
-	}
-	ctx, cancel := managerContext(ctx)
-	defer cancel()
-	theme, err := s.manager.Theme(ctx)
-	if err != nil || !theme.Valid() {
-		return dshmanager.ThemePreferenceSystem
-	}
-	return theme
-}
-
 func (s *ManagerService) SetRunContext(ctx context.Context, target dshmanager.RunContext) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()

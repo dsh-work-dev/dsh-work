@@ -5,7 +5,6 @@ import (
 	"context"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
-	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/workspacecontext"
@@ -30,10 +29,10 @@ func (s *HostService) GetWorkspaceStatus(ctx context.Context) lifecycle.Status {
 	return value
 }
 
-func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
-	if s.Local != nil { return s.Local.GetTheme(ctx) }
-	var value dshmanager.ThemePreference
-	err := call(ctx, s.Client, "HostService", "GetTheme", []any{}, &value)
+func (s *HostService) GetAppearance(ctx context.Context) settings.Appearance {
+	if s.Local != nil { return s.Local.GetAppearance(ctx) }
+	var value settings.Appearance
+	err := call(ctx, s.Client, "HostService", "GetAppearance", []any{}, &value)
 	if err != nil { panic(err) }
 	return value
 }

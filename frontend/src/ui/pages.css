@@ -1,0 +1,107 @@
+/*
+ * Settings pages. Every page follows the grammar in layout.css (sections of
+ * one group of rows); this file only sizes page-specific content inside rows.
+ */
+
+/* ---------- shared page glue ---------- */
+.group > :is(.result, .empty, .note), .rows > :is(.result, .empty, .note) { margin: 0; padding: var(--space-2) var(--row-pad-x); }
+.group > .sr-only + * { border-top: 0; }
+.manager-load-state { display: flex; align-items: center; gap: var(--space-3); margin: calc(var(--space-2) * -1) 0 var(--space-4); color: var(--muted); font-size: var(--fs-meta); }
+.manager-load-state:not(:has(button:not([hidden]))):has(span:empty) { display: none; }
+.row-trail select { width: min(280px, 100%); }
+.brand-mark, .brand img { filter: var(--brand-filter); }
+
+/* ---------- overview ---------- */
+#environment-editor { display: grid; gap: var(--space-3); }
+#environment-editor .row-trail { margin-left: auto; }
+
+/* version records (Settings dialog and startup restore dialog) */
+.restore-point-list { overflow: hidden; border: var(--group-border); border-radius: var(--radius-group); background: var(--group-bg); }
+.restore-point-list > * + * { border-top: var(--row-divider); }
+.version-inspector { display: grid; gap: var(--space-4); }
+.version-inspector > button:first-child { justify-self: start; }
+.version-inspector h3 { font: var(--heading-weight) var(--fs-detail)/1.3 var(--font-heading); overflow-wrap: anywhere; }
+.version-metadata { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--space-2) var(--space-4); font-size: var(--fs-control); }
+.version-metadata dt { color: var(--muted); }
+.version-metadata dd { overflow-wrap: anywhere; }
+.version-plugin-list { display: grid; gap: var(--space-1); padding-top: var(--space-3); border-top: var(--row-divider); font-size: var(--fs-control); }
+.version-plugin-list h4 { margin-bottom: var(--space-1); font-size: var(--fs-control); }
+.version-plugin-list > div { display: flex; justify-content: space-between; gap: var(--space-4); overflow-wrap: anywhere; }
+.version-detail-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+section.restore-point-preview { display: grid; gap: var(--space-3); }
+.restore-point-preview h3 { font: var(--heading-weight) var(--fs-section)/1.4 var(--font-heading); }
+.restore-point-preview pre { max-height: 40vh; margin: 0; padding: var(--space-3); overflow: auto; background: var(--wash); font: 12px/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog.restore-point-preview form { display: grid; gap: var(--space-3); }
+dialog.restore-point-preview input { width: 100%; }
+.version-history-dialog > .actions, .version-history-dialog > .note, .version-history-dialog > .result { margin-top: var(--space-3); }
+
+/* ---------- profiles ---------- */
+.profile-backup-result:not([hidden]) { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+#backup-history-dialog .profile-restore { display: grid; gap: var(--space-3); }
+#backup-history-dialog .row { min-height: 0; font-size: var(--fs-control); }
+
+/* ---------- plugins ---------- */
+.plugin-editor { margin-top: var(--space-5); }
+.plugin-list .row-main > strong, #manager-plugin-profile { font-family: var(--font-mono); }
+.plugin-official > summary { display: flex; align-items: center; min-height: var(--row-min-h); padding: var(--row-pad-y) var(--row-pad-x); cursor: pointer; font-weight: 500; }
+.plugin-official[open] > summary { border-bottom: var(--row-divider); }
+.loader-search { display: block; width: calc(100% - 2 * var(--row-pad-x)); margin: var(--space-3) var(--row-pad-x); }
+.loader-tree { padding: 0 var(--row-pad-x) var(--space-3); }
+.loader-layer { border-left: var(--row-divider); margin: var(--space-2) 0 0 var(--space-1); padding-left: var(--space-3); }
+.loader-layer > summary { padding: var(--space-2) 0; cursor: pointer; font: 500 var(--fs-control) var(--font-mono); overflow-wrap: anywhere; }
+.loader-layer .row { min-height: 0; padding: var(--space-2) 0; }
+.loader-layer .row + .row { border-top: var(--row-divider); }
+
+/* ---------- runtimes ---------- */
+.runtime-preparation .progress-track { flex-basis: 100%; }
+.runtime-preparation > .note { flex-basis: 100%; }
+.runtime-preparation .operation-log { flex-basis: 100%; margin: 0; }
+
+/* ---------- storage ---------- */
+.folder-picker { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.folder-picker-path { flex: 1 1 260px; min-width: 0; font: var(--fs-control)/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+.folder-picker-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-left: auto; }
+.storage-default { cursor: pointer; }
+.storage-actions:not(:has(button:not([hidden]))):has(#storage-status:empty) { display: none; }
+
+/* ---------- pets ---------- */
+.pets-search-row { min-height: 0; }
+.pets-search-label input { width: 100%; }
+button.pets-list-item { width: 100%; min-height: 60px; border: 0; background: transparent; color: inherit; text-align: left; flex-wrap: nowrap; }
+button.pets-list-item > .icon { flex: none; margin-left: auto; color: var(--muted); transition: transform var(--motion); }
+button.pets-list-item[aria-expanded="true"] > .icon { transform: rotate(90deg); }
+button.pets-list-item:hover:not(:disabled) { background: var(--hover); }
+button.pets-list-item:disabled { opacity: .5; cursor: default; }
+.pets-thumbnail { display: grid; flex: none; place-items: center; width: 40px; height: 44px; overflow: hidden; border-radius: var(--radius-control); background: var(--wash); }
+.pets-thumbnail img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.pets-thumbnail.is-placeholder::after { content: ""; width: 14px; height: 14px; border: 1.5px solid var(--muted); border-radius: var(--radius-marker); }
+.pets-list-copy { display: grid; gap: 2px; min-width: 0; }
+.pets-list-copy strong { font-weight: 500; overflow-wrap: anywhere; }
+.pets-list-copy span { color: var(--muted); font-size: var(--fs-meta); }
+/* the preview opens inside the browsed pet's entry */
+.pets-preview { display: grid; gap: var(--space-3); padding: 0 var(--row-pad-x) var(--row-pad-y); }
+.pets-preview-stage { display: grid; place-items: center; height: 220px; border: 1px solid var(--line); border-radius: var(--radius-group); background: var(--wash); }
+.pets-preview-stage img { display: block; width: min(100%, 280px); max-height: 200px; object-fit: contain; }
+.pets-preview-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.pets-preview-copy { display: grid; gap: 2px; min-width: 0; flex: 1 1 200px; }
+.pets-preview-copy p:empty { display: none; }
+.pets-preview-foot > .actions { margin-left: auto; }
+.pets-preview-placeholder { max-width: 220px; color: var(--muted); text-align: center; }
+.pets-preview-name:empty, .pets-description:empty { display: none; }
+.pets-size-control { display: grid; grid-template-columns: auto minmax(160px, 1fr); align-items: center; gap: var(--space-1) var(--space-3); flex: 1 1 260px; max-width: 380px; }
+.pets-size-control output { min-width: 4em; text-align: right; font-variant-numeric: tabular-nums; }
+.pets-size-slider { min-width: 0; }
+.pets-size-slider input[type="range"] { display: block; width: 100%; accent-color: var(--accent); cursor: pointer; }
+.pets-size-slider input[type="range"]:disabled { cursor: default; opacity: .5; }
+.pets-size-slider datalist { display: none; }
+.pets-size-ticks { position: relative; height: 1.4em; margin: 2px 8px 0; color: var(--muted); font-size: 10px; line-height: 1; white-space: nowrap; }
+.pets-size-ticks span { position: absolute; top: 0; transform: translateX(-50%); }
+.pets-size-ticks span:nth-child(1) { left: 0; transform: none; }
+.pets-size-ticks span:nth-child(2) { left: 33.333%; }
+.pets-size-ticks span:nth-child(3) { left: 66.666%; }
+.pets-size-ticks span:nth-child(4) { left: 100%; transform: translateX(-100%); }
+.pets-invalid-issues > summary { min-height: var(--control-h); padding: var(--space-2) 0; cursor: pointer; color: var(--muted); font-size: var(--fs-control); }
+
+/* ---------- about ---------- */
+.about-brand { display: flex; align-items: center; gap: var(--space-2); }
+.about-brand .brand-mark { width: 20px; height: 20px; }

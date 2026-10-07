@@ -41,7 +41,7 @@ export function mountSettingSwitches(root: ParentNode) {
     const labelKey = row.dataset.label!;
     const detailKey = row.dataset.detail;
     const copy = document.createElement("div");
-    copy.className = "setting-copy";
+    copy.className = "row-main";
     const label = document.createElement("label");
     label.htmlFor = id;
     const title = document.createElement("strong");
@@ -62,7 +62,7 @@ export function mountSettingSwitches(root: ParentNode) {
     if (row.dataset.status) descriptions.push(row.dataset.status);
 
     const control = document.createElement("div");
-    control.className = "setting-control";
+    control.className = "row-trail";
     const hitArea = createSettingSwitch({
       id,
       labelledBy: title.id,
@@ -70,7 +70,8 @@ export function mountSettingSwitches(root: ParentNode) {
       disabled: row.hasAttribute("data-disabled"),
     });
     control.append(hitArea);
-    row.classList.add("setting-row");
+    row.classList.add("row");
+    if (row.hasAttribute("data-nested")) row.classList.add("row-nested");
     row.replaceChildren(copy, control);
   }
 }

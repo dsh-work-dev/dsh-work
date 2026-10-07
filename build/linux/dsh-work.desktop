@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=dsh-work
+Comment=Local-first desktop host for DeepSeek Harness
+Exec=/usr/local/bin/dsh-work %u
+Terminal=false
+Type=Application
+Icon=dsh-work
+Categories=Utility;
+StartupWMClass=dsh-work
+MimeType=x-scheme-handler/dsh-work;x-scheme-handler/dsh;

@@ -1,0 +1,111 @@
+/*
+ * Paper — ink on warm paper for long reading. Low-saturation indigo ink as the
+ * accent and seal red for failures. Light, plus a warm charcoal dark.
+ */
+:root[data-theme-id="paper"] {
+  color-scheme: light;
+  --heading-weight: 600;
+
+  --canvas: #f4efe4;
+  --text: #2b2620;
+  --muted: #6b6053;
+  --line: #e2d8c6;
+  --ink: #2b2620;
+  --on-ink: #fbf8f1;
+  --hover: #ede5d6;
+  --wash: #efe8da;
+  --selection: #ebe2d0;
+  --selection-bar: 0;
+  --focus: #34507a;
+  --backdrop: rgb(43 38 32 / 35%);
+
+  --accent: #34507a;
+  --on-accent: #fbf8f1;
+  --outline: #c9bba5;
+  --failed: #a8432c;
+  --on-failed: #fbf8f1;
+  --danger: #a8432c;
+
+  --nav-bg: transparent;
+  --nav-hover-bg: #ebe3d3;
+  --nav-active-bg: #e6dcc8;
+  --nav-active-bar: 0;
+
+  --group-bg: #fbf8f1;
+  --group-border: 1px solid #e2d8c6;
+  --group-foot-bg: #f6f0e4;
+  --row-divider: 1px solid #ece4d5;
+  --row-min-h: 58px;
+  --row-pad-y: 13px;
+  --row-pad-x: 18px;
+
+  --radius-control: 4px;
+  --radius-group: 6px;
+  --radius-tag: 3px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --button-border: 1px solid #c9bba5;
+  --button-bg: #fbf8f1;
+  --button-fg: #2b2620;
+  --button-hover-bg: #f1e9da;
+  --primary-bg: #34507a;
+  --primary-fg: #fbf8f1;
+  --primary-hover-bg: #283f61;
+  --input-border: 1px solid #c9bba5;
+  --input-bg: #fffdf8;
+  --dialog-border: 1px solid #c9bba5;
+  --dialog-shadow: 0 12px 32px rgb(43 38 32 / 16%);
+  --notice-border: 1px solid #d9a898;
+  --notice-icon: #a8432c;
+  --tag-bg: #fbf8f1;
+  --switch-off-bg: #e2d8c6;
+  --switch-off-thumb: #fbf8f1;
+  --switch-thumb-border: 0;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="paper"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #1f1c19;
+  --text: #ece4d6;
+  --muted: #a89a86;
+  --line: #3a342d;
+  --ink: #ece4d6;
+  --on-ink: #1f1c19;
+  --hover: #2b2621;
+  --wash: #242019;
+  --selection: #2f2a24;
+  --focus: #9db4d6;
+  --backdrop: rgb(0 0 0 / 55%);
+  --accent: #9db4d6;
+  --on-accent: #1f1c19;
+  --outline: #5a5044;
+  --failed: #e07a5f;
+  --on-failed: #1f1c19;
+  --danger: #e89a84;
+  --nav-hover-bg: #2b2621;
+  --nav-active-bg: #332d26;
+  --group-bg: #26221e;
+  --group-border: 1px solid #3a342d;
+  --group-foot-bg: #221e1a;
+  --row-divider: 1px solid #332e28;
+  --button-border: 1px solid #5a5044;
+  --button-bg: #26221e;
+  --button-fg: #ece4d6;
+  --button-hover-bg: #2f2a24;
+  --primary-bg: #9db4d6;
+  --primary-fg: #1f1c19;
+  --primary-hover-bg: #b8cae4;
+  --input-border: 1px solid #5a5044;
+  --input-bg: #1f1c19;
+  --dialog-border: 1px solid #5a5044;
+  --dialog-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  --notice-border: 1px solid #7a3b2c;
+  --notice-icon: #e07a5f;
+  --tag-bg: #26221e;
+  --switch-off-bg: #3a342d;
+  --switch-off-thumb: #ece4d6;
+  --brand-filter: invert(1);
+}

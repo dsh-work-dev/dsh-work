@@ -1,0 +1,88 @@
+/*
+ * Ink — early-Mac one-bit look. Light only: the paper metaphor has no dark
+ * counterpart. Ornaments (dither, striped titles, hard shadows) carry no
+ * information.
+ */
+:root[data-theme-id="ink"] {
+  color-scheme: light;
+  --font-body: "Geneva", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-heading: "Chicago", "ChicagoFLF", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-mono: "Monaco", "Cascadia Mono", Consolas, monospace;
+  --heading-weight: 700;
+
+  --canvas: #ffffff;
+  --text: #000000;
+  --muted: #4d4d4d;
+  --line: #000000;
+  --ink: #000000;
+  --on-ink: #ffffff;
+  --hover: #eeeeee;
+  --wash: #ffffff;
+  --selection: #000000;
+  --selection-fg: #ffffff;
+  --selection-bar: 0;
+  --focus: #000000;
+  --backdrop: rgb(255 255 255 / 55%);
+
+  --nav-bg: #ffffff;
+  --nav-hover-bg: #eeeeee;
+  --nav-active-bg: #000000;
+  --nav-active-fg: #ffffff;
+  --nav-active-bar: 0;
+
+  --group-border: 1px solid #000000;
+  --group-shadow: 2px 2px 0 #000000;
+  --group-foot-bg: #ffffff;
+  --row-divider: 1px dotted #000000;
+  --row-min-h: 48px;
+  --row-pad-y: 10px;
+  --row-pad-x: 14px;
+
+  --radius-control: 6px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --control-h: 30px;
+  --button-pad-x: 14px;
+  --button-hover-bg: #eeeeee;
+  --primary-bg: #ffffff;
+  --primary-fg: #000000;
+  --primary-border: 1px solid #000000;
+  --primary-hover-bg: #eeeeee;
+  --primary-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #000000;
+  --dialog-border: 2px solid #000000;
+  --dialog-shadow: 4px 4px 0 #000000;
+  --notice-border: 2px solid #000000;
+  --tag-bg: #ffffff;
+  --icon-stroke: 2;
+  --brand-filter: none;
+  --nav-border: 2px solid #000000;
+}
+
+/* dithered desk behind a white sheet */
+:root[data-theme-id="ink"] .shell-content,
+:root[data-theme-id="ink"] .startup-backdrop {
+  background-color: #ffffff;
+  background-image: radial-gradient(#000000 0.6px, transparent 0.7px);
+  background-size: 4px 4px;
+}
+:root[data-theme-id="ink"] .page {
+  min-height: 100%;
+  border-right: 2px solid #000000;
+  background: #ffffff;
+}
+:root[data-theme-id="ink"] .startup-shell { border-inline: 2px solid #000000; background: #ffffff; }
+
+/* striped title bars */
+:root[data-theme-id="ink"] :is(.page-head h1, .startup-head h1) { display: flex; align-items: center; gap: 10px; width: 100%; }
+:root[data-theme-id="ink"] :is(.page-head h1, .startup-head h1)::after {
+  content: "";
+  flex: 1;
+  height: 11px;
+  background: repeating-linear-gradient(#000000 0 1px, transparent 1px 3px);
+}
+
+:root[data-theme-id="ink"] .button { font-weight: 700; }
+:root[data-theme-id="ink"] .row:is(.is-selected, [aria-selected="true"]) :is(.tag, .row-main > span, .row-main > p) { border-color: #ffffff; background: #000000; color: #ffffff; }
+:root[data-theme-id="ink"] .operation-log-output,
+:root[data-theme-id="ink"] .startup-diagnostics pre { border-top: 1px solid #000000; }
+:root[data-theme-id="ink"] .row:is(.is-selected, [aria-selected="true"]) .pets-list-copy span { color: #ffffff; }

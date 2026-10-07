@@ -186,7 +186,7 @@ Reduce complexity through ordering, grouping and concise copy. Add a management
 view only for dense details or accumulating history. Overview version history
 and profile backups use focused dialogs; DSH and Node runtime controls stay
 on one page. Place failures, diagnostics and next actions near their source.
-Reuse the square monochrome system. [Settings and startup](settings.md) defines
+Visual styling follows ADR-0023. [Settings and startup](settings.md) defines
 the current page layout; [Interface standards](standards/interface.md) governs
 future changes.
 
@@ -342,3 +342,48 @@ The listener is an exception to "no TCP listener". It accepts no Worker
 traffic, lives with the daemon so an open authorization survives a UI restart,
 and is limited to requests from the local machine. Revisit it if DSH offers a
 callback that does not need a loopback origin.
+
+## ADR-0023 — Theme-neutral layout and lucide icons for trusted surfaces
+
+Startup and Settings share one stylesheet stack under `frontend/src/ui/`:
+tokens, base, components, layout, then page files. Layout owns structure,
+order, slots, spacing rhythm and breakpoints (page header, section, group,
+row, facts, list and detail, notice, log). Components read only semantic
+tokens. A theme supplies token values and optional ornaments that carry no
+information, and declares which light/dark modes it supports; it never changes
+structure. Components use semantic role tokens (accent, outline, failed,
+navigation and selection) rather than a fixed colour, so a theme can recolour
+roles independently. Built-in themes are listed twice with the same modes:
+`internal/settings/appearance.go` (validation) and `frontend/src/themes.ts`
+(UI); styles live in `frontend/src/ui/themes/`. Monochrome (system sans-serif,
+light and dark) is the default; the other built-in themes ship for evaluation
+(see the registry). A theme may reshape the content area's appearance
+boldly (window title bars, frosted glass, cut corners, backgrounds), but the
+page grammar and DOM stay the same, and body text always sits on an opaque
+enough surface to stay readable.
+The startup window reserves a decorative backdrop layer for a theme's ambient
+effect.
+
+Themes adjust shared components only through tokens; a look that no token
+covers gets a new token whose default preserves every other theme, rather
+than a per-theme override of the component rule. Overrides drifted per
+surface (a control looked different in a dialog than on a page) and made each
+new theme repeat geometry fixes. The cost is a larger token set in
+`tokens.css`. Product-style themes (ChatGPT, Claude, GitHub, LobeHub)
+reproduce the product's own design tokens or its measured settings page
+instead of an impression of the brand: impressions drifted toward generic
+habits (thick accent bars, double borders) that the products do not use. Text
+contrast takes precedence over fidelity; control borders do not. Revisit a
+product-style theme when that product's settings page changes visibly.
+
+dsh-work persists its own appearance (`settings.Appearance`: theme id and
+system/light/dark mode). SettingsService is the only writer; the startup
+surface reads it through HostService.GetAppearance, and each saved change is
+published as the `appearance` event. This replaces reading DSH's
+`ui-theme.preference`, which only DSH content windows still follow. Native
+window frames take the mode when a window is created; Wails 3 beta has no
+runtime frame-theme switch.
+
+Icons come from `lucide` (ISC, maintained, tree-shaken ES modules, stroke
+icons whose weight and caps follow tokens). Only imported icons ship. Custom
+glyphs or a hand-drawn set would repeat maintenance lucide already covers.

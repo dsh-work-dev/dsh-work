@@ -115,3 +115,26 @@ func TestOfficialLoaderEntriesAreGroupedByTheLayerThatInsertsThem(t *testing.T) 
 		t.Fatalf("third-party override was ignored: %#v", workspace)
 	}
 }
+
+func TestOfficialLoaderEntriesReadBundlePatchArraysInOrder(t *testing.T) {
+	launch, profilePath := newLoaderTestProfile(t)
+	bundleDir := filepath.Join(filepath.Dir(launch.Runtime.Path), "node_modules", "@deepseek-ai", "dsh-web-app")
+	manifest := `{"dsh":{"bundle":{"patch":["./cordis.patch.yml","./preset.patch.yml"]}}}`
+	if err := os.WriteFile(filepath.Join(bundleDir, "package.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "preset.patch.yml"), []byte("- id: tool-bash\n  disabled: false\n- insert:\n    - id: preset\n      name: '@deepseek-ai/dsh-agent-preset'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	layers, err := officialLoaderLayers(profilePath, launch.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(layers) != 2 || len(layers[1].Entries) != 2 {
+		t.Fatalf("bundle patches did not compose into one layer: %#v", layers)
+	}
+	if entry := loaderEntry(t, layers, "tool-bash"); entry.DefaultDisabled {
+		t.Fatalf("later patch override was ignored: %#v", entry)
+	}
+	loaderEntry(t, layers, "preset")
+}

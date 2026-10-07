@@ -47,4 +47,18 @@ const updatedManifest = manifest.replace(/(assemblyIdentity[^>]*\sversion=")[^"]
 if (!/(assemblyIdentity[^>]*\sversion=")[^"]+(")/.test(manifest)) throw new Error("build/windows/wails.exe.manifest has no assembly version");
 await writeIfChanged(manifestPath, updatedManifest);
 
+const plistVersionPattern = /(<key>CFBundle(?:Short)?Version(?:String)?<\/key>\s*<string>)[^<]+(<\/string>)/g;
+for (const name of ["Info.plist", "Info.dev.plist"]) {
+  const plistPath = resolve(root, "build/darwin", name);
+  const plist = await read(plistPath);
+  if ((plist.match(plistVersionPattern) ?? []).length !== 2) throw new Error(`${plistPath} has an unexpected shape`);
+  await writeIfChanged(plistPath, plist.replace(plistVersionPattern, `$1${version}$2`));
+}
+
+const nfpmPath = resolve(root, "build/linux/nfpm/nfpm.yaml");
+const nfpm = await read(nfpmPath);
+const nfpmVersionPattern = /^(version:\s*")[^"]+(")$/m;
+if (!nfpmVersionPattern.test(nfpm)) throw new Error("build/linux/nfpm/nfpm.yaml has no package version");
+await writeIfChanged(nfpmPath, nfpm.replace(nfpmVersionPattern, `$1${version}$2`));
+
 if (!checkOnly) console.log(`version synchronized: ${version}`);

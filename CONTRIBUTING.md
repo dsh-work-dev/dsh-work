@@ -96,11 +96,14 @@ running daemon. `stop --wait` is idempotent when no daemon is reachable: it
 waits for any UI endpoint and manager lock to disappear, then reports stopped.
 The CLI does not start the daemon automatically.
 
+Replace `<runtime-id>` below with an installed runtime ID returned by
+`runtime list`.
+
 ```powershell
 bin\dsh-work-cli.exe status
 bin\dsh-work-cli.exe runtime list
 bin\dsh-work-cli.exe profile list
-bin\dsh-work-cli.exe use --runtime dsh-0.1.7-rc.2 --data-directory dsh-work --profile web
+bin\dsh-work-cli.exe use --runtime "<runtime-id>" --data-directory dsh-work --profile web
 bin\dsh-work-cli.exe plugin list --data-directory dsh-work --profile web
 ```
 

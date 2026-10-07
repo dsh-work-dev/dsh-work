@@ -18,6 +18,15 @@ type SettingsService struct {
 	onLocaleChanged          func(settings.Locale)
 	onNotificationsChanged   func(notifications.Preferences)
 	onRuntimeRollbackChanged func(bool)
+	onAppearanceChanged      func(settings.Appearance)
+}
+
+// SetAppearanceChanged installs the publisher that pushes a saved appearance
+// to every dsh-work window.
+func SetAppearanceChanged(service *SettingsService, changed func(settings.Appearance)) {
+	if service != nil {
+		service.onAppearanceChanged = changed
+	}
 }
 
 func NewSettingsService(manager *settings.Manager, onLocaleChanged func(settings.Locale), onNotificationsChanged func(notifications.Preferences), rollbackChanged ...func(bool)) *SettingsService {
@@ -98,6 +107,27 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 	}
 	if s.onNotificationsChanged != nil {
 		s.onNotificationsChanged(values.Notifications)
+	}
+	return values, nil
+}
+
+// SetAppearance saves the theme and light/dark mode of dsh-work's own windows.
+// The change is published only after it is persisted.
+func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode string) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	values, err := s.manager.SetAppearance(ctx, settings.Appearance{Theme: settings.ThemeID(theme), Mode: settings.AppearanceMode(mode)})
+	if err != nil {
+		return settings.Values{}, err
+	}
+	if s.onAppearanceChanged != nil {
+		s.onAppearanceChanged(values.Appearance)
 	}
 	return values, nil
 }

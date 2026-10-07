@@ -1,0 +1,105 @@
+/*
+ * Neo-brutalism — cream paper, 3px ink outlines, hard offset shadows and candy
+ * colours. Headings become stickers, buttons press into the page. Light only.
+ */
+:root[data-theme-id="brutal"] {
+  color-scheme: light;
+  --heading-weight: 800;
+  --fs-title: 34px;
+  --fs-section: 15px;
+
+  --canvas: #fff4e0;
+  --text: #111111;
+  --muted: #3d3a36;
+  --line: #111111;
+  --ink: #111111;
+  --on-ink: #fff4e0;
+  --hover: #ffe8b8;
+  --wash: #fff9ee;
+  --selection: #fff08a;
+  --selection-bar: 0;
+  --focus: #111111;
+  --backdrop: rgb(17 17 17 / 45%);
+
+  --accent: #ff5ca8;
+  --on-accent: #111111;
+  --outline: #111111;
+  --failed: #ff3b30;
+  --on-failed: #111111;
+  --marker-done-bg: #7ae582;
+  --marker-done-fg: #111111;
+
+  --nav-bg: #ffd23f;
+  --nav-hover-bg: #ffe27a;
+  --nav-active-bg: #111111;
+  --nav-active-fg: #ffd23f;
+  --nav-active-bar: 0;
+
+  --group-bg: #ffffff;
+  --group-border: 3px solid #111111;
+  --group-shadow: 6px 6px 0 #111111;
+  --group-foot-bg: #b8f2e6;
+  --row-divider: 2px solid #111111;
+  --row-min-h: 58px;
+
+  --radius-control: 10px;
+  --radius-group: 14px;
+  --radius-tag: 999px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --control-h: 36px;
+  --button-border: 3px solid #111111;
+  --button-bg: #ffffff;
+  --button-fg: #111111;
+  --button-hover-bg: #ffffff;
+  --button-shadow: 3px 3px 0 #111111;
+  --primary-bg: #ff5ca8;
+  --primary-fg: #111111;
+  --primary-border: 3px solid #111111;
+  --primary-hover-bg: #ff7dbb;
+  --primary-shadow: 3px 3px 0 #111111;
+  --input-border: 3px solid #111111;
+  --input-bg: #ffffff;
+  --dialog-border: 3px solid #111111;
+  --dialog-shadow: 8px 8px 0 #111111;
+  --notice-border: 3px solid #111111;
+  --notice-icon: #ff3b30;
+  --tag-bg: #b8f2e6;
+  --switch-off-bg: #ffffff;
+  --switch-off-thumb: #111111;
+  --switch-thumb-border: 0;
+  --switch-gap: 2px;
+  --icon-stroke: 2.5;
+  --icon-cap: round;
+  --icon-join: round;
+  --nav-border: 3px solid #111111;
+  --nav-weight: 700;
+  --nav-active-weight: 700;
+}
+
+:root[data-theme-id="brutal"] .nav-item { border: 2px solid transparent; }
+:root[data-theme-id="brutal"] .nav-item[aria-current] { border-color: #111111; box-shadow: 3px 3px 0 #111111; }
+:root[data-theme-id="brutal"] :is(.page-head h1, .startup-head h1) { width: fit-content; background: linear-gradient(transparent 58%, #ffd23f 58%, #ffd23f 92%, transparent 92%); }
+:root[data-theme-id="brutal"] .section-head h2 {
+  flex: none;
+  margin-right: auto;
+  padding: 2px 12px;
+  border: 3px solid #111111;
+  border-radius: 8px;
+  background: #b8f2e6;
+  box-shadow: 3px 3px 0 #111111;
+  transform: rotate(-1.2deg);
+}
+:root[data-theme-id="brutal"] .section:nth-of-type(3n+2) .section-head h2 { background: #ffd23f; transform: rotate(1deg); }
+:root[data-theme-id="brutal"] .section:nth-of-type(3n+3) .section-head h2 { background: #c3b5ff; }
+:root[data-theme-id="brutal"] .section-head { margin-bottom: 12px; }
+:root[data-theme-id="brutal"] .button { font-weight: 800; transition: transform var(--motion), box-shadow var(--motion); }
+:root[data-theme-id="brutal"] .button:not(.button-quiet):hover:not(:disabled) { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #111111; }
+:root[data-theme-id="brutal"] .button:not(.button-quiet):active:not(:disabled) { transform: translate(3px, 3px); box-shadow: none; }
+:root[data-theme-id="brutal"] .button-quiet { color: #111111; font-weight: 800; text-decoration: underline 3px #ff5ca8; text-underline-offset: 4px; }
+:root[data-theme-id="brutal"] .tag { border-width: 2px; font-weight: 800; }
+:root[data-theme-id="brutal"] .switch-track { border-width: 3px; }
+:root[data-theme-id="brutal"] .switch input:checked + .switch-track { background: #7ae582; border-color: #111111; }
+:root[data-theme-id="brutal"] .switch input:checked + .switch-track .switch-thumb { background: #111111; border-color: #111111; }
+:root[data-theme-id="brutal"] .startup-shell { gap: 20px; }

@@ -1,0 +1,167 @@
+/*
+ * Design tokens for every trusted dsh-work surface.
+ *
+ * Layout and component CSS read only these variables. A theme replaces the
+ * values (and may add ornaments in its own file); it never changes structure.
+ * The monochrome theme below is the default and supports light and dark.
+ */
+:root {
+  /* scale — shared by every theme */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+  --nav-width: 208px;
+  --page-width: 800px;
+  --page-pad: clamp(20px, 3vw, 32px);
+  --startup-width: 620px;
+  --fs-body: 14px;
+  --fs-control: 13px;
+  --fs-meta: 12px;
+  --fs-title: 22px;
+  --fs-section: 14px;
+  --fs-detail: 18px;
+  --fs-fact: 15px;
+  --marker: 22px;
+  --motion: 120ms;
+
+  /* monochrome theme — light */
+  color-scheme: light;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans", "Yu Gothic UI", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  --heading-weight: 600;
+
+  --canvas: #ffffff;
+  --text: #0a0a0a;
+  --muted: #616161;
+  --line: #e3e3e3;
+  --ink: #0a0a0a;
+  --on-ink: #ffffff;
+  --hover: #f4f4f4;
+  --wash: #f4f4f4;
+  --selection: #ebebeb;
+  --focus: #0a0a0a;
+  --danger: #0a0a0a;
+  --backdrop: rgb(0 0 0 / 40%);
+
+  --nav-bg: var(--wash);
+  --nav-hover-bg: #ebebeb;
+  --nav-active-bg: var(--canvas);
+
+  --group-bg: var(--canvas);
+  --group-border: 1px solid var(--line);
+  --group-shadow: none;
+  --group-foot-bg: var(--wash);
+  --row-divider: 1px solid var(--line);
+  --row-min-h: 56px;
+  --row-pad-y: 12px;
+  --row-pad-x: 16px;
+
+  --radius-control: 0;
+  --radius-group: 0;
+  --radius-tag: 0;
+  --radius-switch: 0;
+  --radius-marker: 0;
+
+  --control-h: 32px;
+  --button-pad-x: 12px;
+  --button-border: 1px solid var(--ink);
+  --button-bg: var(--canvas);
+  --button-fg: var(--ink);
+  --button-hover-bg: var(--hover);
+  --primary-bg: var(--ink);
+  --primary-fg: var(--on-ink);
+  --primary-hover-bg: #333333;
+  --input-border: 1px solid var(--ink);
+  --input-bg: var(--canvas);
+
+  --button-shadow: none;
+  --primary-border: 1px solid var(--primary-bg);
+  --primary-shadow: none;
+  --dialog-border: 1px solid var(--ink);
+  --dialog-shadow: none;
+  --notice-border: 1px solid var(--ink);
+  --notice-icon: currentColor;
+
+  /* semantic roles; monochrome maps them all to ink */
+  --accent: var(--ink);
+  --on-accent: var(--on-ink);
+  --outline: var(--ink);
+  --failed: var(--ink);
+  --on-failed: var(--on-ink);
+  --marker-done-bg: var(--accent);
+  --marker-done-fg: var(--on-accent);
+  --tag-bg: transparent;
+  --switch-off-bg: var(--canvas);
+  --switch-off-thumb: var(--canvas);
+  --switch-thumb-border: 1.5px solid var(--outline);
+  --switch-gap: 3px;
+  --switch-border: 1px solid var(--outline);
+  --switch-on-thumb: var(--on-accent);
+  --switch-w: 38px;
+  --switch-h: 22px;
+  --badge-bg: var(--accent);
+  --badge-fg: var(--on-accent);
+
+  /* navigation */
+  --nav-border: 0;
+  --nav-item-h: var(--control-h);
+  --nav-pad-x: var(--space-3);
+  --nav-list-gap: 2px;
+  --nav-fg: var(--text);
+  --nav-weight: 400;
+  --nav-active-fg: var(--text);
+  --nav-active-weight: 600;
+  --nav-active-bar: 0;
+  --nav-heading-fg: var(--muted);
+  --nav-heading-size: var(--fs-meta);
+  --nav-heading-weight: 400;
+
+  /* headings and rows */
+  --title-weight: var(--heading-weight);
+  --page-head-border: 0;
+  --page-head-pad: 0;
+  --row-title-weight: 500;
+
+  /* control shapes */
+  --radius-button: var(--radius-control);
+  --radius-select: var(--radius-control);
+  --select-bg: var(--input-bg);
+  --select-border: var(--input-border);
+  --select-hover-bg: var(--select-bg);
+  --selection-fg: inherit;
+  --selection-bar: 0;
+  --title-tracking: 0;
+
+  --icon-stroke: 1.75;
+  --icon-cap: square;
+  --icon-join: miter;
+  --brand-filter: none;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #0b0b0b;
+  --text: #f2f2f2;
+  --muted: #a3a3a3;
+  --line: #2a2a2a;
+  --ink: #f2f2f2;
+  --on-ink: #0b0b0b;
+  --hover: #171717;
+  --wash: #171717;
+  --selection: #222222;
+  --focus: #f2f2f2;
+  --danger: #f2f2f2;
+  --backdrop: rgb(0 0 0 / 60%);
+  --nav-hover-bg: #222222;
+  --primary-hover-bg: #cfcfcf;
+  --brand-filter: invert(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion: 0ms; }
+}

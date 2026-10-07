@@ -57,10 +57,6 @@ export function GetSnapshot(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(596675583);
 }
 
-export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
-    return $Call.ByID(761292424);
-}
-
 export function ImportProfileBackup(): $CancellablePromise<dshmanager$0.ProfileCloneResult | null> {
     return $Call.ByID(2600781331);
 }

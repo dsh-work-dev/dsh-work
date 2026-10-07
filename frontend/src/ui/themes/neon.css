@@ -1,0 +1,99 @@
+/*
+ * Neon — cyberpunk night: violet-black, cyan and magenta light, cut corners,
+ * scanlines and glowing titles. Body text stays on solid panels. Dark only.
+ */
+:root[data-theme-id="neon"] {
+  color-scheme: dark;
+  --font-heading: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+  --heading-weight: 700;
+  --fs-title: 26px;
+
+  --canvas: #0a0612;
+  --text: #ece8ff;
+  --muted: #a79cd0;
+  --line: rgb(0 240 255 / 22%);
+  --ink: #ece8ff;
+  --on-ink: #0a0612;
+  --hover: rgb(0 240 255 / 8%);
+  --wash: #07040d;
+  --selection: rgb(255 42 109 / 16%);
+  --selection-bar: 0;
+  --focus: #00f0ff;
+  --backdrop: rgb(5 2 10 / 70%);
+
+  --accent: #00f0ff;
+  --on-accent: #0a0612;
+  --outline: rgb(0 240 255 / 55%);
+  --failed: #ff2a6d;
+  --on-failed: #0a0612;
+  --danger: #ff5c8a;
+
+  --nav-bg: #0d0818;
+  --nav-hover-bg: rgb(0 240 255 / 8%);
+  --nav-active-bg: rgb(255 42 109 / 14%);
+  --nav-active-fg: #ffffff;
+  --nav-active-bar: 0;
+
+  --group-bg: rgb(19 11 36 / 92%);
+  --group-border: 1px solid rgb(0 240 255 / 35%);
+  --group-shadow: 0 0 24px rgb(0 240 255 / 10%);
+  --group-foot-bg: rgb(0 240 255 / 5%);
+  --row-divider: 1px solid rgb(0 240 255 / 14%);
+
+  --radius-control: 0;
+  --radius-group: 0;
+  --control-h: 32px;
+  --button-border: 1px solid rgb(0 240 255 / 60%);
+  --button-bg: rgb(0 240 255 / 6%);
+  --button-fg: #bff9ff;
+  --button-hover-bg: rgb(0 240 255 / 16%);
+  --primary-bg: #ff2a6d;
+  --primary-fg: #0a0612;
+  --primary-border: 1px solid #ff2a6d;
+  --primary-hover-bg: #ff5c8a;
+  --primary-shadow: 0 0 16px rgb(255 42 109 / 55%);
+  --input-border: 1px solid rgb(0 240 255 / 45%);
+  --input-bg: #07040d;
+  --dialog-border: 1px solid #00f0ff;
+  --dialog-shadow: 0 0 40px rgb(0 240 255 / 25%);
+  --notice-border: 1px solid #ff2a6d;
+  --notice-icon: #ff2a6d;
+  --tag-bg: transparent;
+  --switch-off-bg: transparent;
+  --switch-off-thumb: transparent;
+  --switch-thumb-border: 1px solid rgb(0 240 255 / 70%);
+  --brand-filter: invert(1) sepia(1) hue-rotate(140deg) saturate(6);
+  --nav-border: 1px solid rgb(255 42 109 / 35%);
+  --page-head-pad: 10px;
+  --page-head-border: 1px solid transparent;
+}
+
+/* scanlines over a magenta haze */
+:root[data-theme-id="neon"] :is(.shell-content, .startup-backdrop) {
+  background:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 3%) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse 60% 40% at 90% 0%, rgb(255 42 109 / 22%), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 0% 100%, rgb(0 240 255 / 14%), transparent 70%),
+    #0a0612;
+  background-attachment: fixed;
+}
+/* cut corners */
+:root[data-theme-id="neon"] :is(.group, .notice, .startup-diagnostics) {
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+  /* redraw the border across both cut corners */
+  background:
+    linear-gradient(to bottom left, transparent calc(50% - 1px), rgb(0 240 255 / 55%) calc(50% - 1px) calc(50% + 0.5px), transparent calc(50% + 0.5px)) top right / 16px 16px no-repeat,
+    linear-gradient(to top right, transparent calc(50% - 1px), rgb(0 240 255 / 55%) calc(50% - 1px) calc(50% + 0.5px), transparent calc(50% + 0.5px)) bottom left / 16px 16px no-repeat,
+    var(--group-bg);
+}
+:root[data-theme-id="neon"] .button:not(.button-quiet):not(.button-icon) { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); text-transform: uppercase; letter-spacing: 0.04em; }
+:root[data-theme-id="neon"] :is(.page-head h1, .startup-head h1) { color: #ffffff; text-shadow: 0 0 6px #00f0ff, 0 0 18px rgb(0 240 255 / 60%), 2px 0 0 rgb(255 42 109 / 70%); }
+:root[data-theme-id="neon"] .page-head { border-image: linear-gradient(90deg, #ff2a6d, #00f0ff 60%, transparent) 1; }
+:root[data-theme-id="neon"] .section-head h2 { color: #00f0ff; text-transform: uppercase; letter-spacing: 0.1em; text-shadow: 0 0 8px rgb(0 240 255 / 55%); }
+:root[data-theme-id="neon"] .section-head h2::before { content: "// "; color: #ff2a6d; }
+:root[data-theme-id="neon"] .nav-item[aria-current] { box-shadow: 0 0 14px rgb(255 42 109 / 25%); }
+:root[data-theme-id="neon"] .switch input:checked + .switch-track { background: rgb(0 240 255 / 20%); box-shadow: 0 0 10px rgb(0 240 255 / 45%); }
+:root[data-theme-id="neon"] .switch input:checked + .switch-track .switch-thumb { background: #00f0ff; border-color: #00f0ff; }
+:root[data-theme-id="neon"] .tag-strong { box-shadow: 0 0 10px rgb(0 240 255 / 55%); }
+:root[data-theme-id="neon"] [data-state="done"] > .marker { box-shadow: 0 0 10px rgb(0 240 255 / 50%); }
+:root[data-theme-id="neon"] [data-state="failed"] > .marker { box-shadow: 0 0 12px rgb(255 42 109 / 70%); }

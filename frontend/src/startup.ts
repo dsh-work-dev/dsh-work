@@ -8,7 +8,7 @@ import {runningLaunchSelection, startupProfileName, type LifecycleStatus} from "
 import {acquisitionPreparation, runtimePreparationText, formatRuntimeBytes} from "./acquisition-view";
 import {mountOperationLog} from "./operation-log";
 import {applyLocale, subscribeLocale, t} from "./i18n";
-import {applyTheme} from "./theme";
+import {icon} from "./ui/icons";
 
 export function mountHost() {
   const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -57,13 +57,17 @@ export function mountHost() {
       const row = document.createElement("li");
       const name = document.createElement("span");
       name.textContent = plugin;
+      row.className = "row";
+      name.className = "row-main mono";
       const disable = document.createElement("button");
       disable.type = "button";
+      disable.className = "button button-compact";
       disable.textContent = t("action.disable");
       disable.disabled = busy;
       disable.addEventListener("click", () => void resolvePluginFault(plugin, "disable"));
       const remove = document.createElement("button");
       remove.type = "button";
+      remove.className = "button button-compact button-quiet";
       remove.textContent = t("action.remove");
       remove.disabled = busy;
       remove.addEventListener("click", () => void resolvePluginFault(plugin, "remove"));
@@ -112,7 +116,11 @@ export function mountHost() {
       const done = status.state === "Ready" || index < current;
       const running = index === current && (busy || status.state === "Starting");
       row.dataset.state = done ? "done" : index === current && failed ? "failed" : running ? "active" : "pending";
-      row.querySelector(".check-marker")!.textContent = done ? "✓" : index === current && failed ? "!" : String(index + 1);
+      const marker = row.querySelector(".check-marker")!;
+      if (done) marker.replaceChildren(icon("check"));
+      else if (index === current && failed) marker.replaceChildren(icon("triangle-alert"));
+      else if (running) marker.replaceChildren(icon("loader"));
+      else marker.textContent = String(index + 1);
       element(labels[index]).textContent = done ? index === 1 ? `${values[index] ?? ""} · ${t("startup.localInstalled")}` : values[index] ?? t("startup.available") : running ? t(index === 3 ? "startup.launching" : "startup.checking") : index === current && missing ? t("startup.missingComponent") : index === current && stopped ? t("startup.stopped") : index === current && failed ? t("startup.stepFailed") : t("startup.waiting");
       if (index === 2 && values[index] && !done) element(labels[index]).textContent = `${values[index]} · ${element(labels[index]).textContent}`;
     });
@@ -158,7 +166,11 @@ export function mountHost() {
 
       element("app-title").textContent = t("startup.attention");
       for (const id of ["startup-node-state", "startup-dsh-state", "startup-profile", "startup-start-state"]) element(id).textContent = "—";
-      for (const id of ["node", "dsh", "profile", "start"]) element(`check-${id}`).dataset.state = "pending";
+      ["node", "dsh", "profile", "start"].forEach((id, index) => {
+        const row = element(`check-${id}`);
+        row.dataset.state = "pending";
+        row.querySelector(".check-marker")!.textContent = String(index + 1);
+      });
       retry.hidden = false; retry.disabled = busy; retry.textContent = t("common.retry");
       cancel.hidden = true; safe.hidden = true; restoreButton.hidden = true;
     }
@@ -190,7 +202,6 @@ export function mountHost() {
 
   async function refreshEnvironment() {
     snapshot = await ManagerService.GetSnapshot();
-    applyTheme(snapshot.theme);
     renderEnvironment();
   }
 

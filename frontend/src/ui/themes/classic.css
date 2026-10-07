@@ -1,0 +1,132 @@
+/*
+ * Classic OS — late-90s desktop: teal desktop, every section is a window with
+ * a navy title bar, silver bevelled controls, navy selection. Light only.
+ */
+:root[data-theme-id="classic"] {
+  color-scheme: light;
+  --font-body: Tahoma, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-heading: var(--font-body);
+  --heading-weight: 700;
+  --fs-body: 13px;
+  --fs-control: 12.5px;
+  --fs-meta: 12px;
+  --fs-title: 20px;
+  --fs-section: 12.5px;
+
+  --canvas: #008080;
+  --text: #000000;
+  --muted: #3c3c3c;
+  --line: #808080;
+  --ink: #000000;
+  --on-ink: #ffffff;
+  --hover: #d4d0c8;
+  --wash: #ffffff;
+  --selection: #000080;
+  --selection-fg: #ffffff;
+  --selection-bar: 0;
+  --focus: #000000;
+  --backdrop: rgb(0 0 0 / 25%);
+  --bevel-out: inset -1px -1px #0a0a0a, inset 1px 1px #ffffff, inset -2px -2px #808080, inset 2px 2px #dfdfdf;
+  --bevel-in: inset -1px -1px #ffffff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf, inset 2px 2px #808080;
+
+  --accent: #000080;
+  --on-accent: #ffffff;
+  --outline: #000000;
+  --failed: #c00000;
+  --on-failed: #ffffff;
+  --danger: #000000;
+  --marker-done-bg: #ffffff;
+  --marker-done-fg: #000080;
+
+  --nav-bg: #c0c0c0;
+  --nav-hover-bg: #d4d0c8;
+  --nav-active-bg: #000080;
+  --nav-active-fg: #ffffff;
+  --nav-active-bar: 0;
+
+  --group-bg: #c0c0c0;
+  --group-border: 0;
+  --group-shadow: var(--bevel-out);
+  --group-foot-bg: #c0c0c0;
+  --row-divider: 1px solid #808080;
+  --row-min-h: 44px;
+  --row-pad-y: 8px;
+  --row-pad-x: 12px;
+
+  --radius-control: 0;
+  --radius-group: 0;
+  --radius-tag: 0;
+  --radius-switch: 0;
+  --radius-marker: 0;
+  --control-h: 28px;
+  --button-pad-x: 14px;
+  --button-border: 0;
+  --button-bg: #c0c0c0;
+  --button-fg: #000000;
+  --button-hover-bg: #c0c0c0;
+  --button-shadow: var(--bevel-out);
+  --primary-bg: #c0c0c0;
+  --primary-fg: #000000;
+  --primary-border: 0;
+  --primary-hover-bg: #c0c0c0;
+  --primary-shadow: 0 0 0 1px #000000, var(--bevel-out);
+  --input-border: 0;
+  --input-bg: #ffffff;
+  --dialog-border: 0;
+  --dialog-shadow: var(--bevel-out), 4px 4px 0 rgb(0 0 0 / 35%);
+  --notice-border: 0;
+  --notice-icon: #c00000;
+  --tag-bg: #ffffff;
+  --switch-off-bg: #ffffff;
+  --switch-off-thumb: #c0c0c0;
+  --switch-thumb-border: 0;
+  --icon-stroke: 2;
+  --nav-heading-fg: #3c3c3c;
+}
+
+/* each section is a window: the heading is its title bar */
+:root[data-theme-id="classic"] .section-head {
+  min-height: 24px;
+  margin-bottom: 0;
+  padding: 2px 3px 2px 8px;
+  background: linear-gradient(90deg, #000080, #1084d0);
+  color: #ffffff;
+  box-shadow: inset 1px 1px #dfdfdf, inset -1px 0 #0a0a0a;
+}
+:root[data-theme-id="classic"] .section-head h2 { color: #ffffff; }
+:root[data-theme-id="classic"] .section-head .note { color: #d4d4ff; }
+:root[data-theme-id="classic"] .section-head + .group,
+:root[data-theme-id="classic"] .section-head + .section-desc + .group { padding: 3px; background: #c0c0c0; box-shadow: var(--bevel-out); }
+:root[data-theme-id="classic"] .group .row { background: #c0c0c0; }
+:root[data-theme-id="classic"] .rows, :root[data-theme-id="classic"] .pets-list { background: #ffffff; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .rows .row { background: #ffffff; }
+:root[data-theme-id="classic"] .row:is(.is-selected, [aria-selected="true"]) { background: #000080; }
+:root[data-theme-id="classic"] .row:is(.is-selected, [aria-selected="true"]) :is(.row-main > span, .row-main > p, .tag) { border-color: #ffffff; background: #000080; color: #ffffff; }
+
+/* desktop and page title */
+:root[data-theme-id="classic"] :is(.page-head h1, .startup-head h1) { color: #ffffff; text-shadow: 1px 1px 0 #000000; }
+:root[data-theme-id="classic"] .shell-nav { box-shadow: var(--bevel-out); }
+
+/* bevelled controls */
+:root[data-theme-id="classic"] .button:active:not(:disabled) { box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .button-quiet { box-shadow: none; color: #000000; text-decoration: underline; }
+:root[data-theme-id="classic"] :is(select, input[type="text"], input[type="search"]) { box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] :focus-visible { outline: 1px dotted #000000; outline-offset: -4px; }
+:root[data-theme-id="classic"] .tag { border: 0; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .switch-track { border: 0; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .switch-thumb { box-shadow: var(--bevel-out); }
+:root[data-theme-id="classic"] .switch input:checked + .switch-track { background: #000080; }
+:root[data-theme-id="classic"] .switch input:checked + .switch-track .switch-thumb { background: #c0c0c0; border-color: #c0c0c0; }
+:root[data-theme-id="classic"] .marker { border: 0; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .progress-track { height: 16px; background: #ffffff; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .progress-track > span { background: repeating-linear-gradient(90deg, #000080 0 10px, transparent 10px 12px); }
+:root[data-theme-id="classic"] .notice { box-shadow: var(--bevel-out); background: #c0c0c0; }
+:root[data-theme-id="classic"] .startup-shell { background: transparent; }
+:root[data-theme-id="classic"] .startup-checks { padding: 3px; box-shadow: var(--bevel-out); }
+:root[data-theme-id="classic"] .startup-diagnostics pre, :root[data-theme-id="classic"] .operation-log-output { background: #ffffff; box-shadow: var(--bevel-in); }
+:root[data-theme-id="classic"] .startup-footer { border-top: 0; }
+:root[data-theme-id="classic"] :is(.startup-footer .button-quiet, .back-link), :root[data-theme-id="classic"] .brand { color: #ffffff; }
+
+:root[data-theme-id="classic"] ::-webkit-scrollbar { width: 16px; height: 16px; background: #dfdfdf; }
+:root[data-theme-id="classic"] ::-webkit-scrollbar-thumb { background: #c0c0c0; box-shadow: var(--bevel-out); }
+:root[data-theme-id="classic"] .row:is(.is-selected, [aria-selected="true"]) .pets-list-copy span { color: #ffffff; }

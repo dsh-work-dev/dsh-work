@@ -263,3 +263,16 @@ test("a registry observation survives a snapshot refresh", () => {
   assert.equal(merged.length, 2);
   assert.equal(merged[1].sourceKind, "local");
 });
+
+test("the frontend theme registry matches the Host's supported themes and modes", async () => {
+	const {themes} = await import("../src/themes");
+	const source = readFileSync(new URL("../../internal/settings/appearance.go", import.meta.url), "utf8");
+	const ids = Object.fromEntries(Array.from(source.matchAll(/(Theme\w+)\s+ThemeID = "([^"]+)"/g), (match) => [match[1], match[2]]));
+	const modeNames: Record<string, string> = {AppearanceSystem: "system", AppearanceLight: "light", AppearanceDark: "dark"};
+	const host = Array.from(source.matchAll(/^\t(Theme\w+):\s+\{([^}]*)\},$/gm), (match) => ({
+		id: ids[match[1]],
+		modes: match[2].split(",").map((mode) => modeNames[mode.trim()]),
+	}));
+	assert.ok(host.length > 0);
+	assert.deepEqual(themes.map((theme) => ({id: theme.id, modes: [...theme.modes]})), host);
+});

@@ -4,15 +4,15 @@ import type {Snapshot, RestorePoint} from "../bindings/github.com/local/dsh-work
 import {currentLocale, subscribeLocale, t} from "./i18n";
 
 export function mountRestorePoints(container: HTMLElement, updated: (snapshot: Snapshot) => void, startup = false) {
-  const heading = document.createElement("h3");
-  const summary = document.createElement("p"); summary.className = "manager-note";
-  const actions = document.createElement("div"); actions.className = "manager-actions";
+  const heading = document.createElement(startup ? "h3" : "h2");
+  const summary = document.createElement("p"); summary.className = "note";
+  const actions = document.createElement("div"); actions.className = "actions";
   const save = document.createElement("button"); save.type = "button"; save.className = "button button-secondary";
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "button button-secondary"; cancel.hidden = true;
   const list = document.createElement("div"); list.className = "restore-point-list";
-  const feedback = document.createElement("p"); feedback.className = "status-detail"; feedback.setAttribute("role", "status");
+  const feedback = document.createElement("p"); feedback.className = "note"; feedback.setAttribute("role", "status");
   const history = document.createElement("dialog"); history.className = "version-history-dialog";
-  const historyHeader = document.createElement("header");
+  const historyHeader = document.createElement("header"); historyHeader.className = "dialog-head";
   const historyTitle = document.createElement("h2"); historyTitle.id = `${container.id}-history-title`;
   history.setAttribute("aria-labelledby", historyTitle.id);
   const historyClose = document.createElement("button"); historyClose.type = "button"; historyClose.className = "button button-secondary";
@@ -23,7 +23,7 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   const previewTitle = document.createElement("h3"); const previewBody = document.createElement("pre");
   const confirm = document.createElement("button"); confirm.type = "button"; confirm.className = "button button-primary";
   const close = document.createElement("button"); close.type = "button"; close.className = "button button-secondary";
-  const previewActions = document.createElement("div"); previewActions.className = "manager-actions"; previewActions.append(confirm, close);
+  const previewActions = document.createElement("div"); previewActions.className = "actions"; previewActions.append(confirm, close);
   let previewRequest = 0;
   function closePreview() {
     previewRequest++;
@@ -41,7 +41,7 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   const form = document.createElement("form"); const editTitle = document.createElement("h3");
   editTitle.id = `${container.id}-edit-title`; edit.setAttribute("aria-labelledby", editTitle.id);
   const input = document.createElement("input"); input.type = "text"; input.maxLength = 120;
-  const editActions = document.createElement("div"); editActions.className = "manager-actions";
+  const editActions = document.createElement("div"); editActions.className = "actions";
   const submit = document.createElement("button"); submit.type = "submit"; submit.className = "button button-primary";
   const dismiss = document.createElement("button"); dismiss.type = "button"; dismiss.className = "button button-secondary";
   dismiss.onclick = () => edit.close(); editActions.append(submit, dismiss); form.append(editTitle, input, editActions); edit.append(form);
@@ -49,9 +49,14 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   form.onsubmit = event => {event.preventDefault(); const action = editAction; const value = input.value; edit.close(); if (action) void run(() => action(value));};
   if (startup) container.append(heading, summary, actions, feedback, list, preview, edit);
   else {
-    container.classList.add("version-overview");
-    const header = document.createElement("div"); header.className = "version-overview-header"; header.append(heading, actions);
-    container.append(header, summary, feedback, history, edit);
+    // Same grammar as every Settings section: heading, then one group row.
+    const header = document.createElement("div"); header.className = "section-head"; header.append(heading);
+    const group = document.createElement("div"); group.className = "group";
+    const row = document.createElement("div"); row.className = "row";
+    summary.className = "row-main"; actions.className = "row-trail";
+    row.append(summary, actions); group.append(row);
+    feedback.className = "result";
+    container.append(header, group, feedback, history, edit);
     history.append(list, inspector, preview);
     actions.append(browse);
   }
@@ -112,16 +117,16 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
     if (signature !== nextSignature) {
       signature = nextSignature; list.replaceChildren();
       for (const p of [...(view?.points ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
-        const row = document.createElement("div"); row.className = "backup-row";
-        const text = document.createElement("div");
+        const row = document.createElement("div"); row.className = "row";
+        const text = document.createElement("div"); text.className = "row-main";
         const title = document.createElement("strong"); title.textContent = startup ? name(p) : p.label || `DSH ${p.dshVersion}`;
-        const badge = document.createElement("span"); badge.className = "version-kind"; badge.textContent = t(p.kind === "manual" ? "points.manual" : "points.auto");
+        const badge = document.createElement("span"); badge.className = "tag tag-hollow"; badge.textContent = t(p.kind === "manual" ? "points.manual" : "points.auto");
         title.append(" ", badge);
-        const detail = document.createElement("p"); detail.className = "manager-note";
+        const detail = document.createElement("p"); detail.className = "note";
         detail.textContent = startup ? `${p.target.profile.name} · DSH ${p.dshVersion} · ${t("points.plugins", {count: (p.plugins ?? []).length})}${p.unavailable ? ` · ${p.unavailable}` : ""}`
           : `${date(p.createdAt)} · ${p.target.profile.name}${p.label ? ` · DSH ${p.dshVersion}` : ""}`;
         text.append(title, detail);
-        const buttons = document.createElement("div"); buttons.className = "backup-row-actions";
+        const buttons = document.createElement("div"); buttons.className = "row-trail";
         const button = document.createElement("button"); button.type = "button"; button.className = "button button-secondary button-compact";
         button.textContent = t(startup ? "points.restore" : "points.details");
         button.dataset.pointId = p.id;
@@ -155,7 +160,7 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
       add("action.delete", () => editPoint(t("points.delete", {name: name(point)}), "", "action.delete", () => ManagerService.DeleteRestorePoint(point.id), true), point.id === view?.lastRunning || Object.values(view?.lastByProfile ?? {}).includes(point.id) || (view?.operation?.pointId === point.id && view.operation.status !== "completed"));
     }
     inspector.append(back, title, metadata, plugins);
-    if (point.unavailable) {const reason = document.createElement("p"); reason.className = "status-detail"; reason.textContent = point.unavailable; inspector.append(reason);}
+    if (point.unavailable) {const reason = document.createElement("p"); reason.className = "note"; reason.textContent = point.unavailable; inspector.append(reason);}
     inspector.append(tools); controls(); back.focus();
   }
   async function showPreview(point: RestorePoint) {

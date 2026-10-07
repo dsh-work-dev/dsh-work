@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	sys "golang.org/x/sys/windows"
 )
@@ -27,7 +28,9 @@ func TestRuntimeInstallerRemoveDoesNotBlockOnFileSharedWithRunningRuntime(t *tes
 		}
 		return dshmanager.RuntimeInfo{ID: id, Path: launcher, Source: dshmanager.RuntimeSourceManaged}
 	}
-	running, old, older := runtimeInfo("dsh-0.1.7-rc.2"), runtimeInfo("dsh-0.1.7-alpha.2"), runtimeInfo("dsh-0.1.5-rc.3")
+	running := runtimeInfo("dsh-" + dshadapter.SupportedVersion)
+	old := runtimeInfo("dsh-0.1.7-alpha.2")
+	older := runtimeInfo("dsh-0.1.5-rc.3")
 	// A loaded native module is mapped as an executable image. Map a copy of a
 	// small system DLL the same way through the running runtime's link.
 	loaded := filepath.Join(store, running.ID, "node_modules", "koffi.node")

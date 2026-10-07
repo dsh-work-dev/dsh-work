@@ -1,0 +1,129 @@
+/*
+ * Soft — rounded cards lifted by shadow instead of borders, one colour
+ * accent. Light and dark.
+ */
+:root[data-theme-id="soft"] {
+  color-scheme: light;
+  --font-heading: "Segoe UI Variable Display", var(--font-body);
+  --font-mono: "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+  --fs-title: 24px;
+
+  --canvas: #f3f4f7;
+  --text: #1b1f27;
+  --muted: #5d6679;
+  --line: #e4e7ec;
+  --ink: #1b1f27;
+  --on-ink: #ffffff;
+  --hover: #eceff4;
+  --wash: #f9fafb;
+  --selection: #eef2ff;
+  --selection-bar: 0;
+  --focus: #3a5bd9;
+  --backdrop: rgb(16 24 40 / 35%);
+
+  --accent: #3a5bd9;
+  --on-accent: #ffffff;
+  --outline: #d0d5dd;
+  --failed: #c4320a;
+  --on-failed: #ffffff;
+  --danger: #c4320a;
+
+  --nav-bg: transparent;
+  --nav-hover-bg: #e8ebf1;
+  --nav-active-bg: #e0e7ff;
+  --nav-active-fg: #2c46b1;
+  --nav-active-bar: 0;
+
+  --group-bg: #ffffff;
+  --group-border: 0;
+  --group-shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --group-foot-bg: #f9fafb;
+  --row-divider: 1px solid #eef0f3;
+  --row-min-h: 60px;
+  --row-pad-y: 14px;
+  --row-pad-x: 18px;
+
+  --radius-control: 8px;
+  --radius-group: 12px;
+  --radius-tag: 999px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --control-h: 34px;
+  --button-pad-x: 14px;
+  --button-border: 1px solid #d0d5dd;
+  --button-bg: #ffffff;
+  --button-fg: #344054;
+  --button-hover-bg: #f9fafb;
+  --button-shadow: 0 1px 2px rgb(16 24 40 / 5%);
+  --primary-bg: #3a5bd9;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #3a5bd9;
+  --primary-hover-bg: #2c46b1;
+  --input-border: 1px solid #d0d5dd;
+  --input-bg: #ffffff;
+  --dialog-border: 0;
+  --dialog-shadow: 0 20px 40px rgb(16 24 40 / 18%);
+  --notice-border: 1px solid #fecdca;
+  --notice-icon: #c4320a;
+  --tag-bg: #ffffff;
+  --switch-off-bg: #d0d5dd;
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --icon-stroke: 1.75;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="soft"][data-theme="dark"] {
+  color-scheme: dark;
+  --switch-on-thumb: #ffffff;
+  --canvas: #15171c;
+  --text: #eceef2;
+  --muted: #98a2b3;
+  --line: #2b2f37;
+  --ink: #eceef2;
+  --on-ink: #15171c;
+  --hover: #232730;
+  --wash: #191c22;
+  --selection: #242c4a;
+  --focus: #8098f9;
+  --backdrop: rgb(0 0 0 / 55%);
+
+  --accent: #6b83f2;
+  --on-accent: #0f1220;
+  --outline: #3a3f4a;
+  --failed: #f97066;
+  --on-failed: #1d0a08;
+  --danger: #fda29b;
+
+  --nav-hover-bg: #232730;
+  --nav-active-bg: #263159;
+  --nav-active-fg: #c7d2fe;
+
+  --group-bg: #1d2027;
+  --group-shadow: 0 0 0 1px #2b2f37;
+  --group-foot-bg: #191c22;
+  --row-divider: 1px solid #2b2f37;
+
+  --button-border: 1px solid #3a3f4a;
+  --button-bg: #1d2027;
+  --button-fg: #eceef2;
+  --button-hover-bg: #262a33;
+  --button-shadow: none;
+  --primary-bg: #6b83f2;
+  --primary-fg: #0f1220;
+  --primary-border: 1px solid #6b83f2;
+  --primary-hover-bg: #8098f9;
+  --input-border: 1px solid #3a3f4a;
+  --input-bg: #15171c;
+  --dialog-shadow: 0 0 0 1px #2b2f37, 0 20px 40px rgb(0 0 0 / 45%);
+  --notice-border: 1px solid #7a271a;
+  --notice-icon: #fda29b;
+  --tag-bg: #1d2027;
+  --switch-off-bg: #3a3f4a;
+  --brand-filter: invert(1);
+}
+
+:root[data-theme-id="soft"] .page-head h1 { letter-spacing: -0.01em; }

@@ -1,0 +1,87 @@
+/*
+ * Terminal — monospace, dense, dashed rules, one green accent. Dark only.
+ * The "##", ">" and bracket marks are decoration; labels stay unchanged.
+ */
+:root[data-theme-id="terminal"] {
+  color-scheme: dark;
+  --font-body: "Cascadia Mono", Consolas, "Microsoft YaHei UI", "PingFang SC", monospace;
+  --font-heading: var(--font-body);
+  --font-mono: var(--font-body);
+  --heading-weight: 700;
+  --fs-body: 13px;
+  --fs-control: 12.5px;
+  --fs-title: 18px;
+  --fs-section: 12.5px;
+  --fs-detail: 16px;
+  --fs-fact: 14px;
+
+  --canvas: #0c0f0c;
+  --text: #d7f5d3;
+  --muted: #7f9c7b;
+  --line: #243024;
+  --ink: #d7f5d3;
+  --on-ink: #0c0f0c;
+  --hover: #131a13;
+  --wash: #080a08;
+  --selection: #142414;
+  --selection-bar: 0;
+  --focus: #5ee88a;
+  --backdrop: rgb(0 0 0 / 65%);
+
+  --accent: #5ee88a;
+  --on-accent: #0c0f0c;
+  --outline: #3c5a3c;
+  --failed: #ff8f7a;
+  --on-failed: #0c0f0c;
+  --danger: #ff8f7a;
+  --marker-done-bg: transparent;
+  --marker-done-fg: #5ee88a;
+
+  --nav-bg: #0c0f0c;
+  --nav-hover-bg: #131a13;
+  --nav-active-bg: #142414;
+  --nav-active-fg: #5ee88a;
+  --nav-active-bar: 0;
+
+  --group-bg: transparent;
+  --group-border: 1px solid #243024;
+  --group-shadow: none;
+  --group-foot-bg: #101610;
+  --row-divider: 1px dashed #243024;
+  --row-min-h: 44px;
+  --row-pad-y: 8px;
+  --row-pad-x: 12px;
+
+  --control-h: 28px;
+  --button-pad-x: 8px;
+  --button-border: 1px solid #3c5a3c;
+  --button-bg: transparent;
+  --button-fg: #d7f5d3;
+  --button-hover-bg: #142414;
+  --primary-bg: #5ee88a;
+  --primary-fg: #0c0f0c;
+  --primary-border: 1px solid #5ee88a;
+  --primary-hover-bg: #8ff0ae;
+  --input-border: 1px solid #3c5a3c;
+  --input-bg: #0c0f0c;
+  --dialog-border: 1px solid #5ee88a;
+  --notice-border: 1px solid #ff8f7a;
+  --notice-icon: #ff8f7a;
+  --switch-off-bg: transparent;
+  --switch-off-thumb: transparent;
+  --switch-thumb-border: 1px solid #7f9c7b;
+  --icon-stroke: 1.75;
+  --brand-filter: invert(1) sepia(1) hue-rotate(70deg) saturate(3);
+  --nav-border: 1px solid #243024;
+  --page-head-pad: 8px;
+  --page-head-border: 1px dashed #243024;
+}
+
+:root[data-theme-id="terminal"] :is(.page-head h1, .startup-head h1)::before { content: "> "; color: var(--accent); }
+:root[data-theme-id="terminal"] :is(.section-head h2, .version-overview-header h3)::before { content: "## "; color: var(--muted); }
+:root[data-theme-id="terminal"] .button:not(.button-icon)::before { content: "["; color: var(--muted); }
+:root[data-theme-id="terminal"] .button:not(.button-icon)::after { content: "]"; color: var(--muted); }
+:root[data-theme-id="terminal"] .button-primary:not(.button-icon)::before,
+:root[data-theme-id="terminal"] .button-primary:not(.button-icon)::after { color: inherit; }
+:root[data-theme-id="terminal"] .switch input:checked + .switch-track { background: #1d3a24; }
+:root[data-theme-id="terminal"] .switch input:checked + .switch-track .switch-thumb { background: var(--accent); border-color: var(--accent); }

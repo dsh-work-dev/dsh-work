@@ -70,7 +70,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	}
 	defer client.Close()
 	manager := remoteManagerSnapshot{client: client}
-	nativeTheme := dshWindowTheme(manager)
+	dshTheme := dshWindowTheme(manager)
 	var desktop *application.App
 	var workspace, worker, settingsWindow application.Window
 	var windowMu sync.Mutex
@@ -148,7 +148,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	newOptions := func(name string) application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
 		options.Permissions = webviewPermissions(name)
-		options.Windows.Theme = nativeTheme
+		mu.Lock()
+		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)
+		mu.Unlock()
 		options.UseApplicationMenu = name != "settings"
 		if name == "settings" {
 			options.Width, options.Height = 980, 720
@@ -170,6 +172,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		workerOptions := workOptions
 		workerOptions.Name = "worker"
 		workerOptions.Permissions = webviewPermissions("worker")
+		workerOptions.Windows.Theme = dshTheme
 		mu.Lock()
 		if current.URL != "" {
 			workerOptions.URL = current.URL

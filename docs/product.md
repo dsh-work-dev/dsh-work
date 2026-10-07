@@ -17,13 +17,15 @@ dsh-work owns:
 - the authenticated IPC channel between the Workspace WebView and DSH;
 - desktop-notification preferences, routing and delivery.
 - the Desktop Pet catalog, trusted Pet preferences and the native Pet surface.
+- the appearance (theme and light/dark mode) of its own startup and Settings
+  windows.
 
 DSH owns:
 
 - agents, prompts, models and conversations;
 - profiles and their plugin associations;
 - Workspace identity, directories and sessions;
-- its Web UI, contextual notices and appearance preference.
+- its Web UI, contextual notices and the appearance of DSH content.
 
 The Run context contains one DSH runtime, Node selection, DSH data directory and profile.
 Workspace context is selected separately through DSH and is scoped to a Worker
@@ -76,8 +78,10 @@ silently mutate DSH-owned data.
   default; routine lifecycle notifications are disabled.
 - Routine completion delivery is suppressed while the Workspace is active.
   Notification preferences do not hide DSH-owned in-page notices.
-- DSH owns the appearance preference; trusted Host surfaces consume it without
-  persisting a second theme setting.
+- dsh-work persists the appearance of its own windows (General → Theme and
+  Appearance). A theme offers only the light/dark modes it supports; choosing
+  a theme without the current mode switches to one it supports. It does not change DSH's appearance, and DSH
+  content windows keep DSH's own light/dark preference.
 - The Host can display a selected Desktop Pet in a transparent, always-on-top
   surface outside the Workspace window. Pets Settings exposes discovery,
   preview, visibility and direct 50%–300% size control.

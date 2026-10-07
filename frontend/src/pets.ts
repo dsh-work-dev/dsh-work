@@ -1,5 +1,6 @@
 import {PetSettingsService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {subscribeLocale, t} from "./i18n";
+import {icon} from "./ui/icons";
 import {beginControlUpdate} from "./ui/pending-control";
 
 type PetPanel = Awaited<ReturnType<typeof PetSettingsService.GetPetPanel>>;
@@ -108,6 +109,8 @@ export function mountPets() {
   const useButton = document.getElementById("pets-use") as HTMLButtonElement;
   const retryButton = document.getElementById("pets-retry") as HTMLButtonElement;
   const clearButton = document.getElementById("pets-clear") as HTMLButtonElement;
+  const previewPanel = document.getElementById("pets-preview") as HTMLDivElement;
+  const previewHome = document.getElementById("pets-preview-home") as HTMLDivElement;
   let panel: PetPanel | undefined;
   let browseKey: string | undefined;
   let preview: PetPreview | undefined;
@@ -137,7 +140,7 @@ export function mountPets() {
   }
 
   function renderVisibility() {
-    visibility.closest<HTMLElement>(".setting-row")!.hidden = !panel;
+    visibility.closest<HTMLElement>(".row")!.hidden = !panel;
     const preference = panel?.preference;
     const runtime = panel?.runtime;
     visibility.checked = preference?.visibilityIntent === "visible";
@@ -216,14 +219,14 @@ export function mountPets() {
     invalidIssueList.replaceChildren();
     for (const issue of visibleIssues) {
       const line = document.createElement("p");
-      line.className = "manager-note";
+      line.className = "note";
       line.textContent = issueMessage(issue.code);
       invalidIssueList.append(line);
     }
   }
 
   function renderPreview() {
-    document.querySelector<HTMLElement>(".pets-preview-panel")!.hidden = !panel;
+    previewPanel.hidden = !panel || !browseKey;
     const item = (panel?.snapshot.items ?? []).find((candidate) => candidate.stableSourceKey === browseKey);
     previewName.textContent = item?.displayName ?? preview?.displayName ?? "";
     previewName.hidden = !previewName.textContent;
@@ -237,7 +240,7 @@ export function mountPets() {
       previewImage.removeAttribute("src");
       previewImage.alt = "";
     }
-    previewPlaceholder.textContent = t(previewLoading ? "pets.preview.loading" : previewFailure ? "pets.preview.unavailable" : "pets.preview.choose");
+    previewPlaceholder.textContent = t(previewFailure ? "pets.preview.unavailable" : "pets.preview.loading");
     if (panel?.runtime.selectionStatus === "unavailable" && browseKey === selectedKey()) {
       previewMessage.textContent = t("pets.selectedUnavailable");
     } else if (panel?.snapshot.stale) {
@@ -289,6 +292,9 @@ export function mountPets() {
     const focusedKey = activeElement instanceof HTMLButtonElement && list.contains(activeElement)
       ? activeElement.dataset.petKey
       : undefined;
+    // Rows are rebuilt below; park the preview first so a focused preview control survives the move.
+    const previewFocus = previewPanel.contains(activeElement) ? activeElement as HTMLElement : undefined;
+    previewHome.append(previewPanel);
     const scanning = loading || (refreshing && panel?.snapshot.scanState === "never-scanned");
     if (scanning) {
       list.replaceChildren();
@@ -320,13 +326,16 @@ export function mountPets() {
       emptyDescription.hidden = true;
     }
     for (const item of items) {
+      const open = item.stableSourceKey === browseKey;
+      const entry = document.createElement("div");
+      entry.className = `pets-entry${open ? " is-open" : ""}`;
       const option = document.createElement("button");
       option.type = "button";
-      option.className = `manager-list-item pets-list-item${item.stableSourceKey === browseKey ? " is-selected" : ""}`;
+      option.className = "row pets-list-item";
       option.dataset.petKey = item.stableSourceKey;
       option.tabIndex = item.stableSourceKey === keyboardKey ? 0 : -1;
-      option.setAttribute("role", "option");
-      option.setAttribute("aria-selected", String(item.stableSourceKey === browseKey));
+      option.setAttribute("aria-expanded", String(open));
+      if (open) option.setAttribute("aria-controls", previewPanel.id);
       option.disabled = switching || refreshing || item.availability !== "ready";
       const thumbnail = document.createElement("span");
       thumbnail.className = "pets-thumbnail";
@@ -349,9 +358,11 @@ export function mountPets() {
       const status = item.current ? ` · ${t("pets.current.status")}` : "";
       detail.textContent = `${sourceBadge(item)}${status}`;
       content.append(name, detail);
-      option.append(thumbnail, content);
-      option.addEventListener("click", () => void browse(item.stableSourceKey));
-      list.append(option);
+      option.append(thumbnail, content, icon("chevron-right"));
+      option.addEventListener("click", () => { if (browseKey !== item.stableSourceKey) void browse(item.stableSourceKey); });
+      entry.append(option);
+      if (open) entry.append(previewPanel);
+      list.append(entry);
       if (item.availability === "ready") {
         loadThumbnail(item.stableSourceKey);
       }
@@ -362,6 +373,8 @@ export function mountPets() {
       const replacement = list.querySelector<HTMLButtonElement>(`[data-pet-key="${CSS.escape(focusedKey)}"]`);
       if (replacement && !replacement.disabled) replacement.focus({preventScroll: true});
       else list.focus({preventScroll: true});
+    } else if (previewFocus?.isConnected) {
+      previewFocus.focus({preventScroll: true});
     }
     renderIssues();
   }
@@ -633,6 +646,8 @@ export function mountPets() {
   });
   clearButton.addEventListener("click", () => void clearSelection());
   list.addEventListener("keydown", (event) => {
+    // Arrow keys move between pets; keys typed inside the open preview keep their own meaning.
+    if (previewPanel.contains(event.target as Node)) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();

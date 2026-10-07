@@ -13,9 +13,6 @@ import * as app$0 from "../app/models.js";
 import * as daemon$0 from "../daemon/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as dshmanager$0 from "../dshmanager/models.js";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
 import * as lifecycle$0 from "../lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -32,6 +29,10 @@ export function DisableFaultPlugin(packageName: string): $CancellablePromise<lif
     return $Call.ByID(598114413, packageName);
 }
 
+export function GetAppearance(): $CancellablePromise<settings$0.Appearance> {
+    return $Call.ByID(652882904);
+}
+
 export function GetLocale(): $CancellablePromise<settings$0.Locale> {
     return $Call.ByID(3068536916);
 }
@@ -42,10 +43,6 @@ export function GetStartupOutput(): $CancellablePromise<app$0.StartupOutput> {
 
 export function GetStatus(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(3795814092);
-}
-
-export function GetTheme(): $CancellablePromise<dshmanager$0.ThemePreference> {
-    return $Call.ByID(3636700019);
 }
 
 export function GetUpdateState(): $CancellablePromise<daemon$0.UpdateSnapshot> {

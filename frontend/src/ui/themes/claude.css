@@ -1,0 +1,161 @@
+/*
+ * Claude style — measured from the logged-in claude.ai settings (its cds
+ * tokens): white content beside a #fcfcfb sidebar, near-neutral warm greys
+ * (#0b0b0b ink, #52514e secondary), sans-serif semibold headings, rows laid
+ * flat and split only by a 5% hairline, chromeless selects everywhere, a black primary,
+ * blue #2a78d6 36×20 switches and focus, 6–8px radii. Anthropic Sans is not
+ * shipped; the system sans-serif stands in for it. Muted text is darkened
+ * from #898781 and badges use a deeper blue so text keeps normal contrast.
+ * Dark follows the same tokens (#20201f content, #151515 sidebar, #f0efec ink).
+ */
+:root[data-theme-id="claude"] {
+  color-scheme: light;
+  --font-body: system-ui, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --heading-weight: 600;
+  --fs-title: 22px;
+  --fs-section: 15px;
+  --fs-detail: 20px;
+  --fs-meta: 13px;
+  --title-tracking: -0.01em;
+
+  --canvas: #ffffff;
+  --text: #0b0b0b;
+  --muted: #6e6c66;
+  --line: rgb(11 11 11 / 10%);
+  --ink: #0b0b0b;
+  --on-ink: #ffffff;
+  --hover: rgb(11 11 11 / 5%);
+  --wash: #fcfcfb;
+  --selection: rgb(11 11 11 / 5%);
+  --selection-bar: 0;
+  --focus: #2a78d6;
+  --backdrop: rgb(11 11 11 / 35%);
+  --accent-strong: #1f64b8;
+
+  --accent: #2a78d6;
+  --on-accent: #ffffff;
+  --outline: rgb(11 11 11 / 20%);
+  --failed: #d03b3b;
+  --on-failed: #ffffff;
+  --danger: #8e2626;
+
+  --nav-bg: #fcfcfb;
+  --nav-hover-bg: rgb(11 11 11 / 5%);
+  --nav-active-bg: rgb(11 11 11 / 10%);
+  --nav-active-fg: var(--text);
+  --nav-active-bar: 0;
+  --nav-fg: #52514e;
+  --nav-active-weight: 500;
+  --nav-border: 1px solid rgb(11 11 11 / 5%);
+  --row-title-weight: 400;
+
+  --group-bg: transparent;
+  --group-border: 0;
+  --group-shadow: none;
+  --group-foot-bg: transparent;
+  --row-divider: 0 solid transparent;
+  --divider: rgb(11 11 11 / 6%);
+  --row-min-h: 56px;
+  --row-pad-y: 12px;
+  --row-pad-x: 12px;
+  --row-inset: 12px;
+
+  --radius-control: 8px;
+  --radius-group: 8px;
+  --radius-tag: 6px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --control-h: 32px;
+  --button-pad-x: 12px;
+  --button-border: 1px solid rgb(11 11 11 / 10%);
+  --button-bg: transparent;
+  --button-fg: #0b0b0b;
+  --button-hover-bg: rgb(11 11 11 / 5%);
+  --primary-bg: #0b0b0b;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #0b0b0b;
+  --primary-hover-bg: #2c2c2a;
+  --input-border: 1px solid rgb(11 11 11 / 10%);
+  --input-bg: #ffffff;
+  --select-border: 1px solid transparent;
+  --select-bg: transparent;
+  --select-hover-bg: var(--hover);
+  --dialog-border: 1px solid rgb(11 11 11 / 5%);
+  --dialog-shadow: 0 2px 4px rgb(11 11 11 / 7%), 0 6px 16px rgb(11 11 11 / 10%);
+  --notice-border: 1px solid #f09595;
+  --notice-icon: #d03b3b;
+  --tag-bg: transparent;
+  --switch-off-bg: rgb(11 11 11 / 20%);
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --switch-w: 36px;
+  --switch-h: 20px;
+  --switch-gap: 2px;
+  --badge-bg: var(--accent-strong);
+  --icon-stroke: 1.5;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="claude"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #20201f;
+  --text: #f0efec;
+  --muted: #9c9a92;
+  --line: rgb(255 255 255 / 10%);
+  --ink: #f0efec;
+  --on-ink: #0b0b0b;
+  --hover: rgb(255 255 255 / 5%);
+  --wash: #151515;
+  --selection: rgb(255 255 255 / 6%);
+  --focus: #6da7ec;
+  --backdrop: rgb(0 0 0 / 60%);
+
+  --outline: rgb(255 255 255 / 20%);
+  --failed: #d03b3b;
+  --on-failed: #ffffff;
+  --danger: #ec7e7e;
+
+  --nav-bg: #151515;
+  --nav-hover-bg: rgb(255 255 255 / 5%);
+  --nav-active-bg: rgb(255 255 255 / 10%);
+  --nav-fg: #c3c2b7;
+  --nav-border: 1px solid rgb(255 255 255 / 5%);
+
+  --divider: rgb(255 255 255 / 7%);
+
+  --button-border: 1px solid rgb(255 255 255 / 10%);
+  --button-fg: #f0efec;
+  --button-hover-bg: rgb(255 255 255 / 5%);
+  --primary-bg: #ffffff;
+  --primary-fg: #0b0b0b;
+  --primary-border: 1px solid #ffffff;
+  --primary-hover-bg: #e1e0d9;
+  --input-border: 1px solid rgb(255 255 255 / 10%);
+  --input-bg: #151515;
+  --dialog-border: 1px solid rgb(255 255 255 / 10%);
+  --dialog-shadow: 0 2px 4px rgb(0 0 0 / 20%), 0 6px 16px rgb(0 0 0 / 24%);
+  --notice-border: 1px solid #641919;
+  --notice-icon: #ec7e7e;
+  --switch-off-bg: rgb(255 255 255 / 20%);
+  --switch-off-thumb: #f0efec;
+  --brand-filter: invert(1);
+}
+
+/* every select is chromeless and sized to its value, so the chevron follows the text, as in Claude */
+:root[data-theme-id="claude"] select { flex: 0 1 auto; width: auto; field-sizing: content; }
+/* unframed groups: rows keep a small inset for highlights while their text
+   stays on the heading's edge, and must not clip edge-aligned focus rings */
+:root[data-theme-id="claude"] .group { overflow: visible; margin-inline: calc(var(--row-inset) * -1); }
+:root[data-theme-id="claude"] :is(.group, .rows, .notice) > * + *:not(.sr-only + *) {
+  background-image: linear-gradient(var(--divider), var(--divider));
+  background-position: top center;
+  background-size: calc(100% - 2 * var(--row-pad-x)) 1px;
+  background-repeat: no-repeat;
+}
+:root[data-theme-id="claude"] :is(.row.is-selected, .row[aria-selected="true"], .row > .row-select) { border-radius: 8px; }
+/* the flat rows need their own padding once a panel draws a frame */
+:root[data-theme-id="claude"] .notice { --row-pad-x: 16px; }

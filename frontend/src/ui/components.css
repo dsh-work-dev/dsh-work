@@ -1,0 +1,212 @@
+/* Components read tokens only. Each component has exactly one spelling. */
+
+/* ---------- buttons ----------
+   .button            default (outlined)
+   .button-primary    one per region
+   .button-quiet      no chrome until hover
+   .button-danger     destructive wording; confirmation happens elsewhere
+   .button-compact    smaller control inside dense rows
+   .button-icon       square, needs aria-label
+   .button-secondary  legacy alias of the default look */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--button-pad-x);
+  border: var(--button-border);
+  border-radius: var(--radius-button);
+  background: var(--button-bg);
+  box-shadow: var(--button-shadow);
+  color: var(--button-fg);
+  font-size: var(--fs-control);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion), color var(--motion), border-color var(--motion);
+}
+.button:hover:not(:disabled) { background: var(--button-hover-bg); }
+.button-primary { border: var(--primary-border); background: var(--primary-bg); box-shadow: var(--primary-shadow); color: var(--primary-fg); }
+.button-primary:hover:not(:disabled) { background: var(--primary-hover-bg); }
+.button-quiet { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); }
+.button-quiet:hover:not(:disabled) { color: var(--text); }
+.button-danger { color: var(--danger); }
+.button-compact { min-height: calc(var(--control-h) - 6px); padding: 0 var(--space-2); font-size: var(--fs-meta); }
+.button-icon { width: var(--control-h); padding: 0; }
+.button:disabled { opacity: .45; cursor: default; }
+
+/* ---------- form controls ---------- */
+select,
+input[type="text"],
+input[type="search"] {
+  min-width: 0;
+  min-height: var(--control-h);
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border: var(--input-border);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: var(--fs-control);
+}
+/* the native option list cannot show a translucent control background; give it the opaque page colours */
+select option { background-color: var(--canvas); color: var(--text); }
+input::placeholder { color: var(--muted); }
+input[type="search"]::-webkit-search-cancel-button {
+  width: 14px;
+  height: 14px;
+  background: var(--muted);
+  cursor: pointer;
+  -webkit-appearance: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='M18 6 6 18M6 6l12 12'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+input[type="search"]::-webkit-search-cancel-button:hover { background: var(--text); }
+input[type="checkbox"] { accent-color: var(--accent); }
+select { border: var(--select-border); border-radius: var(--radius-select); background-color: var(--select-bg); }
+select:hover:not(:disabled) { background-color: var(--select-hover-bg); }
+select:disabled, input:disabled { opacity: .55; }
+
+/* ---------- switch: label.switch > input + .switch-track > .switch-thumb ---------- */
+.switch { position: relative; display: inline-flex; flex: none; width: var(--switch-w); height: var(--switch-h); cursor: pointer; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border: var(--switch-border);
+  border-radius: var(--radius-switch);
+  background: var(--switch-off-bg);
+  pointer-events: none;
+  transition: background-color var(--motion);
+}
+/* Inset on three sides and square: the thumb stays centered whatever the track border width. */
+.switch-thumb {
+  position: absolute;
+  top: var(--switch-gap);
+  bottom: var(--switch-gap);
+  left: var(--switch-gap);
+  aspect-ratio: 1;
+  border: var(--switch-thumb-border);
+  border-radius: var(--radius-switch);
+  background: var(--switch-off-thumb);
+  transition: transform var(--motion);
+}
+.switch input:checked + .switch-track { border-color: var(--accent); background: var(--accent); }
+.switch input:checked + .switch-track .switch-thumb { transform: translateX(calc(var(--switch-w) - var(--switch-h))); border-color: var(--switch-on-thumb); background: var(--switch-on-thumb); }
+.switch input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }
+.switch:has(input:disabled) { cursor: default; opacity: .45; }
+
+/* ---------- tag: short state next to a title ---------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-tag);
+  background: var(--tag-bg);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.tag-strong { border-color: var(--badge-bg); background: var(--badge-bg); color: var(--badge-fg); }
+.tag-hollow { border-style: dashed; border-color: var(--muted); color: var(--muted); }
+.tag .icon { width: 12px; height: 12px; }
+
+/* ---------- step marker ---------- */
+.marker {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--marker);
+  height: var(--marker);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-marker);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.marker .icon { width: 14px; height: 14px; }
+[data-state="active"] > .marker { border-color: var(--outline); color: var(--text); }
+[data-state="active"] > .marker .icon { animation: spin 1s linear infinite; }
+[data-state="done"] > .marker { border-color: var(--marker-done-bg); background: var(--marker-done-bg); color: var(--marker-done-fg); }
+[data-state="failed"] > .marker { border-color: var(--failed); background: var(--failed); color: var(--on-failed); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- progress ---------- */
+progress {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border: 0;
+  background: var(--line);
+  accent-color: var(--accent);
+  appearance: none;
+}
+progress::-webkit-progress-bar { background: var(--line); }
+progress::-webkit-progress-value { background: var(--accent); }
+progress::-moz-progress-bar { background: var(--accent); }
+.progress-track { position: relative; height: 3px; overflow: hidden; background: var(--line); }
+.progress-track > span { position: absolute; inset: 0 auto 0 0; width: var(--progress, 0%); background: var(--accent); transition: width var(--motion); }
+.progress-track.complete > span { width: 100%; }
+.progress-track.indeterminate > span { width: 30%; animation: progress-slide 1.4s ease-in-out infinite; }
+@keyframes progress-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .progress-track.indeterminate > span { animation: none; left: 0; width: 100%; opacity: .35; }
+  [data-state="active"] > .marker .icon { animation: none; }
+}
+
+/* ---------- text roles ---------- */
+.note { color: var(--muted); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.note:empty, .result:empty { display: none; }
+.empty { padding: var(--row-pad-y) var(--row-pad-x); color: var(--muted); }
+.result { margin-top: var(--space-2); font-size: var(--fs-control); overflow-wrap: anywhere; }
+
+/* ---------- operation log: details.operation-log > summary + toolbar + pre ---------- */
+.operation-log { position: relative; min-width: 0; margin-top: var(--space-3); border: var(--group-border); border-radius: var(--radius-group); }
+.operation-log > summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h);
+  padding: var(--space-1) 120px var(--space-1) var(--space-3);
+  cursor: pointer;
+  font-size: var(--fs-control);
+  font-weight: 600;
+}
+.operation-log-toolbar { position: absolute; top: 3px; right: 3px; }
+.operation-log-output {
+  max-height: 200px;
+  min-height: 64px;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border-top: var(--row-divider);
+  background: var(--wash);
+  font: 12px/1.65 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* ---------- dialog ---------- */
+dialog {
+  width: min(660px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: var(--space-5);
+  overflow: auto;
+  border: var(--dialog-border);
+  border-radius: var(--radius-group);
+  background: var(--canvas);
+  box-shadow: var(--dialog-shadow);
+  color: var(--text);
+}
+dialog::backdrop { background: var(--backdrop); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.dialog-head h2 { font: var(--heading-weight) var(--fs-detail)/1.3 var(--font-heading); }

@@ -6,9 +6,30 @@
 import * as notifications$0 from "../notifications/models.js";
 
 /**
- * Locale is the dsh-work-owned language preference. It is deliberately separate
- * from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
- * chrome and settings copy.
+ * Appearance is the Host-owned look of the startup, Settings and Pet settings
+ * surfaces. DSH content keeps its own appearance.
+ */
+export interface Appearance {
+    "theme": ThemeID;
+    "mode": AppearanceMode;
+}
+
+/**
+ * AppearanceMode is the light/dark choice for dsh-work's own windows.
+ */
+export enum AppearanceMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    AppearanceSystem = "system",
+    AppearanceLight = "light",
+    AppearanceDark = "dark",
+};
+
+/**
+ * Locale is the dsh-work-owned language for its own chrome and settings copy.
  */
 export enum Locale {
     /**
@@ -63,6 +84,35 @@ export enum PetVisibilityIntent {
 };
 
 /**
+ * ThemeID names a built-in dsh-work theme. Themes are static and shipped with
+ * the frontend; the Host only stores which one the user chose.
+ */
+export enum ThemeID {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    ThemeMonochrome = "monochrome",
+    ThemeChatGPT = "chatgpt",
+    ThemeClaude = "claude",
+    ThemeGitHub = "github",
+    ThemeLobeHub = "lobehub",
+    ThemeSoft = "soft",
+    ThemeSwiss = "swiss",
+    ThemePaper = "paper",
+    ThemeGlass = "glass",
+    ThemeInk = "ink",
+    ThemeClassic = "classic",
+    ThemeTerminal = "terminal",
+    ThemeNeon = "neon",
+    ThemeBrutal = "brutal",
+    ThemeBauhaus = "bauhaus",
+    ThemeDeco = "deco",
+    DefaultTheme = "monochrome",
+};
+
+/**
  * Values is the versioned, platform-neutral dsh-work preference contract.
  */
 export interface Values {
@@ -73,6 +123,7 @@ export interface Values {
     "locale": Locale;
     "notifications": notifications$0.Preferences;
     "pet": PetPreference;
+    "appearance": Appearance;
 }
 
 /**

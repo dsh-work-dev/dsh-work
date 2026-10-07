@@ -1,0 +1,99 @@
+/*
+ * Bauhaus — primary red, yellow and blue, circles, squares and triangles,
+ * heavy black rules and a geometric page header. Light only.
+ */
+:root[data-theme-id="bauhaus"] {
+  color-scheme: light;
+  --font-body: "Futura", "Century Gothic", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-heading: var(--font-body);
+  --heading-weight: 800;
+  --fs-title: 38px;
+  --fs-section: 15px;
+  --title-tracking: -0.02em;
+
+  --canvas: #f1ede4;
+  --text: #121212;
+  --muted: #45413a;
+  --line: #121212;
+  --ink: #121212;
+  --on-ink: #f1ede4;
+  --hover: #e6e0d2;
+  --wash: #ffffff;
+  --selection: #f5c518;
+  --selection-fg: #121212;
+  --selection-bar: 0;
+  --focus: #1d4e89;
+
+  --accent: #d62828;
+  --on-accent: #ffffff;
+  --outline: #121212;
+  --failed: #d62828;
+  --on-failed: #ffffff;
+  --marker-done-bg: #1d4e89;
+  --marker-done-fg: #ffffff;
+
+  --nav-bg: #121212;
+  --nav-hover-bg: #2a2a2a;
+  --nav-active-bg: #f5c518;
+  --nav-active-fg: #121212;
+  --nav-active-bar: 0;
+
+  --group-bg: #ffffff;
+  --group-border: 2px solid #121212;
+  --group-foot-bg: #f1ede4;
+  --row-divider: 1px solid #121212;
+
+  --radius-control: 0;
+  --radius-group: 0;
+  --radius-tag: 0;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --button-border: 2px solid #121212;
+  --button-bg: #ffffff;
+  --button-hover-bg: #f5c518;
+  --primary-bg: #1d4e89;
+  --primary-fg: #ffffff;
+  --primary-border: 2px solid #121212;
+  --primary-hover-bg: #163d6b;
+  --input-border: 2px solid #121212;
+  --dialog-border: 3px solid #121212;
+  --notice-border: 3px solid #d62828;
+  --notice-icon: #d62828;
+  --tag-bg: #f5c518;
+  --switch-off-bg: #ffffff;
+  --switch-off-thumb: #121212;
+  --switch-thumb-border: 0;
+  --nav-fg: #f1ede4;
+  --nav-weight: 600;
+  --nav-active-weight: 600;
+  --nav-heading-fg: #f5c518;
+}
+
+:root[data-theme-id="bauhaus"] .shell-nav { color: #f1ede4; }
+
+/* geometric composition behind the page title */
+:root[data-theme-id="bauhaus"] :is(.page-head, .startup-head) { position: relative; padding-bottom: 18px; border-bottom: 6px solid #121212; }
+:root[data-theme-id="bauhaus"] :is(.page-head, .startup-head)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  width: 120px;
+  height: 44px;
+  background:
+    radial-gradient(circle at 22px 22px, #d62828 21px, transparent 22px),
+    linear-gradient(#1d4e89, #1d4e89) 52px 0 / 34px 44px no-repeat,
+    linear-gradient(to top right, #f5c518 50%, transparent 50%) 88px 0 / 32px 44px no-repeat;
+}
+/* shape markers on section headings: circle, square, triangle */
+:root[data-theme-id="bauhaus"] .section-head h2 { display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+:root[data-theme-id="bauhaus"] .section-head h2::before { content: ""; width: 14px; height: 14px; flex: none; border-radius: 50%; background: #d62828; }
+:root[data-theme-id="bauhaus"] .section:nth-of-type(3n+2) .section-head h2::before { border-radius: 0; background: #1d4e89; }
+:root[data-theme-id="bauhaus"] .section:nth-of-type(3n+3) .section-head h2::before { border-radius: 0; background: conic-gradient(from 150deg at 50% 0, #f5c518 0 60deg, transparent 60deg); }
+:root[data-theme-id="bauhaus"] .button { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+:root[data-theme-id="bauhaus"] .button-quiet { color: #121212; text-decoration: underline 2px #d62828; text-underline-offset: 4px; }
+:root[data-theme-id="bauhaus"] .switch-track { border-width: 2px; }
+:root[data-theme-id="bauhaus"] .switch-thumb { border-radius: 50%; }
+:root[data-theme-id="bauhaus"] .switch input:checked + .switch-track { background: #d62828; border-color: #121212; }
+:root[data-theme-id="bauhaus"] .group { box-shadow: 8px 8px 0 -2px #f5c518, 8px 8px 0 0 #121212; }

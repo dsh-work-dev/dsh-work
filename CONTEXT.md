@@ -24,6 +24,8 @@ in the documents linked from `docs/README.md`.
 | Desktop UI client | The process owning workbench and Settings windows and projecting daemon state. | The owner of background tasks. |
 | Desktop Pet | A dsh-work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
 | Pet catalog | The Host-controlled set of validated Pet assets available for selection. | A package execution environment or a DSH plugin registry. |
+| Appearance | dsh-work's persisted theme and light/dark mode for its own startup and Settings windows. | DSH's appearance preference, which DSH content windows keep following. |
+| Theme | A built-in look for dsh-work windows that changes styling only and declares the light/dark modes it supports. | A layout, a page structure or user-supplied CSS. |
 | Pet visibility intent | The user's persisted choice to show or hide the selected Pet. | Proof that a native window is currently visible. |
 | Pet position | A persisted monitor-relative anchor plus native window dimensions and scale. | A DSH Workspace directory or a screen-absolute promise that survives every monitor layout. |
 | Pet preview | A Host-projected frame or safe fallback used by trusted Settings UI. | Direct access by Settings UI to package files. |
@@ -77,3 +79,5 @@ in the documents linked from `docs/README.md`.
 6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch follows the configured recovery policy.
+7. dsh-work remains the source of truth for the appearance of its own windows.
+   It never writes DSH's appearance preference.

@@ -138,21 +138,41 @@ func layerPatch(profilePath string, runtime RuntimeInfo, packageName string) (*y
 		var manifest struct {
 			DSH struct {
 				Bundle struct {
-					Patch string `json:"patch"`
+					Patch json.RawMessage `json:"patch"`
 				} `json:"bundle"`
 			} `json:"dsh"`
 		}
 		if err := json.Unmarshal(data, &manifest); err != nil {
 			return nil, err
 		}
-		if manifest.DSH.Bundle.Patch == "" {
+		declared := manifest.DSH.Bundle.Patch
+		if len(declared) == 0 || string(declared) == "null" {
 			return nil, nil
 		}
-		patchPath := filepath.Join(packageDir, filepath.FromSlash(manifest.DSH.Bundle.Patch))
-		if relative, err := filepath.Rel(packageDir, patchPath); err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return nil, errors.New("layer patch path leaves its package")
+		var paths []string
+		var single string
+		if err := json.Unmarshal(declared, &single); err == nil {
+			if single == "" {
+				return nil, nil
+			}
+			paths = []string{single}
+		} else if err := json.Unmarshal(declared, &paths); err != nil {
+			return nil, err
 		}
-		return readPatchSequence(patchPath)
+		// DSH applies every declared patch in order, including preset files.
+		combined := &yaml.Node{Kind: yaml.SequenceNode}
+		for _, path := range paths {
+			patchPath := filepath.Join(packageDir, filepath.FromSlash(path))
+			if relative, err := filepath.Rel(packageDir, patchPath); err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return nil, errors.New("layer patch path leaves its package")
+			}
+			patch, err := readPatchSequence(patchPath)
+			if err != nil {
+				return nil, err
+			}
+			combined.Content = append(combined.Content, patch.Content...)
+		}
+		return combined, nil
 	}
 	return nil, nil
 }

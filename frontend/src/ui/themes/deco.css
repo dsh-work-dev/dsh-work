@@ -1,0 +1,104 @@
+/*
+ * Art deco — gold on deep navy: double picture frames, fan and chevron
+ * ornament, centred tracked titles between gold rules. Dark only.
+ */
+:root[data-theme-id="deco"] {
+  color-scheme: dark;
+  --font-body: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-heading: "Century Gothic", "Futura", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --heading-weight: 600;
+  --fs-title: 26px;
+  --fs-section: 13px;
+
+  --canvas: #0e1a26;
+  --text: #f3ead7;
+  --muted: #bcae90;
+  --line: rgb(212 175 55 / 30%);
+  --ink: #f3ead7;
+  --on-ink: #0e1a26;
+  --hover: rgb(212 175 55 / 8%);
+  --wash: #0a141d;
+  --selection: rgb(212 175 55 / 14%);
+  --selection-bar: 0;
+  --focus: #e8c860;
+  --backdrop: rgb(4 8 12 / 70%);
+
+  --accent: #d4af37;
+  --on-accent: #0e1a26;
+  --outline: rgb(212 175 55 / 70%);
+  --failed: #e0765c;
+  --on-failed: #0e1a26;
+  --danger: #eb9a86;
+
+  --nav-bg: #0a141d;
+  --nav-hover-bg: rgb(212 175 55 / 8%);
+  --nav-active-bg: rgb(212 175 55 / 12%);
+  --nav-active-fg: #e8c860;
+  --nav-active-bar: 0;
+
+  --group-bg: #12202e;
+  --group-border: 1px solid #d4af37;
+  --group-foot-bg: rgb(212 175 55 / 6%);
+  --row-divider: 1px solid rgb(212 175 55 / 22%);
+  --row-min-h: 58px;
+  --row-pad-x: 22px;
+
+  --radius-control: 0;
+  --radius-group: 0;
+  --radius-marker: 0;
+  --button-border: 1px solid #d4af37;
+  --button-bg: transparent;
+  --button-fg: #e8c860;
+  --button-hover-bg: rgb(212 175 55 / 12%);
+  --primary-bg: #d4af37;
+  --primary-fg: #0e1a26;
+  --primary-border: 1px solid #d4af37;
+  --primary-hover-bg: #e8c860;
+  --input-border: 1px solid rgb(212 175 55 / 60%);
+  --input-bg: #0a141d;
+  --dialog-border: 1px solid #d4af37;
+  --notice-border: 1px solid #e0765c;
+  --notice-icon: #e0765c;
+  --tag-bg: transparent;
+  --switch-off-bg: transparent;
+  --switch-off-thumb: transparent;
+  --switch-thumb-border: 1px solid rgb(212 175 55 / 70%);
+  --brand-filter: invert(1) sepia(1) saturate(3) hue-rotate(5deg) brightness(0.9);
+  --nav-border: 1px solid rgb(212 175 55 / 40%);
+  --nav-heading-fg: #d4af37;
+}
+
+/* chevron wallpaper */
+:root[data-theme-id="deco"] :is(.shell-content, .startup-backdrop) {
+  background:
+    linear-gradient(135deg, rgb(212 175 55 / 5%) 25%, transparent 25%) -24px 0 / 48px 48px,
+    linear-gradient(225deg, rgb(212 175 55 / 5%) 25%, transparent 25%) -24px 0 / 48px 48px,
+    #0e1a26;
+}
+/* double picture frame */
+:root[data-theme-id="deco"] :is(.group, .notice) { outline: 1px solid rgb(212 175 55 / 45%); outline-offset: 4px; }
+:root[data-theme-id="deco"] .section-head { margin-bottom: 14px; }
+:root[data-theme-id="deco"] .section-head + .group { margin-top: 4px; }
+/* centred titles between gold rules, fan above the page title */
+:root[data-theme-id="deco"] :is(.page-head, .startup-head) { position: relative; justify-content: center; padding-top: 34px; text-align: center; }
+:root[data-theme-id="deco"] :is(.page-head, .startup-head)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(50% - 30px);
+  width: 60px;
+  height: 30px;
+  background: repeating-conic-gradient(from 270deg at 50% 100%, #d4af37 0 6deg, transparent 6deg 15deg);
+  -webkit-mask: radial-gradient(circle at 50% 100%, #000 29px, transparent 30px);
+  mask: radial-gradient(circle at 50% 100%, #000 29px, transparent 30px);
+}
+:root[data-theme-id="deco"] :is(.page-head h1, .startup-head h1) { margin: 0; color: #e8c860; text-transform: uppercase; letter-spacing: 0.22em; }
+:root[data-theme-id="deco"] .page-head h1 { margin-right: 0; }
+:root[data-theme-id="deco"] .section-head h2 { display: flex; align-items: center; gap: 14px; color: #e8c860; text-transform: uppercase; letter-spacing: 0.24em; }
+:root[data-theme-id="deco"] .section-head h2::before, :root[data-theme-id="deco"] .section-head h2::after { content: ""; flex: 0 0 28px; height: 5px; border-block: 1px solid #d4af37; }
+:root[data-theme-id="deco"] .button { text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
+:root[data-theme-id="deco"] .nav-heading { letter-spacing: 0.18em; text-transform: uppercase; }
+:root[data-theme-id="deco"] .switch input:checked + .switch-track { background: rgb(212 175 55 / 25%); }
+:root[data-theme-id="deco"] .switch input:checked + .switch-track .switch-thumb { background: #d4af37; border-color: #d4af37; }
+:root[data-theme-id="deco"] .marker { transform: rotate(45deg); }
+:root[data-theme-id="deco"] .marker > * { transform: rotate(-45deg); }

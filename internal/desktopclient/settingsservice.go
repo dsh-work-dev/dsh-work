@@ -37,3 +37,10 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 	err := call(ctx, s.Client, "SettingsService", "SetNotificationPreference", []any{key, enabled}, &value)
 	return value, err
 }
+
+func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode string) (settings.Values, error) {
+	if s.Local != nil { return s.Local.SetAppearance(ctx, theme, mode) }
+	var value settings.Values
+	err := call(ctx, s.Client, "SettingsService", "SetAppearance", []any{theme, mode}, &value)
+	return value, err
+}

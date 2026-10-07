@@ -19,9 +19,7 @@ const stateVersion = 2
 
 const petPreferenceVersion = 3
 
-// Locale is the dsh-work-owned language preference. It is deliberately separate
-// from DSH's appearance preference: DSH owns theme, while dsh-work owns its own
-// chrome and settings copy.
+// Locale is the dsh-work-owned language for its own chrome and settings copy.
 type Locale string
 
 const (
@@ -189,6 +187,7 @@ type Values struct {
 	Locale                   Locale                    `json:"locale"`
 	Notifications            notifications.Preferences `json:"notifications"`
 	Pet                      PetPreference             `json:"pet"`
+	Appearance               Appearance                `json:"appearance"`
 }
 
 func DefaultValues() Values {
@@ -199,6 +198,7 @@ func DefaultValues() Values {
 		Locale:                   DefaultLocale,
 		Notifications:            notifications.DefaultPreferences(),
 		Pet:                      DefaultPetPreference(),
+		Appearance:               DefaultAppearance(),
 	}
 }
 
@@ -246,6 +246,10 @@ type Manager struct {
 	path   string
 	store  Store
 	values Values
+
+	// appearanceImportPending marks settings saved before dsh-work owned its
+	// appearance; see ImportAppearanceMode.
+	appearanceImportPending bool
 }
 
 func New(config Config) (*Manager, error) {
@@ -261,6 +265,7 @@ func New(config Config) (*Manager, error) {
 		return nil, err
 	}
 	values := DefaultValues()
+	importPending := false
 	if loaded != nil {
 		if loaded.Version != stateVersion {
 			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
@@ -270,8 +275,10 @@ func New(config Config) (*Manager, error) {
 		if !values.Locale.Valid() {
 			values.Locale = DefaultLocale
 		}
+		importPending = values.Appearance == Appearance{}
+		values.Appearance = normalizeAppearance(values.Appearance)
 	}
-	return &Manager{path: path, store: config.Store, values: values}, nil
+	return &Manager{path: path, store: config.Store, values: values, appearanceImportPending: importPending}, nil
 }
 
 func (m *Manager) Snapshot(ctx context.Context) (Values, error) {
@@ -371,6 +378,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		Locale                   *Locale         `json:"locale"`
 		Notifications            json.RawMessage `json:"notifications"`
 		Pet                      json.RawMessage `json:"pet"`
+		Appearance               *Appearance     `json:"appearance"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
@@ -418,6 +426,12 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		if err := json.Unmarshal(raw.Pet, &candidate); err == nil {
 			values.Pet = normalizePetPreference(candidate)
 		}
+	}
+	// A file without an appearance predates Host-owned appearance. The zero
+	// value tells Manager to import the DSH mode once.
+	values.Appearance = Appearance{}
+	if raw.Appearance != nil {
+		values.Appearance = normalizeAppearance(*raw.Appearance)
 	}
 	return &values, nil
 }

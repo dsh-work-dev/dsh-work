@@ -25,6 +25,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "acquisition": acquisition$0.OperationStatus;
+            "appearance": settings$0.Appearance;
             "lifecycle": lifecycle$0.Status;
             "locale": settings$0.Locale;
             "notification-failure": boolean;

@@ -1,1 +1,9 @@
 *.go text eol=lf
+*.sh text eol=lf
+*.desktop text eol=lf
+build/windows/info.json text eol=lf
+build/windows/wails.exe.manifest text eol=lf
+frontend/bindings/** text eol=lf
+frontend/package.json text eol=lf
+frontend/package-lock.json text eol=lf
+internal/desktopbridge/assets/client.js text eol=lf

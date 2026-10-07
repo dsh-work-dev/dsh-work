@@ -798,6 +798,34 @@ func (h *Host) readyWorkerForPluginMutation() *lifecycle.Failure {
 func (h *Host) Restart() lifecycle.Status {
 	h.switchMu.Lock()
 	defer h.switchMu.Unlock()
+	return h.restartLocked()
+}
+
+// RestartGeneration accepts a plugin restart only while its original Worker
+// still owns the Ready generation. Queued requests cannot restart a replacement.
+func (h *Host) RestartGeneration(ctx context.Context, generation string) (lifecycle.Status, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return h.Status(), err
+	}
+	if generation == "" || h.Status().GenerationID != generation {
+		return h.Status(), errors.New("the requesting Worker has expired")
+	}
+	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+		return h.Status(), failure
+	}
+	status := h.restartLocked()
+	if status.Error != nil {
+		return status, status.Error
+	}
+	if status.GenerationID == generation || (status.State != lifecycle.StateStarting && status.State != lifecycle.StateReady) {
+		return status, errors.New("Worker cleanup has not completed")
+	}
+	return status, nil
+}
+
+func (h *Host) restartLocked() lifecycle.Status {
 	if h.isShutdownRequested() {
 		return h.Status()
 	}
@@ -2228,9 +2256,10 @@ func (r *generationRun) launchPlan() supervisor.LaunchPlan {
 
 // HostService is the intentionally narrow Wails binding surface.
 type HostService struct {
-	host           *Host
-	localeProvider func() settings.Locale
-	openSettings   func(string)
+	host               *Host
+	localeProvider     func() settings.Locale
+	appearanceProvider func() settings.Appearance
+	openSettings       func(string)
 }
 
 // StartupOutput is the redacted DSH process output retained by the supervisor
@@ -2266,17 +2295,21 @@ func (s *HostService) GetWorkspaceStatus(ctx context.Context) lifecycle.Status {
 	return s.host.Status()
 }
 
-// GetTheme projects the selected DSH data directory's appearance preference. DSH owns
-// the value; dsh-work only uses it to paint its trusted startup surface.
-func (s *HostService) GetTheme(ctx context.Context) dshmanager.ThemePreference {
-	if !s.authorized(ctx) || s.host.deps.Manager == nil {
-		return dshmanager.ThemePreferenceSystem
+// SetHostAppearanceProvider supplies the saved appearance to the startup
+// surface, which cannot read the rest of the settings.
+func SetHostAppearanceProvider(service *HostService, provider func() settings.Appearance) {
+	if service != nil {
+		service.appearanceProvider = provider
 	}
-	snapshot, err := s.host.deps.Manager.Snapshot(ctx)
-	if err != nil || !snapshot.Theme.Valid() {
-		return dshmanager.ThemePreferenceSystem
+}
+
+// GetAppearance returns dsh-work's own theme and light/dark mode for the
+// trusted startup surface. SettingsService remains the write boundary.
+func (s *HostService) GetAppearance(ctx context.Context) settings.Appearance {
+	if !s.authorized(ctx) || s.appearanceProvider == nil {
+		return settings.DefaultAppearance()
 	}
-	return snapshot.Theme
+	return s.appearanceProvider()
 }
 
 // GetLocale reads the dsh-work-owned language preference for the trusted startup

@@ -13,6 +13,10 @@ export function GetSettings(): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(100181646);
 }
 
+export function SetAppearance(theme: string, mode: string): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(618250013, theme, mode);
+}
+
 export function SetAutomaticRuntimeRollback(enabled: boolean): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(1677788962, enabled);
 }

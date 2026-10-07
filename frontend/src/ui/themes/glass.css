@@ -1,0 +1,146 @@
+/*
+ * Aurora glass — a fixed aurora behind frosted, translucent groups; pill
+ * controls and a gradient primary. Group surfaces stay opaque enough that text
+ * never sits on the raw gradient. Light and dark.
+ */
+:root[data-theme-id="glass"] {
+  color-scheme: light;
+  --fs-title: 28px;
+  --heading-weight: 650;
+
+  --canvas: #eef0fb;
+  --text: #1b1d2a;
+  --muted: #4f5470;
+  --line: rgb(27 29 42 / 12%);
+  --ink: #1b1d2a;
+  --on-ink: #ffffff;
+  --hover: rgb(255 255 255 / 55%);
+  --wash: rgb(255 255 255 / 45%);
+  --selection: rgb(124 92 255 / 14%);
+  --selection-bar: 0;
+  --focus: #7c5cff;
+  --backdrop: rgb(27 29 42 / 30%);
+  --aurora: radial-gradient(ellipse 60% 50% at 15% 10%, #c8b6ff 0%, transparent 60%),
+    radial-gradient(ellipse 55% 45% at 85% 20%, #9ee7ff 0%, transparent 60%),
+    radial-gradient(ellipse 70% 60% at 60% 95%, #ffc6e5 0%, transparent 65%),
+    linear-gradient(160deg, #eef0fb, #f7f2fb);
+
+  --accent: #7c5cff;
+  --on-accent: #ffffff;
+  --outline: rgb(27 29 42 / 25%);
+  --failed: #e5484d;
+  --on-failed: #ffffff;
+  --danger: #c9303a;
+
+  --nav-bg: rgb(255 255 255 / 35%);
+  --nav-hover-bg: rgb(255 255 255 / 55%);
+  --nav-active-bg: rgb(255 255 255 / 80%);
+  --nav-active-fg: #4b2fd6;
+  --nav-active-bar: 0;
+
+  --group-bg: rgb(255 255 255 / 62%);
+  --group-border: 1px solid rgb(255 255 255 / 70%);
+  --group-shadow: 0 10px 30px rgb(60 50 120 / 12%);
+  --group-foot-bg: rgb(255 255 255 / 35%);
+  --row-divider: 1px solid rgb(27 29 42 / 8%);
+  --row-min-h: 60px;
+  --row-pad-y: 14px;
+  --row-pad-x: 20px;
+
+  --radius-control: 999px;
+  --radius-group: 20px;
+  --radius-tag: 999px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --radius-dot: 50%;
+  --control-h: 34px;
+  --button-pad-x: 16px;
+  --button-border: 1px solid rgb(27 29 42 / 14%);
+  --button-bg: rgb(255 255 255 / 60%);
+  --button-fg: #1b1d2a;
+  --button-hover-bg: rgb(255 255 255 / 90%);
+  --primary-bg: linear-gradient(135deg, #6a48f5, #2479c9);
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid transparent;
+  --primary-hover-bg: linear-gradient(135deg, #5a38e0, #1b6ab5);
+  --primary-shadow: 0 6px 18px rgb(124 92 255 / 35%);
+  --input-border: 1px solid rgb(27 29 42 / 16%);
+  --input-bg: rgb(255 255 255 / 75%);
+  --dialog-border: 1px solid rgb(255 255 255 / 80%);
+  --dialog-shadow: 0 24px 60px rgb(60 50 120 / 25%);
+  --notice-border: 1px solid rgb(229 72 77 / 45%);
+  --notice-icon: #e5484d;
+  --tag-bg: rgb(255 255 255 / 70%);
+  --switch-off-bg: rgb(27 29 42 / 18%);
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --icon-cap: round;
+  --icon-join: round;
+  --nav-border: 1px solid var(--line);
+}
+
+:root[data-theme-id="glass"][data-theme="dark"] {
+  color-scheme: dark;
+  --switch-on-thumb: #ffffff;
+  --canvas: #0b0d1c;
+  --text: #f2f3ff;
+  --muted: #b3b6d6;
+  --line: rgb(255 255 255 / 12%);
+  --ink: #f2f3ff;
+  --on-ink: #0b0d1c;
+  --hover: rgb(255 255 255 / 10%);
+  --wash: rgb(255 255 255 / 6%);
+  --selection: rgb(154 132 255 / 22%);
+  --focus: #a594ff;
+  --backdrop: rgb(0 0 0 / 55%);
+  --aurora: radial-gradient(ellipse 60% 50% at 12% 8%, rgb(124 92 255 / 55%) 0%, transparent 60%),
+    radial-gradient(ellipse 55% 45% at 88% 18%, rgb(34 184 230 / 45%) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 60% at 55% 100%, rgb(236 72 153 / 35%) 0%, transparent 65%),
+    linear-gradient(160deg, #0b0d1c, #140f2a);
+  --accent: #a594ff;
+  --on-accent: #0b0d1c;
+  --outline: rgb(255 255 255 / 28%);
+  --failed: #ff6b72;
+  --on-failed: #0b0d1c;
+  --danger: #ff8a90;
+  --nav-bg: rgb(255 255 255 / 4%);
+  --nav-hover-bg: rgb(255 255 255 / 9%);
+  --nav-active-bg: rgb(255 255 255 / 14%);
+  --nav-active-fg: #ffffff;
+  --group-bg: rgb(22 22 44 / 55%);
+  --group-border: 1px solid rgb(255 255 255 / 14%);
+  --group-shadow: 0 12px 36px rgb(0 0 0 / 35%);
+  --group-foot-bg: rgb(255 255 255 / 4%);
+  --row-divider: 1px solid rgb(255 255 255 / 8%);
+  --button-border: 1px solid rgb(255 255 255 / 18%);
+  --button-bg: rgb(255 255 255 / 8%);
+  --button-fg: #f2f3ff;
+  --button-hover-bg: rgb(255 255 255 / 16%);
+  --input-border: 1px solid rgb(255 255 255 / 20%);
+  --input-bg: rgb(10 10 28 / 55%);
+  --dialog-border: 1px solid rgb(255 255 255 / 18%);
+  --dialog-shadow: 0 24px 60px rgb(0 0 0 / 55%);
+  --notice-border: 1px solid rgb(255 107 114 / 50%);
+  --notice-icon: #ff6b72;
+  --tag-bg: rgb(255 255 255 / 8%);
+  --switch-off-bg: rgb(255 255 255 / 22%);
+  --brand-filter: invert(1);
+}
+
+:root[data-theme-id="glass"] body { background: var(--aurora) fixed; }
+:root[data-theme-id="glass"] :is(.shell-content, .startup-backdrop) { background: var(--aurora); background-attachment: fixed; }
+:root[data-theme-id="glass"] :is(.shell-nav, .group, .notice, dialog, .startup-diagnostics) {
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+}
+:root[data-theme-id="glass"] .nav-item[aria-current] { box-shadow: 0 4px 14px rgb(60 50 120 / 12%); }
+:root[data-theme-id="glass"] .button-primary { font-weight: 600; }
+:root[data-theme-id="glass"] .tag-strong { border-color: transparent; background: linear-gradient(135deg, #6a48f5, #2479c9); color: #ffffff; }
+:root[data-theme-id="glass"] .page-head h1, :root[data-theme-id="glass"] .startup-head h1 {
+  width: fit-content;
+  background: linear-gradient(120deg, var(--text) 30%, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

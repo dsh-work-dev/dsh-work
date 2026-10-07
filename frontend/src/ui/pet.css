@@ -1,0 +1,98 @@
+/* Desktop Pet window. It keeps its own asset styling and a transparent canvas. */
+html[data-surface="pet"],
+html[data-surface="pet"] body,
+html[data-surface="pet"] #pet-surface {
+  width: 100%;
+  min-width: 1px;
+  height: 100%;
+  min-height: 1px;
+  overflow: hidden;
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+html[data-surface="pet"] #pet-surface {
+  position: fixed;
+  inset: 0;
+}
+
+
+.pet-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 1px;
+  min-height: 1px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  --wails-draggable: no-drag;
+}
+
+.pet-drag-handle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #ffffff 58%, transparent);
+  border-radius: 50%;
+  color: #ffffff;
+  background: color-mix(in srgb, #1f252c 72%, transparent);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 28%);
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity .15s ease;
+  --wails-draggable: drag;
+}
+
+.pet-surface:hover .pet-drag-handle,
+.pet-drag-handle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pet-drag-handle:active {
+  cursor: grabbing;
+}
+
+.pet-surface img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.pet-activity { position: absolute; inset: 8px 8px auto; box-sizing: border-box; font: 13px/1.4 system-ui,sans-serif; user-select: text; --wails-draggable: no-drag; }
+.pet-activity button { color: inherit; background: transparent; border: 0; text-align: start; border-radius: 6px; }
+.pet-activity button:focus-visible { outline: 2px solid #719de5; outline-offset: 1px; }
+.pet-activity button:disabled { opacity: .65; cursor: default; }
+.pet-activity-primary { display: grid; width: 100%; }
+.pet-activity-primary strong, .pet-activity-primary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-sprite-stage { position: absolute; }
+/* Fixed two-line bubble; its visibility never changes the sprite's bounds. */
+.pet-sprite-stage { inset: 60px 0 4px; display: block; min-height: 0; }
+.pet-sprite-stage img { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%; aspect-ratio: auto; object-fit: contain; }
+.pet-activity { inset: 6px 8px auto; margin-inline: auto; max-width: 224px; height: 48px; padding: 6px 12px; border: 1px solid #dfd6c8; border-radius: 16px; background: #fffaf1; color: #40382f; box-shadow: 0 2px 6px #493c2014; overflow: visible; }
+.pet-activity button:hover { background: transparent; cursor: pointer; }
+.pet-activity-primary { margin: 0; padding: 0; gap: 0; line-height: 17px; }
+.pet-activity-primary strong { font-size: 12px; }
+.pet-activity::after { content: ""; position: absolute; bottom: -4px; left: calc(50% - 4px); width: 7px; height: 7px; background: #fffaf1; border-right: 1px solid #dfd6c8; border-bottom: 1px solid #dfd6c8; transform: rotate(45deg); pointer-events: none; }
+.pet-activity-primary span { display: block; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; color: #8a775e; }
+#pet-activity-error { position: absolute; bottom: 0; left: 20px; margin: 0; color: #b3261e; background: white; }
+
+.pet-sprite-stage canvas { width:100%; height:100%; object-fit:contain; pointer-events:none; }
+.pet-touch { position:fixed; padding:0; border:0; background:transparent; border-radius:25%; cursor:pointer; --wails-draggable:no-drag; }
+.pet-touch:focus-visible { outline:2px solid #8a775e; outline-offset:-2px; }
+.pet-touch:hover { background:transparent; }
+@media(prefers-reduced-motion:reduce) { .pet-drag-handle { transition:none; } }
+
+#pet-playback-error { position:absolute; inset:0; margin:0; display:grid; place-items:center; color:#a84930; font-size:12px; }

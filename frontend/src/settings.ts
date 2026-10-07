@@ -4,6 +4,8 @@ import {SettingsService} from "../bindings/github.com/local/dsh-work/internal/de
 import type {Values} from "../bindings/github.com/local/dsh-work/internal/settings";
 import {applyLocale, normalizeLocale, subscribeLocale, t} from "./i18n";
 import {beginControlUpdate} from "./ui/pending-control";
+import {applyAppearance} from "./theme";
+import {supportedMode, themeInfo, themes} from "./themes";
 
 type FeedbackTone = "neutral" | "success" | "error";
 type Feedback = (message: string, tone?: FeedbackTone) => void;
@@ -24,13 +26,21 @@ function settingsErrorMessage(error: unknown, fallback: string): string {
 export function mountSettings(setFeedback: Feedback) {
   const rollbackToggle = document.getElementById("settings-automatic-runtime-rollback") as HTMLSelectElement;
   const localeSelect = document.getElementById("settings-locale") as HTMLSelectElement;
+  const appearanceSelect = document.getElementById("settings-appearance-mode") as HTMLSelectElement;
+  const themeSelect = document.getElementById("settings-appearance-theme") as HTMLSelectElement;
+  themeSelect.replaceChildren(...themes.map(theme => {
+    const option = new Option(t(theme.label), theme.id);
+    option.dataset.i18n = theme.label;
+    return option;
+  }));
   const status = document.getElementById("settings-general-status") as HTMLParagraphElement;
-  const controls = [rollbackToggle, localeSelect];
+  const controls = [rollbackToggle, localeSelect, themeSelect, appearanceSelect];
+  let savedAppearance = {theme: "monochrome", mode: "system"};
   controls.forEach(control => control.disabled = true);
   let savedLocale = normalizeLocale(localeSelect.value);
 
   const form = status.closest("section")!.querySelector<HTMLElement>(".settings-list")!;
-  form.hidden = true; status.className = "manager-note"; status.textContent = t("view.loading");
+  form.hidden = true; status.className = "note"; status.textContent = t("view.loading");
 
   function render(values: Values) {
     form.hidden = false;
@@ -38,6 +48,8 @@ export function mountSettings(setFeedback: Feedback) {
     rollbackToggle.value = values.automaticRuntimeRollback ? "automatic" : "choose";
     localeSelect.value = normalizeLocale(values.locale);
     savedLocale = normalizeLocale(values.locale);
+    savedAppearance = {theme: values.appearance.theme, mode: values.appearance.mode};
+    renderAppearance();
     status.textContent = "";
   }
 
@@ -102,6 +114,35 @@ export function mountSettings(setFeedback: Feedback) {
     }
   })());
 
+  // Only modes the selected theme supports can be chosen.
+  function renderAppearance() {
+    themeSelect.value = savedAppearance.theme;
+    const modes = themeInfo(savedAppearance.theme).modes;
+    for (const option of Array.from(appearanceSelect.options)) option.disabled = !modes.includes(option.value as never);
+    appearanceSelect.value = savedAppearance.mode;
+  }
+
+  // Saving is what applies the change: every window, including this one,
+  // repaints from the published appearance.
+  async function saveAppearance(control: HTMLSelectElement, theme: string, mode: string) {
+    const finishUpdate = beginControlUpdate(control);
+    try {
+      const values = await SettingsService.SetAppearance(theme, supportedMode(theme, mode));
+      applyAppearance(values.appearance);
+      render(values);
+      setFeedback("");
+    } catch (error) {
+      renderAppearance();
+      setFeedback(settingsErrorMessage(error, t("error.saveSettings")), "error");
+      console.error("Could not update dsh-work appearance", error);
+    } finally {
+      finishUpdate();
+    }
+  }
+  themeSelect.addEventListener("change", () => void saveAppearance(themeSelect, themeSelect.value, savedAppearance.mode));
+  appearanceSelect.addEventListener("change", () => void saveAppearance(appearanceSelect, savedAppearance.theme, appearanceSelect.value));
+
+
   return {refresh};
 }
 
@@ -127,7 +168,7 @@ export function mountNotifications(setFeedback: Feedback) {
   Object.values(toggles).forEach(control => control.disabled = true);
 
   const form = status.closest("section")!.querySelector<HTMLElement>(".settings-list")!;
-  form.hidden = true; status.className = "manager-note"; status.textContent = t("view.loading");
+  form.hidden = true; status.className = "note"; status.textContent = t("view.loading");
 
   function render(values: Values) {
     form.hidden = false;

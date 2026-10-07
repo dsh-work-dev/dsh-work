@@ -13,8 +13,8 @@ import {mountRecovery} from "./recovery";
 import {mountNotifications, mountSettings} from "./settings";
 import {mountPets} from "./pets";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
-import {applyTheme} from "./theme";
 import {subscribeLocale, t} from "./i18n";
+import {icon} from "./ui/icons";
 import type {RuntimePreparation} from "./lifecycle";
 import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/dsh-work/internal/lifecycle/models";
 import {UpdateInstallMode, UpdatePhase, type UpdateSnapshot} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
@@ -29,7 +29,6 @@ export type ManagerSnapshot = Snapshot;
 export type ManagerPluginResult = PluginResult;
 
 const getSnapshot = ManagerService.GetSnapshot;
-const getTheme = ManagerService.GetTheme;
 const getHostStatus = HostService.GetWorkspaceStatus;
 const setRunContext = ManagerService.SetRunContext;
 const installPlugin = ManagerService.InstallPlugin;
@@ -166,6 +165,14 @@ export function mergePluginObservation(plugins: PluginInfo[], observed: PluginIn
   });
 }
 
+/** Short state label next to a row title; the row's selection bar repeats it visually. */
+function stateTag(label: string): HTMLSpanElement {
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.textContent = label;
+  return tag;
+}
+
 export function mountManager() {
   const runtime = document.getElementById("manager-runtime") as HTMLSelectElement;
   const node = document.getElementById("manager-node") as HTMLSelectElement;
@@ -215,7 +222,8 @@ export function mountManager() {
   const knownGoodProfile = document.getElementById("manager-known-good-profile") as HTMLElement;
   const selectedProfileLabel = document.getElementById("manager-selected-profile") as HTMLElement;
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
-  const profileEmpty = document.getElementById("manager-profile-empty") as HTMLElement;
+  const profileListView = document.getElementById("profile-list-view") as HTMLElement;
+  const profilePluginCount = document.getElementById("profile-plugin-count") as HTMLParagraphElement;
   const profileDetail = document.getElementById("manager-profile-detail") as HTMLElement;
   const profileName = document.getElementById("manager-profile-name") as HTMLInputElement;
   const profileRename = document.getElementById("manager-profile-rename") as HTMLButtonElement;
@@ -257,8 +265,8 @@ export function mountManager() {
   let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
     ? {dataDirectoryId: initialDataDirectory, name: initialProfile}
     : undefined;
-  let themeSyncTimer: number | undefined;
-  let themeSyncAvailable = false;
+  // Profiles show either the list or one profile's detail; a profile named in the URL opens its detail.
+  let profileView: "list" | "detail" = initialProfile ? "detail" : "list";
   let contextSwitchInFlight = false;
   let runtimeInstallInFlight = false;
   let runtimeRemovalInFlight = false;
@@ -288,7 +296,7 @@ export function mountManager() {
   function feedbackFor(section: ManagerSection, scope?: HTMLElement, fallback?: Element) {
     const panel = scope ?? panels.find(item => item.dataset.managerPanel === section)!;
     const result = document.createElement("p");
-    result.className = "panel-result";
+    result.className = "result";
     result.setAttribute("role", "status");
     result.hidden = true;
     (section === "profiles" ? document.getElementById("manager-profile-detail")! : panel).append(result);
@@ -297,13 +305,13 @@ export function mountManager() {
     let expiry: number | undefined;
     const clear = () => { window.clearTimeout(expiry); result.hidden = true; result.textContent = ""; };
     panel.addEventListener("change", event => {
-      clear(); anchor = (event.target as Element).closest(".setting-row, .runtime-install-card, .plugin-install-row") ?? event.target as Element;
+      clear(); anchor = (event.target as Element).closest(".row") ?? event.target as Element;
     }, true);
     panel.addEventListener("click", event => {
       const button = (event.target as Element).closest("button");
       if (button) {
         clear();
-        anchor = button.closest(".manager-list-item, .profile-actions, .profile-rename-row, .plugin-install-row, .runtime-install-card, .manager-actions, .setting-row") ?? button;
+        anchor = button.closest(".row, .actions") ?? button;
       }
     }, true);
     // Controls already show most successful changes, so other success text is
@@ -326,7 +334,7 @@ export function mountManager() {
   const versionPoints = mountRestorePoints(document.getElementById("version-restore-points")!, next => {snapshot=next;renderSelection();renderOverview();renderProfiles();renderRuntimes();});
   const recovery = mountRecovery((next, restored) => {
     snapshot = next;
-    if (restored) { managedProfile = {...restored}; renameControls.hidden = true; }
+    if (restored) { managedProfile = {...restored}; profileView = "detail"; renameControls.hidden = true; }
     renderSelection(); renderOverview(); renderProfiles(); renderRuntimes();
     if (restored) { selectedProfileLabel.tabIndex = -1; selectedProfileLabel.focus(); }
   });
@@ -337,24 +345,6 @@ export function mountManager() {
   mountStorage();
   const notifications = mountNotifications(feedbackFor("notifications"));
   const pets = mountPets();
-
-  async function syncTheme() {
-    if (!themeSyncAvailable) {
-      return;
-    }
-    try {
-      applyTheme(await getTheme());
-    } catch (error) {
-      console.error("Could not read DSH theme preference", error);
-    }
-  }
-
-  function startThemeSync() {
-    if (themeSyncTimer !== undefined) {
-      return;
-    }
-    themeSyncTimer = window.setInterval(() => void syncTheme(), 1000);
-  }
 
   const sectionPositions = new Map<ManagerSection, number>();
   const sectionFocus = new Map<ManagerSection, {element: HTMLElement; selector?: string}>();
@@ -480,14 +470,6 @@ export function mountManager() {
     }
   }
 
-  const stickyPanels = Array.from(document.querySelectorAll<HTMLElement>(".profile-editor, .pets-preview-panel"));
-  const positionProfileEditor = () => {
-    for (const panel of stickyPanels) panel.style.top = `${Math.min(0, window.innerHeight - 48 - panel.offsetHeight)}px`;
-  };
-  const profileResize = new ResizeObserver(positionProfileEditor);
-  stickyPanels.forEach(panel => profileResize.observe(panel));
-  window.addEventListener("resize", positionProfileEditor);
-  window.addEventListener("pagehide", () => { profileResize.disconnect(); window.removeEventListener("resize", positionProfileEditor); }, {once: true});
   const environmentEditor = document.getElementById("environment-editor")!;
   const environmentApply = document.getElementById("environment-apply") as HTMLButtonElement;
   let editingEnvironment = false;
@@ -515,17 +497,15 @@ export function mountManager() {
   document.getElementById("known-good-return")!.addEventListener("click", () => { if (snapshot?.knownGood) editEnvironment(snapshot.knownGood); });
   document.getElementById("plugins-restart")!.addEventListener("click", () => { if (snapshot?.current) editEnvironment(snapshot.current); });
   const renameStart = document.getElementById("profile-rename-start") as HTMLButtonElement;
-  const finishRename = () => { renameControls.hidden = true; renameStart.focus(); };
-  renameStart.addEventListener("click", () => { renameControls.hidden = false; profileName.focus(); profileName.select(); });
+  const renameRow = document.getElementById("profile-rename-row")!;
+  const finishRename = () => { renameControls.hidden = true; renameRow.hidden = false; renameStart.focus(); };
+  renameStart.addEventListener("click", () => { renameControls.hidden = false; renameRow.hidden = true; profileName.focus(); profileName.select(); });
   document.getElementById("profile-rename-cancel")!.addEventListener("click", finishRename);
   profileName.addEventListener("keydown", event => {
     if (event.key === "Escape") finishRename();
     if (event.key === "Enter" && !profileRename.disabled) profileRename.click();
   });
-  document.getElementById("profile-back-to-list")!.addEventListener("click", () => {
-    const selected = profileList.querySelector<HTMLButtonElement>("[aria-pressed=true]");
-    selected?.focus();
-  });
+  document.getElementById("profile-back-to-list")!.addEventListener("click", showProfileList);
   document.getElementById("profile-switch")!.addEventListener("click", () => { if (managedProfile) void switchToProfile(managedProfile); });
   document.getElementById("profile-plugins-link")!.addEventListener("click", () => showSection("plugins"));
   document.getElementById("plugins-profile-link")!.addEventListener("click", () => {
@@ -540,7 +520,7 @@ export function mountManager() {
   loadRetry.textContent = t("common.retry"); loadRetry.hidden = true;
   loadMessage.textContent = t("view.loading");
   loadState.append(loadMessage, loadRetry);
-  document.querySelector(".manager-topbar")!.after(loadState);
+  document.querySelector(".page-head")!.after(loadState);
   loadRetry.addEventListener("click", () => void refresh());
   document.getElementById("about-version")!.textContent = `dsh-work ${__APP_VERSION__}`;
   aboutUpdateAction.addEventListener("click", () => void performUpdateAction());
@@ -681,7 +661,7 @@ export function mountManager() {
     const plugins = item.plugins ?? [];
     if (plugins.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "manager-empty";
+      empty.className = "empty";
       empty.textContent = item.exists ? t("profiles.noPlugins") : t("value.notInitialized");
       profilePlugins.append(empty);
     }
@@ -693,8 +673,9 @@ export function mountManager() {
 
   function pluginRow(item: ManagerProfile, plugin: PluginInfo, mutable: boolean): HTMLDivElement {
     const row = document.createElement("div");
-    row.className = "plugin-list-item";
+    row.className = "row";
     const text = document.createElement("div");
+    text.className = "row-main";
     const name = document.createElement("strong");
     name.textContent = plugin.name;
     const detail = document.createElement("span");
@@ -711,7 +692,7 @@ export function mountManager() {
     if (!mutable) return row;
     const packageName = plugin.package || plugin.name;
     if (plugin.updateCheck === "available") {
-      row.append(pluginButton("action.upgrade", "button-primary", () => mutatePlugin("upgrade", packageName)));
+      row.append(pluginButton("action.upgrade", "button-secondary", () => mutatePlugin("upgrade", packageName)));
     }
     row.append(pluginButton("action.remove", "button-secondary", () => mutatePlugin("remove", packageName)));
     if (plugin.canToggle) {
@@ -776,7 +757,7 @@ export function mountManager() {
       const visible = filterLoaderLayers(layers, loaderTree.query);
       if (visible.length === 0) {
         const empty = document.createElement("p");
-        empty.className = "manager-empty";
+        empty.className = "empty";
         empty.textContent = t("plugins.noMatches");
         tree.append(empty);
         return;
@@ -796,8 +777,9 @@ export function mountManager() {
         group.append(title);
         for (const entry of layer.entries) {
           const row = document.createElement("div");
-          row.className = "plugin-list-item";
+          row.className = "row";
           const text = document.createElement("div");
+          text.className = "row-main";
           const name = document.createElement("strong");
           name.textContent = entry.id;
           const detail = document.createElement("span");
@@ -827,8 +809,9 @@ export function mountManager() {
   function renderProfileDetail() {
     recovery.selectProfile(managedProfile);
     const item = managedProfileItem();
-    profileEmpty.hidden = !!item;
-    profileDetail.hidden = !item;
+    if (!item) profileView = "list";
+    profileListView.hidden = profileView !== "list";
+    profileDetail.hidden = profileView !== "detail";
     if (!item) {
       profileName.value = "";
       profileClone.disabled = true;
@@ -842,7 +825,8 @@ export function mountManager() {
     const isCurrent = !!current && sameProfileRef(item.ref, current.profile);
     const canRename = item.renamable && !isCurrent && !mutationBlocked();
     profileScopeNote.textContent = [profileKindLabel(item.kind), isCurrent ? t("profiles.current") : ""].filter(Boolean).join(" · ");
-    renameStart.hidden = !item.renamable;
+    profilePluginCount.textContent = t("profiles.pluginCount", {count: item.pluginCount, plural: item.pluginCount === 1 ? "" : "s"});
+    document.getElementById("profile-rename-row")!.hidden = !item.renamable || !renameControls.hidden;
     renameStart.disabled = !canRename;
     const switchProfile = document.getElementById("profile-switch") as HTMLButtonElement;
     switchProfile.hidden = isCurrent;
@@ -1090,7 +1074,6 @@ export function mountManager() {
       snapshot = await setRunContext(next);
       editingEnvironment = false; environmentEditor.hidden = true;
       await refreshCurrentPluginObservation();
-      applyTheme(snapshot.theme);
       operationFeedback("");
       renderSelection();
       renderOverview();
@@ -1122,11 +1105,22 @@ export function mountManager() {
 
   function selectProfile(ref: ManagerProfileRef) {
     managedProfile = {...ref};
+    profileView = "detail";
     renameControls.hidden = true;
     document.getElementById("profile-result")!.textContent = "";
     renderProfiles();
     showSection("profiles");
-    if (window.matchMedia("(max-width: 760px)").matches) { selectedProfileLabel.tabIndex = -1; selectedProfileLabel.focus({preventScroll: true}); profileDetail.scrollIntoView({block: "start"}); }
+    contentScroller.scrollTop = 0;
+    selectedProfileLabel.tabIndex = -1;
+    selectedProfileLabel.focus({preventScroll: true});
+  }
+
+  function showProfileList() {
+    profileView = "list";
+    renderProfiles();
+    contentScroller.scrollTop = 0;
+    const key = managedProfile ? `${managedProfile.dataDirectoryId}/${managedProfile.name}` : "";
+    profileList.querySelector<HTMLButtonElement>(`[data-profile-key="${CSS.escape(key)}"]`)?.focus({preventScroll: true});
   }
 
   function renderProfiles() {
@@ -1139,7 +1133,7 @@ export function mountManager() {
     }
     if (profiles.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "manager-empty";
+      empty.className = "empty";
       empty.textContent = t(snapshot ? "profiles.noProfiles" : "view.loading");
       profileList.append(empty);
       renderProfileDetail();
@@ -1147,15 +1141,13 @@ export function mountManager() {
       return;
     }
     for (const item of profiles) {
-      const selected = sameProfileRef(item.ref, managedProfile);
       const row = document.createElement("div");
-      row.className = `manager-list-item${selected ? " is-selected" : ""}`;
+      row.className = "row";
       const text = document.createElement("div");
+      text.className = "row-main";
       const name = document.createElement("strong");
       name.textContent = item.ref.name;
-      if (current && sameProfileRef(item.ref, current.profile)) {
-        name.textContent += ` · ${t("profiles.current")}`;
-      }
+      if (current && sameProfileRef(item.ref, current.profile)) name.append(stateTag(t("profiles.current")));
       const detail = document.createElement("span");
       detail.textContent = t("profiles.pluginDetail", {
         dataDirectory: dataDirectoryLabel(item.ref.dataDirectoryId),
@@ -1165,12 +1157,11 @@ export function mountManager() {
       });
       text.append(name, detail);
       const choose = document.createElement("button");
-      choose.className = "profile-select";
+      choose.className = "row-select row-drill";
       choose.type = "button";
       choose.dataset.profileKey = `${item.ref.dataDirectoryId}/${item.ref.name}`;
-      choose.setAttribute("aria-pressed", String(selected));
       choose.setAttribute("aria-label", t("profile.inspect", {profile: item.ref.name}));
-      choose.append(text);
+      choose.append(text, icon("chevron-right"));
       choose.addEventListener("click", () => selectProfile(item.ref));
       row.append(choose);
       profileList.append(row);
@@ -1197,17 +1188,19 @@ export function mountManager() {
     const runtimes = snapshot?.runtimes ?? [];
     if (runtimes.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "manager-empty";
+      empty.className = "empty";
       empty.textContent = t("runtimes.noRuntimes");
       runtimeList.append(empty);
     }
     for (const item of runtimes) {
       const selected = item.id === snapshot?.configured?.runtimeId;
       const row = document.createElement("div");
-      row.className = `manager-list-item${selected ? " is-selected" : ""}`;
+      row.className = `row${selected ? " is-selected" : ""}`;
       const text = document.createElement("div");
+      text.className = "row-main";
       const name = document.createElement("strong");
-      name.textContent = `${item.version}${selected ? ` · ${t("action.selected")}` : ""}`;
+      name.textContent = item.version;
+      if (selected) name.append(stateTag(t("action.selected")));
       const detail = document.createElement("span");
       const artifactSource = item.installSource && item.installSource !== "none" ? runtimeArtifactSourceLabel(item.installSource) : "";
       detail.textContent = [runtimeSourceLabel(item.source), t(item.installed ? "value.verified" : "value.unverified"), artifactSource]
@@ -1217,7 +1210,7 @@ export function mountManager() {
       row.append(text);
       if (!selected && item.installed && snapshot?.configured) {
         const switchButton = document.createElement("button");
-        switchButton.className = "button button-primary";
+        switchButton.className = "button";
         switchButton.type = "button";
         switchButton.textContent = t("action.switch");
         switchButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
@@ -1265,17 +1258,19 @@ export function mountManager() {
     if (systemNode) {
       const selectedSystemNode = snapshot?.configured?.node.kind === NodeSelectionKind.NodeSelectionSystem;
       const row = document.createElement("div");
-      row.className = `manager-list-item${selectedSystemNode ? " is-selected" : ""}`;
+      row.className = `row${selectedSystemNode ? " is-selected" : ""}`;
       const text = document.createElement("div");
+      text.className = "row-main";
       const name = document.createElement("strong");
-      name.textContent = `${t("runtimes.systemNode")} ${systemNode.version}${selectedSystemNode ? ` · ${t("action.selected")}` : ""}`;
+      name.textContent = `${t("runtimes.systemNode")} ${systemNode.version}`;
+      if (selectedSystemNode) name.append(stateTag(t("action.selected")));
       const detail = document.createElement("span");
       detail.textContent = `${t("value.system")} · ${t("value.verified")}`;
       text.append(name, detail);
       row.append(text);
       if (!selectedSystemNode && snapshot?.configured) {
         const useButton = document.createElement("button");
-        useButton.className = "button button-primary";
+        useButton.className = "button";
         useButton.type = "button";
         useButton.textContent = t("action.switch");
         useButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
@@ -1286,24 +1281,26 @@ export function mountManager() {
     }
     if (nodes.length === 0) {
       const empty = document.createElement("p");
-      empty.className = "manager-empty";
+      empty.className = "empty";
       empty.textContent = t("runtimes.noNodes");
       nodeList.append(empty);
     }
     for (const item of nodes) {
       const selectedNode = snapshot?.configured?.node.kind === NodeSelectionKind.NodeSelectionManaged && snapshot.configured.node.installationId === item.id;
       const row = document.createElement("div");
-      row.className = `manager-list-item${selectedNode ? " is-selected" : ""}`;
+      row.className = `row${selectedNode ? " is-selected" : ""}`;
       const text = document.createElement("div");
+      text.className = "row-main";
       const name = document.createElement("strong");
-      name.textContent = `${item.version}${selectedNode ? ` · ${t("action.selected")}` : ""}`;
+      name.textContent = item.version;
+      if (selectedNode) name.append(stateTag(t("action.selected")));
       const detail = document.createElement("span");
       detail.textContent = [t("value.installed"), runtimeArtifactSourceLabel(item.installSource), t(item.verified ? "value.verified" : "value.unverified")].join(" · ");
       text.append(name, detail);
       row.append(text);
       if (!selectedNode && item.installed && snapshot?.configured) {
         const switchButton = document.createElement("button");
-        switchButton.className = "button button-primary";
+        switchButton.className = "button";
         switchButton.type = "button";
         switchButton.textContent = t("action.switch");
         switchButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
@@ -1407,7 +1404,6 @@ export function mountManager() {
       applyPluginObservation();
       loadState.hidden = true;
       setContextControlsDisabled(mutationBlocked());
-      applyTheme(snapshot.theme);
       renderSelection();
       syncManagedProfile(preferredProfile);
       renderOverview();
@@ -1415,8 +1411,6 @@ export function mountManager() {
       renderRuntimes();
       renderUpdate();
       showSection(currentSection);
-      themeSyncAvailable = true;
-      startThemeSync();
       observePluginsIfNeeded();
     } catch (error) {
       loadState.hidden = false; loadRetry.hidden = false;
@@ -1424,7 +1418,7 @@ export function mountManager() {
       if (!snapshot) {
         for (const field of [currentState, currentRuntime, currentProfile, currentNode]) field.textContent = "—";
         profileList.textContent = "";
-        profileEmpty.hidden = true; pluginEmpty.hidden = true;
+        pluginEmpty.hidden = true;
         setContextControlsDisabled(true);
       }
       console.error("Could not read DSH manager snapshot", error);
@@ -1434,7 +1428,11 @@ export function mountManager() {
   }
 
   for (const item of navItems) {
-    item.addEventListener("click", () => showSection(sectionName(item.dataset.managerSection ?? null)));
+    item.addEventListener("click", () => {
+      const section = sectionName(item.dataset.managerSection ?? null);
+      if (section === "profiles" && profileView === "detail") { profileView = "list"; renderProfiles(); }
+      showSection(section);
+    });
   }
   Events.On("lifecycle", () => void refresh());
   Events.On("update-state", (event) => {
@@ -1487,7 +1485,7 @@ export function mountManager() {
   });
   setContextControlsDisabled(true);
   for (const field of [currentState, currentRuntime, currentProfile, currentNode]) field.textContent = "—";
-  profileEmpty.hidden = true; pluginEmpty.hidden = true;
+  pluginEmpty.hidden = true;
   showSection(currentSection);
   subscribeLocale(() => {
     Object.values(operationLogs).forEach(log => log.labels());
@@ -1502,12 +1500,10 @@ export function mountManager() {
 
   dataDirectory.addEventListener("change", () => fillProfiles());
   window.addEventListener("focus", () => {
-    void syncTheme();
     void refresh();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      void syncTheme();
       void refresh();
     }
   });
@@ -1597,7 +1593,6 @@ export function mountManager() {
     try {
       snapshot = await renameProfile({profile: item.ref, newName: nextName});
       managedProfile = {dataDirectoryId: item.ref.dataDirectoryId, name: nextName};
-      applyTheme(snapshot.theme);
       renderSelection();
       renderOverview();
       renderProfiles();

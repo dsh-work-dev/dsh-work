@@ -1,48 +1,63 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark" data-theme-preference="system">
+<html lang="zh-CN" data-theme="light" data-theme-preference="system">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f6f8" />
     <title>dsh-work</title>
     <link rel="icon" type="image/png" href="/branding/dsh-work-appicon.png" />
     <link rel="apple-touch-icon" href="/branding/dsh-work-appicon-light.png" />
     <script>
       const surface = new URLSearchParams(window.location.search).get("surface");
       document.documentElement.dataset.surface = surface || "host";
+      // Paint the last known dsh-work appearance before styles load; the Host value replaces it.
+      try {
+        const cached = JSON.parse(localStorage.getItem("dsh-work.appearance") || "null");
+        const mode = cached && cached.mode;
+        const dark = mode === "dark" || (mode !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        if (cached && cached.theme) document.documentElement.dataset.themeId = cached.theme;
+      } catch {}
     </script>
-    <link rel="stylesheet" href="/style.css" />
-    <link rel="stylesheet" href="/src/ui/settings.css" />
-    <link rel="stylesheet" href="/src/ui/startup.css" />
+    <link rel="stylesheet" href="/src/ui/app.css" />
   </head>
   <body>
-    <main id="host-surface" class="startup-shell" aria-labelledby="app-title">
-      <header class="startup-intro"><h1 id="app-title"></h1></header>
-      <ol class="startup-checks" aria-label="启动检查">
-        <li id="check-node"><span class="check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong>Node.js</strong><span id="startup-node-state"></span></div>
-          <div id="node-controls" class="startup-component-controls" hidden><select id="startup-node" aria-label="Node.js"></select><button id="download-node" type="button" data-i18n="startup.downloadNode">下载 Node.js</button></div></div></li>
-        <li id="check-dsh"><span class="check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong>DSH</strong><span id="startup-dsh-state"></span></div>
-          <div id="dsh-controls" class="startup-component-controls" hidden><select id="startup-dsh" aria-label="DSH"></select><button id="download-dsh" type="button" data-i18n="startup.downloadDsh">下载所选版本</button><button id="refresh-releases" type="button" data-i18n="startup.releases">获取版本</button></div></div></li>
-        <li id="check-profile"><span class="check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong data-i18n="startup.profileStep">Profile 与插件</strong><span id="startup-profile"></span></div></div></li>
-        <li id="check-start"><span class="check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong data-i18n="startup.startStep">启动</strong><span id="startup-start-state"></span></div></div></li>
-      </ol>
-      <div id="startup-progress" hidden><p id="startup-progress-message" role="status"></p><progress id="startup-progress-bar" data-i18n-aria-label="host.startupProgress"></progress></div>
-      <section id="startup-resolution">
-        <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
-        <section id="startup-plugin-fault" class="startup-plugin-fault" hidden aria-labelledby="startup-plugin-fault-title"><strong id="startup-plugin-fault-title" data-i18n="fault.title">可能是插件导致 DSH 无法启动</strong><ul id="startup-plugin-fault-list"></ul></section>
-        <div class="startup-actions"><button id="retry" class="startup-primary" type="button" hidden>重试</button><button id="startup-safe-mode" type="button" data-i18n="safe.enter" hidden>启动安全模式</button><button id="open-startup-restore" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" type="button" data-i18n="common.cancel" hidden>取消</button></div>
-        <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">
-          <div class="startup-diagnostic-actions"><strong id="startup-log-title" data-i18n="startup.log">日志</strong><span id="diagnostic-copy-status" role="status"></span><button id="copy-startup-output" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button></div>
-          <pre id="startup-output" tabindex="0"></pre>
+    <main id="host-surface" class="startup" aria-labelledby="app-title">
+      <div class="startup-backdrop" aria-hidden="true"></div>
+      <div class="startup-shell">
+        <header class="startup-head">
+          <div class="brand"><img src="/branding/dsh-work-mark-black.png" alt="" />dsh-work</div>
+          <h1 id="app-title"></h1>
+        </header>
+        <ol class="startup-checks group" aria-label="启动检查">
+          <li id="check-node" class="startup-check"><span class="marker check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong>Node.js</strong><span id="startup-node-state"></span></div>
+            <div id="node-controls" class="startup-component-controls actions" hidden><select id="startup-node" aria-label="Node.js"></select><button id="download-node" class="button button-primary" type="button" data-i18n="startup.downloadNode">下载 Node.js</button></div></div></li>
+          <li id="check-dsh" class="startup-check"><span class="marker check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong>DSH</strong><span id="startup-dsh-state"></span></div>
+            <div id="dsh-controls" class="startup-component-controls actions" hidden><select id="startup-dsh" aria-label="DSH"></select><button id="refresh-releases" class="button" type="button" data-i18n="startup.releases">获取版本</button><button id="download-dsh" class="button button-primary" type="button" data-i18n="startup.downloadDsh">下载所选版本</button></div></div></li>
+          <li id="check-profile" class="startup-check"><span class="marker check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong data-i18n="startup.profileStep">Profile 与插件</strong><span id="startup-profile"></span></div></div></li>
+          <li id="check-start" class="startup-check"><span class="marker check-marker" aria-hidden="true"></span><div class="check-body"><div class="check-heading"><strong data-i18n="startup.startStep">启动</strong><span id="startup-start-state"></span></div></div></li>
+        </ol>
+        <div id="startup-progress" hidden><p id="startup-progress-message" class="note" role="status"></p><progress id="startup-progress-bar" data-i18n-aria-label="host.startupProgress"></progress></div>
+        <section id="startup-resolution">
+          <p id="status-message" role="status" hidden></p><p id="startup-action-error" role="alert" hidden></p>
+          <section id="startup-plugin-fault" class="notice startup-plugin-fault" hidden aria-labelledby="startup-plugin-fault-title">
+            <div class="notice-head"><span data-icon="triangle-alert"></span><strong id="startup-plugin-fault-title" data-i18n="fault.title">可能是插件导致 DSH 无法启动</strong></div>
+            <ul id="startup-plugin-fault-list" class="rows"></ul>
+          </section>
+          <div class="startup-actions actions"><button id="retry" class="button button-primary" type="button" hidden>重试</button><button id="startup-safe-mode" class="button" type="button" data-i18n="safe.enter" hidden>启动安全模式</button><button id="open-startup-restore" class="button" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" class="button button-quiet" type="button" data-i18n="common.cancel" hidden>取消</button></div>
+          <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">
+            <div class="startup-diagnostic-actions"><strong id="startup-log-title" data-i18n="startup.log">日志</strong><span id="diagnostic-copy-status" class="note" role="status"></span><button id="copy-startup-output" class="button button-quiet button-compact" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button></div>
+            <pre id="startup-output" tabindex="0"></pre>
+          </section>
         </section>
-      </section>
-      <footer class="startup-footer"><button id="open-runtime-settings" type="button" data-i18n="startup.settings">设置</button><button id="show-startup-log" type="button" data-i18n="startup.log" aria-controls="startup-diagnostics" aria-expanded="false">日志</button><button id="quit" type="button" data-i18n="common.quit">退出</button></footer>
+        <footer class="startup-footer"><button id="open-runtime-settings" class="button button-quiet" type="button" data-i18n="startup.settings">设置</button><button id="show-startup-log" class="button button-quiet" type="button" data-i18n="startup.log" aria-controls="startup-diagnostics" aria-expanded="false">日志</button><button id="quit" class="button button-quiet" type="button" data-i18n="common.quit">退出</button></footer>
+      </div>
       <dialog id="startup-restore-dialog" class="startup-restore-dialog" aria-labelledby="startup-restore-title">
-        <header><h2 id="startup-restore-title" data-i18n="startup.restore">恢复版本</h2><button id="close-startup-restore" type="button" data-i18n="startup.close">关闭</button></header>
+        <header class="dialog-head"><h2 id="startup-restore-title" data-i18n="startup.restore">恢复版本</h2><button id="close-startup-restore" class="button" type="button" data-i18n="startup.close">关闭</button></header>
         <section id="startup-restore-points" class="restore-points-panel"></section>
       </dialog>
       <div hidden><div id="startup-node-progress"><p></p><progress></progress></div><div id="startup-dsh-progress"><p></p><progress></progress></div></div>
     </main>
+
     <main id="pet-surface" class="pet-surface" aria-label="Desktop pet" hidden>
       <section id="pet-activity" class="pet-activity" aria-label="Conversation activity" hidden>
         <button id="pet-activity-primary" class="pet-activity-primary" type="button"><strong id="pet-activity-title"></strong><span id="pet-activity-status" role="status" aria-live="polite"></span></button>
@@ -53,10 +68,11 @@
         <span aria-hidden="true">⠿</span>
       </div>
     </main>
-    <main id="manager-surface" class="manager-app" aria-labelledby="manager-title" hidden>
-      <a class="settings-skip-link" href="#manager-content" data-i18n="manager.skipToContent">Skip to settings</a>
-      <aside class="manager-sidebar" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-        <select id="manager-section-select" class="manager-section-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+
+    <main id="manager-surface" class="shell" aria-labelledby="manager-title" hidden>
+      <a class="skip-link" href="#manager-content" data-i18n="manager.skipToContent">Skip to settings</a>
+      <aside class="shell-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+        <select id="manager-section-select" class="nav-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
           <option value="overview" data-i18n="manager.overview">Overview</option>
           <optgroup label="Application" data-i18n-label="manager.groupApplication">
           <option value="settings" data-i18n="manager.general">General</option>
@@ -73,385 +89,414 @@
           <option value="about" data-i18n="manager.about">About</option>
           </optgroup>
         </select>
-        <nav class="manager-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-          <button class="manager-nav-item is-active" data-manager-section="overview" type="button"><span data-i18n="manager.overview">Overview</span></button>
-          <section class="manager-nav-group" aria-labelledby="settings-group-application">
-          <h2 id="settings-group-application" class="manager-nav-heading" data-i18n="manager.groupApplication">Application</h2>
-          <button class="manager-nav-item" data-manager-section="settings" type="button"><span data-i18n="manager.general">General</span></button>
-          <button class="manager-nav-item" data-manager-section="notifications" type="button"><span data-i18n="manager.notifications">Notifications</span></button>
-          <button class="manager-nav-item" data-manager-section="pets" type="button"><span data-i18n="manager.pets">Pets</span></button>
-          </section>
-          <section class="manager-nav-group" aria-labelledby="settings-group-environment">
-          <h2 id="settings-group-environment" class="manager-nav-heading" data-i18n="manager.groupEnvironment">DSH environment</h2>
-          <button class="manager-nav-item" data-manager-section="runtimes" type="button"><span data-i18n="manager.runtimes">Runtimes</span></button>
-          <button class="manager-nav-item" data-manager-section="profiles" type="button"><span data-i18n="manager.profiles">Profiles</span></button>
-          <button class="manager-nav-item" data-manager-section="plugins" type="button"><span data-i18n="manager.plugins">Plugins</span></button>
-          </section>
-          <section class="manager-nav-group" aria-labelledby="settings-group-maintenance">
-          <h2 id="settings-group-maintenance" class="manager-nav-heading" data-i18n="manager.groupMaintenance">Maintenance</h2>
-          <button class="manager-nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
-          <button class="manager-nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span><span id="about-update-badge" class="manager-nav-badge" data-i18n="about.updateBadge" hidden>更新</span></button>
-          </section>
+        <nav data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+          <button class="nav-item" data-manager-section="overview" type="button"><span data-i18n="manager.overview">Overview</span></button>
+          <div class="nav-group" role="group" aria-labelledby="settings-group-application">
+            <h2 id="settings-group-application" class="nav-heading" data-i18n="manager.groupApplication">Application</h2>
+            <button class="nav-item" data-manager-section="settings" type="button"><span data-i18n="manager.general">General</span></button>
+            <button class="nav-item" data-manager-section="notifications" type="button"><span data-i18n="manager.notifications">Notifications</span></button>
+            <button class="nav-item" data-manager-section="pets" type="button"><span data-i18n="manager.pets">Pets</span></button>
+          </div>
+          <div class="nav-group" role="group" aria-labelledby="settings-group-environment">
+            <h2 id="settings-group-environment" class="nav-heading" data-i18n="manager.groupEnvironment">DSH environment</h2>
+            <button class="nav-item" data-manager-section="runtimes" type="button"><span data-i18n="manager.runtimes">Runtimes</span></button>
+            <button class="nav-item" data-manager-section="profiles" type="button"><span data-i18n="manager.profiles">Profiles</span></button>
+            <button class="nav-item" data-manager-section="plugins" type="button"><span data-i18n="manager.plugins">Plugins</span></button>
+          </div>
+          <div class="nav-group" role="group" aria-labelledby="settings-group-maintenance">
+            <h2 id="settings-group-maintenance" class="nav-heading" data-i18n="manager.groupMaintenance">Maintenance</h2>
+            <button class="nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
+            <button class="nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span><span id="about-update-badge" class="nav-badge" data-i18n="about.updateBadge" hidden>更新</span></button>
+          </div>
         </nav>
       </aside>
 
-      <div class="manager-main" id="manager-content" tabindex="-1">
-        <header class="manager-topbar">
-          <h1 id="manager-title" data-i18n="manager.overview">Overview</h1>
-        </header>
+      <div class="shell-content" id="manager-content" tabindex="-1">
+        <div class="page">
+          <header class="page-head">
+            <h1 id="manager-title" data-i18n="manager.overview">Overview</h1>
+          </header>
 
+          <!--
+            Page grammar (docs/settings.md): a page is sections; a section is a
+            heading (section-level actions on its right) and one group; every
+            control sits in a group row. A page with a single group omits the
+            section heading. Only operation results appear outside groups.
+          -->
+          <section id="manager-section-overview" class="panel" data-manager-panel="overview" aria-labelledby="manager-title">
+            <section class="section" aria-labelledby="overview-current-title">
+              <div class="section-head"><h2 id="overview-current-title" data-i18n="manager.currentEnvironment">Current environment</h2><button id="environment-edit" class="button" data-i18n="environment.edit" type="button">Switch environment</button></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.currentEnvironment" aria-label="Current environment">
+                  <div><dt data-i18n="field.launchState">Launch state</dt><dd><span id="manager-current-state" class="tag" data-i18n="value.notRunning">Not running</span></dd></div>
+                  <div><dt>DSH</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                  <div><dt data-i18n="field.node">Node</dt><dd id="manager-current-node">—</dd></div>
+                </dl>
+                <div id="environment-editor" class="row row-foot" hidden>
+                  <div class="form-grid">
+                    <label class="field"><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
+                    <label class="field"><span data-i18n="field.node">Node</span><select id="manager-node"></select></label>
+                    <select id="manager-data-directory" hidden aria-hidden="true" tabindex="-1"></select>
+                    <label class="field"><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
+                  </div>
+                  <div class="row-trail"><button id="environment-cancel" class="button button-quiet" data-i18n="common.cancel" type="button">Cancel</button><button id="environment-apply" class="button button-primary" data-i18n="environment.apply" type="button">Switch and restart</button></div>
+                </div>
+              </div>
+            </section>
 
-        <section id="manager-section-overview" class="manager-section" data-manager-panel="overview" aria-labelledby="selection-title">
-          <div class="panel-heading">
-            <div>
-              <h2 id="selection-title" data-i18n="manager.launchContext">Run context</h2>
-            </div>
-          </div>
-          <div class="overview-context-grid">
-            <section class="overview-context" aria-labelledby="overview-current-title">
-              <div class="overview-context-heading">
-                <h3 id="overview-current-title" data-i18n="manager.currentEnvironment">Current environment</h3>
-                <span id="manager-current-state" class="overview-state" data-i18n="value.notRunning">Not running</span>
+            <section id="manager-configured-context" class="section" aria-labelledby="overview-configured-title" hidden>
+              <div class="section-head"><h2 id="overview-configured-title" data-i18n="manager.configuredContext">Configured context</h2></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.configuredContext" aria-label="Configured context">
+                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-configured-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                </dl>
               </div>
-              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.currentEnvironment" aria-label="Current environment">
-                <div><dt>DSH</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                <div><dt data-i18n="field.node">Node</dt><dd id="manager-current-node">—</dd></div>
-              </dl>
             </section>
-            <section id="manager-configured-context" class="overview-context" aria-labelledby="overview-configured-title" hidden>
-              <div class="overview-context-heading">
-                <h3 id="overview-configured-title" data-i18n="manager.configuredContext">Configured context</h3>
-                <span class="overview-state" data-i18n="value.configured">Configured</span>
+
+            <section id="manager-known-good-context" class="section" aria-labelledby="overview-known-good-title" hidden>
+              <div class="section-head"><h2 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h2><button id="known-good-return" class="button" data-i18n="recovery.restore" type="button">Return</button></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
+                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                </dl>
               </div>
-              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.configuredContext" aria-label="Configured context">
-                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-configured-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-              </dl>
             </section>
-            <section id="manager-known-good-context" class="overview-context" aria-labelledby="overview-known-good-title" hidden>
-              <button id="known-good-return" class="button button-secondary" data-i18n="recovery.restore" type="button">Return</button>
-              <h3 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h3>
-              <dl class="selection-facts overview-facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
-                <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-              </dl>
+
+            <section id="manager-switch-failure" class="section notice" aria-live="polite" hidden>
+              <div class="notice-head"><span data-icon="triangle-alert"></span><div><strong data-i18n="recovery.title">Run context needs attention</strong><p id="manager-switch-failure-detail" class="note"></p></div></div>
+              <details class="operation-log">
+                <summary data-i18n="switch.diagnostics">Diagnostic details</summary>
+                <div class="operation-log-toolbar"><button id="manager-switch-copy" class="button button-quiet button-compact" data-i18n="logs.copy" type="button">Copy</button></div>
+                <pre id="manager-switch-diagnostic" class="operation-log-output" tabindex="0"></pre>
+              </details>
+              <div class="actions">
+                <button id="manager-switch-retry" class="button button-primary" data-i18n="common.retry" type="button">Retry</button>
+                <button id="manager-switch-restore" class="button" data-i18n="recovery.restore" type="button">Restore known good</button>
+              </div>
             </section>
-          </div>
-          <div class="manager-actions">
-            <button id="environment-edit" class="button button-secondary" data-i18n="environment.edit" type="button">Switch environment</button>
-            <button id="manager-safe-mode" class="button button-secondary" data-i18n="safe.enter" type="button">启动安全模式</button>
-          </div>
-          <p id="safe-feedback" class="manager-note" role="status"></p>
-          <div id="environment-editor" class="settings-block launch-settings" hidden>
-            <div class="manager-grid">
-              <label><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
-              <label><span data-i18n="field.node">Node</span><select id="manager-node"></select></label>
-              <select id="manager-data-directory" hidden aria-hidden="true" tabindex="-1"></select>
-              <label><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
-            </div>
-            <div class="manager-actions"><button id="environment-apply" class="button button-primary" data-i18n="environment.apply" type="button">Switch and restart</button><button id="environment-cancel" class="button button-secondary" data-i18n="common.cancel" type="button">Cancel</button></div>
-          </div>
-          <section id="version-restore-points" class="restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
-          <section id="manager-switch-failure" class="runtime-preparation" aria-live="polite" hidden>
-            <p class="status-label" data-i18n="recovery.title">Run context needs attention</p>
-            <p id="manager-switch-failure-detail" class="status-detail"></p>
-            <details class="operation-log">
-              <summary data-i18n="switch.diagnostics">Diagnostic details</summary>
-              <div class="operation-log-toolbar"><button id="manager-switch-copy" class="button button-secondary button-compact" data-i18n="logs.copy" type="button">Copy</button></div>
-              <pre id="manager-switch-diagnostic" class="operation-log-output" tabindex="0"></pre>
-            </details>
-            <div class="manager-actions">
-              <button id="manager-switch-retry" class="button button-primary" data-i18n="common.retry" type="button">Retry</button>
-              <button id="manager-switch-restore" class="button button-secondary" data-i18n="recovery.restore" type="button">Restore known good</button>
-            </div>
+
+            <section id="version-restore-points" class="section restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
+
+            <section class="section" aria-labelledby="overview-safe-title">
+              <div class="section-head"><h2 id="overview-safe-title" data-i18n="safe.title">Safe mode</h2></div>
+              <div class="group">
+                <div class="row">
+                  <div class="row-main"><span class="row-meta" data-i18n="safe.description">Start a clean environment to troubleshoot plugins.</span></div>
+                  <div class="row-trail"><button id="manager-safe-mode" class="button" data-i18n="safe.enter" type="button">启动安全模式</button></div>
+                </div>
+              </div>
+              <p id="safe-feedback" class="result" role="status"></p>
+            </section>
           </section>
-        </section>
 
-        <section id="manager-section-profiles" class="manager-section" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
-          <div class="profiles-layout">
-            <div class="profile-directory">
-          <div class="profile-page-actions">
-            <button id="backup-import" class="button button-secondary" data-i18n="backup.import" type="button">Import profile</button>
-            <p id="backup-import-feedback" class="manager-note" role="status"></p>
-          </div>
-
-
-              <div id="manager-profiles" class="manager-list"></div>
-            </div>
-            <div class="profile-editor">
-
-              <div id="manager-profile-empty" class="profile-empty">
-                <p class="manager-empty" data-i18n="profiles.choose">Choose a profile to manage its settings.</p>
-              </div>
-              <div id="manager-profile-detail" hidden><button id="profile-back-to-list" class="button button-secondary" data-i18n="profiles.back" type="button">Profiles</button><p id="profile-result" role="status"></p>
-                <div class="profile-detail-heading">
-                  <div>
-                    <div class="profile-title-row">
-                      <h2 id="manager-selected-profile" class="selected-profile" data-i18n="value.noProfile">No profile selected</h2>
-                      <div class="profile-title-actions">
-                        <button id="profile-switch" class="button button-primary" data-i18n="action.switchToProfile" type="button">Switch</button>
-                        <button id="profile-rename-start" class="button button-secondary" data-i18n="action.rename" type="button">Rename</button>
-                        <button id="profile-plugins-link" class="button button-secondary" data-i18n="profiles.managePlugins" type="button">Manage plugins</button>
-                      </div>
-                    </div>
-                    <p id="manager-profile-scope-note" class="manager-note" data-i18n="profiles.choose">Choose a profile to manage its settings.</p>
+          <section id="manager-section-profiles" class="panel" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
+            <section id="profile-list-view" class="section" aria-labelledby="profiles-all-title">
+              <div class="section-head"><h2 id="profiles-all-title" data-i18n="profiles.all">All profiles</h2><button id="backup-import" class="button" data-i18n="backup.import" type="button">Import profile</button></div>
+              <div class="group"><div id="manager-profiles" class="rows"></div></div>
+              <p id="backup-import-feedback" class="result" role="status"></p>
+            </section>
+            <div id="manager-profile-detail" class="profile-detail" hidden>
+              <button id="profile-back-to-list" class="button button-quiet back-link" type="button"><span data-icon="chevron-left"></span><span data-i18n="profiles.all">All profiles</span></button>
+              <section class="section" aria-labelledby="manager-selected-profile">
+                <div class="section-head profile-head">
+                  <h2 id="manager-selected-profile" class="detail-title" data-i18n="value.noProfile">No profile selected</h2>
+                  <span id="manager-profile-scope-note" class="note"></span>
+                  <button id="profile-switch" class="button" data-i18n="action.switchToProfile" type="button">Switch</button>
+                </div>
+                <div class="group profile-content">
+                  <div class="row backup-summary-row">
+                    <div class="row-main"><strong data-i18n="backup.collection">Backups</strong><p id="backup-summary" role="status"></p></div>
+                    <div class="row-trail"><button id="backup-history-open" class="button" data-i18n="backup.history" type="button">管理备份</button><button id="manager-profile-backup" class="button button-primary" data-context-mutation="true" data-i18n="action.backup" type="button">Backup</button></div>
+                  </div>
+                  <div class="row">
+                    <div class="row-main"><strong data-i18n="profiles.plugins">Plugins</strong><p id="profile-plugin-count"></p></div>
+                    <div class="row-trail"><button id="profile-plugins-link" class="button" data-i18n="profiles.managePlugins" type="button">Manage plugins</button></div>
                   </div>
                 </div>
-
-                <div id="profile-rename-controls" class="profile-rename-controls" hidden>
-                  <div class="profile-rename-row">
-                  <label><span data-i18n="profiles.name">Profile name</span><input id="manager-profile-name" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
-                  <button class="button button-secondary" id="manager-profile-rename" data-i18n="action.save" type="button">Rename</button><button id="profile-rename-cancel" class="button button-secondary" data-i18n="common.cancel" type="button">Cancel</button>
-                </div>
-                </div>
-                <div class="profile-actions">
-                  <button class="button button-primary" id="manager-profile-backup" data-context-mutation="true" data-i18n="action.backup" type="button">Backup</button>
-                  <div class="profile-secondary-actions">
-                    <button class="button button-secondary" id="manager-profile-clone" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button>
-                    <button class="button button-secondary" id="manager-profile-export" data-i18n="action.export" type="button">Export</button>
-                    <button class="button button-danger" id="manager-profile-delete" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button>
-                  </div>
-                </div>
-                <div id="profile-backup-result" class="profile-backup-result" hidden>
+                <div id="profile-backup-result" class="profile-backup-result result" hidden>
                   <span id="profile-backup-message" role="status"></span>
-                  <button id="profile-backup-open" class="button button-secondary button-compact" data-i18n="backup.open" type="button">Open backup folder</button>
+                  <button id="profile-backup-open" class="button button-quiet button-compact" data-i18n="backup.open" type="button">Open backup folder</button>
                 </div>
-                <div class="backup-summary-row"><p id="backup-summary" class="manager-note" role="status"></p><button id="backup-history-open" class="button button-secondary" data-i18n="backup.history" type="button">管理备份</button></div>
-                <dialog id="backup-history-dialog" class="settings-dialog" aria-labelledby="backup-history-title">
-                <header class="settings-dialog-heading"><h2 id="backup-history-title"><span data-i18n="backup.collection">备份</span> <span id="backup-count"></span></h2><button id="backup-history-close" class="button button-secondary" data-i18n="startup.close" type="button">关闭</button></header>
-                <section id="profile-owned-backups" class="profile-restore">
-                  <div class="profile-backups-heading">
-                    <div class="manager-actions">
-                      <button id="backup-open" class="button button-secondary button-compact" data-i18n="backup.open" type="button">Open backup folder</button>
-                      <button id="backup-refresh" class="button button-secondary button-compact" data-i18n="action.refresh" type="button">Refresh</button>
+              </section>
+              <section class="section" aria-labelledby="profile-actions-title">
+                <div class="section-head"><h2 id="profile-actions-title" data-i18n="profiles.actions">Profile actions</h2></div>
+                <div class="group">
+                  <div class="row">
+                    <div class="row-main"><strong data-i18n="action.clone">Clone</strong><p data-i18n="profiles.clone.note">Create a new profile from this one.</p></div>
+                    <div class="row-trail"><button id="manager-profile-clone" class="button" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button></div>
+                  </div>
+                  <div class="row">
+                    <div class="row-main"><strong data-i18n="action.export">Export</strong><p data-i18n="profiles.export.note">Save a file you can import later.</p></div>
+                    <div class="row-trail"><button id="manager-profile-export" class="button" data-i18n="action.export" type="button">Export</button></div>
+                  </div>
+                  <div id="profile-rename-row" class="row">
+                    <div class="row-main"><strong data-i18n="action.rename">Rename</strong><p data-i18n="profiles.rename.note">Change the profile name.</p></div>
+                    <div class="row-trail"><button id="profile-rename-start" class="button" data-i18n="action.rename" type="button">Rename</button></div>
+                  </div>
+                  <div id="profile-rename-controls" class="row profile-rename-controls" hidden>
+                    <label class="field row-main"><span data-i18n="profiles.name">Profile name</span><input id="manager-profile-name" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
+                    <div class="row-trail profile-rename-row"><button id="profile-rename-cancel" class="button button-quiet" data-i18n="common.cancel" type="button">Cancel</button><button class="button button-primary" id="manager-profile-rename" data-i18n="action.save" type="button">Rename</button></div>
+                  </div>
+                  <div class="row">
+                    <div class="row-main"><strong data-i18n="action.delete">Delete</strong><p data-i18n="profiles.delete.note">Remove this profile and its plugins.</p></div>
+                    <div class="row-trail"><button id="manager-profile-delete" class="button button-danger" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button></div>
+                  </div>
+                </div>
+                <p id="profile-result" class="result" role="status"></p>
+              </section>
+                  <dialog id="backup-history-dialog" aria-labelledby="backup-history-title">
+                    <header class="dialog-head"><h2 id="backup-history-title"><span data-i18n="backup.collection">备份</span> <span id="backup-count"></span></h2><button id="backup-history-close" class="button" data-i18n="startup.close" type="button">关闭</button></header>
+                    <section id="profile-owned-backups" class="profile-restore">
+                      <div class="group">
+                        <div id="profile-backups" class="rows"></div>
+                        <div class="row row-foot"><button id="backup-open" class="button button-quiet" data-i18n="backup.open" type="button">Open backup folder</button><button id="backup-refresh" class="button button-quiet" data-i18n="action.refresh" type="button">Refresh</button><button id="backup-more" class="button button-quiet actions-end" data-i18n="action.showAll" type="button" hidden>Show all</button></div>
+                      </div>
+                      <p id="backup-feedback" class="result" role="status"></p>
+                    </section>
+                  </dialog>
+            </div>
+          </section>
+
+          <section id="manager-section-plugins" class="panel" data-manager-panel="plugins" aria-labelledby="manager-title" hidden>
+            <section class="section" aria-labelledby="plugins-target-title">
+              <div class="section-head"><h2 id="plugins-target-title" data-i18n="field.profile">Profile</h2><button id="plugins-profile-link" class="button" data-i18n="plugins.manageProfile" type="button">Manage profile</button></div>
+              <div class="group">
+                <div class="row plugin-target-row">
+                  <div class="row-main"><strong id="manager-plugin-profile">—</strong><p id="manager-plugin-empty" data-i18n="profiles.noCurrent">No current profile</p></div>
+                  <div class="row-trail"><button id="plugins-restart" type="button" class="button button-primary" data-i18n="native.restartDsh" hidden>Restart</button></div>
+                </div>
+              </div>
+            </section>
+            <div id="manager-plugin-detail" class="plugin-editor" hidden>
+              <p id="manager-plugin-scope-note" class="result" hidden></p>
+              <section class="section" aria-labelledby="plugins-add-title">
+                <div class="section-head"><h2 id="plugins-add-title" data-i18n="profiles.addPlugin">Add plugin</h2></div>
+                <div class="group">
+                  <div class="row plugin-install-row">
+                    <input id="manager-plugin-package" class="row-main" data-i18n-placeholder="placeholder.package" data-i18n-aria-label="profiles.addPlugin" aria-label="Add plugin" type="text" placeholder="@scope/plugin@version" autocomplete="off" />
+                    <div class="row-trail"><button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button></div>
+                  </div>
+                </div>
+                <p id="plugin-operation-status" class="result" role="status"></p>
+              </section>
+              <section class="section" aria-labelledby="plugins-installed-title">
+                <div class="section-head"><h2 id="plugins-installed-title" data-i18n="plugins.installed">Installed</h2></div>
+                <div class="group"><div id="manager-profile-plugins" class="rows plugin-list"></div></div>
+              </section>
+            </div>
+          </section>
+
+          <section id="manager-section-runtimes" class="panel" data-manager-panel="runtimes" aria-labelledby="manager-title" hidden>
+            <section id="manager-dsh-group" class="section runtime-group" aria-labelledby="runtimes-title">
+              <div class="section-head"><h2 id="runtimes-title" data-i18n="runtimes.dsh">DSH runtimes</h2></div>
+              <div class="group">
+                <div id="manager-runtimes" class="rows"></div>
+                <div id="manager-dsh-preparation" class="row runtime-preparation" hidden>
+                  <div class="row-main"><strong data-i18n="runtimes.dshPreparation">DSH download</strong><p id="manager-dsh-preparation-detail" aria-live="polite" data-i18n="runtimes.preparing">Preparing the download.</p></div>
+                  <div class="row-trail"><button class="button button-compact" id="manager-dsh-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button></div>
+                  <div id="manager-dsh-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing"><span id="manager-dsh-preparation-progress-fill"></span></div>
+                  <p id="manager-dsh-preparation-meta" class="note"></p>
+                </div>
+                <div class="row row-foot runtime-install-card">
+                  <select id="manager-runtime-version" class="row-main" data-i18n-aria-label="field.version" aria-label="Version"></select>
+                  <div class="row-trail"><button class="button" id="manager-dsh-refresh" data-i18n="action.refresh" type="button">Refresh</button><button class="button button-primary" id="manager-runtime-install" data-i18n="action.download" type="button">Download</button></div>
+                </div>
+              </div>
+            </section>
+            <section id="manager-node-group" class="section runtime-group" aria-labelledby="node-runtimes-title">
+              <div class="section-head"><h2 id="node-runtimes-title" data-i18n="runtimes.node">Node runtimes</h2></div>
+              <div class="group">
+                <div id="manager-nodes" class="rows"></div>
+                <div id="manager-node-preparation" class="row runtime-preparation" hidden>
+                  <div class="row-main"><strong data-i18n="runtimes.nodePreparation">Node download</strong><p id="manager-node-preparation-detail" aria-live="polite" data-i18n="runtimes.preparing">Preparing the download.</p></div>
+                  <div class="row-trail"><button class="button button-compact" id="manager-node-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button></div>
+                  <div id="manager-node-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing"><span id="manager-node-preparation-progress-fill"></span></div>
+                  <p id="manager-node-preparation-meta" class="note"></p>
+                </div>
+                <div class="row row-foot runtime-install-card node-install-card">
+                  <div class="row-trail"><button class="button button-primary" id="manager-node-install" data-i18n="runtimes.downloadLatestNode" type="button">Download latest stable</button></div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section id="manager-section-data-directories" class="panel" data-manager-panel="data-directories" aria-labelledby="manager-title" hidden>
+            <section class="section storage-location" aria-labelledby="storage-root-label">
+              <div class="section-head"><h2 id="storage-root-label" data-i18n="storage.root">App data</h2></div>
+              <div class="group"><div id="storage-root" class="row"></div></div>
+              <p id="storage-root-target" class="result" hidden></p>
+            </section>
+            <section class="section storage-location" aria-labelledby="storage-user-label">
+              <div class="section-head"><h2 id="storage-user-label" data-i18n="storage.user">User data</h2></div>
+              <div class="group">
+                <div id="storage-user" class="row"></div>
+                <label class="row storage-default"><input id="storage-default" type="checkbox" /><span data-i18n="storage.default">Use default location</span></label>
+                <div class="row row-foot storage-actions">
+                  <p id="storage-status" class="row-main" role="status" aria-live="polite"></p>
+                  <div class="row-trail"><button id="storage-cancel" type="button" class="button" data-i18n="storage.cancel" hidden>Cancel migration</button><button id="storage-save" type="button" class="button button-primary" data-i18n="storage.save" hidden>Save locations</button></div>
+                </div>
+              </div>
+              <p id="storage-user-target" class="result" hidden></p>
+            </section>
+          </section>
+
+          <section id="manager-section-settings" class="panel settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
+            <div class="settings-list">
+              <section class="section" aria-labelledby="general-startup-title">
+                <div class="section-head"><h2 id="general-startup-title" data-i18n="general.startupSection">Startup</h2></div>
+                <div class="group">
+                  <div class="row">
+                    <div class="row-main"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div>
+                    <div class="row-trail"><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div>
+                  </div>
+                </div>
+              </section>
+              <section class="section" aria-labelledby="general-interface-title">
+                <div class="section-head"><h2 id="general-interface-title" data-i18n="general.interfaceSection">Interface</h2></div>
+                <div class="group">
+                  <div class="row">
+                    <div class="row-main"><label for="settings-locale" data-i18n="general.language">Language</label></div>
+                    <div class="row-trail">
+                      <select id="settings-locale">
+                        <option value="en" data-i18n="locale.english">English</option>
+                        <option value="zh-CN" data-i18n="locale.chinese">中文</option>
+                        <option value="ja-JP" data-i18n="locale.japanese">日本語</option>
+                      </select>
                     </div>
                   </div>
-                  <div class="profile-restore-content">
-                    <div id="profile-backups" class="manager-list"></div><button id="backup-more" class="button button-secondary" data-i18n="action.showAll" type="button" hidden>Show all</button>
-                    <p id="backup-feedback" class="manager-note" role="status"></p>
+                  <div class="row">
+                    <div class="row-main"><label for="settings-appearance-theme" data-i18n="general.theme">Theme</label></div>
+                    <div class="row-trail"><select id="settings-appearance-theme"></select></div>
                   </div>
-                </section>
-                </dialog>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="manager-section-plugins" class="manager-section" data-manager-panel="plugins" aria-labelledby="manager-title" hidden>
-          <div class="plugin-target-row">
-            <p><span data-i18n="field.profile">Profile</span> <strong id="manager-plugin-profile">—</strong></p>
-            <button id="plugins-profile-link" class="button button-secondary button-compact" data-i18n="plugins.manageProfile" type="button">Manage profile</button>
-          </div>
-          <div id="manager-plugin-empty" class="profile-empty">
-            <p class="manager-empty" data-i18n="profiles.noCurrent">No current profile</p>
-          </div>
-          <div id="manager-plugin-detail" class="plugin-editor" hidden>
-            <p id="manager-plugin-scope-note" class="manager-note" hidden></p>
-            <button id="plugins-restart" type="button" class="button button-primary" data-i18n="native.restartDsh" hidden>Restart</button>
-            <p id="plugin-operation-status" role="status"></p>
-            <div class="plugin-management">
-              <div class="plugin-install-row">
-                <label><span data-i18n="profiles.addPlugin">Add plugin</span><input id="manager-plugin-package" data-i18n-placeholder="placeholder.package" type="text" placeholder="@scope/plugin@version" autocomplete="off" /></label>
-                <button class="button button-primary" id="manager-plugin-install" data-i18n="action.install" type="button">Install</button>
-              </div>
-              <div id="manager-profile-plugins" class="plugin-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <section id="manager-section-runtimes" class="manager-section" data-manager-panel="runtimes" aria-labelledby="manager-title" hidden>
-          <section id="manager-dsh-group" class="runtime-group" aria-labelledby="runtimes-title">
-          <div class="panel-heading">
-            <div>
-              <h2 id="runtimes-title" data-i18n="runtimes.dsh">DSH runtimes</h2>
-            </div>
-          </div>
-
-          <div id="manager-runtimes" class="manager-list"></div>
-<div class="runtime-install-card">
-            <label><span data-i18n="field.version">Version</span><select id="manager-runtime-version"></select></label>
-            <button class="button button-secondary" id="manager-dsh-refresh" data-i18n="action.refresh" type="button">Refresh</button>
-            <button class="button button-primary" id="manager-runtime-install" data-i18n="action.download" type="button">Download</button>
-          </div>
-          <section id="manager-dsh-preparation" class="runtime-preparation" hidden>
-            <div class="runtime-preparation-heading">
-              <div>
-                <p class="status-label" data-i18n="runtimes.dshPreparation">DSH download</p>
-                <p id="manager-dsh-preparation-detail" class="status-detail" aria-live="polite" data-i18n="runtimes.preparing">Preparing the download.</p>
-              </div>
-              <button class="button button-secondary button-compact" id="manager-dsh-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button>
-            </div>
-            <div id="manager-dsh-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing">
-              <span id="manager-dsh-preparation-progress-fill"></span>
-            </div>
-            <p id="manager-dsh-preparation-meta" class="manager-note"></p>
-          </section>
-          </section>
-          <section id="manager-node-group" class="runtime-group" aria-labelledby="node-runtimes-title">
-          <div class="panel-heading"><div><h2 id="node-runtimes-title" data-i18n="runtimes.node">Node runtimes</h2></div></div>
-          <div id="manager-nodes" class="manager-list"></div>
-          <div class="runtime-install-card node-install-card">
-            <button class="button button-primary" id="manager-node-install" data-i18n="runtimes.downloadLatestNode" type="button">Download latest stable</button>
-          </div>
-          <section id="manager-node-preparation" class="runtime-preparation" hidden>
-            <div class="runtime-preparation-heading">
-              <div>
-                <p class="status-label" data-i18n="runtimes.nodePreparation">Node download</p>
-                <p id="manager-node-preparation-detail" class="status-detail" aria-live="polite" data-i18n="runtimes.preparing">Preparing the download.</p>
-              </div>
-              <button class="button button-secondary button-compact" id="manager-node-cancel" data-i18n="common.cancel" type="button" hidden>Cancel</button>
-            </div>
-            <div id="manager-node-preparation-progress" class="progress-track" role="progressbar" data-i18n-aria-label="runtimes.preparationProgress" aria-label="Runtime preparation progress" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing">
-              <span id="manager-node-preparation-progress-fill"></span>
-            </div>
-            <p id="manager-node-preparation-meta" class="manager-note"></p>
-          </section>
-
-          </section>
-
-        </section>
-
-        <section id="manager-section-data-directories" class="manager-section" data-manager-panel="data-directories" aria-labelledby="manager-title" hidden>
-          <div class="settings-list storage-locations">
-            <section class="storage-location" aria-labelledby="storage-root-label">
-              <h2 id="storage-root-label" data-i18n="storage.root">App data</h2>
-              <div id="storage-root"></div>
-              <p id="storage-root-target" class="manager-note" hidden></p>
-            </section>
-            <section class="storage-location" aria-labelledby="storage-user-label">
-              <h2 id="storage-user-label" data-i18n="storage.user">User data</h2>
-              <div id="storage-user"></div>
-              <label class="storage-default"><input id="storage-default" type="checkbox" /><span data-i18n="storage.default">Use default location</span></label>
-              <p id="storage-user-target" class="manager-note" hidden></p>
-            </section>
-            <p id="storage-status" role="status" aria-live="polite"></p>
-            <div class="manager-actions"><button id="storage-save" type="button" class="button" data-i18n="storage.save" hidden>Save locations</button> <button id="storage-cancel" type="button" class="button button-secondary" data-i18n="storage.cancel" hidden>Cancel migration</button></div>
-          </div>
-        </section>
-
-        <section id="manager-section-settings" class="manager-section settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
-          <div class="settings-list">
-            <div class="setting-row"><div class="setting-copy"><label for="settings-automatic-runtime-rollback" data-i18n="points.failurePolicy">When startup fails</label><p class="manager-note" data-i18n="points.policyHelp">Restoring may download the recorded versions.</p></div><div class="setting-control"><select id="settings-automatic-runtime-rollback"><option value="automatic" data-i18n="points.policyAuto">Restore last successful snapshot</option><option value="choose" data-i18n="points.policyChoose">Let me choose</option></select></div></div>
-            <div class="setting-row">
-              <div class="setting-copy">
-                <label for="settings-locale" data-i18n="general.language">Language</label>
-              </div>
-              <div class="setting-control">
-                  <select id="settings-locale">
-                    <option value="en" data-i18n="locale.english">English</option>
-                    <option value="zh-CN" data-i18n="locale.chinese">中文</option>
-                    <option value="ja-JP" data-i18n="locale.japanese">日本語</option>
-                  </select>
-              </div>
-            </div>
-          </div>
-          <p id="settings-general-status" class="sr-only" role="status" aria-live="polite"></p>
-        </section>
-
-        <section id="manager-section-notifications" class="manager-section settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>
-          <div class="settings-list">
-            <div data-setting-switch="settings-notifications-enabled" data-label="notifications.desktop" data-status="settings-notifications-status" data-detail="notifications.desktopDetail"></div>
-            <div data-setting-switch="settings-notifications-completed" data-label="notifications.completed" data-status="settings-notifications-status" data-detail="notifications.completedDetail"></div>
-            <div data-setting-switch="settings-notifications-interaction-required" data-label="notifications.interactionRequired" data-status="settings-notifications-status" data-detail="notifications.interactionRequiredDetail"></div>
-            <div data-setting-switch="settings-notifications-errors" data-label="notifications.errors" data-status="settings-notifications-status" data-detail="notifications.errorsDetail"></div>
-            <div data-setting-switch="settings-notifications-lifecycle" data-label="notifications.lifecycle" data-status="settings-notifications-status" data-detail="notifications.lifecycleDetail"></div>
-          </div>
-          <p id="settings-notifications-status" class="sr-only" role="status" aria-live="polite"></p>
-        </section>
-
-        <section id="manager-section-pets" class="manager-section settings-section" data-manager-panel="pets" aria-labelledby="manager-title" hidden>
-          <div data-setting-switch="pets-visibility" data-label="pets.visibility.label" data-status="pets-visibility-status" data-disabled></div>
-          <p id="pets-visibility-status" class="manager-note" role="status" aria-live="polite"></p>
-          <div class="pets-layout">
-            <section class="pets-list-panel" aria-labelledby="pets-list-title">
-              <div class="panel-heading pets-panel-heading">
-                <div>
-                  <h2 id="pets-list-title" data-i18n="pets.list.title">Available pets</h2>
-                  <p id="pets-list-count" class="manager-note" data-i18n="pets.list.count">Available: 0</p>
+                  <div class="row">
+                    <div class="row-main"><label for="settings-appearance-mode" data-i18n="general.appearance">Appearance</label></div>
+                    <div class="row-trail">
+                      <select id="settings-appearance-mode">
+                        <option value="system" data-i18n="appearance.system">Match system</option>
+                        <option value="light" data-i18n="appearance.light">Light</option>
+                        <option value="dark" data-i18n="appearance.dark">Dark</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <button class="button button-secondary button-compact" id="pets-refresh" data-i18n="pets.refresh.action" type="button">Refresh</button>
+              </section>
+            </div>
+            <p id="settings-general-status" class="sr-only" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="manager-section-notifications" class="panel settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>
+            <div class="group settings-list">
+              <div data-setting-switch="settings-notifications-enabled" data-label="notifications.desktop" data-status="settings-notifications-status" data-detail="notifications.desktopDetail"></div>
+              <div data-setting-switch="settings-notifications-completed" data-label="notifications.completed" data-status="settings-notifications-status" data-detail="notifications.completedDetail" data-nested></div>
+              <div data-setting-switch="settings-notifications-interaction-required" data-label="notifications.interactionRequired" data-status="settings-notifications-status" data-detail="notifications.interactionRequiredDetail" data-nested></div>
+              <div data-setting-switch="settings-notifications-errors" data-label="notifications.errors" data-status="settings-notifications-status" data-detail="notifications.errorsDetail" data-nested></div>
+              <div data-setting-switch="settings-notifications-lifecycle" data-label="notifications.lifecycle" data-status="settings-notifications-status" data-detail="notifications.lifecycleDetail" data-nested></div>
+            </div>
+            <p id="settings-notifications-status" class="sr-only" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="manager-section-pets" class="panel settings-section" data-manager-panel="pets" aria-labelledby="manager-title" hidden>
+            <section class="section" aria-labelledby="pets-display-title">
+              <div class="section-head"><h2 id="pets-display-title" data-i18n="pets.displaySection">Display</h2></div>
+              <div class="group pets-display">
+                <div data-setting-switch="pets-visibility" data-label="pets.visibility.label" data-status="pets-visibility-status" data-disabled></div>
+                <div data-setting-switch="pets-always-on-top" data-label="pets.alwaysOnTop.label" data-status="pets-always-on-top-status" data-disabled></div>
+                <div class="row pets-size-row">
+                  <div class="row-main"><strong id="pets-size-label" data-i18n="pets.size.label">Pet size</strong></div>
+                  <div class="row-trail pets-size-control">
+                    <output id="pets-size-value" for="pets-size">100%</output>
+                    <div class="pets-size-slider">
+                      <input id="pets-size" type="range" min="50" max="200" step="5" value="100" list="pets-size-ticks" aria-labelledby="pets-size-label" aria-describedby="pets-size-status" disabled />
+                      <datalist id="pets-size-ticks">
+                        <option value="50" label="50%"></option>
+                        <option value="75" label="75%"></option>
+                        <option value="100" label="100%"></option>
+                        <option value="125" label="125%"></option>
+                        <option value="150" label="150%"></option>
+                        <option value="175" label="175%"></option>
+                        <option value="200" label="200%"></option>
+                      </datalist>
+                      <div class="pets-size-ticks" aria-hidden="true"><span>50%</span><span>100%</span><span>150%</span><span>200%</span></div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <label class="pets-search-label" for="pets-search"><span class="sr-only" data-i18n="pets.search.placeholder">Search pets</span><input id="pets-search" data-i18n-placeholder="pets.search.placeholder" type="search" placeholder="Search pets" autocomplete="off" /></label>
-              <div id="pets-list" class="manager-list pets-list" role="listbox" data-i18n-aria-label="pets.list.title" aria-label="Available pets" aria-orientation="vertical" tabindex="0"></div>
-              <div id="pets-empty" class="manager-empty" hidden>
-                <strong id="pets-empty-title" data-i18n="pets.empty.title">No pets available</strong>
-                <span id="pets-empty-description" class="manager-note" data-i18n="pets.empty.description">Create or install a pet in Codex, then refresh</span>
+              <p id="pets-visibility-status" class="result" role="status" aria-live="polite"></p>
+              <p id="pets-always-on-top-status" class="result" role="status" aria-live="polite"></p>
+              <p id="pets-size-status" class="result" role="status" aria-live="polite"></p>
+            </section>
+
+            <section class="section" aria-labelledby="pets-list-title">
+              <div class="section-head">
+                <h2 id="pets-list-title" data-i18n="pets.list.title">Available pets</h2>
+                <span id="pets-list-count" class="note" data-i18n="pets.list.count">Available: 0</span>
+                <button class="button" id="pets-refresh" data-i18n="pets.refresh.action" type="button">Refresh</button>
+              </div>
+              <div class="group">
+                <div class="row pets-search-row"><label class="row-main pets-search-label" for="pets-search"><span class="sr-only" data-i18n="pets.search.placeholder">Search pets</span><input id="pets-search" data-i18n-placeholder="pets.search.placeholder" type="search" placeholder="Search pets" autocomplete="off" /></label></div>
+                <div id="pets-list" class="rows pets-list" data-i18n-aria-label="pets.list.title" aria-label="Available pets" tabindex="0"></div>
+                <div id="pets-empty" class="row pets-empty" hidden>
+                  <div class="row-main"><strong id="pets-empty-title" data-i18n="pets.empty.title">No pets available</strong><span id="pets-empty-description" data-i18n="pets.empty.description">Create or install a pet in Codex, then refresh</span></div>
+                </div>
               </div>
               <details id="pets-invalid-issues" class="pets-invalid-issues" hidden>
                 <summary><span id="pets-invalid-summary" data-i18n="pets.invalid.summary">0 pets could not be loaded</span></summary>
                 <div id="pets-invalid-issue-list"></div>
               </details>
-            </section>
-
-            <section class="pets-preview-panel" aria-labelledby="pets-preview-title">
-              <div class="panel-heading pets-panel-heading">
-                <div>
-                  <h2 id="pets-preview-title" data-i18n="pets.preview.title">Preview</h2>
+              <!-- the preview opens under the pet being browsed; it waits here while no row shows it -->
+              <div id="pets-preview-home" hidden>
+                <div id="pets-preview" class="pets-preview" role="region" aria-labelledby="pets-preview-name">
+                  <strong id="pets-preview-name" class="sr-only"></strong>
+                  <div id="pets-preview-stage" class="pets-preview-stage" aria-live="polite">
+                    <div id="pets-preview-placeholder" class="pets-preview-placeholder" role="status" data-i18n="pets.preview.loading">Loading preview</div>
+                    <img id="pets-preview-image" alt="" hidden />
+                  </div>
+                  <div class="pets-preview-foot">
+                    <div class="pets-preview-copy"><p id="pets-preview-message" role="status" aria-live="polite"></p><p id="pets-preview-description" class="pets-description"></p></div>
+                    <div class="actions">
+                      <button class="button button-quiet" id="pets-clear" data-i18n="pets.clear.action" type="button" disabled>Clear selection</button>
+                      <button class="button" id="pets-retry" data-i18n="pets.retry" type="button" hidden>Retry</button>
+                      <button class="button button-primary" id="pets-use" data-i18n="pets.use.action" type="button" disabled>Use this pet</button>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div id="pets-preview-stage" class="pets-preview-stage" aria-live="polite">
-                <div id="pets-preview-placeholder" class="pets-preview-placeholder" role="status" data-i18n="pets.preview.choose">Choose a pet to preview</div>
-                <img id="pets-preview-image" alt="" hidden />
-              </div>
-              <h3 id="pets-preview-name" class="pets-preview-name"></h3>
-              <p id="pets-preview-message" class="manager-note" role="status" aria-live="polite"></p>
-              <div class="button-row pets-preview-actions">
-                <button class="button button-primary" id="pets-use" data-i18n="pets.use.action" type="button" disabled>Use this pet</button>
-                <button class="button button-secondary" id="pets-retry" data-i18n="pets.retry" type="button" hidden>Retry</button>
-                <button class="button button-secondary" id="pets-clear" data-i18n="pets.clear.action" type="button" disabled>Clear selection</button>
-              </div>
-          <div data-setting-switch="pets-always-on-top" data-label="pets.alwaysOnTop.label" data-status="pets-always-on-top-status" data-disabled></div>
-          <p id="pets-always-on-top-status" class="manager-note" role="status" aria-live="polite"></p>
-
-          <div class="pets-size-row setting-row">
-            <div class="setting-copy">
-              <strong id="pets-size-label" data-i18n="pets.size.label">Pet size</strong>
-            </div>
-            <div class="setting-control pets-size-control">
-              <output id="pets-size-value" for="pets-size">100%</output>
-              <div class="pets-size-slider">
-                <input id="pets-size" type="range" min="50" max="200" step="5" value="100" list="pets-size-ticks" aria-labelledby="pets-size-label" aria-describedby="pets-size-status" disabled />
-                <datalist id="pets-size-ticks">
-                  <option value="50" label="50%"></option>
-                  <option value="75" label="75%"></option>
-                  <option value="100" label="100%"></option>
-                  <option value="125" label="125%"></option>
-                  <option value="150" label="150%"></option>
-                  <option value="175" label="175%"></option>
-                  <option value="200" label="200%"></option>
-                </datalist>
-                <div class="pets-size-ticks" aria-hidden="true">
-                  <span>50%</span>
-                  <span>100%</span>
-                  <span>150%</span>
-                  <span>200%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <p id="pets-size-status" class="manager-note" role="status" aria-live="polite"></p>
-              <p id="pets-preview-description" class="manager-note pets-description"></p>
-
             </section>
-          </div>
-        </section>
-        <section class="manager-section about-section" aria-labelledby="manager-title" data-manager-panel="about" hidden>
-          <div class="about-brand"><img class="brand-mark" src="/branding/dsh-work-mark-black.png" alt="" /><h2>dsh-work</h2></div>
-          <p id="about-description" data-i18n="about.description">dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It makes a versioned external DSH runtime startable, observable, and recoverable.</p>
-          <p id="about-version"></p>
-          <section class="about-update-card" aria-labelledby="about-update-title">
-            <div class="about-update-heading"><div><h3 id="about-update-title" data-i18n="about.updateTitle">Application update</h3><p id="about-update-status" class="manager-note" role="status" aria-live="polite"></p></div><span id="about-update-target" class="about-update-target"></span></div>
-            <progress id="about-update-progress" max="100" value="0" hidden data-i18n-aria-label="about.updateProgress"></progress>
-            <p id="about-update-progress-meta" class="manager-note" hidden></p>
-            <div class="about-update-actions"><button id="about-update-action" class="button button-primary" type="button"></button><span id="about-update-last-checked" class="manager-note"></span></div>
           </section>
-          <div class="about-actions"><a href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer" data-i18n="about.help">DSH help</a><button id="about-copy" class="button button-secondary" data-i18n="startup.copyDiagnostics" type="button">Copy diagnostics</button></div>
-          <p id="about-result" role="status"></p>
-        </section>
+
+          <section class="panel about-section" aria-labelledby="manager-title" data-manager-panel="about" hidden>
+            <section class="section" aria-labelledby="about-product-title">
+              <div class="section-head"><h2 id="about-product-title" class="about-brand"><img class="brand-mark" src="/branding/dsh-work-mark-black.png" alt="" />dsh-work</h2><button id="about-copy" class="button" data-i18n="startup.copyDiagnostics" type="button">Copy diagnostics</button></div>
+              <div class="group">
+                <div class="row">
+                  <div class="row-main"><strong id="about-version"></strong><p id="about-description" data-i18n="about.description">dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It makes a versioned external DSH runtime startable, observable, and recoverable.</p></div>
+                  <div class="row-trail"><a class="button button-quiet" href="https://github.com/deepseek-ai/deepseek-harness" target="_blank" rel="noreferrer" data-i18n="about.help">DSH help</a></div>
+                </div>
+              </div>
+              <p id="about-result" class="result" role="status"></p>
+            </section>
+            <section class="section about-update-card" aria-labelledby="about-update-title">
+              <div class="section-head"><h2 id="about-update-title" data-i18n="about.updateTitle">Application update</h2><span id="about-update-target" class="note mono"></span></div>
+              <div class="group">
+                <div class="row">
+                  <div class="row-main">
+                    <p id="about-update-status" role="status" aria-live="polite"></p>
+                    <progress id="about-update-progress" max="100" value="0" hidden data-i18n-aria-label="about.updateProgress"></progress>
+                    <p id="about-update-progress-meta" hidden></p>
+                    <span id="about-update-last-checked"></span>
+                  </div>
+                  <div class="row-trail"><button id="about-update-action" class="button button-primary" type="button"></button></div>
+                </div>
+              </div>
+            </section>
+          </section>
+        </div>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
-  <span id="manager-current-data-directory" hidden></span><span id="manager-configured-data-directory" hidden></span><span id="manager-known-good-data-directory" hidden></span>
-</body>
+    <span id="manager-current-data-directory" hidden></span><span id="manager-configured-data-directory" hidden></span><span id="manager-known-good-data-directory" hidden></span>
+  </body>
 </html>

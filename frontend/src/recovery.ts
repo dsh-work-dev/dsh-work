@@ -63,10 +63,10 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
       more.hidden = showAll || backups.length <= 5;
       if (!backups.length) {
         const empty = document.createElement("p");
-        empty.className = "manager-note"; empty.textContent = t("backup.empty"); list.append(empty);
+        empty.className = "note"; empty.textContent = t("backup.empty"); list.append(empty);
       }
       for (const backup of (showAll ? backups : backups.slice(0, 5))) {
-        const row = document.createElement("div"); row.className = "backup-row";
+        const row = document.createElement("div"); row.className = "row";
         const label = document.createElement("span"); label.textContent = `${new Date(backup.createdAt).toLocaleString(currentLocale(), {year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false})} · ${Math.ceil(backup.size / 1024)} KB`; label.title = backup.fileName;
         const restore = document.createElement("button"); restore.type = "button"; restore.className = "button button-secondary button-compact";
         restore.textContent = t("backup.restore");
@@ -87,7 +87,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
             await refresh();
           }, false, "backup.deleteError").then(() => refreshButton.focus({preventScroll: true}));
         });
-        const actions = document.createElement("div"); actions.className = "backup-row-actions";
+        const actions = document.createElement("div"); actions.className = "row-trail";
         actions.append(restore, remove);
         row.append(label, actions); list.append(row);
       }

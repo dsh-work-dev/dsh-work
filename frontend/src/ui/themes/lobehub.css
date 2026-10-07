@@ -1,0 +1,167 @@
+/*
+ * LobeHub — lobe-ui's tokens (src/styles/theme): a neutral grey layout
+ * (#f8f8f8 / #000) with the page raised as one rounded white panel
+ * (#ffffff / #0d0d0d), a black-or-white primary, HarmonyOS Sans, 8/12px radii,
+ * 36px controls, filled (borderless) inputs and secondary buttons, and soft
+ * layered shadows. Volcano / red for failures and geekblue for focus, as in
+ * its light and dark palettes. From the LobeHub app: secondary-grey
+ * navigation text (#666 / #aaa), 500-weight group labels, 1px row spacing and
+ * a divider under the page title. Light and dark.
+ */
+:root[data-theme-id="lobehub"] {
+  color-scheme: light;
+  --font-body: "HarmonyOS Sans", "Segoe UI Variable Display", "Segoe UI", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: Hack, "SF Mono", "Cascadia Code", Consolas, monospace;
+  --fs-title: 24px;
+  --title-tracking: -0.01em;
+
+  --canvas: #f8f8f8;
+  --text: #080808;
+  --muted: #666666;
+  --line: #eeeeee;
+  --ink: #080808;
+  --on-ink: #ffffff;
+  --hover: rgb(0 0 0 / 3%);
+  --wash: #f8f8f8;
+  --selection: rgb(0 0 0 / 6%);
+  --selection-bar: 0;
+  --focus: #0072f5;
+  --backdrop: rgb(0 0 0 / 45%);
+  --panel-bg: #ffffff;
+  --panel-border: 1px solid #eeeeee;
+  --panel-shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 2px 4px rgb(0 0 0 / 2%);
+
+  --accent: #222222;
+  --on-accent: #ffffff;
+  --outline: #dddddd;
+  --failed: #c93d24;
+  --on-failed: #ffffff;
+  --danger: #b5361d;
+
+  --nav-bg: transparent;
+  --nav-hover-bg: rgb(0 0 0 / 4%);
+  --nav-active-bg: rgb(0 0 0 / 7%);
+  --nav-active-fg: var(--text);
+  --nav-active-bar: 0;
+  --nav-fg: #666666;
+  --nav-list-gap: 1px;
+  --nav-heading-weight: 500;
+  --page-head-pad: var(--space-5);
+  --page-head-border: 1px solid var(--line);
+
+  --group-bg: var(--canvas);
+  --group-border: 1px solid #eeeeee;
+  --group-shadow: none;
+  --group-foot-bg: rgb(0 0 0 / 1.5%);
+  --row-divider: 1px solid #f2f2f2;
+  --row-min-h: 58px;
+  --row-pad-y: 13px;
+  --row-pad-x: 16px;
+
+  --radius-control: 8px;
+  --radius-group: 12px;
+  --radius-tag: 6px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --control-h: 36px;
+  --button-pad-x: 14px;
+  --button-border: 1px solid transparent;
+  --button-bg: rgb(0 0 0 / 6%);
+  --button-fg: #080808;
+  --button-hover-bg: rgb(0 0 0 / 10%);
+  --primary-bg: #222222;
+  --primary-fg: #ffffff;
+  --primary-border: 1px solid #222222;
+  --primary-hover-bg: #333333;
+  --input-border: 1px solid transparent;
+  --input-bg: rgb(0 0 0 / 4%);
+  --dialog-border: 1px solid #eeeeee;
+  --dialog-shadow: 0 40px 80px rgb(0 0 0 / 6%), 0 20px 40px rgb(0 0 0 / 5%), 0 10px 20px rgb(0 0 0 / 4%), 0 5px 10px rgb(0 0 0 / 3%), 0 2px 4px rgb(0 0 0 / 2%);
+  --notice-border: 1px solid #ffcec5;
+  --notice-icon: #c93d24;
+  --tag-bg: rgb(0 0 0 / 3%);
+  --switch-off-bg: rgb(0 0 0 / 16%);
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --switch-w: 44px;
+  --switch-h: 22px;
+  --switch-gap: 2px;
+  --icon-stroke: 1.75;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="lobehub"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #000000;
+  --text: #ffffff;
+  --muted: #aaaaaa;
+  --line: #1a1a1a;
+  --ink: #ffffff;
+  --on-ink: #000000;
+  --hover: rgb(255 255 255 / 6%);
+  --wash: #0d0d0d;
+  --selection: rgb(255 255 255 / 10%);
+  --focus: #4c90ff;
+  --backdrop: rgb(0 0 0 / 65%);
+  --panel-bg: #0d0d0d;
+  --panel-border: 1px solid #1a1a1a;
+  --panel-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 2px 4px rgb(0 0 0 / 3%);
+
+  --accent: #eeeeee;
+  --on-accent: #000000;
+  --outline: #2d2d2d;
+  --failed: #f4416c;
+  --on-failed: #000000;
+  --danger: #ff6f87;
+
+  --nav-hover-bg: rgb(255 255 255 / 6%);
+  --nav-active-bg: rgb(255 255 255 / 10%);
+  --nav-fg: #aaaaaa;
+
+  --group-bg: #141414;
+  --group-border: 1px solid #202020;
+  --group-foot-bg: rgb(255 255 255 / 2%);
+  --row-divider: 1px solid #1d1d1d;
+
+  --button-bg: rgb(255 255 255 / 8%);
+  --button-fg: #ffffff;
+  --button-hover-bg: rgb(255 255 255 / 14%);
+  --primary-bg: #eeeeee;
+  --primary-fg: #000000;
+  --primary-border: 1px solid #eeeeee;
+  --primary-hover-bg: #ffffff;
+  --input-bg: rgb(255 255 255 / 6%);
+  --dialog-border: 1px solid #202020;
+  --dialog-shadow: 0 40px 80px rgb(0 0 0 / 9%), 0 20px 40px rgb(0 0 0 / 8%), 0 10px 20px rgb(0 0 0 / 6%), 0 5px 10px rgb(0 0 0 / 5%), 0 2px 4px rgb(0 0 0 / 3%);
+  --notice-border: 1px solid #780032;
+  --notice-icon: #f4416c;
+  --tag-bg: rgb(255 255 255 / 6%);
+  --switch-off-bg: rgb(255 255 255 / 22%);
+  --switch-off-thumb: #ffffff;
+  --brand-filter: invert(1);
+}
+
+/* every surface sits on the grey layout as one raised, rounded panel;
+   groups inside it read as grey wells (Form variant="filled") */
+:root[data-theme-id="lobehub"] :is(.shell-content, .startup) {
+  margin: var(--space-2) var(--space-2) var(--space-2) 0;
+  border: var(--panel-border);
+  border-radius: var(--radius-group);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-shadow);
+}
+@media (max-width: 760px) {
+  :root[data-theme-id="lobehub"] .shell-content { margin: 0 var(--space-2) var(--space-2); }
+}
+/* the startup panel is inset like the Settings one; its shell fills the panel instead of the window */
+:root[data-theme-id="lobehub"] .startup { min-height: calc(100vh - 2 * var(--space-2)); margin: var(--space-2); }
+:root[data-theme-id="lobehub"] .startup-shell { min-height: calc(100vh - 2 * var(--space-2) - 2px); }
+:root[data-theme-id="lobehub"] dialog { background: var(--panel-bg); }
+:root[data-theme-id="lobehub"] :is(dialog, .shell-nav) {
+  -webkit-backdrop-filter: saturate(150%) blur(10px);
+  backdrop-filter: saturate(150%) blur(10px);
+}
+:root[data-theme-id="lobehub"] .button { font-weight: 500; }

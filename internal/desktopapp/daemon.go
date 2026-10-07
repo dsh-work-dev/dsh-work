@@ -159,6 +159,15 @@ func runDaemon(identity string, resources Resources) {
 		localePreference = values.Locale
 		notificationPreference = values.Notifications
 		automaticRuntimeRollback.Store(values.AutomaticRuntimeRollback)
+		// Settings written before dsh-work owned its appearance followed the
+		// DSH theme; adopt that mode once so the look does not change on upgrade.
+		if manager != nil {
+			if theme, err := manager.Theme(context.Background()); err == nil {
+				if err := settingsManager.ImportAppearanceMode(context.Background(), dshworksettings.AppearanceMode(theme)); err != nil {
+					log.Printf("dsh-work appearance could not be imported: %v", err)
+				}
+			}
+		}
 	}
 	var petCatalog dshworkpet.PetCatalog
 	petCatalogRoot := filepath.Join(filepath.Dir(config.SettingsPath), "pet-cache")
@@ -226,6 +235,16 @@ func runDaemon(identity string, resources Resources) {
 			openSettings(section)
 		}
 	})
+	dshworkapp.SetHostAppearanceProvider(hostService, func() dshworksettings.Appearance {
+		if settingsManager == nil {
+			return dshworksettings.DefaultAppearance()
+		}
+		values, err := settingsManager.Snapshot(context.Background())
+		if err != nil {
+			return dshworksettings.DefaultAppearance()
+		}
+		return values.Appearance
+	})
 	var desktop *application.App
 	var publishRemote = func(string, any) {}
 	managerService := dshworkapp.NewManagerServiceWithRuntimeProgress(manager, host, func(status acquisition.OperationStatus) {
@@ -249,6 +268,12 @@ func runDaemon(identity string, resources Resources) {
 		notificationRouter.SetPreferences,
 		automaticRuntimeRollback.Store,
 	)
+	var publishAppearance func(dshworksettings.Appearance)
+	dshworkapp.SetAppearanceChanged(settingsService, func(appearance dshworksettings.Appearance) {
+		if publishAppearance != nil {
+			publishAppearance(appearance)
+		}
+	})
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
 	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
 	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
@@ -754,6 +779,10 @@ func runDaemon(identity string, resources Resources) {
 		desktop.Event.Emit("locale", locale)
 		server.Publish("locale", locale)
 	}
+	publishAppearance = func(appearance dshworksettings.Appearance) {
+		desktop.Event.Emit("appearance", appearance)
+		server.Publish("appearance", appearance)
+	}
 
 	openSettings = func(section string) {
 		if maintenance.InstallerInProgress() {
@@ -915,6 +944,19 @@ func executableExists(path string) bool {
 
 type managerSnapshotReader interface {
 	Snapshot(context.Context) (dshmanager.Snapshot, error)
+}
+
+// hostWindowTheme maps dsh-work's own appearance to the native frame of its
+// startup and Settings windows. DSH content windows use dshWindowTheme.
+func hostWindowTheme(mode dshworksettings.AppearanceMode) application.Theme {
+	switch mode {
+	case dshworksettings.AppearanceLight:
+		return application.Light
+	case dshworksettings.AppearanceDark:
+		return application.Dark
+	default:
+		return application.SystemDefault
+	}
 }
 
 func dshWindowTheme(manager managerSnapshotReader) application.Theme {
