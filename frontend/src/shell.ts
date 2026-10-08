@@ -2,6 +2,7 @@ import {Events, Window} from "@wailsio/runtime";
 import {HostService, PetSettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {PetPanel} from "../bindings/github.com/local/dsh-work/internal/app/models";
 import {subscribeLocale, t} from "./i18n";
+import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import type {MenuAction, MenuState} from "./shell-menu-model";
 import {icon, type IconName} from "./ui/icons";
@@ -99,6 +100,7 @@ export function mountShell() {
   let eventSeen = false;
   const show = (url: string) => {
     if (!url) {
+      setMenu({dsh: null});
       frame.hidden = true;
       frame.removeAttribute("src");
       host?.removeAttribute("hidden");
@@ -106,7 +108,11 @@ export function mountShell() {
       document.documentElement.style.removeProperty("--shell-text");
       return;
     }
-    if (frame.getAttribute("src") !== url) frame.src = url;
+    if (frame.getAttribute("src") !== url) {
+      // A new DSH document reports its own catalog once it is ready.
+      setMenu({dsh: null});
+      frame.src = url;
+    }
     frame.hidden = false;
     host?.setAttribute("hidden", "true");
   };
@@ -118,16 +124,24 @@ export function mountShell() {
     if (!eventSeen) show(value.url);
   }).catch(() => {});
 
-  // Only the framed DSH document may recolour the chrome, and only with colours.
+  // Only the framed DSH document talks to the shell: colours, its command catalog and menu keys.
   window.addEventListener("message", event => {
     const src = frame.getAttribute("src");
     if (!src || event.source !== frame.contentWindow || event.origin !== new URL(src).origin) return;
-    const data = event.data as {type?: unknown; background?: unknown; color?: unknown};
-    if (data?.type !== "dsh-work/surface" || typeof data.background !== "string" || typeof data.color !== "string") return;
-    const root = document.documentElement.style;
-    if (CSS.supports("color", data.background)) root.setProperty("--shell-surface", data.background);
-    if (CSS.supports("color", data.color)) root.setProperty("--shell-text", data.color);
+    const message = parseFrameMessage(event.data);
+    if (!message) return;
+    if (message.type === "catalog") setMenu({dsh: message.commands});
+    else if (message.type === "menu-key") menuBar.focus();
+    else {
+      const root = document.documentElement.style;
+      if (CSS.supports("color", message.background)) root.setProperty("--shell-surface", message.background);
+      if (CSS.supports("color", message.color)) root.setProperty("--shell-text", message.color);
+    }
   });
+  sendCommand = id => {
+    const src = frame.getAttribute("src");
+    if (src) frame.contentWindow?.postMessage({version: 1, type: "dsh-work/command", id}, new URL(src).origin);
+  };
 
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.
   let altAlone = false;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {hasTranslationInEveryLocale} from "../src/i18n";
+import {parseFrameMessage} from "../src/shell-frame";
 import {buildMenus, stepItem, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
@@ -79,4 +80,22 @@ test("every shell menu label is translated in every locale", () => {
     "shell.window.minimise", "shell.window.maximise", "shell.window.restore", "shell.window.close",
   ];
   for (const key of keys) assert.equal(hasTranslationInEveryLocale(key), true, key);
+});
+
+test("frame catalog keeps only menu commands with well-formed entries", () => {
+  const parsed = parseFrameMessage({version: 1, type: "dsh-work/catalog", commands: [
+    {id: "session.new", keys: ["Ctrl", "N"], bound: true},
+    {id: "plugin.private", keys: [], bound: true},
+    {id: "terminal.new", keys: "Ctrl+T", bound: true},
+  ]});
+  assert.equal(parsed?.type, "catalog");
+  assert.deepEqual(Array.from((parsed as {commands: Map<string, unknown>}).commands.keys()), ["session.new"]);
+});
+
+test("frame messages are rejected unless they match a known shape", () => {
+  assert.equal(parseFrameMessage(null), null);
+  assert.equal(parseFrameMessage({type: "dsh-work/command", id: "session.new"}), null);
+  assert.equal(parseFrameMessage({type: "dsh-work/menu-key", key: "Tab"}), null);
+  assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/menu-key", key: "F10"}), {type: "menu-key"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/surface", background: "rgb(1, 2, 3)", color: "red"}), {type: "surface", background: "rgb(1, 2, 3)", color: "red"});
 });
