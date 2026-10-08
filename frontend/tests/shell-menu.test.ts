@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {hasTranslationInEveryLocale} from "../src/i18n";
 import {buildMenus, stepItem, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
@@ -66,4 +67,16 @@ test("keyboard steps skip separators and wrap", () => {
   assert.equal(stepItem(items, 3, -1), 1);
   assert.equal(stepItem(items, 4, 1), 0);
   assert.equal(stepItem(items, -1, 1), 0);
+});
+
+test("every shell menu label is translated in every locale", () => {
+  const keys = [
+    "shell.menu.app", "shell.menu.session", "shell.menu.view", "shell.menu.help", "shell.menu.settings", "shell.menu.showPet",
+    "shell.menu.restart", "shell.menu.quit", "shell.menu.checkUpdates", "shell.menu.updateAvailable", "shell.menu.updating",
+    "shell.menu.about", "shell.menu.unbound", "shell.menu.bar",
+    "shell.command.session.new", "shell.command.workspace.add", "shell.command.terminal.new", "shell.command.browser.new",
+    "shell.command.sidebar.left.toggle", "shell.command.sidebar.right.toggle", "shell.command.shortcuts.open", "shell.command.settings.open",
+    "shell.window.minimise", "shell.window.maximise", "shell.window.restore", "shell.window.close",
+  ];
+  for (const key of keys) assert.equal(hasTranslationInEveryLocale(key), true, key);
 });

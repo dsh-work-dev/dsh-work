@@ -6,7 +6,7 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 
 .shell-bar {
   flex: none; display: flex; align-items: center; height: 40px;
-  background: var(--canvas); color: var(--text); user-select: none;
+  user-select: none;
 }
 /* Native non-client regions (composition hosting): Windows hit-tests the caption and
    caption buttons, giving native drag, double-click maximise and Snap layouts. */
@@ -24,3 +24,32 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-controls button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
 .shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
+/* Chrome colours follow the DSH surface when the frame reports it. */
+.shell-bar { background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text)); }
+.shell-brand img { width: 18px; height: 18px; display: block; }
+.shell-menubar { display: flex; align-self: stretch; align-items: center; gap: 2px; padding-right: 8px; }
+.shell-menu-button {
+  height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: inherit;
+  font: inherit; font-size: var(--fs-control); cursor: default; position: relative;
+}
+.shell-menu-button:hover, .shell-menu-button[aria-expanded="true"], .shell-menu-button:focus-visible {
+  background: color-mix(in srgb, currentColor 10%, transparent); outline: none;
+}
+.shell-menu-badge::after {
+  content: ""; position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #2f6feb);
+}
+.shell-menu {
+  position: fixed; z-index: 20; min-width: 220px; padding: 4px; border-radius: 8px;
+  background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text));
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  font-size: var(--fs-control);
+}
+.shell-menu-item {
+  display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px 6px 6px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: default;
+}
+.shell-menu-item:focus { background: color-mix(in srgb, currentColor 10%, transparent); outline: none; }
+.shell-menu-item[aria-disabled="true"] { opacity: 0.45; }
+.shell-menu-check svg { width: 14px; height: 14px; display: block; }
+.shell-menu-keys { opacity: 0.6; font-size: var(--fs-meta); }
+.shell-menu-separator { height: 1px; margin: 4px 6px; background: color-mix(in srgb, currentColor 14%, transparent); }
