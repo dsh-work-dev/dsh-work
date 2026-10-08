@@ -66,3 +66,8 @@ export function stepItem(items: readonly MenuEntry[], from: number, delta: 1 | -
   }
   return from;
 }
+
+/** DSH's readable keys already carry their separators ("Ctrl", "+", "B" on Windows; "⌃", "B" on macOS). */
+export function formatKeys(keys: readonly string[] | undefined): string {
+  return keys?.join("") ?? "";
+}

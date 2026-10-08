@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {hasTranslationInEveryLocale} from "../src/i18n";
 import {parseFrameMessage} from "../src/shell-frame";
-import {buildMenus, stepItem, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
+import {buildMenus, formatKeys, stepItem, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
@@ -98,4 +98,11 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/menu-key", key: "Tab"}), null);
   assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/menu-key", key: "F10"}), {type: "menu-key"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/surface", background: "rgb(1, 2, 3)", color: "red"}), {type: "surface", background: "rgb(1, 2, 3)", color: "red"});
+});
+
+test("shortcut keys render as DSH shows them, without extra separators", () => {
+  assert.equal(formatKeys(["Ctrl", "+", "Alt", "+", "B"]), "Ctrl+Alt+B");
+  assert.equal(formatKeys(["Ctrl", "+", "/"]), "Ctrl+/");
+  assert.equal(formatKeys(["⌃", "⌥", "N"]), "⌃⌥N");
+  assert.equal(formatKeys(undefined), "");
 });

@@ -1,4 +1,4 @@
-import {buildMenus, stepItem, type Menu, type MenuAction, type MenuEntry, type MenuId, type MenuItem, type MenuState} from "./shell-menu-model";
+import {buildMenus, formatKeys, stepItem, type Menu, type MenuAction, type MenuEntry, type MenuId, type MenuItem, type MenuState} from "./shell-menu-model";
 import {icon} from "./ui/icons";
 
 export interface MenuBar {
@@ -52,16 +52,18 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     button.setAttribute("role", entry.checked === undefined ? "menuitem" : "menuitemcheckbox");
     if (entry.checked !== undefined) button.setAttribute("aria-checked", String(entry.checked));
     if (!entry.enabled) button.setAttribute("aria-disabled", "true");
-    const check = document.createElement("span");
-    check.className = "shell-menu-check";
-    if (entry.checked) check.append(icon("check"));
     const label = document.createElement("span");
     label.className = "shell-menu-label";
     label.textContent = entry.label;
-    const keys = document.createElement("span");
-    keys.className = "shell-menu-keys";
-    keys.textContent = entry.hint ?? entry.keys?.join("+") ?? "";
-    button.append(check, label, keys);
+    // Trailing slot: the check mark for toggles, otherwise the shortcut or why it is off.
+    const trailing = document.createElement("span");
+    trailing.className = "shell-menu-trailing";
+    if (entry.checked) {
+      trailing.classList.add("shell-menu-checked");
+      trailing.append(icon("check"));
+    }
+    else trailing.textContent = entry.hint ?? formatKeys(entry.keys);
+    button.append(label, trailing);
     button.addEventListener("click", () => activate(entry));
     button.addEventListener("pointerenter", () => button.focus());
     return button;

@@ -39,17 +39,19 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
   content: ""; position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #2f6feb);
 }
 .shell-menu {
-  position: fixed; z-index: 20; min-width: 220px; padding: 4px; border-radius: 8px;
+  position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: 8px;
   background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text));
   border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
   font-size: var(--fs-control);
 }
 .shell-menu-item {
-  display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; width: 100%;
-  padding: 6px 10px 6px 6px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: default;
+  display: flex; align-items: center; gap: 24px; width: 100%; min-height: 30px;
+  padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: default;
 }
+.shell-menu-label { flex: 1; white-space: nowrap; }
 .shell-menu-item:focus { background: color-mix(in srgb, currentColor 10%, transparent); outline: none; }
 .shell-menu-item[aria-disabled="true"] { opacity: 0.45; }
-.shell-menu-check svg { width: 14px; height: 14px; display: block; }
-.shell-menu-keys { opacity: 0.6; font-size: var(--fs-meta); }
+.shell-menu-trailing { display: flex; align-items: center; opacity: 0.6; font-size: var(--fs-meta); white-space: nowrap; }
+.shell-menu-checked { opacity: 1; }
+.shell-menu-trailing svg { width: 14px; height: 14px; }
 .shell-menu-separator { height: 1px; margin: 4px 6px; background: color-mix(in srgb, currentColor 14%, transparent); }
