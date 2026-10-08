@@ -234,6 +234,15 @@ export enum PluginUpdateCheck {
     PluginUpdateUnavailable = "unavailable",
 };
 
+/**
+ * PluginUpgradeAllRequest upgrades several profile plugins as one change, so
+ * the Host stops, verifies and, on failure, restores the Worker only once.
+ */
+export interface PluginUpgradeAllRequest {
+    "target": PluginTarget;
+    "packages": string[] | null;
+}
+
 export interface PluginUpgradeRequest {
     "target": PluginTarget;
     "package": string;

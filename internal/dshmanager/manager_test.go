@@ -655,6 +655,19 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	if !upgrade.RestartRequired || strings.Join(runner.args, " ") != "plugin --profile alpha update @example/alpha --registry https://registry.npmjs.org/" {
 		t.Fatalf("plugin upgrade = result %#v args %#v", upgrade, runner.args)
 	}
+	snapshot, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []PluginInfo
+	for _, profile := range snapshot.Profiles {
+		if profile.Ref.Name == "alpha" {
+			listed = profile.Plugins
+		}
+	}
+	if len(listed) != 1 || listed[0].Package != "@example/alpha" || listed[0].SuccessfulRoute != RuntimeArtifactSourceOfficial {
+		t.Fatalf("snapshot plugins ignore recorded source: %#v", listed)
+	}
 	alpha, err := manager.ListPlugins(context.Background(), PluginListRequest{Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}})
 	if err != nil {
 		t.Fatal(err)

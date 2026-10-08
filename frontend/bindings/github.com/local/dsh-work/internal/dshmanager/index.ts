@@ -34,6 +34,7 @@ export type {
     PluginRemoveRequest,
     PluginResult,
     PluginTarget,
+    PluginUpgradeAllRequest,
     PluginUpgradeRequest,
     ProfileBackupRequest,
     ProfileBackupResult,

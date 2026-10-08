@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -190,6 +191,76 @@ func TestPluginChangesReinstallVersionsThroughSwitchTransaction(t *testing.T) {
 				t.Fatal("restored plugin worker is not Ready")
 			}
 		})
+	}
+}
+
+type batchPluginManager struct {
+	*dshmanager.Manager
+	host        *Host
+	calls       []string
+	generations []string
+	fail        string
+}
+
+func (m *batchPluginManager) ApplyPlugin(ctx context.Context, launch dshmanager.ResolvedLaunch, spec, operation string) (dshmanager.PluginResult, error) {
+	if run := m.host.activeRun(); run != nil && run.cleanupPending() {
+		return dshmanager.PluginResult{}, errors.New("plugin ran before worker cleanup")
+	}
+	m.calls = append(m.calls, operation+":"+spec)
+	m.generations = append(m.generations, m.host.Status().GenerationID)
+	if spec == m.fail {
+		return dshmanager.PluginResult{}, errors.New("upgrade rejected")
+	}
+	return dshmanager.PluginResult{Profile: launch.Target.Profile}, nil
+}
+
+func TestUpgradePluginsRestartsWorkerOnce(t *testing.T) {
+	for _, fail := range []string{"", "beta"} {
+		t.Run("fail="+fail, func(t *testing.T) {
+			f := newRunContextSwitchFixture(t)
+			defer f.close()
+			manager := &batchPluginManager{Manager: f.manager, host: f.host, fail: fail}
+			f.host.deps.Manager = manager
+			f.startReady(t)
+			before := f.host.Status().GenerationID
+			target := dshmanager.PluginTarget{Profile: f.target("alpha").Profile}
+			_, err := f.host.UpgradePlugins(context.Background(), dshmanager.PluginUpgradeAllRequest{Target: target, Packages: []string{"alpha", " beta ", "alpha", "gamma"}})
+			want := []string{"update:alpha", "update:beta", "update:gamma"}
+			if fail != "" {
+				want = want[:2]
+				if err == nil {
+					t.Fatal("failed batch upgrade was accepted")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(manager.calls, ",") != strings.Join(want, ",") {
+				t.Fatalf("calls = %v, want %v", manager.calls, want)
+			}
+			for _, generation := range manager.generations[1:] {
+				if generation != manager.generations[0] {
+					t.Fatalf("worker restarted between upgrades: %v", manager.generations)
+				}
+			}
+			status := f.host.Status()
+			if status.State != lifecycle.StateReady || status.GenerationID == before {
+				t.Fatalf("status after batch = %#v", status)
+			}
+		})
+	}
+}
+
+func TestUpgradePluginsRejectsEmptyBatch(t *testing.T) {
+	f := newRunContextSwitchFixture(t)
+	defer f.close()
+	f.startReady(t)
+	before := f.host.Status().GenerationID
+	target := dshmanager.PluginTarget{Profile: f.target("alpha").Profile}
+	if _, err := f.host.UpgradePlugins(context.Background(), dshmanager.PluginUpgradeAllRequest{Target: target, Packages: []string{" ", ""}}); err == nil {
+		t.Fatal("empty batch was accepted")
+	}
+	if f.host.Status().GenerationID != before {
+		t.Fatal("empty batch restarted the worker")
 	}
 }
 

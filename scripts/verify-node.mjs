@@ -10,13 +10,16 @@ const npmArgs = process.platform === "win32" ? ["/d", "/c", "npm", "--version"] 
 const npmVersion = execFileSync(npmCommand, npmArgs, { encoding: "utf8" }).trim();
 const minimumNodeMajor = manifest.node.minimumMajor;
 const currentNodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
-const expectedNpm = manifest.packageManager.version;
+const minimumNpmMajor = manifest.packageManager.minimumMajor;
+const currentNpmMajor = Number.parseInt(npmVersion.split(".")[0], 10);
 
 if (currentNodeMajor < minimumNodeMajor) {
   throw new Error(`Node mismatch: expected >=${minimumNodeMajor}, got ${process.version}`);
 }
-if (npmVersion !== expectedNpm) {
-  throw new Error(`npm mismatch: expected ${expectedNpm}, got ${npmVersion}`);
+// frontend/package-lock.json and `npm ci` pin dependencies; the npm release
+// itself only needs to read that lockfile.
+if (!(currentNpmMajor >= minimumNpmMajor)) {
+  throw new Error(`npm mismatch: expected >=${minimumNpmMajor}, got ${npmVersion}`);
 }
 
 console.log(`node=${process.version} npm=${npmVersion}`);

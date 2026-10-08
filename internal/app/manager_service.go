@@ -535,6 +535,29 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	return s.manager.UpgradePlugin(ctx, request)
 }
 
+// UpgradePlugins upgrades several profile plugins with a single Worker restart.
+func (s *ManagerService) UpgradePlugins(ctx context.Context, request dshmanager.PluginUpgradeAllRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "settings") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in the Settings window.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	artifact := acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "plugin"}
+	ctx = s.commandLogContext(ctx, operationID, artifact)
+	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
+	defer func() {
+		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+	}()
+	if s.host != nil {
+		return s.host.UpgradePlugins(ctx, request)
+	}
+	return s.manager.UpgradePlugins(ctx, request)
+}
+
 func (s *ManagerService) RenameProfile(ctx context.Context, request dshmanager.ProfileRenameRequest) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()

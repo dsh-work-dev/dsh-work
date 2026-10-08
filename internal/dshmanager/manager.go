@@ -864,9 +864,13 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	lastSwitchAttempt := cloneSwitchAttempt(m.lastSwitchAttempt)
 	safeMode := cloneSafeMode(m.safeMode)
 	versionPoints := m.versionViewLocked()
+	provenance := append([]PluginProvenanceRecord(nil), m.pluginProvenance...)
 	m.mu.RUnlock()
 
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader, current, configured, knownGood, lastSwitchAttempt)
+	for i := range profiles {
+		applyPluginProvenance(profiles[i].Plugins, profiles[i].Ref, profiles[i].Path, provenance)
+	}
 	if safeMode != nil {
 		for i := range profiles {
 			if profiles[i].Ref == safeMode.ReturnTo.Profile {
@@ -952,6 +956,22 @@ func (m *Manager) RemovePlugin(ctx context.Context, request PluginRemoveRequest)
 
 func (m *Manager) UpgradePlugin(ctx context.Context, request PluginUpgradeRequest) (PluginResult, error) {
 	return m.runPluginCommand(ctx, request.Target, request.Package, "update")
+}
+
+// UpgradePlugins upgrades each package in order and stops at the first
+// failure. Without a Host there is no Worker to restart or restore.
+func (m *Manager) UpgradePlugins(ctx context.Context, request PluginUpgradeAllRequest) (PluginResult, error) {
+	packages, err := NormalizePluginUpgradeBatch(request.Packages)
+	if err != nil {
+		return PluginResult{}, err
+	}
+	var result PluginResult
+	for _, packageName := range packages {
+		if result, err = m.runPluginCommand(ctx, request.Target, packageName, "update"); err != nil {
+			return PluginResult{}, err
+		}
+	}
+	return result, nil
 }
 
 // RenameProfile changes the directory name that DSH uses as a custom
@@ -1356,19 +1376,8 @@ func (m *Manager) observePluginUpdates(ctx context.Context, dataDirectory DataDi
 		plugins[index].SourceKind = classifyPluginSource(plugins[index].Spec)
 		plugins[index].CurrentVersion = plugins[index].Version
 		plugins[index].UpdateCheck = PluginUpdateUnknown
-		for provenanceIndex := len(provenance) - 1; provenanceIndex >= 0; provenanceIndex-- {
-			record := provenance[provenanceIndex]
-			if record.Profile == profile && record.Package == plugins[index].Package {
-				plugins[index].SourceKind = record.SourceKind
-				plugins[index].SuccessfulRoute = record.SuccessfulRoute
-				break
-			}
-		}
-		if configuredPluginRegistry(filepath.Join(dataDirectory.Path, "profiles", profile.Name), plugins[index].Package) != "" {
-			plugins[index].SourceKind = PluginSourcePrivateRegistry
-			plugins[index].SuccessfulRoute = RuntimeArtifactSourceNone
-		}
 	}
+	applyPluginProvenance(plugins, profile, filepath.Join(dataDirectory.Path, "profiles", profile.Name), provenance)
 	if runner == nil || commands == nil {
 		return plugins
 	}
@@ -1394,6 +1403,25 @@ func (m *Manager) observePluginUpdates(ctx context.Context, dataDirectory DataDi
 	}
 	applyPluginOutdatedJSON(plugins, result)
 	return plugins
+}
+
+// applyPluginProvenance labels plugins with the source recorded when dsh-work
+// installed them, so a listing shows the source before any registry check.
+func applyPluginProvenance(plugins []PluginInfo, profile ProfileRef, profilePath string, provenance []PluginProvenanceRecord) {
+	for index := range plugins {
+		for provenanceIndex := len(provenance) - 1; provenanceIndex >= 0; provenanceIndex-- {
+			record := provenance[provenanceIndex]
+			if record.Profile == profile && record.Package == plugins[index].Package {
+				plugins[index].SourceKind = record.SourceKind
+				plugins[index].SuccessfulRoute = record.SuccessfulRoute
+				break
+			}
+		}
+		if configuredPluginRegistry(profilePath, plugins[index].Package) != "" {
+			plugins[index].SourceKind = PluginSourcePrivateRegistry
+			plugins[index].SuccessfulRoute = RuntimeArtifactSourceNone
+		}
+	}
 }
 
 func applyPluginListJSON(plugins []PluginInfo, data string) {

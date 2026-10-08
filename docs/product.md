@@ -45,7 +45,12 @@ silently mutate DSH-owned data.
   applies the change. A disabled plugin stays installed. DSH distribution
   packages cannot be disabled as a whole. Non-current profiles are read-only.
 - Plugin update availability comes from a registry check that runs whenever
-  the current profile is running.
+  the current profile is running. A failed check is retried with backoff (2 s
+  doubling to 60 s). Plugins dsh-work installed show their recorded source
+  (official, mirror, custom registry) before the check completes.
+- Upgrade all applies every available plugin upgrade in one Run-context
+  change: one Worker stop, ordered upgrades, one health check, and rollback of
+  the whole batch on failure.
 - Successful normal startup records the last successful version snapshot.
   Settings Overview presents a compact record summary and save action, with
   history and selected-record management in a dedicated dialog.

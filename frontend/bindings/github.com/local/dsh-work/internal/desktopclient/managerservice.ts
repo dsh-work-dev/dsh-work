@@ -172,3 +172,7 @@ export function SetRunContext(target: dshmanager$0.RunContext): $CancellableProm
 export function UpgradePlugin(request: dshmanager$0.PluginUpgradeRequest): $CancellablePromise<dshmanager$0.PluginResult> {
     return $Call.ByID(2877447132, request);
 }
+
+export function UpgradePlugins(request: dshmanager$0.PluginUpgradeAllRequest): $CancellablePromise<dshmanager$0.PluginResult> {
+    return $Call.ByID(2906018941, request);
+}
