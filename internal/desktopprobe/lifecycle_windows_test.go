@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,9 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	report := filepath.Join(root, "webview.json")
 	writeLifecyclePet(t, root)
 	t.Setenv("DSH_WORK_DESKTOP_ROOT", root)
+	// The default single-window shell (ADR-0024); a developer's DSH_WORK_SHELL=0
+	// must not switch this test to the two-window workbench.
+	t.Setenv("DSH_WORK_SHELL", "1")
 	t.Setenv("DSH_WORK_DESKTOP_REPORT", report)
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"version":2,"closeToTray":false,"locale":"zh-CN"}`), 0600); err != nil {
 		t.Fatal(err)
@@ -265,7 +269,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			waitUntil(t, 15*time.Second, func() bool {
-				return !nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+				return !workbenchVisible(uiPID)
 			})
 		} else {
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
@@ -280,13 +284,13 @@ func TestRealDaemonLifecycle(t *testing.T) {
 			})
 			uiPID = status.PID
 			waitUntil(t, 10*time.Second, func() bool {
-				return nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+				return workbenchVisible(uiPID)
 			})
 			if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
 				t.Fatal(err)
 			}
 			waitUntil(t, 10*time.Second, func() bool {
-				return !nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助")
+				return !workbenchVisible(uiPID)
 			})
 		}
 		if !processAlive(uiPID) {
@@ -309,7 +313,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUntil(t, 5*time.Second, func() bool {
-		return nativeWindowVisible(uiPID, "dsh-work", "操作", "设置", "帮助") && nativeWindowVisible(uiPID, "设置")
+		return workbenchVisible(uiPID) && nativeWindowVisible(uiPID, "设置")
 	})
 	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
 		t.Fatal(err)
@@ -374,10 +378,26 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	sampleData, _ := json.Marshal(processSample)
 	var sample struct {
 		Error                      string
-		TCPListeners, UDPEndpoints []any
+		TCPListeners, UDPEndpoints []struct {
+			OwningProcess int
+			LocalAddress  string
+			LocalPort     int
+		}
 	}
-	if json.Unmarshal(sampleData, &sample) != nil || sample.Error != "" || len(sample.TCPListeners) != 0 || len(sample.UDPEndpoints) != 0 {
+	if json.Unmarshal(sampleData, &sample) != nil || sample.Error != "" || len(sample.UDPEndpoints) != 0 {
 		t.Fatalf("process/network sample: %s", sampleData)
+	}
+	// ADR-0022: the daemon's account sign-in callback is the only listener, on
+	// the 127.0.0.1 port the daemon reports for it.
+	callback, err := url.Parse(baseline.AccountCallback)
+	if err != nil || callback.Scheme != "http" || callback.Hostname() != "127.0.0.1" || callback.Port() == "" {
+		t.Fatalf("account callback origin %q", baseline.AccountCallback)
+	}
+	if len(sample.TCPListeners) != 1 {
+		t.Fatalf("want only the account callback listener %s; process/network sample: %s", callback.Host, sampleData)
+	}
+	if listener := sample.TCPListeners[0]; listener.OwningProcess != baseline.PID || listener.LocalAddress != "127.0.0.1" || fmt.Sprint(listener.LocalPort) != callback.Port() {
+		t.Fatalf("want only the account callback listener %s owned by daemon %d; process/network sample: %s", callback.Host, baseline.PID, sampleData)
 	}
 	// Restart belongs to the background owner and replaces exactly the Worker.
 	if err := client.Call(context.Background(), "HostService", "Restart", "workspace", nil, nil); err != nil {
@@ -453,7 +473,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	transportRaw, _ := json.MarshalIndent(transportEvidence, "", "  ")
 	_ = os.WriteFile(filepath.Join(root, "transport.json"), transportRaw, 0600)
-	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "transport": transportEvidence, "checks": []string{"native WebView binary/WS/cancellation", "native WebView direct TCP loopback", "native last-window close hides and reuses UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI hidden", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench hide", "native Pet stays visible in daemon", "notification preference retained", "no TCP/UDP listeners", "restart replaces Worker and preserves daemon"}}
+	evidence := map[string]any{"ok": true, "daemonPID": baseline.PID, "accountCallback": baseline.AccountCallback, "processes": processSample, "restartedWorkerPID": restarted.Diagnostics.PID, "workerPID": baseline.Diagnostics.PID, "taskChildPID": firstTask.Child, "uiPIDs": uiPIDs, "ticksBefore": firstTask.Ticks, "ticksAfter": after.Ticks, "generation": baseline.Status.GenerationID, "transport": transportEvidence, "checks": []string{"native WebView binary/WS/cancellation", "native WebView direct TCP loopback", "native last-window close hides and reuses UI", "same daemon/Worker on reopen", "UI crash preserves task/subprocess", "online CLI with UI hidden", "explicit stop cleans Worker/task child and releases lock", "legacy closeToTray=false ignored", "Settings survives workbench hide", "native Pet stays visible in daemon", "notification preference retained", "only the account callback TCP listener, no UDP", "restart replaces Worker and preserves daemon"}}
 	raw, _ := json.MarshalIndent(evidence, "", "  ")
 	_ = os.WriteFile(filepath.Join(root, "lifecycle.json"), raw, 0600)
 	t.Logf("evidence: %s", filepath.Join(root, "lifecycle.json"))
@@ -559,7 +579,26 @@ func writeLifecyclePet(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 }
-func nativeWindowVisible(pid int, title string, menuLabels ...string) bool {
+
+// workbenchVisible reports the shell's workbench window: no native menu bar
+// (the shell draws its own) and frameless, so the client area is the whole
+// window. Wails keeps WS_CAPTION and drops the frame in WM_NCCALCSIZE.
+func workbenchVisible(pid int) bool {
+	dll := windows.NewLazySystemDLL("user32.dll")
+	return visibleWindow(pid, "dsh-work", func(hwnd uintptr) bool {
+		var window, client windows.Rect
+		menu, _, _ := dll.NewProc("GetMenu").Call(hwnd)
+		dll.NewProc("GetWindowRect").Call(hwnd, uintptr(unsafe.Pointer(&window)))
+		dll.NewProc("GetClientRect").Call(hwnd, uintptr(unsafe.Pointer(&client)))
+		return menu == 0 && client.Right == window.Right-window.Left && client.Bottom == window.Bottom-window.Top
+	})
+}
+
+func nativeWindowVisible(pid int, title string) bool {
+	return visibleWindow(pid, title, func(uintptr) bool { return true })
+}
+
+func visibleWindow(pid int, title string, match func(hwnd uintptr) bool) bool {
 	dll := windows.NewLazySystemDLL("user32.dll")
 	enum := dll.NewProc("EnumWindows")
 	owner := dll.NewProc("GetWindowThreadProcessId")
@@ -575,21 +614,7 @@ func nativeWindowVisible(pid int, title string, menuLabels ...string) bool {
 		var buf [256]uint16
 		text.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
 		shown, _, _ := visible.Call(hwnd)
-		if windows.UTF16ToString(buf[:]) == title && shown != 0 {
-			if len(menuLabels) > 0 {
-				menu, _, _ := dll.NewProc("GetMenu").Call(hwnd)
-				count, _, _ := dll.NewProc("GetMenuItemCount").Call(menu)
-				if menu == 0 || int(count) != len(menuLabels) {
-					return 1
-				}
-				for i, label := range menuLabels {
-					var item [128]uint16
-					dll.NewProc("GetMenuStringW").Call(menu, uintptr(i), uintptr(unsafe.Pointer(&item[0])), 128, 0x400)
-					if windows.UTF16ToString(item[:]) != label {
-						return 1
-					}
-				}
-			}
+		if windows.UTF16ToString(buf[:]) == title && shown != 0 && match(hwnd) {
 			found = true
 			return 0
 		}

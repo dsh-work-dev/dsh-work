@@ -38,6 +38,9 @@ type Snapshot struct {
 	Events        []Event
 	Cursor        uint64
 	Diagnostics   supervisor.Diagnostics
+	// AccountCallback is the origin of the daemon's account sign-in callback
+	// listener (ADR-0022), or empty when it is unavailable.
+	AccountCallback string
 }
 type Server struct {
 	Services        map[string]any
@@ -124,7 +127,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.focusSeen = time.Now()
 			s.mu.Unlock()
 		}
-		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics()}
+		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics(), AccountCallback: s.AccountCallback.Origin()}
 		if state.Status.State == lifecycle.StateReady {
 			state.URL = state.Status.WorkspaceURL
 		} else if state.Status.State == lifecycle.StateStarting {
