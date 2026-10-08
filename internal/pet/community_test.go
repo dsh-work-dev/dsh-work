@@ -49,7 +49,7 @@ func TestCommunityCatalogLoadsJSONCAndBoundsWebM(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	catalog, err := NewPetCatalog(CatalogConfig{CommunityHome: home, CacheRoot: filepath.Join(home, "cache"), HomeDir: func() (string, error) { return home, nil }, Env: func(string) string { return "" }})
+	catalog, err := NewPetCatalog(CatalogConfig{CommunityHome: home, CacheRoot: testCacheRoot(t, home), HomeDir: func() (string, error) { return home, nil }, Env: func(string) string { return "" }})
 	if err != nil {
 		t.Fatal(err)
 	}

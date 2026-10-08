@@ -99,6 +99,11 @@ func TestMachineProjectsWorkspaceContextSeparatelyFromLaunchState(t *testing.T) 
 	if err := os.Mkdir(workspacePath, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// NewSelected stores the real path: macOS temp lives behind /var -> /private/var
+	// and Windows runners report 8.3 short names.
+	if real, err := filepath.EvalSymlinks(workspacePath); err == nil {
+		workspacePath = real
+	}
 	workspace, err := workspacecontext.NewSelected(generation, "workspace-1", workspacePath, "Project")
 	if err != nil {
 		t.Fatal(err)

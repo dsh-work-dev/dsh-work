@@ -174,6 +174,16 @@ func clean(path string) (string, error) {
 	return resolved, nil
 }
 func validate(old, next Locations) (Locations, error) {
+	// Compare against the current locations in the same resolved form as next;
+	// otherwise a symlinked or 8.3 short current path hides containment.
+	if root, e := clean(old.Root); e == nil {
+		old.Root = root
+	}
+	if old.UserData != "" {
+		if userData, e := clean(old.UserData); e == nil {
+			old.UserData = userData
+		}
+	}
 	var err error
 	next.Root, err = clean(next.Root)
 	if err != nil {
