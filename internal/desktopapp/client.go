@@ -117,12 +117,15 @@ func runDesktopClient(identity string, resources Resources) error {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
+	var open func(string)
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
 		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
+			application.NewService(shellService),
 		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
 			mu.Lock()
 			defer mu.Unlock()
@@ -132,7 +135,6 @@ func runDesktopClient(identity string, resources Resources) error {
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
 	ledger := lifecycle.NewWindowLedger("workspace", "settings")
-	var open func(string)
 	var loadedWorkerURL, settingsSection string
 	remember := func(window application.Window, options application.WebviewWindowOptions) {
 		store := remoteGeometry{client: client, values: state.Preferences}
@@ -304,7 +306,11 @@ func runDesktopClient(identity string, resources Resources) error {
 			open("")
 		}
 	})
-	refreshMenu := installDesktopMenu(desktop, client, state, open)
+	refreshMenu := func(daemon.Snapshot) {}
+	if !shell {
+		// The shell draws its own menu bar; the two-window workbench keeps the native one.
+		refreshMenu = installDesktopMenu(desktop, client, state, open)
+	}
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
 		windowMu.Lock()
 		window := worker

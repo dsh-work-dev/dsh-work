@@ -5,11 +5,13 @@ import * as HostService from "./hostservice.js";
 import * as ManagerService from "./managerservice.js";
 import * as PetSettingsService from "./petsettingsservice.js";
 import * as SettingsService from "./settingsservice.js";
+import * as ShellService from "./shellservice.js";
 import * as StorageService from "./storageservice.js";
 export {
     HostService,
     ManagerService,
     PetSettingsService,
     SettingsService,
+    ShellService,
     StorageService
 };
