@@ -165,3 +165,32 @@ function openExternal(raw:string){
 document.addEventListener('click',event=>{const anchor=(event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement|null;if(!anchor)return;const u=new URL(anchor.href,location.href);if(u.origin!==location.origin){event.preventDefault();openExternal(u.href);}},true);
 const nativeOpen=window.open.bind(window);
 window.open=((url?:string|URL,target?:string,features?:string)=>{if(url){const u=new URL(url,location.href);if(u.origin!==location.origin){openExternal(u.href);return null;}}return nativeOpen(url,target,features);}) as typeof window.open;
+
+// Framed in the dsh-work shell: report DSH's base fill so the shell chrome
+// continues it. DSH's own Windows caption paints --dsw-specific-sidebar-fill,
+// so the shell reads the same semantic token. Only colours cross the
+// boundary, only to the embedder.
+const shellOrigin = window.parent !== window ? location.ancestorOrigins?.[0] : undefined;
+if (shellOrigin) {
+  let last = '', pending = 0;
+  const resolve = (token: string, fallback: string) => {
+    const probe = document.createElement('span');
+    probe.style.cssText = `position:absolute;visibility:hidden;color:var(${token},${fallback})`;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  };
+  const report = () => {
+    pending = 0;
+    if (!document.body) return;
+    const style = getComputedStyle(document.body);
+    const surface = {type: 'dsh-work/surface', background: resolve('--dsw-specific-sidebar-fill', style.backgroundColor), color: style.color, scheme: getComputedStyle(document.documentElement).colorScheme};
+    const key = JSON.stringify(surface);
+    if (key !== last) { last = key; window.parent.postMessage(surface, shellOrigin); }
+  };
+  const schedule = () => { if (!pending) pending = requestAnimationFrame(report); };
+  new MutationObserver(schedule).observe(document.documentElement, {attributes: true, subtree: true, attributeFilter: ['class', 'style', 'data-theme']});
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', schedule);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', schedule); else schedule();
+}

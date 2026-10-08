@@ -1,0 +1,26 @@
+/* R-50 prototype: shell chrome around the framed DSH document. */
+html[data-shell] body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; }
+html[data-shell] #host-surface { flex: 1; min-height: 0; overflow: auto; }
+/* The startup layout fills the window; under the shell bar it fills the area below it. */
+html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
+
+.shell-bar {
+  flex: none; display: flex; align-items: center; height: 40px;
+  background: var(--canvas); color: var(--text); user-select: none;
+}
+/* Native non-client regions (composition hosting): Windows hit-tests the caption and
+   caption buttons, giving native drag, double-click maximise and Snap layouts. */
+.shell-brand { padding: 0 12px; font-size: var(--fs-control); font-weight: 600; --wails-non-client-region: caption; align-self: stretch; display: flex; align-items: center; }
+.shell-drag { flex: 1; align-self: stretch; --wails-non-client-region: caption; }
+.shell-controls button:nth-child(1) { --wails-non-client-region: minimize; }
+.shell-controls button:nth-child(2) { --wails-non-client-region: maximize; }
+.shell-controls button:nth-child(3) { --wails-non-client-region: close; }
+.shell-controls { display: flex; align-self: stretch; }
+.shell-controls button {
+  width: 46px; border: 0; padding: 0; background: transparent; color: inherit;
+  display: grid; place-items: center; cursor: default;
+}
+.shell-controls button svg { width: 15px; height: 15px; stroke-width: 1.5; }
+.shell-controls button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
+.shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }

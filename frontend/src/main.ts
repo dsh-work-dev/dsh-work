@@ -2,6 +2,7 @@ import {mountSettingSwitches} from "./ui/setting-switch";
 import {hydrateIcons} from "./ui/icons";
 
 import {mountHost} from "./startup";
+import {mountShell} from "./shell";
 
 import {applyLocale, defaultLocale, mountLocale} from "./i18n";
 import {mountManager} from "./manager";
@@ -33,4 +34,5 @@ if (surface === "settings") {
 } else {
   mountAppearance(() => HostService.GetAppearance());
   mountHost();
+  if (new URLSearchParams(window.location.search).get("shell") === "1") mountShell();
 }

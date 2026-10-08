@@ -6,6 +6,7 @@
 @import "./pages.css";
 @import "./startup.css";
 @import "./pet.css";
+@import "./shell.css";
 /* Themes last: their tokens are scoped by data-theme-id and their ornaments
    must win over component defaults. */
 @import "./themes/chatgpt.css";

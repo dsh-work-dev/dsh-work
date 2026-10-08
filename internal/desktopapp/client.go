@@ -80,8 +80,23 @@ func runDesktopClient(identity string, resources Resources) error {
 	var applicationShuttingDown atomic.Bool
 	current := state
 	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
+	// Shell mode (R-50 prototype, default on this branch): one frameless
+	// workbench window hosts the trusted shell document, and DSH runs in a frame
+	// on its own authority. DSH_WORK_SHELL=0 restores the two-window workbench.
+	shell := os.Getenv("DSH_WORK_SHELL") != "0"
+	surfaceHost := ""
+	if shell {
+		surfaceHost = shellWorkerHost
+	}
 	var workerSurface *desktopbridge.Surface
-	workerSurface = &desktopbridge.Surface{StandardHTTP: standardHTTP, Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
+	workerSurface = &desktopbridge.Surface{Host: surfaceHost, StandardHTTP: standardHTTP, Window: func() application.Window {
+		windowMu.Lock()
+		defer windowMu.Unlock()
+		if shell {
+			return workspace
+		}
+		return worker
+	}, Current: func() *desktopbridge.Bridge {
 		mu.Lock()
 		snapshot := current
 		mu.Unlock()
@@ -103,12 +118,16 @@ func runDesktopClient(identity string, resources Resources) error {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
-		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true},
+		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
-		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: uiAssets(client, application.AssetFileServerFS(resources.Assets))},
+		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			return shellWorkerURL(current.URL)
+		}, uiAssets(client, application.AssetFileServerFS(resources.Assets)))},
 	})
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
@@ -123,7 +142,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		defer windowMu.Unlock()
-		if name == "workspace" && (workspace == nil || worker == nil || (window.ID() != workspace.ID() && window.ID() != worker.ID())) {
+		if name == "workspace" && (workspace == nil || (window.ID() != workspace.ID() && (worker == nil || window.ID() != worker.ID()))) {
 			return
 		}
 		if name == "settings" && (settingsWindow == nil || window.ID() != settingsWindow.ID()) {
@@ -143,7 +162,9 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		workspace.Hide()
-		worker.Hide()
+		if worker != nil {
+			worker.Hide()
+		}
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
@@ -166,9 +187,26 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		workOptions := newOptions("workspace")
+		if shell {
+			workOptions.Frameless = true
+			workOptions.URL = "/?shell=1"
+			// Composition hosting moves hit-testing to the native window: edge
+			// resizing and the caption/caption-button regions (Snap layouts) no
+			// longer depend on which document is under the pointer. Without it,
+			// Wails detects edges in the top document, which the DSH frame covers.
+			workOptions.Windows.WebView2CompositionHosting = true
+		}
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
 		remember(workspace, workOptions)
+		if shell {
+			if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
+				desktopprobe.InstallClient(desktop, workspace, report)
+			}
+			ownWorkspace := workspace
+			workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorkspace, event) })
+			return
+		}
 		workerOptions := workOptions
 		workerOptions.Name = "worker"
 		workerOptions.Permissions = webviewPermissions("worker")
@@ -232,6 +270,10 @@ func runDesktopClient(identity string, resources Resources) error {
 		if !ledger.TryShow("workspace") {
 			return
 		}
+		if shell {
+			workspace.Show().Focus()
+			return
+		}
 		mu.Lock()
 		ready := current.URL != ""
 		workerURL := current.URL
@@ -266,6 +308,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
 		windowMu.Lock()
 		window := worker
+		if shell {
+			window = workspace
+		}
 		if section == "settings" {
 			window = settingsWindow
 		} else if workspace != nil && workspace.IsVisible() {
@@ -357,6 +402,11 @@ func runDesktopClient(identity string, resources Resources) error {
 						desktop.Event.Emit("lifecycle", next.Status)
 						lastStatus = statusJSON
 					}
+					if next.URL != lastURL && shell {
+						// The shell swaps its frame; the native window stays put.
+						desktop.Event.Emit("worker-url", shellWorkerURL(next.URL))
+						lastURL = next.URL
+					}
 					if next.URL != lastURL {
 						windowMu.Lock()
 						if workspace == nil {
@@ -398,6 +448,45 @@ func isWorkspaceOpenURL(raw string) bool {
 		return false
 	}
 	return strings.EqualFold(launched.Scheme, "dsh") || strings.EqualFold(launched.Scheme, accountcallback.DesktopReturnScheme)
+}
+
+// webviewDebugArgs opens WebView2 DevTools on a loopback port for prototype
+// inspection only; Wails' own browser arguments override the WebView2 env var.
+func webviewDebugArgs() []string {
+	port := os.Getenv("DSH_WORK_WEBVIEW_DEBUG_PORT")
+	if port == "" {
+		return nil
+	}
+	return []string{"--remote-debugging-port=" + port}
+}
+
+// shellWorkerHost is the fixed authority of the framed Worker document. Wails
+// intercepts any wails.localhost authority inside the WebView, so the port is
+// an origin label only and nothing listens on it. It stays fixed so DSH's
+// browser storage survives Worker generations.
+const shellWorkerHost = "wails.localhost:48217"
+
+func shellWorkerURL(relative string) string {
+	if relative == "" {
+		return ""
+	}
+	return "http://" + shellWorkerHost + relative
+}
+
+// shellState answers the shell's initial frame address; later changes arrive
+// as worker-url events.
+func shellState(workerURL func() string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/__shell/worker" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(struct {
+			URL string `json:"url"`
+		}{workerURL()})
+	})
 }
 
 type uiWorkerTransport struct {
