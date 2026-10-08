@@ -18,7 +18,7 @@
   },
   "packageManager": {
     "name": "npm",
-    "version": "11.19.0",
+    "minimumMajor": 11,
     "lockfile": "frontend/package-lock.json"
   },
   "dsh": {
@@ -29,6 +29,6 @@
   },
   "targets": {
     "development": "windows/amd64",
-    "validation": ["windows/amd64", "darwin/amd64", "linux/amd64"]
+    "validation": ["windows/amd64", "darwin/arm64", "linux/amd64"]
   }
 }

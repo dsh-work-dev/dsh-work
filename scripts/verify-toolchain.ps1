@@ -19,8 +19,9 @@ if ($go -notmatch [regex]::Escape("go$($manifest.go.version)")) {
 if (-not $nodeMajorMatch.Success -or [int]$nodeMajorMatch.Groups['major'].Value -lt [int]$manifest.node.minimumMajor) {
     throw "Node mismatch: expected >=$($manifest.node.minimumMajor), got $node"
 }
-if ($npm -ne $manifest.packageManager.version) {
-    throw "npm mismatch: expected $($manifest.packageManager.version), got $npm"
+$npmMajorMatch = [regex]::Match($npm, '^(?<major>\d+)\.')
+if (-not $npmMajorMatch.Success -or [int]$npmMajorMatch.Groups['major'].Value -lt [int]$manifest.packageManager.minimumMajor) {
+    throw "npm mismatch: expected >=$($manifest.packageManager.minimumMajor), got $npm"
 }
 if ($wails -ne $manifest.wails.cli) {
     throw "Wails mismatch: expected $($manifest.wails.cli), got $wails"
