@@ -94,7 +94,9 @@ jobs:
         run: |
           $nsisVersion = (Get-Content toolchain.lock.json -Raw | ConvertFrom-Json).nsis.version
           choco install nsis --version=$nsisVersion --yes --no-progress
-          makensis /VERSION
+          $nsisBin = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisBin
+          & (Join-Path $nsisBin 'makensis.exe') /VERSION
 
       - name: Build application
         run: wails3 build
