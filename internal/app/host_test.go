@@ -392,6 +392,11 @@ func TestHostUsesManagerRunContextAndClearsCurrentState(t *testing.T) {
 	if err := os.Mkdir(workspacePath, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// NewSelected stores the real path: macOS temp lives behind /var -> /private/var
+	// and Windows runners report 8.3 short names.
+	if real, err := filepath.EvalSymlinks(workspacePath); err == nil {
+		workspacePath = real
+	}
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath: filepath.Join(root, "manager.json"),
 		DataDirectories: []dshmanager.DataDirectoryInfo{{

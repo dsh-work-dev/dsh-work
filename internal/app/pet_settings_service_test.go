@@ -468,6 +468,9 @@ func (r *petServiceRenderer) Unload(context.Context) error { return r.err }
 func newTrustedPetSettingsService(manager *settings.Manager, catalog pet.PetCatalog, renderer pet.PetRenderer) *PetSettingsService {
 	service := NewPetSettingsService(manager, catalog, renderer)
 	service.trustedSurface = func(context.Context) bool { return true }
+	// Pin the full overlay contract so results do not depend on the host OS;
+	// fallback platforms are covered by tests that set capabilities explicitly.
+	service.overlayCapabilities = pet.CapabilitiesFor("windows")
 	return service
 }
 

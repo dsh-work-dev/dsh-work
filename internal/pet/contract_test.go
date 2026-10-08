@@ -59,7 +59,7 @@ func TestCodexCatalogDiscoveryUsesEnvironmentPrecedenceAndDirectChildren(t *test
 
 	catalog, err := NewCatalog(CatalogConfig{
 		CodexHome: configuredHome,
-		CacheRoot: filepath.Join(t.TempDir(), "cache"),
+		CacheRoot: testCacheRoot(t, t.TempDir()),
 		Env: func(name string) string {
 			if name == "CODEX_HOME" {
 				return envHome
@@ -112,7 +112,7 @@ func TestCatalogUsesUserHomeCodexFallbackWhenEnvironmentIsEmpty(t *testing.T) {
 		"id": "fallback", "displayName": "Home Fallback", "spritesheetPath": "spritesheet.png",
 	}, 1536, 1872)
 	catalog, err := NewCatalog(CatalogConfig{
-		CacheRoot: filepath.Join(t.TempDir(), "cache"),
+		CacheRoot: testCacheRoot(t, t.TempDir()),
 		HomeDir:   func() (string, error) { return userHome, nil },
 		Env:       func(string) string { return "" },
 	})
@@ -133,7 +133,7 @@ func TestCatalogPetsPrecedenceAlsoReservesInvalidSameFolderEntries(t *testing.T)
 	writeCodexFixture(t, home, SourceCodexAvatars, "reserved", map[string]any{
 		"id": "reserved-avatar", "displayName": "Should Not Bypass", "spritesheetPath": "spritesheet.png",
 	}, 1536, 1872)
-	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache")})
+	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestCatalogInspectAndAdapterProbeExposeNormalizedSafeResults(t *testing.T) 
 	if err != nil || probe.Source.StableKey != "codex:pets:inspect" || probe.Geometry.FrameCount != 72 {
 		t.Fatalf("probe=%+v err=%v", probe, err)
 	}
-	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache")})
+	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestCatalogRefreshPublishesRevisionedStaleSnapshotsAndRetainsItems(t *testi
 	}, 1536, 1872)
 	currentHome := validHome
 	catalog, err := NewCatalog(CatalogConfig{
-		CacheRoot: filepath.Join(t.TempDir(), "cache"),
+		CacheRoot: testCacheRoot(t, t.TempDir()),
 		Env: func(name string) string {
 			if name == "CODEX_HOME" {
 				return currentHome
@@ -549,7 +549,7 @@ func TestCatalogRefreshPublishesRevisionedStaleSnapshotsAndRetainsItems(t *testi
 	}
 
 	firstFailureCatalog, err := NewCatalog(CatalogConfig{
-		CacheRoot: filepath.Join(t.TempDir(), "cache"),
+		CacheRoot: testCacheRoot(t, t.TempDir()),
 		Env: func(name string) string {
 			if name == "CODEX_HOME" {
 				return filepath.Join(t.TempDir(), "never-there")
@@ -571,7 +571,7 @@ func TestCatalogAndDefinitionsAreDefensiveCopies(t *testing.T) {
 	source := writeCodexFixture(t, home, SourceCodexPets, "copy", map[string]any{
 		"id": "copy", "displayName": "Copy", "spriteVersionNumber": 2, "spritesheetPath": "spritesheet.png",
 	}, 1536, 2288)
-	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache")})
+	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func TestCatalogRefreshCoalescesConcurrentScansAndCancellationPublishesNothing(t
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache"), Adapter: adapter})
+	catalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir()), Adapter: adapter})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestCatalogRefreshCoalescesConcurrentScansAndCancellationPublishesNothing(t
 	}
 
 	cancelAdapter := &blockingPetAdapter{started: make(chan struct{}), release: make(chan struct{})}
-	cancelCatalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache"), Adapter: cancelAdapter})
+	cancelCatalog, err := NewCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir()), Adapter: cancelAdapter})
 	if err != nil {
 		t.Fatal(err)
 	}

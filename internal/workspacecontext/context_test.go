@@ -26,6 +26,11 @@ func TestNewSelectedCanonicalizesAndValidatesExistingDirectory(t *testing.T) {
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// NewSelected stores the real path: macOS temp lives behind /var -> /private/var
+	// and Windows runners report 8.3 short names.
+	if real, err := filepath.EvalSymlinks(directory); err == nil {
+		directory = real
+	}
 	selected, err := NewSelected("generation-1", "workspace-1", filepath.Join(directory, "."), "Project")
 	if err != nil {
 		t.Fatal(err)

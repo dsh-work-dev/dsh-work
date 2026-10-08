@@ -10,8 +10,25 @@ import (
 	"time"
 )
 
+// testCacheRoot returns parent/cache and restores write permission on the
+// read-only cache tree before t.TempDir removes it; Unix cannot unlink
+// entries inside a 0o500 directory.
+func testCacheRoot(t *testing.T, parent string) string {
+	t.Helper()
+	root := filepath.Join(parent, "cache")
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
+	return root
+}
+
 func TestMaterializePackagePrunesOldDigestsWithinBounds(t *testing.T) {
-	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	cacheRoot := testCacheRoot(t, t.TempDir())
 	keepFile := filepath.Join(cacheRoot, "keep-me.txt")
 	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		t.Fatal(err)
@@ -54,7 +71,7 @@ func TestMaterializePackagePrunesOldDigestsWithinBounds(t *testing.T) {
 }
 
 func TestCleanupDigestCacheEnforcesByteLimitAndRetainsCurrent(t *testing.T) {
-	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	cacheRoot := testCacheRoot(t, t.TempDir())
 	paths := make([]string, 0, 3)
 	for index := 0; index < 3; index++ {
 		path, err := materializePackage(context.Background(), cacheRoot, cacheInventoryForTest(index, []byte("x")))
@@ -83,7 +100,7 @@ func TestCleanupDigestCacheEnforcesByteLimitAndRetainsCurrent(t *testing.T) {
 
 func TestCleanupDigestCacheSkipsNonCompliantEntriesAndStaysInsideRoot(t *testing.T) {
 	root := t.TempDir()
-	cacheRoot := filepath.Join(root, "cache")
+	cacheRoot := testCacheRoot(t, root)
 	outsideRoot := filepath.Join(root, "outside")
 	if err := os.MkdirAll(cacheRoot, 0o700); err != nil {
 		t.Fatal(err)

@@ -17,6 +17,16 @@ func put(t *testing.T, path, text string) {
 		t.Fatal(err)
 	}
 }
+// tempDir returns t.TempDir in resolved form, matching what Save stores
+// (macOS /var -> /private/var, Windows 8.3 short names).
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
 func contents(t *testing.T, path string) string {
 	t.Helper()
 	b, e := os.ReadFile(path)
@@ -28,7 +38,7 @@ func contents(t *testing.T, path string) string {
 func TestRelocateAndReopenWithDefaultAndExternalData(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(map[bool]string{false: "default", true: "external"}[external], func(t *testing.T) {
-			base := t.TempDir()
+			base := tempDir(t)
 			old := filepath.Join(base, "old")
 			next := filepath.Join(base, "new")
 			locator := filepath.Join(base, "control", "locations.json")
@@ -181,5 +191,23 @@ func TestPreparationFailureDoesNotPublishOrDeleteData(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(base, ".dsh-work-migrate-*"))
 	if len(matches) != 0 {
 		t.Fatal("left partial staging directories")
+	}
+}
+func TestNestedRootIsRejectedWhenCurrentRootIsALink(t *testing.T) {
+	base := tempDir(t)
+	target := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(target, "app"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	m, err := Open(filepath.Join(base, "locations.json"), filepath.Join(link, "app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Save(Locations{Root: filepath.Join(target, "app", "nested")}); err == nil {
+		t.Fatal("accepted a root nested in the current root reached through a link")
 	}
 }

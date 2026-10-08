@@ -290,7 +290,7 @@ func TestPetCatalogDiscoversDirectChildrenWithPetsPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache")})
+	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestPetCatalogMaterializesAndDefensivelyResolvesPackages(t *testing.T) {
 	packageRoot := writeCodexPackage(t, home, SourceCodexPets, "stable", map[string]any{
 		"id": "stable", "displayName": "Original", "spritesheetPath": "spritesheet.png",
 	}, 1536, 1872, "spritesheet.png")
-	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	cacheRoot := testCacheRoot(t, t.TempDir())
 	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: cacheRoot})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +374,7 @@ func TestPetCatalogSnapshotRevisionStaleAndDefensiveCopy(t *testing.T) {
 	writeCodexPackage(t, home, SourceCodexPets, "one", map[string]any{
 		"id": "one", "displayName": "One", "spritesheetPath": "spritesheet.png",
 	}, 1536, 1872, "spritesheet.png")
-	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	cacheRoot := testCacheRoot(t, t.TempDir())
 	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: cacheRoot})
 	if err != nil {
 		t.Fatal(err)
@@ -421,7 +421,7 @@ func TestPetCatalogCoalescesConcurrentRefreshAndDoesNotPublishCancellation(t *te
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache"), Adapter: adapter})
+	catalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir()), Adapter: adapter})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestPetCatalogCoalescesConcurrentRefreshAndDoesNotPublishCancellation(t *te
 	}
 
 	cancelAdapter := &blockingAdapter{entered: make(chan struct{}), release: make(chan struct{})}
-	cancelCatalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: filepath.Join(t.TempDir(), "cache"), Adapter: cancelAdapter})
+	cancelCatalog, err := NewPetCatalog(CatalogConfig{CodexHome: home, CacheRoot: testCacheRoot(t, t.TempDir()), Adapter: cancelAdapter})
 	if err != nil {
 		t.Fatal(err)
 	}
