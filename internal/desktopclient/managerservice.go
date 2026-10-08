@@ -169,6 +169,13 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	return value, err
 }
 
+func (s *ManagerService) UpgradePlugins(ctx context.Context, request dshmanager.PluginUpgradeAllRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s.Local != nil { return s.Local.UpgradePlugins(ctx, request) }
+	var value dshmanager.PluginResult
+	err := call(ctx, s.Client, "ManagerService", "UpgradePlugins", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) RenameProfile(ctx context.Context, request dshmanager.ProfileRenameRequest) (dshmanager.Snapshot, error) {
 	if s.Local != nil { return s.Local.RenameProfile(ctx, request) }
 	var value dshmanager.Snapshot

@@ -38,6 +38,7 @@ const setPluginDisabled = ManagerService.SetPluginDisabled;
 const listLoaderEntries = ManagerService.ListLoaderEntries;
 const setLoaderEntryDisabled = ManagerService.SetLoaderEntryDisabled;
 const upgradePlugin = ManagerService.UpgradePlugin;
+const upgradePlugins = ManagerService.UpgradePlugins;
 const renameProfile = ManagerService.RenameProfile;
 const cloneProfile = ManagerService.CloneProfile;
 const deleteProfile = ManagerService.DeleteProfile;
@@ -238,6 +239,8 @@ export function mountManager() {
   const pluginProfileLabel = document.getElementById("manager-plugin-profile") as HTMLElement;
   const pluginScopeNote = document.getElementById("manager-plugin-scope-note") as HTMLParagraphElement;
   const profilePlugins = document.getElementById("manager-profile-plugins") as HTMLDivElement;
+  const upgradeAll = document.getElementById("manager-plugin-upgrade-all") as HTMLButtonElement;
+  let upgradablePackages: string[] = [];
   const profileList = document.getElementById("manager-profiles") as HTMLDivElement;
   const runtimeList = document.getElementById("manager-runtimes") as HTMLDivElement;
   const nodeList = document.getElementById("manager-nodes") as HTMLDivElement;
@@ -260,6 +263,8 @@ export function mountManager() {
   let pluginObservation: {profile: string; plugins?: PluginInfo[]; layers?: LoaderLayer[]} | undefined;
   let pluginObservationGeneration = 0;
   let pluginObservationInFlight: string | undefined;
+  let pluginObservationRetryDelay = 0;
+  let pluginObservationRetry: number | undefined;
   // The loader tree starts collapsed for each profile shown.
   let loaderTree = {profile: "", open: false, query: "", openLayers: new Set<string>()};
   let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
@@ -668,6 +673,11 @@ export function mountManager() {
     for (const plugin of plugins) {
       profilePlugins.append(pluginRow(item, plugin, mutable));
     }
+    upgradablePackages = mutable
+      ? plugins.filter(plugin => plugin.updateCheck === "available").map(plugin => plugin.package || plugin.name)
+      : [];
+    upgradeAll.hidden = upgradablePackages.length < 2;
+    upgradeAll.textContent = t("action.upgradeAll", {count: String(upgradablePackages.length)});
     renderLoaderTree(item, mutable);
   }
 
@@ -1377,8 +1387,18 @@ export function mountManager() {
     const plugins = listPlugins({target: {profile: current.profile}}).then((result) => {
       if (stale()) return;
       observation.plugins = result ?? [];
+      pluginObservationRetryDelay = 0;
       applyPluginObservation();
-    }, (error) => console.error("Could not refresh current plugin observation", error));
+    }, (error) => {
+      console.error("Could not refresh current plugin observation", error);
+      if (stale()) return;
+      // A Worker that just became Ready may not answer yet; retry with backoff
+      // instead of keeping the snapshot listing for this profile.
+      pluginObservation = undefined;
+      pluginObservationRetryDelay = Math.min(Math.max(pluginObservationRetryDelay * 2, 2000), 60000);
+      window.clearTimeout(pluginObservationRetry);
+      pluginObservationRetry = window.setTimeout(observePluginsIfNeeded, pluginObservationRetryDelay);
+    });
     await Promise.all([layers, plugins]);
   }
 
@@ -1535,6 +1555,29 @@ export function mountManager() {
     for (const control of Array.from(profilePlugins.querySelectorAll<HTMLButtonElement | HTMLInputElement>("[data-plugin-control]"))) {
       control.disabled = disabled;
     }
+    upgradeAll.disabled = disabled;
+  }
+
+  // Upgrades every plugin with an available update in one Worker restart.
+  async function upgradeAllPlugins() {
+    const packages = [...upgradablePackages];
+    if (packages.length === 0) return;
+    try {
+      const target = explicitPluginTarget();
+      setPluginControlsDisabled(true);
+      const result = await upgradePlugins({target, packages});
+      invalidatePluginObservation();
+      await refresh(target.profile);
+      document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
+      pluginsFeedback(t("feedback.pluginsUpgraded", {profile: result.profile.name, count: String(packages.length)}), "success");
+    } catch (error) {
+      // A failed candidate may have restored the previous environment.
+      await Promise.allSettled([refresh()]);
+      pluginsFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
+      console.error("Could not upgrade profile plugins", error);
+    } finally {
+      setPluginControlsDisabled(false);
+    }
   }
 
   async function mutatePlugin(operation: "install" | "upgrade" | "remove" | "disable" | "enable" | "disable-entry" | "enable-entry", packageOverride?: string) {
@@ -1576,6 +1619,7 @@ export function mountManager() {
   }
 
   install.addEventListener("click", () => void mutatePlugin("install"));
+  upgradeAll.addEventListener("click", () => void upgradeAllPlugins());
 
   profileRename.addEventListener("click", () => void (async () => {
     const item = managedProfileItem();

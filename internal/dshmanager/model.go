@@ -1,6 +1,10 @@
 package dshmanager
 
-import "github.com/local/dsh-work/internal/lifecycle"
+import (
+	"strings"
+
+	"github.com/local/dsh-work/internal/lifecycle"
+)
 
 // DataDirectoryOwnership describes who owns the DSH data directory. A
 // dsh-work-owned directory is safe for dsh-work to create and maintain; a
@@ -239,6 +243,38 @@ type PluginRemoveRequest struct {
 type PluginUpgradeRequest struct {
 	Target  PluginTarget `json:"target"`
 	Package string       `json:"package"`
+}
+
+// PluginUpgradeAllRequest upgrades several profile plugins as one change, so
+// the Host stops, verifies and, on failure, restores the Worker only once.
+type PluginUpgradeAllRequest struct {
+	Target   PluginTarget `json:"target"`
+	Packages []string     `json:"packages"`
+}
+
+// MaxPluginUpgradeBatch bounds a single upgrade-all request.
+const MaxPluginUpgradeBatch = 64
+
+// NormalizePluginUpgradeBatch trims, de-duplicates and bounds the packages of
+// an upgrade-all request while keeping their order.
+func NormalizePluginUpgradeBatch(packages []string) ([]string, error) {
+	seen := make(map[string]bool, len(packages))
+	result := make([]string, 0, len(packages))
+	for _, item := range packages {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		result = append(result, item)
+	}
+	if len(result) == 0 {
+		return nil, failure(lifecycle.ErrorPluginCommandFailed, "No plugin was selected for upgrade", "choose at least one plugin with an available update")
+	}
+	if len(result) > MaxPluginUpgradeBatch {
+		return nil, failure(lifecycle.ErrorPluginCommandFailed, "Too many plugins were selected for one upgrade", "upgrade fewer plugins at a time")
+	}
+	return result, nil
 }
 
 // LoaderLayer is one official profile layer and the loader entries it

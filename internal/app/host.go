@@ -44,6 +44,7 @@ type WorkerChannel interface {
 type ProfilePluginManager interface {
 	InstallPlugin(context.Context, dshmanager.PluginInstallRequest) (dshmanager.PluginResult, error)
 	UpgradePlugin(context.Context, dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error)
+	UpgradePlugins(context.Context, dshmanager.PluginUpgradeAllRequest) (dshmanager.PluginResult, error)
 	RemovePlugin(context.Context, dshmanager.PluginRemoveRequest) (dshmanager.PluginResult, error)
 	SetPluginDisabled(context.Context, dshmanager.PluginDisableRequest) (dshmanager.PluginResult, error)
 }
@@ -596,6 +597,33 @@ func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemove
 }
 func (h *Host) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error) {
 	return h.applyPlugin(ctx, request.Target, request.Package, "update")
+}
+
+// UpgradePlugins applies every upgrade inside one Run-context switch: the
+// Worker stops once, all packages update, then one health check decides. Any
+// failure restores the version point taken before the first upgrade.
+func (h *Host) UpgradePlugins(ctx context.Context, request dshmanager.PluginUpgradeAllRequest) (dshmanager.PluginResult, error) {
+	packages, err := dshmanager.NormalizePluginUpgradeBatch(request.Packages)
+	if err != nil {
+		return dshmanager.PluginResult{}, err
+	}
+	manager, ok := h.deps.Manager.(interface {
+		ApplyPlugin(context.Context, dshmanager.ResolvedLaunch, string, string) (dshmanager.PluginResult, error)
+	})
+	if !ok {
+		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
+	}
+	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+		var result dshmanager.PluginResult
+		for index, packageName := range packages {
+			dshadapter.ReportCommandOutput(ctx, fmt.Sprintf("Upgrading %s (%d/%d)…", packageName, index+1, len(packages)))
+			var err error
+			if result, err = manager.ApplyPlugin(ctx, launch, packageName, "update"); err != nil {
+				return dshmanager.PluginResult{}, fmt.Errorf("%s: %w", packageName, err)
+			}
+		}
+		return result, nil
+	})
 }
 
 // SetPluginDisabled delegates bundle activation to DSH's live PluginManager.
