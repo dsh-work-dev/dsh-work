@@ -1,13 +1,10 @@
 import {Events, Window} from "@wailsio/runtime";
-import {HostService, PetSettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
-import type {PetPanel} from "../bindings/github.com/local/dsh-work/internal/app/models";
+import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import type {MenuAction, MenuState} from "./shell-menu-model";
 import {icon, type IconName} from "./ui/icons";
-
-const petState = (panel: PetPanel) => ({ready: panel.runtime?.selectionStatus === "ready", visible: panel.runtime?.effectiveVisibility === "visible"});
 
 /** Trusted shell chrome (top bar and menus) around the framed DSH document. */
 export function mountShell() {
@@ -53,7 +50,7 @@ export function mountShell() {
   };
   const refreshPet = async () => {
     try {
-      setMenu({pet: petState(await PetSettingsService.GetPetPanel())});
+      setMenu({pet: await ShellService.GetPet()});
     } catch (error) {
       console.warn("pet state unavailable", error);
     }
@@ -73,7 +70,7 @@ export function mountShell() {
     switch (action.kind) {
       case "settings": void ShellService.OpenSettings("settings"); break;
       case "update": case "about": void ShellService.OpenSettings("about"); break;
-      case "pet": void busyAction(async () => { menuState.pet = petState(await PetSettingsService.SetPetVisibility(!menuState.pet.visible)); }); break;
+      case "pet": void busyAction(async () => { menuState.pet = await ShellService.SetPetVisible(!menuState.pet.visible); }); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
       case "dsh": sendCommand(action.id); break;

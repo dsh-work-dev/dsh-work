@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/accountcallback"
+	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
@@ -118,7 +119,13 @@ func runDesktopClient(identity string, resources Resources) error {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
 	var open func(string)
-	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }}
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
+		var panel app.PetPanel
+		if visible == nil {
+			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel)
+		}
+		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
+	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
 		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},

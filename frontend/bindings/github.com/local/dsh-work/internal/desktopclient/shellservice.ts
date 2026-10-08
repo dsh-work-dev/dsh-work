@@ -3,7 +3,7 @@
 
 /**
  * ShellService serves the trusted workbench shell from the UI process, which
- * owns the windows; it never reaches the background.
+ * owns the windows.
  * @module
  */
 
@@ -11,9 +11,27 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
+/**
+ * GetPet reports whether a pet is selected and visible.
+ */
+export function GetPet(): $CancellablePromise<$models.ShellPet> {
+    return $Call.ByID(2012532601);
+}
+
 /**
  * OpenSettings shows dsh-work Settings at a section the shell menu offers.
  */
 export function OpenSettings(section: string): $CancellablePromise<void> {
     return $Call.ByID(671240417, section);
+}
+
+/**
+ * SetPetVisible shows or hides the selected pet.
+ */
+export function SetPetVisible(visible: boolean): $CancellablePromise<$models.ShellPet> {
+    return $Call.ByID(3239166025, visible);
 }

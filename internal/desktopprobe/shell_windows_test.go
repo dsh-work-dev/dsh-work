@@ -37,7 +37,11 @@ func TestRealShellFrame(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"version":2,"closeToTray":false,"locale":"zh-CN"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	exe, _ := filepath.Abs("bin/dsh-work.exe")
+	binary := os.Getenv("DSH_WORK_TEST_BINARY")
+	if binary == "" {
+		binary = "bin/dsh-work.exe"
+	}
+	exe, _ := filepath.Abs(binary)
 	logFile, err := os.Create(filepath.Join(root, "process.log"))
 	if err != nil {
 		t.Fatal(err)

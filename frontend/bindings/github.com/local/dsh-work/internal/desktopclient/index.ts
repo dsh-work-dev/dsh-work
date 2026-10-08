@@ -15,3 +15,7 @@ export {
     ShellService,
     StorageService
 };
+
+export type {
+    ShellPet
+} from "./models.js";

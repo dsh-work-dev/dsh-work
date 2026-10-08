@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/pet"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -45,5 +47,33 @@ func TestShellServiceOpensOnlyMenuSectionsFromTrustedWindows(t *testing.T) {
 	case got := <-opened:
 		t.Fatalf("rejected request still opened %q", got)
 	default:
+	}
+}
+
+func TestShellServicePetStateFromTrustedWindows(t *testing.T) {
+	var requested []*bool
+	s := &ShellService{Pet: func(_ context.Context, visible *bool) (app.PetPanel, error) {
+		requested = append(requested, visible)
+		shown := visible != nil && *visible
+		state := pet.VisibilityHidden
+		if shown {
+			state = pet.VisibilityVisible
+		}
+		return app.PetPanel{Runtime: pet.RuntimeState{SelectionStatus: pet.SelectionReady, EffectiveVisibility: state}}, nil
+	}}
+	if _, err := s.GetPet(context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "worker"}))); err == nil {
+		t.Fatal("read pet state from the Worker window")
+	}
+	trusted := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	got, err := s.GetPet(trusted)
+	if err != nil || got != (ShellPet{Ready: true, Visible: false}) {
+		t.Fatalf("GetPet = %+v, %v", got, err)
+	}
+	got, err = s.SetPetVisible(trusted, true)
+	if err != nil || got != (ShellPet{Ready: true, Visible: true}) {
+		t.Fatalf("SetPetVisible = %+v, %v", got, err)
+	}
+	if len(requested) != 2 || requested[0] != nil || requested[1] == nil || !*requested[1] {
+		t.Fatalf("requests = %v", requested)
 	}
 }
