@@ -17,6 +17,7 @@ func put(t *testing.T, path, text string) {
 		t.Fatal(err)
 	}
 }
+
 // tempDir returns t.TempDir in resolved form, matching what Save stores
 // (macOS /var -> /private/var, Windows 8.3 short names).
 func tempDir(t *testing.T) string {
