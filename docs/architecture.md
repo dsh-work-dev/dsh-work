@@ -7,8 +7,9 @@ User
   |
   v
 Desktop UI client (Go + Wails)
-  |-- trusted startup and Settings WebViews, application menu
-  |-- Worker WebView --> Wails HTTP handler or bounded byte streams
+  |-- workbench window: trusted shell (top bar, menus, startup)
+  |     `-- DSH frame on its own origin --> Wails HTTP handler or bounded byte streams
+  |-- trusted Settings window
   `-- current-user local IPC --------------------+
 Manager CLI --> current-user local IPC ----------|
                                                 v
@@ -118,10 +119,32 @@ a stream-capable HTTP handler. The Go proxy still validates relative paths,
 removes hop-by-hop and credential headers, sets the internal Origin and preserves
 the same generation checks as the stream path.
 
-The startup window (`workspace`) and Settings have fixed trusted roles.
-The DSH window (`worker`) has an immutable role. Native-stamped window identity
-selects resource handlers and denies its management runtime requests. Worker
-service-worker registration is blocked to protect the shared WebView origin.
+The workbench window (`workspace`) hosts the trusted shell document at
+`http://wails.localhost`; Settings has its own trusted window. DSH runs in an
+iframe inside the shell on the fixed authority `http://wails.localhost:48217`.
+That port is an origin label only: WebView2 requests to any `wails.localhost`
+authority are intercepted by the Wails asset server, so nothing listens on it.
+It stays fixed so DSH's browser storage (drafts, shortcut preferences) survives
+Worker generations.
+
+Every request from the frame carries the workbench window's native ID, so the
+request authority selects the role instead. Requests whose Host is the DSH
+authority get the Worker role: only `/wails/runtime.js`, `/wails/custom.js` and
+the two Stream endpoints pass, other `/wails/*` routes are denied, and the
+generation is checked. On the shell authority, requests whose `Origin` or
+`Referer` belongs to the DSH authority are refused, the shell may not open
+Streams (a frame reload would retire the shell's Stream session), and every
+response carries `Content-Security-Policy: frame-ancestors 'none'` so the
+frame cannot navigate itself into a same-origin shell page. Messages a framed
+document posts through `chrome.webview` do not reach Wails, so the frame has no
+native drag, resize or invoke channel. Worker service-worker registration is
+blocked.
+
+Wails' host-prefix interception (including the port) is an implementation
+detail, not a documented contract; `TestRealShellFrame` (`DSH_WORK_SHELL_TEST=1`)
+exercises the framed Worker through the real bridge and must pass after Wails
+upgrades. `DSH_WORK_SHELL=0` still selects the earlier two-window workbench, in
+which the DSH window (`worker`) is told apart by its native window ID.
 Resources use the native asset handler and daemon Worker forwarding. The default
 Fetch and WebSocket bodies use Wails Streams with 64 KiB chunks, upload
 acknowledgements and download credits. The daemon forwards traffic to the
@@ -291,15 +314,52 @@ capabilities.
    resize does not leave persisted dimensions claiming a state the native window
    did not reach.
 
-## Native windows and menus
+## Windows and menus
 
-The UI client installs the application menu on both workbench windows. Settings
-has its own locale-aware title and no application menu. Native menu actions use
-the daemon services; the tray belongs to the daemon and can open Settings or
-the workbench, restart DSH, and explicitly stop the background. Pet and native
-notification adapters remain in the daemon, so closing the UI preserves them.
+The workbench is one frameless window using WebView2 composition hosting. The
+shell document draws a 40px top bar: the app icon, the menu bar, an empty
+caption area and the minimise, maximise and close buttons. The caption area and
+the three buttons are marked with `--wails-non-client-region`, so Windows
+hit-tests them natively: dragging, double-click maximise, Snap layouts on the
+maximise button and edge resizing work even where the DSH frame covers the
+window. Plain HWND hosting is not used: there Wails detects window edges from
+mouse moves in the top document, which never sees moves over the frame.
 
-Assign the initial Worker/Settings URL before creating the window to avoid a
+The top bar takes DSH's `--dsw-specific-sidebar-fill` (the colour DSH's own
+Windows caption uses) and text colour, reported by the injected bridge, so the
+chrome continues DSH's surface in light and dark. Before DSH is ready it uses
+dsh-work's own tokens.
+
+The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`):
+
+| Menu | Items |
+|---|---|
+| 应用 | 设置, 显示桌面宠物, 重启 DSH, 退出 |
+| 会话 | 新会话, 添加工作区, 新终端, 新浏览器 |
+| 视图 | 左侧栏, 右侧栏, 键盘快捷键, DSH 设置 |
+| 帮助 | 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
+
+Host items call trusted bindings. `ShellService` runs in the UI process: it
+opens Settings at its main or About section, and reads or sets Pet visibility
+on behalf of the Settings surface, which is the only surface the daemon grants
+Pet controls. Restart and quit keep the availability rules of the tray.
+
+会话 and 视图 run a fixed list of DSH commands through the dsh-work DSH client
+plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
+command's current binding from `ctx.shortcuts.catalog`, and runs a command the
+shell asks for by dispatching that binding through DSH's keyboard path, since
+DSH offers plugins no public command invoke. An unbound command is shown as not
+bound and disabled. The plugin also forwards Alt pressed alone and F10, which
+focus the menu bar. Shell and plugin accept messages only from each other's
+window and origin.
+
+Settings is a separate window with its own locale-aware title and no menu. The
+tray belongs to the daemon and can open Settings or the workbench, restart DSH,
+and explicitly stop the background. Pet and native notification adapters remain
+in the daemon, so closing the UI preserves them.
+
+Assign the initial Settings URL (and, in the two-window workbench, the Worker
+URL) before creating the window to avoid a
 second initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
 suppress the console; STARTF_USESHOWWINDOW/SW_HIDE would override the first
 native ShowWindow request and must not be used for the UI launch.

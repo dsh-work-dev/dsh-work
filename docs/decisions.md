@@ -288,6 +288,16 @@ pipe. `http://127.0.0.1:1` remains an internal origin and is never bound as a
 listening socket. The account sign-in callback in ADR-0022 is the only
 loopback listener. It is a browser entry point, not a Worker transport.
 
+The DSH document's WebView origin is `http://wails.localhost:48217` (ADR-0024).
+The port is an origin label for the intercepted request, not a listener, so this
+decision is unchanged. Serving the WebView from DSH's own loopback HTTP server
+was rejected again for the framed layout: DSH's `SameSite=Strict` session
+cookie is not sent from a cross-site iframe, and the only working workaround
+(disabling DSH session authentication, as one third-party desktop does) would
+let any local process drive the agent. Measured in the WebView, the stream path
+costs about 1 ms per message round trip and carries about 116 MB/s; a direct
+WebSocket is faster but the difference is not visible in the UI.
+
 ## ADR-0021 — DSH PluginManager owns plugin activation
 
 When a profile's Worker is Ready, enabling or disabling a plugin bundle or an
@@ -387,3 +397,59 @@ runtime frame-theme switch.
 Icons come from `lucide` (ISC, maintained, tree-shaken ES modules, stroke
 icons whose weight and caps follow tokens). Only imported icons ship. Custom
 glyphs or a hand-drawn set would repeat maintenance lucide already covers.
+
+## ADR-0024 — One workbench window: trusted shell with DSH framed on its own origin
+
+The workbench is one frameless window. Its top-level document is dsh-work's
+trusted shell (`http://wails.localhost`): top bar, menus, window buttons and the
+startup view. DSH runs in an iframe on the fixed authority
+`http://wails.localhost:48217`, carried by the existing bridge and named pipe
+(ADR-0020). The shell and DSH exchange only typed `postMessage` messages
+(surface colours, the DSH command catalog, menu keys, menu commands), each side
+checking the other's window and origin. Settings stays a separate window for
+now.
+
+Trust follows origin, not window. Inside one window every request carries the
+same native window ID, so the request authority selects the Worker role, the
+shell authority refuses requests whose `Origin` or `Referer` is DSH's, shell
+pages send `frame-ancestors 'none'`, and the shell does not use Wails Streams
+(Stream sessions are per window, and a frame reload retires older ones). The
+DSH authority's port stays fixed so DSH's browser storage survives restarts.
+
+The window uses WebView2 composition hosting with `--wails-non-client-region`
+on the caption area and the three buttons. Windows then hit-tests them natively:
+dragging, double-click maximise, Snap layouts and edge resizing work over the
+DSH frame. Under plain HWND hosting Wails detects edges and double clicks in
+the top document's script (beta.16 maps double-click to maximise only on macOS),
+which cannot see input over the frame; no web-level fallback is kept.
+
+The menu bar is drawn by the shell: 应用 and 帮助 hold host actions; 会话 and
+视图 hold a fixed list of DSH commands with DSH's current shortcuts. DSH gives
+plugins no public command invoke, and its official desktop menu path
+(`dshDesktop.keyboard`) is active only when DSH runs in its Electron desktop
+runtime, so the dsh-work DSH plugin runs a command by dispatching its current
+binding through DSH's keyboard path. The top bar takes DSH's
+`--dsw-specific-sidebar-fill`, the colour DSH's own Windows caption uses.
+
+Why: the shell owns every host command (restart, quit, update, Settings), so
+none of them is reachable from DSH plugins; the chrome and recovery entry stay
+usable when DSH hangs or fails; and later windows or a same-window Settings
+panel reuse the same origin-based trust. DSH loses its Electron caption layout
+and runs as a plain web page under the bar.
+
+Costs and conditions to revisit:
+
+- Wails' interception of any `wails.localhost` authority and composition
+  hosting are implementation details and an experimental option of Wails 3
+  beta; `TestRealShellFrame` must pass after Wails upgrades.
+- Running commands by dispatching bindings depends on DSH accepting script
+  keyboard events; an unbound command is disabled in the menu. Revisit if DSH
+  publishes a plugin command invoke.
+- Same-origin `window.open` from DSH still opens an unmanaged WebView2 window.
+- `DSH_WORK_SHELL=0` keeps the earlier two-window workbench until it is removed.
+
+Rejected: drawing the bar inside the DSH document (host commands would be
+reachable from DSH plugins and the chrome would die with DSH); two native
+WebViews in one window (no Wails API, and shell menus could not overlay the DSH
+view); a coloured native title bar (the menu stays on its own row); switching to
+Electron (rewrites the host).

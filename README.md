@@ -21,8 +21,8 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 
 Closing a desktop window hides it and keeps its WebView in the UI client, so
 reopening returns to the same page state. The tray, Worker, Pet and
-notifications remain with the background daemon. Use “停止后台并退出” in the
-tray or application menu to stop background work and exit.
+notifications remain with the background daemon. Use 应用 → 退出 in the
+workbench menu, or “停止后台并退出” in the tray, to stop background work and exit.
 
 ## Project boundary
 
