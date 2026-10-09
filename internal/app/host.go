@@ -1493,7 +1493,8 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	run.setChannel(channel)
 	plan, err := h.deps.DSH.BuildLaunchPlan(dshadapter.LaunchContext{
-		SafeMode:           launch.dataDirectory.ID == dshmanager.SafeModeDataDirectoryID,
+		CoreOverlay:        true,
+		UserDataOverlay:    launch.dataDirectory.ID != dshmanager.SafeModeDataDirectoryID,
 		GenerationID:       run.generation,
 		Runtime:            launch.runtime,
 		BootstrapDirectory: h.config.BootstrapDirectory,

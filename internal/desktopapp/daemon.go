@@ -97,9 +97,9 @@ func runDaemon(identity string, resources Resources) {
 	dsh.SetUserDataDirectory(storage.UserDataPath())
 	petActivity := dshactivity.New(filepath.Join(filepath.Dir(config.SettingsPath), "pet-activity-bridge"))
 	defer petActivity.Close()
-	dsh.SetLaunchPatch(petActivity.Prepare)
+	dsh.SetCoreOverlayPatch(petActivity.Prepare)
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
-		dsh.SetLaunchPatch(func(generation string) (string, error) {
+		dsh.SetCoreOverlayPatch(func(generation string) (string, error) {
 			patch, err := petActivity.Prepare(generation)
 			if err != nil {
 				return "", err

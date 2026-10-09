@@ -54,7 +54,8 @@ type ReadyAnnouncement struct {
 // resolved separately for this generation and is never persisted by the
 // manager.
 type LaunchContext struct {
-	SafeMode           bool
+	CoreOverlay        bool
+	UserDataOverlay    bool
 	GenerationID       string
 	Runtime            Runtime
 	BootstrapDirectory string
@@ -69,12 +70,14 @@ type Adapter struct {
 	expectedVersion    string
 	executableOverride string
 	discoveryRoot      string
-	launchPatch        func(string) (string, error)
+	coreOverlayPatch   func(string) (string, error)
 	userDataDirectory  string
 }
 
-// SetLaunchPatch installs a Host-owned, ephemeral overlay for each Worker.
-func (a *Adapter) SetLaunchPatch(prepare func(string) (string, error)) { a.launchPatch = prepare }
+// SetCoreOverlayPatch installs a Host-owned, ephemeral overlay for each Worker.
+func (a *Adapter) SetCoreOverlayPatch(prepare func(string) (string, error)) {
+	a.coreOverlayPatch = prepare
+}
 
 func (a *Adapter) SetUserDataDirectory(path string) { a.userDataDirectory = path }
 
@@ -284,17 +287,17 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		WorkingDirectory: workingDirectory,
 		ExpectedOrigin:   origin,
 	}
-	if a.userDataDirectory != "" && !launch.SafeMode {
+	if a.userDataDirectory != "" && launch.UserDataOverlay {
 		patch, err := prepareUserDataPatch(dataDirectory, a.userDataDirectory)
 		if err != nil {
 			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH user data: %w", err)
 		}
 		plan.Args = append([]string{"--patch", patch}, plan.Args...)
 	}
-	if a.launchPatch != nil && !launch.SafeMode {
-		patch, err := a.launchPatch(launch.GenerationID)
+	if launch.CoreOverlay && a.coreOverlayPatch != nil {
+		patch, err := a.coreOverlayPatch(launch.GenerationID)
 		if err != nil {
-			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH activity bridge: %w", err)
+			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH core overlay: %w", err)
 		}
 		plan.Args = append([]string{"--patch", patch}, plan.Args...)
 	}
