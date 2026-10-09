@@ -6,7 +6,11 @@ export function apply(ctx, config = {}) {
   const query = '?generation=' + encodeURIComponent(generation);
   ctx.on('webserver/index-inject', table => {
     table.push({kind: 'global', name: '__WORK_GENERATION__', value: generation});
-    table.push({kind: 'global', name: '__DSH_TRANSPORT__', value: {}});
+    // dsh-work owns this Host: it launches the Worker and the page reaches it only
+    // through the authenticated pipe. DSH's own desktop shell declares the same
+    // for its dsh-app:// page; without it DSH treats the non-loopback page as a
+    // remote browser and keeps every setting in memory.
+    table.push({kind: 'global', name: '__DSH_TRANSPORT__', value: {ownsHost: true}});
     table.push({kind: 'script-src', placement: 'head', src: '/__work/boot.js' + query});
     table.push({kind: 'html', placement: 'head', html: '<script type="module" src="/__work/bridge.js' + query + '"></script>'});
   });

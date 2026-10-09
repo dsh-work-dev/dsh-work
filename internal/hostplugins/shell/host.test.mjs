@@ -9,7 +9,7 @@ test('shell Host contributes generation-scoped transport bootstrap before DSH cl
   listeners.get('webserver/index-inject')(rows);
   assert.deepEqual(rows, [
     {kind: 'global', name: '__WORK_GENERATION__', value: 'g/1'},
-    {kind: 'global', name: '__DSH_TRANSPORT__', value: {}},
+    {kind: 'global', name: '__DSH_TRANSPORT__', value: {ownsHost: true}},
     {kind: 'script-src', placement: 'head', src: '/__work/boot.js?generation=g%2F1'},
     {kind: 'html', placement: 'head', html: '<script type="module" src="/__work/bridge.js?generation=g%2F1"></script>'},
   ]);
