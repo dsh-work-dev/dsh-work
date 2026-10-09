@@ -37,7 +37,7 @@ try {
     $env:GOOS = 'windows'
     $env:GOARCH = $Arch
     $env:CGO_ENABLED = '0'
-    & go build -tags production -trimpath -buildvcs=false "-ldflags=$ldflags" -o $appPath .
+    & go build -tags 'production,devtools' -trimpath -buildvcs=false "-ldflags=$ldflags" -o $appPath .
     if ($LASTEXITCODE -ne 0) { throw "dsh-work production build failed with exit code $LASTEXITCODE" }
 
     & go build -tags production -trimpath -buildvcs=false "-ldflags=-w -s -X github.com/local/dsh-work/internal/version.Value=$version" -o $cliPath ./cmd/dsh-work

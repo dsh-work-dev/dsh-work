@@ -142,7 +142,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
 	ledger := lifecycle.NewWindowLedger("workspace", "settings")
-	var loadedWorkerURL, settingsSection string
+	var loadedWorkerURL string
 	remember := func(window application.Window, options application.WebviewWindowOptions) {
 		store := remoteGeometry{client: client, values: state.Preferences}
 		flush := nativeui.RememberWindowGeometry(window, options, store)
@@ -258,17 +258,14 @@ func runDesktopClient(identity string, resources Resources) error {
 				options.URL = settingsURL(manager, section)
 				newWindow := desktop.Window.NewWithOptions(options)
 				settingsWindow = newWindow
-				settingsSection = section
 				window := settingsWindow
 				remember(window, options)
 				window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("settings", window, event) })
+			} else {
+				desktop.Event.Emit("settings-section", section)
 			}
 			if !ledger.TryShow("settings") {
 				return
-			}
-			if settingsSection != section {
-				settingsWindow.SetURL(settingsURL(manager, section))
-				settingsSection = section
 			}
 			settingsWindow.Show().Focus()
 			return

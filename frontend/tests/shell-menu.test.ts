@@ -7,12 +7,49 @@ import {buildMenus, formatKeys, stepItem, type Menu, type MenuItem, type MenuSta
 
 const t = (key: string) => key;
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
-  lifecycle: "Ready", busy: false, pet: {ready: true, visible: false}, updatePhase: "idle", dsh: null, ...overrides,
+  lifecycle: "Ready", busy: false, pet: {ready: true, visible: false}, safeMode: {available: true, active: false}, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: true, dsh: null, ...overrides,
 });
 const item = (menus: Menu[], key: string) => menus.flatMap(menu => menu.items).find(entry => entry.type === "item" && entry.key === key) as MenuItem;
 
-test("menus follow the 应用／会话／视图／帮助 order", () => {
-  assert.deepEqual(buildMenus(state(), t).map(menu => menu.id), ["app", "session", "view", "help"]);
+const keysOf = (menu: Menu) => menu.items.map(entry => entry.type === "item" ? entry.key : "-");
+
+test("menus follow the 文件／视图／运行／设置／帮助 layout", () => {
+  const menus = buildMenus(state(), t);
+  assert.deepEqual(menus.map(menu => menu.id), ["file", "view", "run", "settings", "help"]);
+  assert.deepEqual(menus.map(keysOf), [
+    ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "closeWindow", "quit"],
+    ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
+    ["refresh", "restart", "-", "safeMode"],
+    ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "-", "settings.open"],
+    ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "copyDiagnostics", "devtools", "-", "update", "about"],
+  ]);
+});
+
+test("safe mode follows the environment and the restart rules", () => {
+  const enter = item(buildMenus(state(), t), "safeMode");
+  assert.equal(enter.label, "shell.menu.enterSafeMode");
+  assert.equal(enter.enabled, true);
+  assert.equal(item(buildMenus(state({safeMode: {available: true, active: true}}), t), "safeMode").label, "shell.menu.exitSafeMode");
+  assert.equal(item(buildMenus(state({safeMode: null}), t), "safeMode").enabled, false);
+  assert.equal(item(buildMenus(state({safeMode: {available: false, active: false}}), t), "safeMode").enabled, false);
+  assert.equal(item(buildMenus(state({lifecycle: "Stopping"}), t), "safeMode").enabled, false);
+});
+
+test("full screen shows its state and zoom stops at actual size", () => {
+  const actual = buildMenus(state(), t);
+  assert.equal(item(actual, "fullscreen").checked, false);
+  assert.equal(item(actual, "zoomIn").enabled, true);
+  assert.equal(item(actual, "zoomOut").enabled, false);
+  assert.equal(item(actual, "zoomReset").enabled, false);
+  const zoomed = buildMenus(state({window: {fullscreen: true, zoom: 1.1}}), t);
+  assert.equal(item(zoomed, "fullscreen").checked, true);
+  assert.equal(item(zoomed, "zoomOut").enabled, true);
+  assert.equal(item(zoomed, "zoomReset").enabled, true);
+});
+
+test("refresh needs a loaded DSH document", () => {
+  assert.equal(item(buildMenus(state(), t), "refresh").enabled, true);
+  assert.equal(item(buildMenus(state({framed: false}), t), "refresh").enabled, false);
 });
 
 test("host items follow the native menu availability rules", () => {
@@ -25,13 +62,14 @@ test("host items follow the native menu availability rules", () => {
   const stopping = buildMenus(state({lifecycle: "Stopping"}), t);
   assert.equal(item(stopping, "quit").enabled, false);
   const busy = buildMenus(state({busy: true}), t);
-  for (const key of ["restart", "quit", "pet"]) assert.equal(item(busy, key).enabled, false, key);
-  assert.equal(item(busy, "settings").enabled, true);
+  for (const key of ["restart", "quit", "showPet", "safeMode"]) assert.equal(item(busy, key).enabled, false, key);
+  assert.equal(item(busy, "closeWindow").enabled, true);
+  assert.equal(item(busy, "settings.settings").enabled, true);
 });
 
 test("pet item mirrors selection and visibility", () => {
-  assert.equal(item(buildMenus(state({pet: {ready: false, visible: false}}), t), "pet").enabled, false);
-  const visible = item(buildMenus(state({pet: {ready: true, visible: true}}), t), "pet");
+  assert.equal(item(buildMenus(state({pet: {ready: false, visible: false}}), t), "showPet").enabled, false);
+  const visible = item(buildMenus(state({pet: {ready: true, visible: true}}), t), "showPet");
   assert.equal(visible.enabled, true);
   assert.equal(visible.checked, true);
 });
@@ -62,21 +100,20 @@ test("help reflects the update phase", () => {
 });
 
 test("keyboard steps skip separators and wrap", () => {
-  const items = buildMenus(state(), t)[0].items;
+  const items = buildMenus(state(), t)[2].items;
   assert.equal(items[2].type, "separator");
   assert.equal(stepItem(items, 1, 1), 3);
   assert.equal(stepItem(items, 3, -1), 1);
-  assert.equal(stepItem(items, 4, 1), 0);
+  assert.equal(stepItem(items, 3, 1), 0);
   assert.equal(stepItem(items, -1, 1), 0);
 });
 
 test("every shell menu label is translated in every locale", () => {
   const keys = [
-    "shell.menu.app", "shell.menu.session", "shell.menu.view", "shell.menu.help", "shell.menu.settings", "shell.menu.showPet",
-    "shell.menu.restart", "shell.menu.quit", "shell.menu.checkUpdates", "shell.menu.updateAvailable", "shell.menu.updating",
-    "shell.menu.about", "shell.menu.unbound", "shell.menu.bar",
-    "shell.command.session.new", "shell.command.workspace.add", "shell.command.terminal.new", "shell.command.browser.new",
-    "shell.command.sidebar.left.toggle", "shell.command.sidebar.right.toggle", "shell.command.shortcuts.open", "shell.command.settings.open",
+    "shell.menu.bar", "shell.menu.unbound", "shell.menu.updateAvailable", "shell.menu.updating",
+    "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
+    ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
+      .filter(key => !key.startsWith("manager.")),
     "shell.window.minimise", "shell.window.maximise", "shell.window.restore", "shell.window.close",
   ];
   for (const key of keys) assert.equal(hasTranslationInEveryLocale(key), true, key);

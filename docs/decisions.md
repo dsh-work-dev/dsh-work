@@ -423,8 +423,15 @@ DSH frame. Under plain HWND hosting Wails detects edges and double clicks in
 the top document's script (beta.16 maps double-click to maximise only on macOS),
 which cannot see input over the frame; no web-level fallback is kept.
 
-The menu bar is drawn by the shell: 应用 and 帮助 hold host actions; 会话 and
-视图 hold a fixed list of DSH commands with DSH's current shortcuts. DSH gives
+The menu bar is drawn by the shell. Menus are grouped by what the user does,
+not by who implements an item: 文件 (create, close, quit), 视图 (layout, zoom,
+pet), 运行 (refresh, restart, safe mode), 设置 (every Settings section, one
+click away, plus DSH settings) and 帮助 (docs, shortcuts, feedback,
+diagnostics, updates). Host items call trusted bindings; a fixed list of DSH
+commands shows DSH's current shortcuts. Per-session actions (rename, fork,
+archive, stop) stay in DSH's own menus, and environment switching and version
+records stay in Settings Overview. Not offered: new window, command palette,
+focus mode, always on top and recent workspaces. DSH gives
 plugins no public command invoke, and its official desktop menu path
 (`dshDesktop.keyboard`) is active only when DSH runs in its Electron desktop
 runtime, so the dsh-work DSH plugin runs a command by dispatching its current

@@ -25,7 +25,10 @@ type ShellPet struct {
 	Visible bool `json:"visible"`
 }
 
-var shellSettingsSections = map[string]bool{"settings": true, "about": true}
+var shellSettingsSections = map[string]bool{
+	"overview": true, "settings": true, "notifications": true, "pets": true,
+	"runtimes": true, "profiles": true, "plugins": true, "data-directories": true, "about": true,
+}
 
 // OpenSettings shows dsh-work Settings at a section the shell menu offers.
 func (s *ShellService) OpenSettings(ctx context.Context, section string) error {

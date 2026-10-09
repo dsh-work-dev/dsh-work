@@ -1,10 +1,26 @@
-import {Events, Window} from "@wailsio/runtime";
-import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {Browser, Clipboard, Events, Window} from "@wailsio/runtime";
+import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {diagnosticsReport} from "./diagnostics";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
-import type {MenuAction, MenuState} from "./shell-menu-model";
+import type {LinkTarget, MenuAction, MenuState, WindowAction} from "./shell-menu-model";
+import {safeModeActive} from "./recovery";
 import {icon, type IconName} from "./ui/icons";
+
+const links: Record<LinkTarget, string> = {
+  "docs": "https://github.com/dsh-work-dev/dsh-work/tree/main/docs",
+  "feedback-desktop": "https://github.com/dsh-work-dev/dsh-work/issues",
+  "feedback-dsh": "https://github.com/deepseek-ai/deepseek-harness/issues",
+};
+
+const windowActions: Record<WindowAction, () => Promise<void>> = {
+  "close": () => Window.Close(),
+  "zoom-in": () => Window.ZoomIn(),
+  "zoom-out": () => Window.ZoomOut(),
+  "zoom-reset": () => Window.ZoomReset(),
+  "fullscreen": () => Window.ToggleFullscreen(),
+};
 
 /** Trusted shell chrome (top bar and menus) around the framed DSH document. */
 export function mountShell() {
@@ -42,7 +58,7 @@ export function mountShell() {
   frame.setAttribute("allow", "microphone; clipboard-read; clipboard-write; fullscreen");
   frame.hidden = true;
 
-  let menuState: MenuState = {lifecycle: "Starting", busy: false, pet: {ready: false, visible: false}, updatePhase: "idle", dsh: null};
+  let menuState: MenuState = {lifecycle: "Starting", busy: false, pet: {ready: false, visible: false}, safeMode: null, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: false, dsh: null};
   let sendCommand: (id: string) => void = () => {};
   const setMenu = (patch: Partial<MenuState>) => {
     menuState = {...menuState, ...patch};
@@ -54,6 +70,20 @@ export function mountShell() {
     } catch (error) {
       console.warn("pet state unavailable", error);
     }
+  };
+  const refreshSafeMode = async () => {
+    try {
+      const snapshot = await ManagerService.GetSnapshot();
+      setMenu({safeMode: {available: !!snapshot.configured, active: safeModeActive(snapshot)}});
+    } catch (error) {
+      console.warn("environment state unavailable", error);
+    }
+  };
+  const copyDiagnostics = async () => {
+    const [status, update, snapshot] = await Promise.all([
+      HostService.GetStatus().catch(() => undefined), HostService.GetUpdateState().catch(() => undefined), ManagerService.GetSnapshot().catch(() => undefined),
+    ]);
+    await Clipboard.SetText(diagnosticsReport({update, state: status?.state, snapshot}));
   };
   const busyAction = async (work: () => Promise<unknown>) => {
     if (menuState.busy) return;
@@ -67,16 +97,35 @@ export function mountShell() {
     }
   };
   const run = (action: MenuAction) => {
+    const report = (what: string) => (error: unknown) => console.warn(`${what} failed`, error);
     switch (action.kind) {
-      case "settings": void ShellService.OpenSettings("settings"); break;
+      case "window": void windowActions[action.action]().then(syncWindow).catch(report(action.action)); break;
+      case "link": void Browser.OpenURL(links[action.target]).catch(report("open link")); break;
+      case "devtools": void Window.OpenDevTools().catch(report("developer tools")); break;
+      case "diagnostics": void copyDiagnostics().catch(report("copy diagnostics")); break;
+      case "settings": void ShellService.OpenSettings(action.section); break;
       case "update": case "about": void ShellService.OpenSettings("about"); break;
       case "pet": void busyAction(async () => { menuState.pet = await ShellService.SetPetVisible(!menuState.pet.visible); }); break;
+      case "refresh": reloadFrame(); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
+      case "safe-mode": void busyAction(async () => {
+        try {
+          const snapshot = await (menuState.safeMode?.active ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode());
+          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot)};
+        } catch (error) {
+          // Settings Overview shows why the switch failed.
+          void ShellService.OpenSettings("overview");
+          throw error;
+        }
+      }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
       case "dsh": sendCommand(action.id); break;
     }
   };
-  const menuBar = createMenuBar(t, run, id => { if (id === "app") void refreshPet(); }, () => frame.contentWindow?.focus());
+  const menuBar = createMenuBar(t, run, id => {
+    if (id === "view") { void refreshPet(); void syncWindow(); }
+    if (id === "run") void refreshSafeMode();
+  }, () => frame.contentWindow?.focus());
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, controls);
   document.body.prepend(bar);
@@ -92,12 +141,13 @@ export function mountShell() {
   void HostService.GetStatus().then(status => setMenu({lifecycle: status.state})).catch(() => {});
   void HostService.GetUpdateState().then(update => setMenu({updatePhase: update.phase})).catch(() => {});
   void refreshPet();
+  void refreshSafeMode();
 
   const host = document.getElementById("host-surface");
   let eventSeen = false;
   const show = (url: string) => {
     if (!url) {
-      setMenu({dsh: null});
+      setMenu({dsh: null, framed: false});
       frame.hidden = true;
       frame.removeAttribute("src");
       host?.removeAttribute("hidden");
@@ -110,8 +160,16 @@ export function mountShell() {
       setMenu({dsh: null});
       frame.src = url;
     }
+    setMenu({framed: true});
     frame.hidden = false;
     host?.setAttribute("hidden", "true");
+  };
+  // Reloads the DSH document only; the Worker keeps running.
+  const reloadFrame = () => {
+    const src = frame.getAttribute("src");
+    if (!src) return;
+    setMenu({dsh: null});
+    frame.setAttribute("src", src);
   };
   Events.On("worker-url", event => {
     eventSeen = true;
@@ -159,7 +217,14 @@ export function mountShell() {
     altAlone = false;
   }, true);
 
+  // Full screen hides the window buttons; 视图 → 全屏 leaves it.
+  const syncWindow = async () => {
+    const [fullscreen, zoom] = await Promise.all([Window.IsFullscreen(), Window.GetZoom()]);
+    controls.hidden = fullscreen;
+    setMenu({window: {fullscreen, zoom}});
+  };
   const syncMaximised = async () => {
+    void syncWindow().catch(() => {});
     const maximised = await Window.IsMaximised();
     maximise.replaceChildren(icon(maximised ? "copy" : "square"));
     maximise.dataset.labelKey = maximised ? "shell.window.restore" : "shell.window.maximise";

@@ -91,15 +91,17 @@ silently mutate DSH-owned data.
   surface outside the Workspace window. Pets Settings exposes discovery,
   preview, visibility and direct 50%–300% size control.
 - Closing a desktop window hides it and retains its WebView for the next open;
-  closing or crashing the UI client leaves background tasks running. 应用 → 退出
+  closing or crashing the UI client leaves background tasks running. 文件 → 退出
   in the workbench menu (“停止后台并退出” in the tray) explicitly stops the Worker
   and its children, releases locks and exits the tray and remaining UI.
 - The workbench is a single window without a system title bar. DSH runs inside
   it below a dsh-work top bar that follows DSH's surface colour and holds the
-  menus 应用 (Settings, desktop pet, restart DSH, quit), 会话 and 视图 (common DSH
-  commands with their current DSH shortcuts) and 帮助 (updates, about), plus
-  native-behaving minimise, maximise (with Windows 11 Snap layouts) and close
-  buttons. Alt or F10 focuses the menus, also while typing in DSH.
+  menus 文件 (new session, workspace, terminal and browser; close, quit), 视图
+  (sidebars, zoom, full screen, desktop pet), 运行 (refresh, restart DSH, safe
+  mode), 设置 (each Settings section and DSH settings) and 帮助 (docs, keyboard
+  shortcuts, feedback, diagnostics, updates, about); DSH commands show their
+  current DSH shortcuts. The bar ends with native-behaving minimise, maximise
+  (with Windows 11 Snap layouts) and close buttons. Alt or F10 focuses the menus, also while typing in DSH.
 - The manager CLI shares the daemon for online operations and uses locked
   offline access when the daemon is unavailable.
 - Windows uses a Job Object to own the Worker process tree.

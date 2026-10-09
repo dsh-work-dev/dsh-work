@@ -13,6 +13,7 @@ import (
 
 func init() {
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
+	application.RegisterEvent[string]("settings-section")
 	application.RegisterEvent[acquisition.OperationStatus]("acquisition")
 	application.RegisterEvent[settings.Locale]("locale")
 	application.RegisterEvent[settings.Appearance]("appearance")

@@ -332,19 +332,29 @@ dsh-work's own tokens.
 
 The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`):
 
-| Menu | Items |
+| Menu | Items (DSH commands marked *) |
 |---|---|
-| 应用 | 设置, 显示桌面宠物, 重启 DSH, 退出 |
-| 会话 | 新会话, 添加工作区, 新终端, 新浏览器 |
-| 视图 | 左侧栏, 右侧栏, 键盘快捷键, DSH 设置 |
-| 帮助 | 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
+| 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 关闭窗口, 退出 |
+| 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
+| 运行 | 刷新, 重启 DSH · 启动安全模式 / 退出安全模式 |
+| 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
+| 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
 
 Host items call trusted bindings. `ShellService` runs in the UI process: it
-opens Settings at its main or About section, and reads or sets Pet visibility
-on behalf of the Settings surface, which is the only surface the daemon grants
-Pet controls. Restart and quit keep the availability rules of the tray.
+opens Settings at a section, and reads or sets Pet visibility on behalf of the
+Settings surface, which is the only surface the daemon grants Pet controls.
+Restart and quit keep the availability rules of the tray; safe mode uses the
+same `ManagerService` calls as Settings Overview and opens Overview when it
+fails. 刷新 reloads only the DSH frame; the Worker keeps running. Zoom, full
+screen and close use the Wails window API (close hides the window). Zoom
+scales the whole window, shell bar included, and cannot go below actual size
+(Wails clamps WebView2 zoom at 100%), so 缩小 and 实际大小 are off at 100%. 全屏
+is a checked item; full screen hides the window buttons and is left through
+the same item. The links
+open the dsh-work docs and issue tracker and the DeepSeek Harness issue
+tracker in the system browser. 复制诊断信息 copies the same report as About.
 
-会话 and 视图 run a fixed list of DSH commands through the dsh-work DSH client
+DSH commands run from a fixed list through the dsh-work DSH client
 plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
 command's current binding from `ctx.shortcuts.catalog`, and runs a command the
 shell asks for by dispatching that binding through DSH's keyboard path, since

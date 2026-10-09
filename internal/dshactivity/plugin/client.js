@@ -30,7 +30,7 @@ function openAccountSignIn(ctx) {
 // The dsh-work shell menu runs a fixed set of DSH commands. DSH exposes no
 // public command invoke to plugins, so a command runs by dispatching its
 // current binding through DSH's own keyboard path; unbound commands stay off.
-const SHELL_COMMANDS = ['session.new', 'workspace.add', 'terminal.new', 'browser.new', 'sidebar.left.toggle', 'sidebar.right.toggle', 'shortcuts.open', 'settings.open'];
+const SHELL_COMMANDS = ['session.new', 'session.search', 'workspace.add', 'terminal.new', 'browser.new', 'sidebar.left.toggle', 'sidebar.right.toggle', 'settings.open', 'shortcuts.open'];
 
 function keyForCode(code) {
   if (code.startsWith('Key')) return code.slice(3).toLowerCase();

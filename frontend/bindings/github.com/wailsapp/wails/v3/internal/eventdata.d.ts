@@ -30,6 +30,7 @@ declare module "@wailsio/runtime" {
             "locale": settings$0.Locale;
             "notification-failure": boolean;
             "pet-state": app$0.PetOverlayState;
+            "settings-section": string;
             "update-state": daemon$0.UpdateSnapshot;
         }
     }
