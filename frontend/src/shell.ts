@@ -243,6 +243,9 @@ export function mountShell() {
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
     // A cancelled save dialog was the user's own choice and needs no message.
+    else if (message.type === "account-signout") {
+      toast.show(t({pending: "shell.toast.signOutPending", success: "shell.toast.signedOut", error: "shell.toast.signOutFailed"}[message.state]));
+    }
     else if (message.type === "export-result") {
       if (message.result !== "cancelled") toast.show(t(message.result === "saved" ? "shell.toast.exportSaved" : "shell.toast.exportFailed"));
     }

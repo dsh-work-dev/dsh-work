@@ -1,5 +1,5 @@
 // Package dshactivity projects the current DSH Worker's structured activity into
-// Host-owned pet state. The DSH plugin is a launch overlay, never a profile edit.
+// Host-owned pet state, through the @dsh-work/pet plugin (see hostplugins).
 package dshactivity
 
 import (
@@ -14,16 +14,11 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
-
-	"github.com/local/dsh-work/internal/hostplugins"
-	"github.com/local/dsh-work/internal/version"
 )
 
 type Interaction struct {
@@ -75,68 +70,32 @@ type Snapshot struct {
 }
 
 type Bridge struct {
-	lifecycleMu                     sync.Mutex
-	mu                              sync.Mutex
-	root, generation, token, origin string
-	client                          *http.Client
-	cancel                          context.CancelFunc
-	done                            chan struct{}
-	state                           Snapshot
+	lifecycleMu               sync.Mutex
+	mu                        sync.Mutex
+	generation, token, origin string
+	client                    *http.Client
+	cancel                    context.CancelFunc
+	done                      chan struct{}
+	state                     Snapshot
 }
 
-func New(root string) *Bridge { return &Bridge{root: root} }
+func New() *Bridge { return &Bridge{} }
 
-// Prepare installs the immutable built-in plugin set and returns a generation
-// patch that mounts all packages without editing the user's profile.
-func (b *Bridge) Prepare(generation string) (string, error) {
+// Begin resets the projection for a new Worker generation and returns the
+// launch configuration of the @dsh-work/pet plugin: the generation and a fresh
+// token that authenticates its routes.
+func (b *Bridge) Begin(generation string) (map[string]string, error) {
 	b.lifecycleMu.Lock()
 	defer b.lifecycleMu.Unlock()
 	if generation == "" {
-		return "", errors.New("missing activity generation")
+		return nil, errors.New("missing activity generation")
 	}
 	b.stop()
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return "", err
+		return nil, err
 	}
 	token := hex.EncodeToString(raw)
-	root, err := filepath.Abs(b.root)
-	if err != nil {
-		return "", err
-	}
-	if err = os.MkdirAll(root, 0700); err != nil {
-		return "", err
-	}
-	packages, err := hostplugins.Install(root, version.String())
-	if err != nil {
-		return "", fmt.Errorf("install Host plugins: %w", err)
-	}
-	entries := make([]any, 0, len(packages))
-	for _, name := range []string{"shell", "account", "activity"} {
-		pkg, ok := packages[name]
-		if !ok {
-			return "", fmt.Errorf("Host plugin %s is unavailable", name)
-		}
-		config := map[string]string{}
-		if name == "shell" {
-			config = map[string]string{"generation": generation}
-		}
-		if name == "activity" {
-			config = map[string]string{"generation": generation, "token": token}
-		}
-		entries = append(entries, map[string]any{
-			"id": pkg.ID, "name": moduleURL(filepath.Join(pkg.Directory, "host.js")), "config": config,
-		})
-	}
-	patch := []any{map[string]any{"insert": entries}}
-	data, err := json.Marshal(patch)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(root, "launch-"+token[:12]+".patch.yml")
-	if err = os.WriteFile(path, data, 0600); err != nil {
-		return "", err
-	}
 	b.mu.Lock()
 	if b.cancel != nil {
 		b.cancel()
@@ -148,7 +107,7 @@ func (b *Bridge) Prepare(generation string) (string, error) {
 	b.client = nil
 	b.state = Snapshot{SchemaVersion: 1, Generation: generation, Sessions: []Activity{}}
 	b.mu.Unlock()
-	return path, nil
+	return map[string]string{"generation": generation, "token": token}, nil
 }
 
 // Start observes the authenticated Worker through its owned transport.
@@ -224,7 +183,7 @@ func (b *Bridge) Start(ctx context.Context, authURL string, transport http.Round
 	}()
 }
 func fetch(ctx context.Context, client *http.Client, origin, token string) (Snapshot, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/__dshwork/activity", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/__dshwork/pet-activity", nil)
 	req.Header.Set("X-DSH-Work-Token", token)
 	req.Header.Set("Origin", origin)
 	resp, err := client.Do(req)
@@ -287,7 +246,7 @@ func (b *Bridge) Open(ctx context.Context, id string) error {
 		return errors.New("conversation activity is unavailable")
 	}
 	data, _ := json.Marshal(map[string]string{"sessionId": id})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/__dshwork/activity", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/__dshwork/pet-activity", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -325,13 +284,6 @@ func (b *Bridge) stop() {
 	}
 }
 
-func moduleURL(path string) string {
-	path = filepath.ToSlash(path)
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return (&url.URL{Scheme: "file", Path: path}).String()
-}
 func clean(s string, n int) string {
 	r := []rune(strings.TrimSpace(strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

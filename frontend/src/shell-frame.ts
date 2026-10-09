@@ -8,10 +8,13 @@ export type FrameMessage =
   | {type: "sidebar-state"; open: boolean}
   | {type: "window-key"; action: WindowAction}
   | {type: "export-result"; result: ExportResult}
+  | {type: "account-signout"; state: SignOutState}
   | {type: "menu-key"}
   | {type: "surface"; background: string; color: string};
 
 export type ExportResult = "saved" | "cancelled" | "error";
+export type SignOutState = "pending" | "success" | "error";
+const signOutStates: readonly SignOutState[] = ["pending", "success", "error"];
 const exportResults: readonly ExportResult[] = ["saved", "cancelled", "error"];
 const commandStates: readonly DshCommandState[] = ["ready", "unbound", "unavailable"];
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
@@ -38,6 +41,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
   if (message.type === "dsh-work/export-result" && exportResults.includes(message.result as ExportResult)) {
     return {type: "export-result", result: message.result as ExportResult};
+  }
+  if (message.type === "dsh-work/account-signout" && signOutStates.includes(message.state as SignOutState)) {
+    return {type: "account-signout", state: message.state as SignOutState};
   }
   if (message.type === "dsh-work/menu-key" && (message.key === "Alt" || message.key === "F10")) return {type: "menu-key"};
   if (message.type === "dsh-work/surface" && typeof message.background === "string" && typeof message.color === "string") {

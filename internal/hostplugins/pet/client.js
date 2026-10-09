@@ -3,16 +3,16 @@ function reportComponentReady(id) {
   if (shellOrigin) window.parent.postMessage({version: 1, type: 'dsh-work/component-ready', id}, shellOrigin);
 }
 
-window.__ModuleLoader__.load({id: '@dsh-work/activity', factory: () => ({
+window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
   inject: ['sessions', 'uiSession'],
   apply(ctx) {
-    reportComponentReady('activity');
+    reportComponentReady('pet');
     let stopped = false, timer, ack = '', error = '';
     const abort = new AbortController();
     async function sync() {
       try {
         const list = ctx.sessions.list.getSnapshot();
-        const response = await fetch('/__dshwork/activity-client', {method: 'POST', credentials: 'same-origin',
+        const response = await fetch('/__dshwork/pet-activity-client', {method: 'POST', credentials: 'same-origin',
           headers: {'Content-Type': 'application/json'}, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]),
           body: JSON.stringify({current: list.current, visible: document.visibilityState === 'visible' && document.hasFocus(),
             sessions: Object.values(list.byId ?? {}).slice(0, 256).map(s => ({id: s.id, title: s.displayTitle, parentId: s.parentId})), ack, error})});

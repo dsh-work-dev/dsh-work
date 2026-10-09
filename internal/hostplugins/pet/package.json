@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-work/activity",
+  "name": "@dsh-work/pet",
   "version": "0.0.0",
   "type": "module",
   "exports": {".": "./host.js", "./client": "./client.js"},

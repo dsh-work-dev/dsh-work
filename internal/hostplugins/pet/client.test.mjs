@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 
-test('activity client reports the current DSH session to its Host route', async () => {
+test('pet client reports the current DSH session to its Host route', async () => {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const requests = [];
@@ -27,9 +27,9 @@ test('activity client reports the current DSH session to its Host route', async 
   plugin.apply(ctx);
   try {
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.deepEqual(posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'activity'}, origin: 'http://wails.localhost'}]);
+    assert.deepEqual(posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'pet'}, origin: 'http://wails.localhost'}]);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].input, '/__dshwork/activity-client');
+    assert.equal(requests[0].input, '/__dshwork/pet-activity-client');
     assert.equal(requests[0].init.method, 'POST');
     const body = JSON.parse(requests[0].init.body);
     assert.equal(body.current, 'session-1');

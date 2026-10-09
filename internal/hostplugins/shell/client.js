@@ -25,16 +25,25 @@ function keyForCode(code) {
 function connectShell(ctx) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
   if (!shellOrigin) return;
-  ctx.inject(['shortcuts', 'uiWorkspace', 'layout'], ctx => {
+  // The workspace and layout services are optional: the menu keeps working
+  // without them, and the commands they serve report unavailable.
+  const services = {uiWorkspace: undefined, layout: undefined};
+  let report = () => {};
+  for (const name of Object.keys(services)) {
+    ctx.inject([name], ctx => {
+      services[name] = ctx[name];
+      report();
+      ctx.effect(() => () => { services[name] = undefined; report(); });
+    });
+  }
+  ctx.inject(['shortcuts'], ctx => {
     const {catalog, config, fixedCatalog} = ctx.shortcuts;
-    const uiWorkspace = ctx.uiWorkspace;
-    const layout = ctx.layout;
     const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
     const entries = () => new Map(catalog.getSnapshot().map(entry => [entry.id, entry]));
     const ready = () => (config?.getSnapshot().status ?? 'ready') === 'ready';
     const hasPublicService = id => id === 'session.new'
-      ? typeof uiWorkspace?.startSession === 'function'
-      : id === 'sidebar.left.toggle' && typeof layout?.toggleSidebar === 'function';
+      ? typeof services.uiWorkspace?.startSession === 'function'
+      : id === 'sidebar.left.toggle' && typeof services.layout?.toggleSidebar === 'function';
     const shortcutState = entry => {
       if (!entry.binding) return 'unbound';
       if (!ready() || entry.issue || entry.conflicts?.length || entry.binding.secondCode !== undefined) return 'unavailable';
@@ -44,7 +53,7 @@ function connectShell(ctx) {
       if (id === 'session.new' || id === 'sidebar.left.toggle') return hasPublicService(id) ? 'ready' : 'unavailable';
       return shortcutState(entry);
     };
-    const report = () => {
+    report = () => {
       const current = entries();
       post({type: 'dsh-work/catalog', commands: SHELL_COMMANDS.flatMap(id => {
         const entry = current.get(id);
@@ -82,13 +91,13 @@ function connectShell(ctx) {
       let handled = false;
       try {
         if (data.id === 'session.new') {
-          if (typeof uiWorkspace?.startSession === 'function') {
-            uiWorkspace.startSession();
+          if (typeof services.uiWorkspace?.startSession === 'function') {
+            services.uiWorkspace.startSession();
             handled = true;
           }
         } else if (data.id === 'sidebar.left.toggle') {
-          if (typeof layout?.toggleSidebar === 'function') {
-            layout.toggleSidebar();
+          if (typeof services.layout?.toggleSidebar === 'function') {
+            services.layout.toggleSidebar();
             handled = true;
           }
         } else {

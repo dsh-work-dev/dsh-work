@@ -115,19 +115,21 @@ test('does not reopen an attempt that was already waiting when the page connecte
   }
 });
 
-test('wraps account sign-out with pending and success feedback, then restores the Remote method', async () => {
-  const {plugin, document} = await loadPlugin();
+const signOutStates = posted => posted.filter(p => p.message.type === 'dsh-work/account-signout').map(p => p.message.state);
+
+test('reports account sign-out progress and success to the shell, then restores the Remote method', async () => {
+  const {plugin, posted} = await loadPlugin();
   const stream = accountStream();
   const signOut = async () => new Response(JSON.stringify({type: 'server-response', result: {ok: true}}));
   const {ctx, account, dispose} = context(stream, {signOut});
   plugin.apply(ctx);
   try {
     const pending = account.signOut();
-    assert.equal(document.body.children[0].textContent, '正在退出登录…');
+    assert.deepEqual(signOutStates(posted), ['pending']);
     const result = await pending;
     assert.equal(result.ok, true);
     await tick();
-    assert.equal(document.body.children[0].textContent, '已退出登录');
+    assert.deepEqual(signOutStates(posted), ['pending', 'success']);
     dispose();
     assert.equal(account.signOut, signOut);
   } finally {
@@ -135,16 +137,15 @@ test('wraps account sign-out with pending and success feedback, then restores th
   }
 });
 
-test('shows sign-out failure feedback when the Remote method rejects', async () => {
-  const {plugin, document} = await loadPlugin();
+test('reports sign-out failure to the shell when the Remote method rejects', async () => {
+  const {plugin, posted} = await loadPlugin();
   const stream = accountStream();
   const {ctx, account, dispose} = context(stream, {signOut: async () => { throw new Error('network'); }});
   plugin.apply(ctx);
   try {
     await assert.rejects(account.signOut(), /network/);
     await tick();
-    assert.equal(document.body.children[0].textContent, '退出登录失败，请重试');
-    assert.equal(document.body.children[0].attributes.role, 'alert');
+    assert.deepEqual(signOutStates(posted), ['pending', 'error']);
   } finally {
     dispose();
   }

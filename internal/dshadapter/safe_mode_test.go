@@ -19,7 +19,7 @@ func TestSafeModeLaunchRetainsCoreOverlayAndOmitsUserData(t *testing.T) {
 		return corePatch, nil
 	})
 	plan, err := a.BuildLaunchPlan(LaunchContext{
-		CoreOverlay: true, UserDataOverlay: false, GenerationID: "safe-generation",
+		UserDataOverlay: false, GenerationID: "safe-generation",
 		Runtime:            Runtime{Path: filepath.Join(root, "dsh.cmd"), Version: SupportedVersion},
 		BootstrapDirectory: filepath.Join(root, "bootstrap"),
 		DataDirectory:      filepath.Join(root, "rescue"), Profile: "web",

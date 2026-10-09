@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/workeripc"
 )
 
@@ -35,8 +37,14 @@ func TestLiveDSHWorkerActivity(t *testing.T) {
 		cli = override
 	}
 	home := t.TempDir()
-	b := New(filepath.Join(home, "bridge"))
-	patch, err := b.Prepare("live-test")
+	b := New()
+	petConfig, err := b.Begin("live-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development").Prepare("live-test", map[string]map[string]string{
+		"shell": {"generation": "live-test"}, "pet": petConfig,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +76,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	data, _ := os.ReadFile(patch)
 	var patches []map[string]any
 	_ = json.Unmarshal(data, &patches)
-	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": moduleURL(fixture), "config": map[string]string{"token": b.token, "cwd": home}}}})
+	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(fixture), "/")}).String(), "config": map[string]string{"token": b.token, "cwd": home}}}})
 	data, _ = json.Marshal(patches)
 	if err = os.WriteFile(patch, data, 0600); err != nil {
 		t.Fatal(err)
@@ -145,8 +153,8 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	indexBody, _ := io.ReadAll(index.Body)
 	index.Body.Close()
-	if !strings.Contains(string(indexBody), "@dsh-work/activity") {
-		t.Fatal("activity client missing from DSH boot graph")
+	if !strings.Contains(string(indexBody), "@dsh-work/pet") {
+		t.Fatal("pet client missing from DSH boot graph")
 	}
 	b.mu.Lock()
 	client, origin, token := b.client, b.origin, b.token
@@ -315,7 +323,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	clientSync := func(input any) map[string]any {
 		body, _ := json.Marshal(input)
-		req, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/activity-client", bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/pet-activity-client", bytes.NewReader(body))
 		req.Header.Set("Origin", origin)
 		resp, err := client.Do(req)
 		if err != nil {
@@ -338,7 +346,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	clientSync(map[string]any{"ack": navigation["id"], "current": "pet-live-fixture", "visible": true})
 	waitFor(func(a Activity) bool { return !a.Unread && a.State == "idle" })
 	// Raw webServer routes must explicitly retain DSH's cookie trust fence.
-	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/activity-client", strings.NewReader(`{}`))
+	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/pet-activity-client", strings.NewReader(`{}`))
 	anonymous.Header.Set("Origin", origin)
 	anonymousClient := &http.Client{Transport: carrier.HTTP}
 	unauthorized, err := anonymousClient.Do(anonymous)

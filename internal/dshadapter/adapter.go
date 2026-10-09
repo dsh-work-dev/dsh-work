@@ -54,7 +54,8 @@ type ReadyAnnouncement struct {
 // resolved separately for this generation and is never persisted by the
 // manager.
 type LaunchContext struct {
-	CoreOverlay        bool
+	// UserDataOverlay places DSH user data in dsh-work's user-data folder; safe
+	// mode leaves it out. The core overlay (host plugins) always loads.
 	UserDataOverlay    bool
 	GenerationID       string
 	Runtime            Runtime
@@ -294,7 +295,7 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		}
 		plan.Args = append([]string{"--patch", patch}, plan.Args...)
 	}
-	if launch.CoreOverlay && a.coreOverlayPatch != nil {
+	if a.coreOverlayPatch != nil {
 		patch, err := a.coreOverlayPatch(launch.GenerationID)
 		if err != nil {
 			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH core overlay: %w", err)

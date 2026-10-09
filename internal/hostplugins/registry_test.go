@@ -13,7 +13,7 @@ func TestInstallPublishesThreeVersionedDSHPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"shell", "account", "activity"} {
+	for _, name := range []string{"shell", "account", "pet"} {
 		pkg, ok := packages[name]
 		if !ok {
 			t.Fatalf("missing %s package", name)
@@ -55,5 +55,29 @@ func TestInstallPublishesThreeVersionedDSHPackages(t *testing.T) {
 		if next[name].Directory == pkg.Directory {
 			t.Fatalf("%s version reused an old package path", name)
 		}
+	}
+}
+
+func TestInstallRepairsAPartiallyWrittenFile(t *testing.T) {
+	root := t.TempDir()
+	packages, err := Install(root, "1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := filepath.Join(packages["shell"].Directory, "client.js")
+	want, err := os.ReadFile(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An interrupted launch can leave a truncated file in the version directory.
+	if err := os.WriteFile(client, want[:len(want)/2], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(root, "1.2.3"); err != nil {
+		t.Fatalf("install did not recover from a partial file: %v", err)
+	}
+	got, err := os.ReadFile(client)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("repaired client.js differs (err=%v)", err)
 	}
 }

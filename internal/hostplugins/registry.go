@@ -20,12 +20,12 @@ type Package struct {
 	Directory string
 }
 
-var packageNames = []string{"shell", "account", "activity"}
+var packageNames = []string{"shell", "account", "pet"}
 var safeVersion = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
 var packageFiles = map[string][]string{
-	"shell":    {"package.json", "host.js", "client.js", "README.md"},
-	"account":  {"package.json", "host.js", "client.js", "README.md"},
-	"activity": {"package.json", "host.js", "client.js", "README.md"},
+	"shell":   {"package.json", "host.js", "client.js", "README.md"},
+	"account": {"package.json", "host.js", "client.js", "README.md"},
+	"pet":     {"package.json", "host.js", "client.js", "README.md"},
 }
 
 // Install publishes embedded DSH plugins below a content-addressed application
@@ -98,37 +98,33 @@ func Install(root, version string) (map[string]Package, error) {
 	return result, nil
 }
 
+// writeImmutable writes one file of a content-addressed version directory.
+// Matching content is left alone. Anything else at that path can only be a
+// partial write from an interrupted launch, so it is replaced atomically.
 func writeImmutable(path string, data []byte) error {
 	existing, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		if !bytes.Equal(existing, data) {
-			return errors.New("refusing to change files in an installed version")
-		}
+	if err == nil && bytes.Equal(existing, data) {
 		return nil
-	case !errors.Is(err, fs.ErrNotExist):
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			existing, readErr := os.ReadFile(path)
-			if readErr == nil && bytes.Equal(existing, data) {
-				return nil
-			}
-			return errors.New("refusing to change files in an installed version")
-		}
 		return err
 	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
 	if _, err := file.Write(data); err != nil {
 		file.Close()
-		os.Remove(path)
 		return err
 	}
 	if err := file.Sync(); err != nil {
 		file.Close()
-		os.Remove(path)
 		return err
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
 }

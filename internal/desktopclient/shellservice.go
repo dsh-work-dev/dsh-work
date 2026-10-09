@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/pet"
@@ -23,9 +24,18 @@ type ShellService struct {
 	// OnBuiltinComponentsChanged broadcasts transient DSH Client handshake state to every window.
 	OnBuiltinComponentsChanged func([]BuiltinComponentStatus)
 
-	componentsMu sync.RWMutex
-	components   map[string]string
+	// BuiltinComponentTimeout marks components that never report as failed;
+	// zero means defaultBuiltinComponentTimeout.
+	BuiltinComponentTimeout time.Duration
+
+	componentsMu    sync.RWMutex
+	components      map[string]string
+	componentsRound uint64
 }
+
+// DSH loads its plugins within seconds; a cold start with many profile plugins
+// still finishes well inside this budget.
+const defaultBuiltinComponentTimeout = 45 * time.Second
 
 // BuiltinComponentStatus is the read-only load state of an application-owned DSH Client.
 type BuiltinComponentStatus struct {
@@ -33,7 +43,7 @@ type BuiltinComponentStatus struct {
 	State string `json:"state"`
 }
 
-var builtinComponentIDs = [...]string{"shell", "account", "activity"}
+var builtinComponentIDs = [...]string{"shell", "account", "pet"}
 
 // ShellPet is what the shell menu needs from the pet panel.
 type ShellPet struct {
@@ -58,13 +68,38 @@ func (s *ShellService) BeginBuiltinComponents(ctx context.Context) error {
 		return err
 	}
 	s.componentsMu.Lock()
+	s.componentsRound++
+	round := s.componentsRound
 	s.components = make(map[string]string, len(builtinComponentIDs))
 	for _, id := range builtinComponentIDs {
 		s.components[id] = "loading"
 	}
 	s.componentsMu.Unlock()
 	s.publishBuiltinComponents()
+	timeout := s.BuiltinComponentTimeout
+	if timeout <= 0 {
+		timeout = defaultBuiltinComponentTimeout
+	}
+	time.AfterFunc(timeout, func() { s.failUnreported(round) })
 	return nil
+}
+
+// failUnreported marks the components of one frame load that never reported.
+func (s *ShellService) failUnreported(round uint64) {
+	s.componentsMu.Lock()
+	changed := false
+	if round == s.componentsRound {
+		for id, state := range s.components {
+			if state == "loading" {
+				s.components[id] = "failed"
+				changed = true
+			}
+		}
+	}
+	s.componentsMu.Unlock()
+	if changed {
+		s.publishBuiltinComponents()
+	}
 }
 
 // ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
@@ -73,6 +108,7 @@ func (s *ShellService) ResetBuiltinComponents(ctx context.Context) error {
 		return err
 	}
 	s.componentsMu.Lock()
+	s.componentsRound++
 	s.components = nil
 	s.componentsMu.Unlock()
 	s.publishBuiltinComponents()

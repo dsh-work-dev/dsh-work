@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -55,8 +52,8 @@ func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 }
 
 func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.T) {
-	b := New(t.TempDir())
-	if _, err := b.Prepare("g1"); err != nil {
+	b := New()
+	if _, err := b.Begin("g1"); err != nil {
 		t.Fatal(err)
 	}
 	token := b.token
@@ -100,52 +97,15 @@ func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.
 	if err := b.Open(ctx, "arbitrary"); err == nil {
 		t.Fatal("unknown navigation admitted")
 	}
-	patch, err := b.Prepare("g2")
+	config, err := b.Begin("g2")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if filepath.Dir(patch) != b.root {
-		t.Fatal("patch escaped Host directory")
 	}
 	b.accept("g1", Snapshot{SchemaVersion: 1, Generation: "g1", Sessions: []Activity{{SessionID: "old"}}})
 	if b.Snapshot().Connected || len(b.Snapshot().Sessions) != 0 {
 		t.Fatal("old generation published")
 	}
-	content, err := os.ReadFile(patch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !json.Valid(content) {
-		t.Fatal("invalid JSON/YAML patch")
-	}
-	var patchRows []map[string]any
-	if err := json.Unmarshal(content, &patchRows); err != nil || len(patchRows) != 1 {
-		t.Fatalf("invalid launch patch: %s (%v)", content, err)
-	}
-	insert, ok := patchRows[0]["insert"].([]any)
-	if !ok || len(insert) != 3 {
-		t.Fatalf("launch patch did not mount three built-in plugins: %#v", patchRows)
-	}
-	for i, id := range []string{"dsh-work-shell", "dsh-work-account", "dsh-work-activity"} {
-		entry, ok := insert[i].(map[string]any)
-		if !ok || entry["id"] != id {
-			t.Fatalf("plugin %d = %#v, want %s", i, insert[i], id)
-		}
-		name, _ := entry["name"].(string)
-		if !strings.Contains(name, "/versions/development/") {
-			t.Fatalf("plugin %s path is not versioned: %s", id, name)
-		}
-		if id == "dsh-work-shell" {
-			config, _ := entry["config"].(map[string]any)
-			if config["generation"] != "g2" {
-				t.Fatalf("shell config = %#v", config)
-			}
-		}
-		if id == "dsh-work-activity" {
-			config, _ := entry["config"].(map[string]any)
-			if config["generation"] != "g2" || config["token"] != b.token {
-				t.Fatalf("activity config = %#v", config)
-			}
-		}
+	if config["generation"] != "g2" || config["token"] != b.token || len(b.token) != 64 {
+		t.Fatalf("pet launch config = %#v", config)
 	}
 }

@@ -5,7 +5,7 @@ import test from 'node:test';
 const SHELL = 'http://wails.localhost';
 
 // Load the DSH client plugin framed by a fake shell, with a fake shortcut catalog.
-async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false} = {}) {
+async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false, servicesPresent = true} = {}) {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const listeners = {};
@@ -58,14 +58,15 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
   const ctx = {
     sessions: {list: {getSnapshot: () => ({byId: {}})}},
     effect: fn => { fn(); },
-    inject(deps, callback) { if (deps.includes('shortcuts')) callback(ctx); },
+    // Like Cordis, a callback runs only once every dependency is available.
+    inject(deps, callback) { if (deps.every(dep => ctx[dep] !== undefined)) callback(ctx); },
     shortcuts: {
       catalog: {getSnapshot: () => snapshot, subscribe: fn => { notify = fn; return () => {}; }},
       config: {getSnapshot: () => ({status}), subscribe: () => () => {}},
       fixedCatalog: {getSnapshot: () => fixed, subscribe: () => () => {}},
     },
-    uiWorkspace,
-    layout,
+    uiWorkspace: servicesPresent ? uiWorkspace : undefined,
+    layout: servicesPresent ? layout : undefined,
   };
   definition.factory(() => undefined).apply(ctx);
   const emit = (type, event) => (listeners[type] ?? []).forEach(fn => fn(event));
@@ -205,4 +206,13 @@ test('forwards Alt pressed alone and F10, but not Alt chords', async () => {
   shell.emit('keydown', {key: 'n', altKey: true});
   shell.emit('keyup', {key: 'Alt'});
   assert.deepEqual(keys(), ['F10', 'Alt']);
+});
+
+test('keeps the menu bridge when a profile lacks the workspace or layout service', async () => {
+  const shell = await framed([entry('terminal.new', {code: 'Backquote', modifiers: ['control']}, ['Ctrl', '`'])], {servicesPresent: false});
+  const commands = new Map(catalogs(shell.posted).at(-1).map(command => [command.id, command.state]));
+  assert.equal(commands.get('terminal.new'), 'ready');
+  assert.equal(commands.get('session.new'), 'unavailable');
+  assert.equal(commands.get('sidebar.left.toggle'), 'unavailable');
+  assert.deepEqual(messages(shell.posted, 'dsh-work/component-ready').map(message => message.id), ['shell']);
 });
