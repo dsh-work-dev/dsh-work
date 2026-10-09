@@ -1087,7 +1087,7 @@ func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Conf
 	host := NewHost(Dependencies{
 		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server},
 	}, Config{
-		BootstrapDirectory:  filepath.Join(root, "bootstrap"),
+		BootstrapDirectory: filepath.Join(root, "bootstrap"),
 		// Failing profiles wait the whole readiness budget, so it stays short; it
 		// still has to cover a first loopback probe on a slow CI runner.
 		ReadinessTimeout:    400 * time.Millisecond,
