@@ -108,3 +108,30 @@ export function createUploadWorkerAdapter(worker: Worker, streamFetch: StreamFet
     },
   });
 }
+
+export type SessionExportRoute = {sessionId: string; includeDescendants: boolean};
+
+export function parseSessionExportRoute(raw: string | URL, pageHref: string): SessionExportRoute | undefined {
+  try {
+    const page = new URL(pageHref);
+    const target = new URL(raw, page);
+    const ids = target.searchParams.getAll('sessionId');
+    const descendants = target.searchParams.getAll('includeDescendants');
+    if (target.username !== '' || target.password !== '' || target.origin !== page.origin || target.pathname !== '/api/session.export') return undefined;
+    if (ids.length !== 1 || ids[0] === '' || ids[0].length > 4096 || descendants.length > 1) return undefined;
+    const includeDescendants = descendants[0] ?? 'false';
+    if (includeDescendants !== 'true' && includeDescendants !== 'false') return undefined;
+    return {sessionId: ids[0], includeDescendants: includeDescendants === 'true'};
+  } catch {
+    return undefined;
+  }
+}
+
+export function sessionExportCommand(route: SessionExportRoute): string {
+  const query = new URLSearchParams({sessionId: route.sessionId, includeDescendants: String(route.includeDescendants)});
+  return `/__work/session-export?${query.toString()}`;
+}
+export function sessionExportDownloadRoute(raw: string | URL, filename: string, pageHref: string): SessionExportRoute | undefined {
+  if (filename === '') return undefined;
+  return parseSessionExportRoute(raw, pageHref);
+}

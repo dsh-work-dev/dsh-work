@@ -88,17 +88,39 @@ function r(e, t, r) {
 		}
 	});
 }
+function i(e, t) {
+	try {
+		let n = new URL(t), r = new URL(e, n), i = r.searchParams.getAll("sessionId"), a = r.searchParams.getAll("includeDescendants");
+		if (r.username !== "" || r.password !== "" || r.origin !== n.origin || r.pathname !== "/api/session.export" || i.length !== 1 || i[0] === "" || i[0].length > 4096 || a.length > 1) return;
+		let o = a[0] ?? "false";
+		return o !== "true" && o !== "false" ? void 0 : {
+			sessionId: i[0],
+			includeDescendants: o === "true"
+		};
+	} catch {
+		return;
+	}
+}
+function a(e) {
+	return `/__work/session-export?${new URLSearchParams({
+		sessionId: e.sessionId,
+		includeDescendants: String(e.includeDescendants)
+	}).toString()}`;
+}
+function o(e, t, n) {
+	if (t !== "") return i(e, n);
+}
 //#endregion
 //#region internal/desktopbridge/client.ts
-var i = globalThis.fetch.bind(globalThis), a = globalThis.__WORK_GENERATION__, o = 64 * 1024;
-async function s(t, n) {
-	let r = { ...n }, s = r.uploadTotal, c = r.onUploadProgress;
+var s = globalThis.fetch.bind(globalThis), c = globalThis.__WORK_GENERATION__, l = 64 * 1024;
+async function u(t, n) {
+	let r = { ...n }, i = r.uploadTotal, a = r.onUploadProgress;
 	delete r.duplex, delete r.uploadTotal, delete r.onUploadProgress;
-	let l = new Request(t, r), u = new URL(l.url);
-	if (u.origin !== location.origin || u.pathname.startsWith("/wails/")) return i(l);
+	let o = new Request(t, r), u = new URL(o.url);
+	if (u.origin !== location.origin || u.pathname.startsWith("/wails/")) return s(o);
 	let d = e("worker-fetch");
 	d.binaryType = "arraybuffer";
-	let f = !1, p = !1, m, h, g, _, v, y = l.signal, b = () => {
+	let f = !1, p = !1, m, h, g, _, v, y = o.signal, b = () => {
 		p = !0, y.removeEventListener("abort", x), g?.(/* @__PURE__ */ Error("Worker upload closed")), _?.(), v?.cancel().catch(() => {}), d.close();
 	}, x = () => C(y.reason ?? new DOMException("Aborted", "AbortError")), S, C = (e) => {
 		if (!p) {
@@ -119,7 +141,7 @@ async function s(t, n) {
 						if (f) throw Error("duplicate headers");
 						let t = JSON.parse(new TextDecoder().decode(n.subarray(1))), r = new Headers();
 						for (let [e, n] of Object.entries(t.headers)) for (let t of n) r.append(e, t);
-						let i = l.method === "HEAD" || [
+						let i = o.method === "HEAD" || [
 							204,
 							205,
 							304
@@ -163,29 +185,29 @@ async function s(t, n) {
 			}
 		}, d.onopen = () => {
 			let e = {};
-			l.headers.forEach((t, n) => e[n] = [t]), d.send(new TextEncoder().encode(JSON.stringify({
-				generation: a,
+			o.headers.forEach((t, n) => e[n] = [t]), d.send(new TextEncoder().encode(JSON.stringify({
+				generation: c,
 				url: u.pathname + u.search,
-				method: l.method,
+				method: o.method,
 				headers: e,
-				hasBody: !!l.body
+				hasBody: !!o.body
 			}))), (async () => {
-				if (!l.body) return;
-				let e = l.body.getReader();
+				if (!o.body) return;
+				let e = o.body.getReader();
 				v = e;
 				let t = 0;
 				try {
 					for (;;) {
 						let { done: n, value: r } = await e.read();
 						if (n) break;
-						for (let e = 0; e < r.length; e += o) {
+						for (let e = 0; e < r.length; e += l) {
 							if (p) throw Error("Worker upload closed");
-							let n = r.subarray(e, e + o), i = new Uint8Array(n.length + 1);
-							i[0] = 1, i.set(n, 1), await new Promise((e, t) => {
-								h = e, g = t, d.send(i);
-							}), t += n.length, c?.({
+							let n = r.subarray(e, e + l), o = new Uint8Array(n.length + 1);
+							o[0] = 1, o.set(n, 1), await new Promise((e, t) => {
+								h = e, g = t, d.send(o);
+							}), t += n.length, a?.({
 								loaded: t,
-								...s === void 0 ? {} : { total: s }
+								...i === void 0 ? {} : { total: i }
 							});
 						}
 					}
@@ -200,14 +222,53 @@ async function s(t, n) {
 }
 globalThis.WorkerBridge = {
 	Stream: e,
-	workerFetch: s
+	workerFetch: u
 };
-var c = globalThis.Worker;
-typeof c == "function" && (globalThis.Worker = new Proxy(c, { construct(e, t, n) {
+var d, f;
+function p(e) {
+	let t = document.body ?? document.documentElement;
+	if (!t) return;
+	let n = (document.documentElement?.lang || navigator.language || "en").toLowerCase(), r = n.startsWith("zh"), i = n.startsWith("ja"), a = e === "saved" ? r ? "会话日志已保存" : i ? "セッションログを保存しました" : "Session log saved." : e === "cancelled" ? r ? "已取消导出" : i ? "エクスポートをキャンセルしました" : "Export cancelled." : r ? "无法导出会话日志，请重试。" : i ? "セッションログをエクスポートできませんでした。もう一度お試しください。" : "Could not export the session log. Try again.";
+	(!d || !d.isConnected) && (d = document.createElement("div"), Object.assign(d.style, {
+		position: "fixed",
+		top: "20px",
+		right: "20px",
+		zIndex: "2147483647",
+		maxWidth: "min(360px, calc(100vw - 40px))",
+		padding: "12px 16px",
+		borderRadius: "10px",
+		background: "rgba(24, 24, 27, 0.96)",
+		color: "#fff",
+		boxShadow: "0 8px 24px rgba(0, 0, 0, 0.22)",
+		font: "500 14px/1.5 system-ui, sans-serif",
+		pointerEvents: "none",
+		opacity: "0",
+		transition: "opacity 120ms ease"
+	}), t.appendChild(d)), d.setAttribute("role", e === "error" ? "alert" : "status"), d.setAttribute("aria-live", e === "error" ? "assertive" : "polite"), d.textContent = a, d.style.opacity = "1", f !== void 0 && window.clearTimeout(f), f = window.setTimeout(() => {
+		d && (d.style.opacity = "0");
+	}, 3500);
+}
+var m = /* @__PURE__ */ new Set(), h = globalThis.HTMLAnchorElement;
+if (typeof h == "function") {
+	let e = h.prototype.click;
+	h.prototype.click = function() {
+		let t = o(this.href, this.download, location.href);
+		if (!t || !this.download) {
+			e.call(this);
+			return;
+		}
+		m.has(t.sessionId) || (m.add(t.sessionId), u(a(t), { method: "POST" }).then(async (e) => {
+			let t = await e.json();
+			t.result === "saved" ? p("saved") : t.result === "cancelled" ? p("cancelled") : p("error");
+		}).catch(() => p("error")).finally(() => m.delete(t.sessionId)));
+	};
+}
+var g = globalThis.Worker;
+typeof g == "function" && (globalThis.Worker = new Proxy(g, { construct(e, t, n) {
 	let i = Reflect.construct(e, t, n);
-	return t[1]?.name === "dsh-file-upload" ? r(i, s, location.href) : i;
+	return t[1]?.name === "dsh-file-upload" ? r(i, u, location.href) : i;
 } }));
-var l = globalThis.WebSocket, u = class extends EventTarget {
+var _ = globalThis.WebSocket, v = class extends EventTarget {
 	static {
 		this.CONNECTING = 0;
 	}
@@ -225,7 +286,7 @@ var l = globalThis.WebSocket, u = class extends EventTarget {
 			let e = new URL(this.url);
 			this.socket.send(new TextEncoder().encode(JSON.stringify({
 				url: e.pathname + e.search,
-				generation: a,
+				generation: c,
 				protocols: typeof n == "string" ? [n] : n ?? []
 			})));
 		}, this.socket.onmessage = (e) => {
@@ -280,8 +341,8 @@ var l = globalThis.WebSocket, u = class extends EventTarget {
 		let n = typeof e == "string" ? new TextEncoder().encode(e).length : e instanceof Blob ? e.size : e.byteLength;
 		this.bufferedAmount += n, this.queue = this.queue.then(async () => {
 			let r = typeof e == "string" ? new TextEncoder().encode(e) : e instanceof Blob ? new Uint8Array(await e.arrayBuffer()) : ArrayBuffer.isView(e) ? new Uint8Array(e.buffer, e.byteOffset, e.byteLength) : new Uint8Array(e);
-			for (let e = 0; e < r.length || e === 0; e += o) {
-				let n = r.subarray(e, e + o), i = new Uint8Array(n.length + 1);
+			for (let e = 0; e < r.length || e === 0; e += l) {
+				let n = r.subarray(e, e + l), i = new Uint8Array(n.length + 1);
 				i[0] = t, i.set(n, 1), await this.write(i);
 			}
 			await this.write(new Uint8Array([5])), this.bufferedAmount -= n;
@@ -312,8 +373,8 @@ var l = globalThis.WebSocket, u = class extends EventTarget {
 		r[0] = 6, r.set(n, 1), this.socket.send(r);
 	}
 };
-globalThis.WebSocket = new Proxy(l, { construct(e, n, r) {
-	return t(n[0], location.href) ? new u(n[0], n[1]) : Reflect.construct(e, n, r);
+globalThis.WebSocket = new Proxy(_, { construct(e, n, r) {
+	return t(n[0], location.href) ? new v(n[0], n[1]) : Reflect.construct(e, n, r);
 } });
 //#endregion
-export { e as Stream, s as workerFetch };
+export { e as Stream, u as workerFetch };

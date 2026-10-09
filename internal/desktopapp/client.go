@@ -102,6 +102,9 @@ func runDesktopClient(identity string, resources Resources) error {
 					Detail     string
 				}{generation, detail}, nil)
 			},
+			SaveSessionExport: func(ctx context.Context, filename string, write func(io.Writer) error) (bool, error) {
+				return nativeui.SaveSessionLogArchive(desktop, filename, write)
+			},
 		}
 	}}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {

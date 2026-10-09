@@ -14,10 +14,10 @@ import (
 // Wails dispatches runtime calls or serves application files; Window only
 // scopes the Worker's streams to the workbench window.
 type Surface struct {
-	Host         string
-	Window       func() application.Window
-	Current      func() *Bridge
-	Assets       func(*Bridge) http.Handler
+	Host    string
+	Window  func() application.Window
+	Current func() *Bridge
+	Assets  func(*Bridge) http.Handler
 }
 
 func (s *Surface) forWindow(window application.Window) *Bridge {
