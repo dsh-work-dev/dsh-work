@@ -17,6 +17,8 @@ type ShellService struct {
 	// The background grants pet controls to the Settings surface only, so the
 	// UI process asks on its behalf, as the native menu did.
 	Pet func(ctx context.Context, visible *bool) (app.PetPanel, error)
+	// SaveZoomLevel stores the workbench zoom factor in the background settings.
+	SaveZoomLevel func(ctx context.Context, zoom float64) error
 }
 
 // ShellPet is what the shell menu needs from the pet panel.
@@ -43,6 +45,17 @@ func (s *ShellService) OpenSettings(ctx context.Context, section string) error {
 	}
 	go s.Open(section)
 	return nil
+}
+
+// SaveZoom remembers the workbench zoom factor for the next start.
+func (s *ShellService) SaveZoom(ctx context.Context, zoom float64) error {
+	if _, err := trustedWindow(ctx); err != nil {
+		return err
+	}
+	if s.SaveZoomLevel == nil {
+		return errors.New("zoom cannot be saved")
+	}
+	return s.SaveZoomLevel(ctx, zoom)
 }
 
 // GetPet reports whether a pet is selected and visible.

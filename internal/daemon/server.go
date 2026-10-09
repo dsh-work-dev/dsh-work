@@ -217,6 +217,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeJSON(w, true)
 		}
+	case "/zoom":
+		if s.maintenanceBusy() {
+			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+			return
+		}
+		var zoom float64
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64)).Decode(&zoom) != nil {
+			http.Error(w, "invalid zoom", 400)
+			return
+		}
+		if err := s.Settings.SetWorkspaceZoom(r.Context(), zoom); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, true)
 	case "/geometry":
 		if s.maintenanceBusy() {
 			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)

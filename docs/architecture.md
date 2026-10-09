@@ -350,17 +350,28 @@ screen and close use the Wails window API (close hides the window). Zoom
 scales the whole window, shell bar included, and cannot go below actual size
 (Wails clamps WebView2 zoom at 100%), so 缩小 and 实际大小 are off at 100%. 全屏
 is a checked item; full screen hides the window buttons and is left through
-the same item. The links
-open the dsh-work docs and issue tracker and the DeepSeek Harness issue
-tracker in the system browser. 复制诊断信息 copies the same report as About.
+the same item. Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0 and F11 run the same window
+items, also while DSH has focus, unless DSH binds that chord itself. The zoom
+factor is saved in Host settings and restored when the workbench opens. The
+links open the dsh-work docs and issue tracker and the DeepSeek Harness issue
+tracker in the system browser. 复制诊断信息 copies the same report as About. 检查更新
+starts a check and reports the outcome in a short status line under the bar;
+when an update is already found, downloading or not configured, it opens About
+instead.
+Release builds include the WebView developer tools (`devtools` build tag), so
+打开调试窗口 works for every user, as in other desktop apps built on web views.
 
 DSH commands run from a fixed list through the dsh-work DSH client
 plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
 command's current binding from `ctx.shortcuts.catalog`, and runs a command the
 shell asks for by dispatching that binding through DSH's keyboard path, since
-DSH offers plugins no public command invoke. An unbound command is shown as not
-bound and disabled. The plugin also forwards Alt pressed alone and F10, which
-focus the menu bar. Shell and plugin accept messages only from each other's
+DSH offers plugins no public command invoke. A command is disabled and marked
+未绑定 when it has no binding, or 不可用 when the menu cannot press it: a
+conflicting, invalid or two-key binding, or DSH shortcut settings that are
+still loading. DSH prevents default on the key press it consumes, so the
+plugin reports whether DSH took the command; when DSH ignores it, the shell
+shows that the command could not run. The plugin also forwards Alt pressed
+alone and F10, which focus the menu bar, and the window keys above. Shell and plugin accept messages only from each other's
 window and origin.
 
 Settings is a separate window with its own locale-aware title and no menu. The

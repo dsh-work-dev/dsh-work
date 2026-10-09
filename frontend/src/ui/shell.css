@@ -56,3 +56,10 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-menu-checked { opacity: 1; }
 .shell-menu-trailing svg { width: 14px; height: 14px; }
 .shell-menu-separator { height: 1px; margin: 4px 6px; background: color-mix(in srgb, currentColor 14%, transparent); }
+.shell-toast {
+  position: fixed; z-index: 30; top: 48px; left: 50%; transform: translateX(-50%); max-width: min(480px, calc(100vw - 32px));
+  padding: 8px 14px; border-radius: 8px; font-size: var(--fs-control);
+  background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text));
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.shell-toast[hidden] { display: none; }

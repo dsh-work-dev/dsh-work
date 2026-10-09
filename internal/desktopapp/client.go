@@ -125,6 +125,8 @@ func runDesktopClient(identity string, resources Resources) error {
 			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel)
 		}
 		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
+	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
+		return client.JSON(ctx, "/zoom", zoom, nil)
 	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
 		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
@@ -204,6 +206,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			// longer depend on which document is under the pointer. Without it,
 			// Wails detects edges in the top document, which the DSH frame covers.
 			workOptions.Windows.WebView2CompositionHosting = true
+			workOptions.Zoom = state.Preferences.WorkspaceZoom
 		}
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {hasTranslationInEveryLocale} from "../src/i18n";
 import {parseFrameMessage} from "../src/shell-frame";
-import {buildMenus, formatKeys, stepItem, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
+import {buildMenus, formatKeys, stepItem, windowKeyAction, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
@@ -77,8 +77,9 @@ test("pet item mirrors selection and visibility", () => {
 test("DSH items wait for the catalog and show the current binding", () => {
   assert.equal(item(buildMenus(state(), t), "session.new").enabled, false);
   const dsh = new Map([
-    ["session.new", {id: "session.new", keys: ["Ctrl", "Alt", "N"], bound: true}],
-    ["terminal.new", {id: "terminal.new", keys: [], bound: false}],
+    ["session.new", {id: "session.new", keys: ["Ctrl", "Alt", "N"], state: "ready" as const}],
+    ["terminal.new", {id: "terminal.new", keys: [], state: "unbound" as const}],
+    ["browser.new", {id: "browser.new", keys: ["Ctrl", "K"], state: "unavailable" as const}],
   ]);
   const menus = buildMenus(state({dsh}), t);
   const created = item(menus, "session.new");
@@ -88,7 +89,33 @@ test("DSH items wait for the catalog and show the current binding", () => {
   const unbound = item(menus, "terminal.new");
   assert.equal(unbound.enabled, false);
   assert.equal(unbound.hint, "shell.menu.unbound");
+  const unavailable = item(menus, "browser.new");
+  assert.equal(unavailable.enabled, false);
+  assert.equal(unavailable.keys, undefined);
+  assert.equal(unavailable.hint, "shell.menu.unavailable");
   assert.equal(item(menus, "workspace.add").enabled, false);
+});
+
+test("window items show the keys the shell handles", () => {
+  const menus = buildMenus(state({window: {fullscreen: false, zoom: 1.2}}), t);
+  assert.equal(formatKeys(item(menus, "zoomIn").keys), "Ctrl+=");
+  assert.equal(formatKeys(item(menus, "zoomOut").keys), "Ctrl+-");
+  assert.equal(formatKeys(item(menus, "zoomReset").keys), "Ctrl+0");
+  assert.equal(formatKeys(item(menus, "fullscreen").keys), "F11");
+});
+
+test("window keys map to window actions", () => {
+  const key = (init: Partial<KeyboardEventInit> & {code: string}) => windowKeyAction({ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...init});
+  assert.equal(key({code: "Equal", ctrlKey: true}), "zoom-in");
+  assert.equal(key({code: "Equal", ctrlKey: true, shiftKey: true}), "zoom-in");
+  assert.equal(key({code: "NumpadAdd", ctrlKey: true}), "zoom-in");
+  assert.equal(key({code: "Minus", ctrlKey: true}), "zoom-out");
+  assert.equal(key({code: "Numpad0", ctrlKey: true}), "zoom-reset");
+  assert.equal(key({code: "F11"}), "fullscreen");
+  assert.equal(key({code: "F11", shiftKey: true}), undefined);
+  assert.equal(key({code: "Equal", ctrlKey: true, altKey: true}), undefined);
+  assert.equal(key({code: "Minus", ctrlKey: true, shiftKey: true}), undefined);
+  assert.equal(key({code: "KeyN", ctrlKey: true}), undefined);
 });
 
 test("help reflects the update phase", () => {
@@ -110,7 +137,8 @@ test("keyboard steps skip separators and wrap", () => {
 
 test("every shell menu label is translated in every locale", () => {
   const keys = [
-    "shell.menu.bar", "shell.menu.unbound", "shell.menu.updateAvailable", "shell.menu.updating",
+    "shell.menu.bar", "shell.menu.unbound", "shell.menu.unavailable", "shell.menu.updateAvailable", "shell.menu.updating",
+    "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
     "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
     ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
       .filter(key => !key.startsWith("manager.")),
@@ -121,9 +149,10 @@ test("every shell menu label is translated in every locale", () => {
 
 test("frame catalog keeps only menu commands with well-formed entries", () => {
   const parsed = parseFrameMessage({version: 1, type: "dsh-work/catalog", commands: [
-    {id: "session.new", keys: ["Ctrl", "N"], bound: true},
-    {id: "plugin.private", keys: [], bound: true},
-    {id: "terminal.new", keys: "Ctrl+T", bound: true},
+    {id: "session.new", keys: ["Ctrl", "N"], state: "ready"},
+    {id: "plugin.private", keys: [], state: "ready"},
+    {id: "terminal.new", keys: "Ctrl+T", state: "ready"},
+    {id: "browser.new", keys: [], state: "running"},
   ]});
   assert.equal(parsed?.type, "catalog");
   assert.deepEqual(Array.from((parsed as {commands: Map<string, unknown>}).commands.keys()), ["session.new"]);
@@ -135,6 +164,10 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/menu-key", key: "Tab"}), null);
   assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/menu-key", key: "F10"}), {type: "menu-key"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/surface", background: "rgb(1, 2, 3)", color: "red"}), {type: "surface", background: "rgb(1, 2, 3)", color: "red"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/command-result", id: "session.new", handled: false}), {type: "command-result", id: "session.new", handled: false});
+  assert.equal(parseFrameMessage({type: "dsh-work/command-result", id: "plugin.private", handled: false}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/window-key", action: "zoom-in"}), {type: "window-key", action: "zoom-in"});
+  assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
 });
 
 test("shortcut keys render as DSH shows them, without extra separators", () => {

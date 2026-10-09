@@ -261,3 +261,27 @@ func asFailure(err error, target *lifecycle.Failure) bool {
 	*target = value
 	return true
 }
+
+func TestSettingsPersistWorkspaceZoom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []float64{0.5, 0, 6} {
+		if err := manager.SetWorkspaceZoom(context.Background(), invalid); err == nil {
+			t.Fatalf("accepted zoom %v", invalid)
+		}
+	}
+	if err := manager.SetWorkspaceZoom(context.Background(), 1.25); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := reloaded.Snapshot(context.Background())
+	if err != nil || values.WorkspaceZoom != 1.25 {
+		t.Fatalf("reloaded zoom = %v error=%v", values.WorkspaceZoom, err)
+	}
+}

@@ -29,8 +29,21 @@ function openAccountSignIn(ctx) {
 
 // The dsh-work shell menu runs a fixed set of DSH commands. DSH exposes no
 // public command invoke to plugins, so a command runs by dispatching its
-// current binding through DSH's own keyboard path; unbound commands stay off.
+// current binding through DSH's own keyboard path. A binding the menu cannot
+// press (a conflict, an invalid or two-key binding, or settings still loading)
+// is reported unavailable rather than pressed into the wrong command.
 const SHELL_COMMANDS = ['session.new', 'session.search', 'workspace.add', 'terminal.new', 'browser.new', 'sidebar.left.toggle', 'sidebar.right.toggle', 'settings.open', 'shortcuts.open'];
+
+// Window keys the shell owns while DSH has focus, unless DSH binds the same chord.
+function windowKeyAction(event) {
+  if (event.altKey || event.metaKey) return undefined;
+  if (!event.ctrlKey) return event.code === 'F11' && !event.shiftKey ? 'fullscreen' : undefined;
+  if (event.code === 'Equal' || event.code === 'NumpadAdd') return 'zoom-in';
+  if (event.shiftKey) return undefined;
+  if (event.code === 'Minus' || event.code === 'NumpadSubtract') return 'zoom-out';
+  if (event.code === 'Digit0' || event.code === 'Numpad0') return 'zoom-reset';
+  return undefined;
+}
 
 function keyForCode(code) {
   if (code.startsWith('Key')) return code.slice(3).toLowerCase();
@@ -42,30 +55,46 @@ function connectShell(ctx) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
   if (!shellOrigin) return;
   ctx.inject(['shortcuts'], ctx => {
-    const catalog = ctx.shortcuts.catalog;
+    const {catalog, config, fixedCatalog} = ctx.shortcuts;
     const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
     const entries = () => new Map(catalog.getSnapshot().map(entry => [entry.id, entry]));
+    const ready = () => (config?.getSnapshot().status ?? 'ready') === 'ready';
+    const state = entry => {
+      if (!entry.binding) return 'unbound';
+      if (!ready() || entry.issue || entry.conflicts?.length || entry.binding.secondCode !== undefined) return 'unavailable';
+      return 'ready';
+    };
     const report = () => {
       const current = entries();
       post({type: 'dsh-work/catalog', commands: SHELL_COMMANDS.flatMap(id => {
         const entry = current.get(id);
-        return entry ? [{id, keys: entry.binding ? [...entry.keys] : [], bound: entry.binding !== null}] : [];
+        return entry ? [{id, keys: entry.binding ? [...entry.keys] : [], state: state(entry)}] : [];
       })});
     };
     ctx.effect(() => catalog.subscribe(report));
+    if (config) ctx.effect(() => config.subscribe(report));
     report();
     const onMessage = event => {
       if (event.source !== window.parent || event.origin !== shellOrigin) return;
       const data = event.data;
       if (data?.type !== 'dsh-work/command' || !SHELL_COMMANDS.includes(data.id)) return;
-      const binding = entries().get(data.id)?.binding;
-      if (!binding) return;
-      const modifiers = new Set(binding.modifiers);
-      document.body.dispatchEvent(new KeyboardEvent('keydown', {
-        code: binding.code, key: keyForCode(binding.code), bubbles: true, cancelable: true,
-        ctrlKey: modifiers.has('control'), altKey: modifiers.has('alt'), shiftKey: modifiers.has('shift'), metaKey: modifiers.has('meta'),
-      }));
+      const entry = entries().get(data.id);
+      let handled = false;
+      if (entry && state(entry) === 'ready') {
+        const modifiers = new Set(entry.binding.modifiers);
+        const press = new KeyboardEvent('keydown', {
+          code: entry.binding.code, key: keyForCode(entry.binding.code), bubbles: true, cancelable: true,
+          ctrlKey: modifiers.has('control'), altKey: modifiers.has('alt'), shiftKey: modifiers.has('shift'), metaKey: modifiers.has('meta'),
+        });
+        // DSH prevents default on input it consumes, whether it runs the command or declines it.
+        handled = !document.body.dispatchEvent(press);
+      }
+      post({type: 'dsh-work/command-result', id: data.id, handled});
     };
+    const sameChord = (binding, event) => binding?.code === event.code && binding.secondCode === undefined &&
+      ['control', 'alt', 'shift', 'meta'].every(modifier => binding.modifiers.includes(modifier) === !!event[modifier === 'control' ? 'ctrlKey' : `${modifier}Key`]);
+    const boundInDSH = event => catalog.getSnapshot().some(entry => sameChord(entry.binding, event)) ||
+      (fixedCatalog?.getSnapshot() ?? []).some(entry => entry.bindings.some(binding => sameChord(binding, event)));
     // Alt pressed alone or F10 opens the shell menu bar, as in a native window.
     let altAlone = false;
     const keydown = event => {
@@ -74,6 +103,11 @@ function connectShell(ctx) {
         post({type: 'dsh-work/menu-key', key: 'F10'});
         altAlone = false;
         return;
+      }
+      const action = windowKeyAction(event);
+      if (action && !event.defaultPrevented && !boundInDSH(event)) {
+        event.preventDefault();
+        post({type: 'dsh-work/window-key', action});
       }
       altAlone = event.key === 'Alt' && !event.repeat;
     };

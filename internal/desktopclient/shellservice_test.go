@@ -77,3 +77,18 @@ func TestShellServicePetStateFromTrustedWindows(t *testing.T) {
 		t.Fatalf("requests = %v", requested)
 	}
 }
+
+func TestShellServiceSavesZoomFromTrustedWindows(t *testing.T) {
+	var saved []float64
+	s := &ShellService{SaveZoomLevel: func(_ context.Context, zoom float64) error { saved = append(saved, zoom); return nil }}
+	if err := s.SaveZoom(context.Background(), 1.1); err == nil {
+		t.Fatal("saved zoom without a trusted window")
+	}
+	trusted := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	if err := s.SaveZoom(trusted, 1.1); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0] != 1.1 {
+		t.Fatalf("saved = %v", saved)
+	}
+}

@@ -5,7 +5,9 @@ export const dshMenuCommands: readonly string[] = [
   "sidebar.left.toggle", "sidebar.right.toggle", "settings.open", "shortcuts.open",
 ];
 
-export interface DshCommand { id: string; keys: string[]; bound: boolean }
+/** Whether the menu can press a DSH command's binding: unbound, or bound in a way it cannot press. */
+export type DshCommandState = "ready" | "unbound" | "unavailable";
+export interface DshCommand { id: string; keys: string[]; state: DshCommandState }
 
 export interface MenuState {
   lifecycle: string;
@@ -24,6 +26,24 @@ export interface MenuState {
 
 export type SettingsSection = "overview" | "settings" | "notifications" | "pets" | "runtimes" | "profiles" | "plugins" | "data-directories" | "about";
 export type WindowAction = "close" | "zoom-in" | "zoom-out" | "zoom-reset" | "fullscreen";
+/** Window actions with keys of their own, handled by the shell and forwarded by the DSH plugin. */
+export const keyedWindowActions: readonly WindowAction[] = ["zoom-in", "zoom-out", "zoom-reset", "fullscreen"];
+const windowKeys: Partial<Record<WindowAction, string[]>> = {
+  "zoom-in": ["Ctrl", "+", "="], "zoom-out": ["Ctrl", "+", "-"], "zoom-reset": ["Ctrl", "+", "0"], "fullscreen": ["F11"],
+};
+
+type KeyFacts = Pick<KeyboardEvent, "code" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">;
+
+/** The window action a key press asks for; the DSH plugin keeps the same table. */
+export function windowKeyAction(event: KeyFacts): WindowAction | undefined {
+  if (event.altKey || event.metaKey) return undefined;
+  if (!event.ctrlKey) return event.code === "F11" && !event.shiftKey ? "fullscreen" : undefined;
+  if (event.code === "Equal" || event.code === "NumpadAdd") return "zoom-in";
+  if (event.shiftKey) return undefined;
+  if (event.code === "Minus" || event.code === "NumpadSubtract") return "zoom-out";
+  if (event.code === "Digit0" || event.code === "Numpad0") return "zoom-reset";
+  return undefined;
+}
 export type LinkTarget = "docs" | "feedback-desktop" | "feedback-dsh";
 export type MenuAction =
   | {kind: "settings"; section: SettingsSection} | {kind: "window"; action: WindowAction} | {kind: "link"; target: LinkTarget}
@@ -51,11 +71,13 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
     type: "item", key: `settings.${section}`, label: t(`manager.${label}`), enabled: true,
     action: {kind: "settings", section},
   });
+  const windowItem = (key: string, action: WindowAction, enabled = true): MenuItem => ({...host(key, {kind: "window", action}, enabled), keys: windowKeys[action]});
   const dsh = (id: string): MenuItem => {
     const command = state.dsh?.get(id);
+    const ready = command?.state === "ready";
     return {
-      type: "item", key: id, label: t(`shell.command.${id}`), enabled: command?.bound === true,
-      keys: command?.bound ? command.keys : undefined, hint: command && !command.bound ? t("shell.menu.unbound") : undefined,
+      type: "item", key: id, label: t(`shell.command.${id}`), enabled: ready,
+      keys: ready ? command.keys : undefined, hint: command && !ready ? t(`shell.menu.${command.state}`) : undefined,
       action: {kind: "dsh", id},
     };
   };
@@ -71,11 +93,11 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
     {id: "view", label: t("shell.menu.view"), badge: false, items: [
       dsh("sidebar.left.toggle"), dsh("sidebar.right.toggle"),
       separator,
-      host("zoomIn", {kind: "window", action: "zoom-in"}),
+      windowItem("zoomIn", "zoom-in"),
       // WebView2 zoom in Wails stops at actual size, so there is nothing below it.
-      host("zoomOut", {kind: "window", action: "zoom-out"}, state.window.zoom > 1),
-      host("zoomReset", {kind: "window", action: "zoom-reset"}, state.window.zoom !== 1),
-      {...host("fullscreen", {kind: "window", action: "fullscreen"}), checked: state.window.fullscreen},
+      windowItem("zoomOut", "zoom-out", state.window.zoom > 1),
+      windowItem("zoomReset", "zoom-reset", state.window.zoom !== 1),
+      {...windowItem("fullscreen", "fullscreen"), checked: state.window.fullscreen},
       separator,
       {...host("showPet", {kind: "pet"}, !state.busy && state.pet.ready), checked: state.pet.visible},
     ]},

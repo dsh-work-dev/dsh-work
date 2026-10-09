@@ -8,11 +8,13 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/settings"
 )
 
 type maintenanceTestService struct {
@@ -78,7 +80,7 @@ func TestServerBlocksMutableCallsDuringInstallerMaintenance(t *testing.T) {
 
 func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	server := &Server{Maintenance: func() bool { return true }}
-	for _, path := range []string{"/open", "/update/action", "/geometry", "/worker"} {
+	for _, path := range []string{"/open", "/update/action", "/geometry", "/zoom", "/worker"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
 		server.ServeHTTP(recorder, request)
@@ -272,4 +274,24 @@ func postCall(t *testing.T, server *Server, call Call) Result {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func TestServerSavesWorkspaceZoom(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := settings.New(settings.Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Settings: manager}
+	for body, want := range map[string]int{`1.2`: http.StatusOK, `0.5`: http.StatusBadRequest, `"big"`: http.StatusBadRequest} {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/zoom", strings.NewReader(body)))
+		if recorder.Code != want {
+			t.Fatalf("zoom %s status = %d, want %d", body, recorder.Code, want)
+		}
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil || values.WorkspaceZoom != 1.2 {
+		t.Fatalf("saved zoom = %v error=%v", values.WorkspaceZoom, err)
+	}
 }

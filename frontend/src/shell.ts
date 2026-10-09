@@ -4,7 +4,8 @@ import {diagnosticsReport} from "./diagnostics";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
-import type {LinkTarget, MenuAction, MenuState, WindowAction} from "./shell-menu-model";
+import {createToast} from "./shell-toast";
+import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
 import {safeModeActive} from "./recovery";
 import {icon, type IconName} from "./ui/icons";
 
@@ -21,6 +22,8 @@ const windowActions: Record<WindowAction, () => Promise<void>> = {
   "zoom-reset": () => Window.ZoomReset(),
   "fullscreen": () => Window.ToggleFullscreen(),
 };
+
+const report = (what: string) => (error: unknown) => console.warn(`${what} failed`, error);
 
 /** Trusted shell chrome (top bar and menus) around the framed DSH document. */
 export function mountShell() {
@@ -79,11 +82,47 @@ export function mountShell() {
       console.warn("environment state unavailable", error);
     }
   };
+  const toast = createToast();
   const copyDiagnostics = async () => {
     const [status, update, snapshot] = await Promise.all([
       HostService.GetStatus().catch(() => undefined), HostService.GetUpdateState().catch(() => undefined), ManagerService.GetSnapshot().catch(() => undefined),
     ]);
-    await Clipboard.SetText(diagnosticsReport({update, state: status?.state, snapshot}));
+    try {
+      await Clipboard.SetText(diagnosticsReport({update, state: status?.state, snapshot}));
+      toast.show(t("shell.toast.diagnosticsCopied"));
+    } catch (error) {
+      toast.show(t("shell.toast.diagnosticsFailed"));
+      throw error;
+    }
+  };
+  // A check started from the menu reports its outcome here; other phases are shown in About.
+  let checkingFromMenu = false;
+  const checkUpdates = async () => {
+    if (!["idle", "up-to-date", "error"].includes(menuState.updatePhase)) {
+      await ShellService.OpenSettings("about");
+      return;
+    }
+    checkingFromMenu = true;
+    toast.show(t("about.update.checking"));
+    try {
+      await HostService.Update("check");
+    } catch (error) {
+      checkingFromMenu = false;
+      toast.show(t("about.update.error"));
+      throw error;
+    }
+  };
+  const reportCheck = (update: {phase?: string; targetVersion?: string}) => {
+    if (!checkingFromMenu || update.phase === "checking") return;
+    checkingFromMenu = false;
+    if (update.phase === "up-to-date") toast.show(t("about.update.upToDate"));
+    else if (update.phase === "available" || update.phase === "ready") toast.show(t("about.update.available", {version: update.targetVersion ?? ""}));
+    else if (update.phase === "error") toast.show(t("about.update.error"));
+  };
+  const runWindow = async (action: WindowAction) => {
+    await windowActions[action]();
+    await syncWindow();
+    if (action.startsWith("zoom")) await ShellService.SaveZoom(menuState.window.zoom);
   };
   const busyAction = async (work: () => Promise<unknown>) => {
     if (menuState.busy) return;
@@ -97,14 +136,14 @@ export function mountShell() {
     }
   };
   const run = (action: MenuAction) => {
-    const report = (what: string) => (error: unknown) => console.warn(`${what} failed`, error);
     switch (action.kind) {
-      case "window": void windowActions[action.action]().then(syncWindow).catch(report(action.action)); break;
+      case "window": void runWindow(action.action).catch(report(action.action)); break;
       case "link": void Browser.OpenURL(links[action.target]).catch(report("open link")); break;
       case "devtools": void Window.OpenDevTools().catch(report("developer tools")); break;
       case "diagnostics": void copyDiagnostics().catch(report("copy diagnostics")); break;
       case "settings": void ShellService.OpenSettings(action.section); break;
-      case "update": case "about": void ShellService.OpenSettings("about"); break;
+      case "update": void checkUpdates().catch(report("check updates")); break;
+      case "about": void ShellService.OpenSettings("about"); break;
       case "pet": void busyAction(async () => { menuState.pet = await ShellService.SetPetVisible(!menuState.pet.visible); }); break;
       case "refresh": reloadFrame(); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
@@ -129,6 +168,7 @@ export function mountShell() {
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, controls);
   document.body.prepend(bar);
+  document.body.append(toast.element);
   document.body.append(frame);
 
   subscribeLocale(() => {
@@ -137,7 +177,11 @@ export function mountShell() {
     void syncMaximised();
   });
   Events.On("lifecycle", event => setMenu({lifecycle: String((event.data as {state?: string} | undefined)?.state ?? menuState.lifecycle)}));
-  Events.On("update-state", event => setMenu({updatePhase: String((event.data as {phase?: string} | undefined)?.phase ?? "idle")}));
+  Events.On("update-state", event => {
+    const update = (event.data ?? {}) as {phase?: string; targetVersion?: string};
+    setMenu({updatePhase: String(update.phase ?? "idle")});
+    reportCheck(update);
+  });
   void HostService.GetStatus().then(status => setMenu({lifecycle: status.state})).catch(() => {});
   void HostService.GetUpdateState().then(update => setMenu({updatePhase: update.phase})).catch(() => {});
   void refreshPet();
@@ -186,6 +230,10 @@ export function mountShell() {
     const message = parseFrameMessage(event.data);
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
+    else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
+    else if (message.type === "command-result") {
+      if (!message.handled) toast.show(t("shell.toast.commandFailed", {command: t(`shell.command.${message.id}`)}));
+    }
     else if (message.type === "menu-key") menuBar.focus();
     else {
       const root = document.documentElement.style;
@@ -201,6 +249,12 @@ export function mountShell() {
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.
   let altAlone = false;
   window.addEventListener("keydown", event => {
+    const windowAction = windowKeyAction(event);
+    if (windowAction && !event.defaultPrevented) {
+      event.preventDefault();
+      void runWindow(windowAction).catch(report(windowAction));
+      return;
+    }
     if (event.key === "F10" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
       event.preventDefault();
       altAlone = false;

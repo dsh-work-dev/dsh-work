@@ -30,6 +30,13 @@ export function OpenSettings(section: string): $CancellablePromise<void> {
 }
 
 /**
+ * SaveZoom remembers the workbench zoom factor for the next start.
+ */
+export function SaveZoom(zoom: number): $CancellablePromise<void> {
+    return $Call.ByID(447002478, zoom);
+}
+
+/**
  * SetPetVisible shows or hides the selected pet.
  */
 export function SetPetVisible(visible: boolean): $CancellablePromise<$models.ShellPet> {
