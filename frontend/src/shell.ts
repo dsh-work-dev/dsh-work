@@ -188,9 +188,12 @@ export function mountShell() {
   void refreshSafeMode();
 
   const host = document.getElementById("host-surface");
+  let frameRevision = 0;
   let eventSeen = false;
   const show = (url: string) => {
     if (!url) {
+      frameRevision++;
+      void ShellService.ResetBuiltinComponents().catch(report("reset built-in components"));
       setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
       frame.hidden = true;
       frame.removeAttribute("src");
@@ -200,9 +203,12 @@ export function mountShell() {
       return;
     }
     if (frame.getAttribute("src") !== url) {
-      // A new DSH document reports its own catalog once it is ready.
+      // Begin the status snapshot before the new DSH Clients can report their handshakes.
+      const revision = ++frameRevision;
       setMenu({dsh: null, sidebarLeftOpen: undefined});
-      frame.src = url;
+      void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
+        if (revision === frameRevision) frame.src = url;
+      });
     }
     setMenu({framed: true});
     frame.hidden = false;
@@ -212,8 +218,11 @@ export function mountShell() {
   const reloadFrame = () => {
     const src = frame.getAttribute("src");
     if (!src) return;
+    const revision = ++frameRevision;
     setMenu({dsh: null, sidebarLeftOpen: undefined});
-    frame.setAttribute("src", src);
+    void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
+      if (revision === frameRevision) frame.setAttribute("src", src);
+    });
   };
   Events.On("worker-url", event => {
     eventSeen = true;
@@ -230,6 +239,7 @@ export function mountShell() {
     const message = parseFrameMessage(event.data);
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
+    else if (message.type === "component-ready") void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
     else if (message.type === "command-result") {

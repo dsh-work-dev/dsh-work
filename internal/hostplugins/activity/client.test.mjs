@@ -6,8 +6,9 @@ test('activity client reports the current DSH session to its Host route', async 
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const requests = [];
+  const posted = [];
   const disposers = [];
-  globalThis.window = {__ModuleLoader__: {load(value) { definition = value; }}};
+  globalThis.window = {parent: {postMessage: (message, origin) => posted.push({message, origin})}, location: {ancestorOrigins: ['http://wails.localhost']}, __ModuleLoader__: {load(value) { definition = value; }}};
   globalThis.document = {visibilityState: 'visible', hasFocus: () => true};
   globalThis.fetch = async (input, init) => {
     requests.push({input, init});
@@ -26,6 +27,7 @@ test('activity client reports the current DSH session to its Host route', async 
   plugin.apply(ctx);
   try {
     await new Promise(resolve => setTimeout(resolve, 0));
+    assert.deepEqual(posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'activity'}, origin: 'http://wails.localhost'}]);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].input, '/__dshwork/activity-client');
     assert.equal(requests[0].init.method, 'POST');

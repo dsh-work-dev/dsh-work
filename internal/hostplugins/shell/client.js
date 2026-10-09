@@ -133,6 +133,7 @@ function connectShell(ctx) {
       altAlone = false;
     };
     window.addEventListener('message', onMessage);
+    post({type: 'dsh-work/component-ready', id: 'shell'});
     window.addEventListener('keydown', keydown, true);
     window.addEventListener('keyup', keyup, true);
     ctx.effect(() => () => {

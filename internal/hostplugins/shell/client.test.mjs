@@ -75,6 +75,11 @@ const entry = (id, binding, keys = [], extra = {}) => ({id, label: id, keys, bin
 const messages = (posted, type) => posted.filter(p => p.message.type === type).map(p => p.message);
 const catalogs = posted => posted.filter(p => p.message.type === 'dsh-work/catalog').map(p => p.message.commands);
 
+test('reports its built-in component handshake to the shell', async () => {
+  const shell = await framed([]);
+  assert.deepEqual(messages(shell.posted, 'dsh-work/component-ready'), [{version: 1, type: 'dsh-work/component-ready', id: 'shell'}]);
+});
+
 test('reports only the menu commands with their current binding', async () => {
   const shell = await framed([
     entry('session.new', {code: 'KeyN', modifiers: ['control', 'alt']}, ['Ctrl', 'Alt', 'N']),

@@ -43,6 +43,11 @@ async function finishSignOutFeedback(value) {
   showSignOutFeedback(succeeded ? 'success' : 'error');
 }
 
+function reportComponentReady(id) {
+  const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
+  if (shellOrigin) window.parent.postMessage({version: 1, type: 'dsh-work/component-ready', id}, shellOrigin);
+}
+
 // DSH's desktop account UI starts sign-in and waits; the desktop shell opens the
 // authorization page. The URL exists only after the Host reaches waiting-browser,
 // so follow the official account/watch stream, as DSH's own desktop shells do.
@@ -93,6 +98,7 @@ function openAccountSignIn(ctx) {
 window.__ModuleLoader__.load({id: '@dsh-work/account', factory: () => ({
   inject: [],
   apply(ctx) {
+    reportComponentReady('account');
     openAccountSignIn(ctx);
   }
 })});

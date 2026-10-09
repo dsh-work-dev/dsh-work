@@ -174,6 +174,8 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/command-result", id: "plugin.private", handled: false}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/window-key", action: "zoom-in"}), {type: "window-key", action: "zoom-in"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/sidebar-state", open: false}), {type: "sidebar-state", open: false});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/component-ready", id: "activity"}), {type: "component-ready", id: "activity"});
+  assert.equal(parseFrameMessage({type: "dsh-work/component-ready", id: "plugin.private"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
 });

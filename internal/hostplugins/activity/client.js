@@ -1,6 +1,12 @@
+function reportComponentReady(id) {
+  const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
+  if (shellOrigin) window.parent.postMessage({version: 1, type: 'dsh-work/component-ready', id}, shellOrigin);
+}
+
 window.__ModuleLoader__.load({id: '@dsh-work/activity', factory: () => ({
   inject: ['sessions', 'uiSession'],
   apply(ctx) {
+    reportComponentReady('activity');
     let stopped = false, timer, ack = '', error = '';
     const abort = new AbortController();
     async function sync() {

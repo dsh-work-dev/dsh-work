@@ -92,3 +92,35 @@ func TestShellServiceSavesZoomFromTrustedWindows(t *testing.T) {
 		t.Fatalf("saved = %v", saved)
 	}
 }
+
+func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
+	s := &ShellService{}
+	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	settings := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "settings"}))
+	worker := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "worker"}))
+	ids := []string{"shell", "account", "activity"}
+
+	initial, err := s.GetBuiltinComponents(settings)
+	if err != nil || len(initial) != len(ids) { t.Fatalf("initial = %+v, %v", initial, err) }
+	for i, item := range initial { if item.ID != ids[i] || item.State != "inactive" { t.Fatalf("initial[%d] = %+v", i, item) } }
+	if err := s.BeginBuiltinComponents(worker); err == nil { t.Fatal("began a component load from the Worker window") }
+	if err := s.ReportBuiltinComponent(settings, "shell"); err == nil { t.Fatal("accepted a handshake from Settings") }
+	if err := s.BeginBuiltinComponents(workspace); err != nil { t.Fatal(err) }
+
+	loading, err := s.GetBuiltinComponents(settings)
+	if err != nil { t.Fatal(err) }
+	for _, item := range loading { if item.State != "loading" { t.Fatalf("loading state = %+v", loading) } }
+	if err := s.ReportBuiltinComponent(workspace, "unknown"); err == nil { t.Fatal("accepted an unknown component") }
+	if err := s.ReportBuiltinComponent(workspace, "account"); err != nil { t.Fatal(err) }
+	loaded, err := s.GetBuiltinComponents(settings)
+	if err != nil { t.Fatal(err) }
+	if loaded[0].State != "loading" || loaded[1].State != "loaded" || loaded[2].State != "loading" { t.Fatalf("after handshake = %+v", loaded) }
+
+	loaded[1].State = "inactive"
+	again, err := s.GetBuiltinComponents(settings)
+	if err != nil || again[1].State != "loaded" { t.Fatalf("caller mutated shared state: %+v, %v", again, err) }
+	if err := s.ResetBuiltinComponents(workspace); err != nil { t.Fatal(err) }
+	reset, err := s.GetBuiltinComponents(settings)
+	if err != nil { t.Fatal(err) }
+	for _, item := range reset { if item.State != "inactive" { t.Fatalf("reset state = %+v", reset) } }
+}

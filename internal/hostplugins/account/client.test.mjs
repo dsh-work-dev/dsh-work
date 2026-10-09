@@ -8,6 +8,7 @@ async function loadPlugin() {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const opened = [];
+  const posted = [];
   const children = [];
   const body = {children, appendChild(element) { children.push(element); element.isConnected = true; }};
   const document = {
@@ -19,6 +20,8 @@ async function loadPlugin() {
   };
   globalThis.window = {
     __ModuleLoader__: {load: value => { definition = value; }},
+    parent: {postMessage: (message, origin) => posted.push({message, origin})},
+    location: {ancestorOrigins: ['http://wails.localhost']},
     open: (url, target, features) => { opened.push({url, target, features}); return null; },
     setTimeout: () => 1,
     clearTimeout: () => {},
@@ -27,7 +30,7 @@ async function loadPlugin() {
   globalThis.fetch = () => new Promise(() => {});
   globalThis.document = document;
   new Function(source)();
-  return {plugin: definition.factory(() => undefined), opened, document};
+  return {plugin: definition.factory(() => undefined), opened, posted, document};
 }
 
 function accountStream() {
@@ -68,6 +71,16 @@ function context(stream, accountOverrides = {}) {
 }
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('reports the account component handshake to the framed shell', async () => {
+  const {plugin, posted} = await loadPlugin();
+  const stream = accountStream();
+  const {ctx, dispose} = context(stream);
+  plugin.apply(ctx);
+  try {
+    assert.deepEqual(posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'account'}, origin: 'http://wails.localhost'}]);
+  } finally { dispose(); }
+});
 
 test('opens the DSH account authorization URL once when sign-in waits for the browser', async () => {
   const {plugin, opened} = await loadPlugin();

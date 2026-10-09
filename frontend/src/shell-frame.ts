@@ -1,8 +1,10 @@
+import {builtinComponentIds, type BuiltinComponentId} from "./builtin-components";
 import {dshMenuCommands, keyedWindowActions, type DshCommand, type DshCommandState, type WindowAction} from "./shell-menu-model";
 
 export type FrameMessage =
   | {type: "catalog"; commands: Map<string, DshCommand>}
   | {type: "command-result"; id: string; handled: boolean}
+  | {type: "component-ready"; id: BuiltinComponentId}
   | {type: "sidebar-state"; open: boolean}
   | {type: "window-key"; action: WindowAction}
   | {type: "menu-key"}
@@ -27,6 +29,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     return {type: "command-result", id: message.id, handled: message.handled};
   }
   if (message.type === "dsh-work/sidebar-state" && typeof message.open === "boolean") return {type: "sidebar-state", open: message.open};
+  if (message.type === "dsh-work/component-ready" && typeof message.id === "string" && builtinComponentIds.includes(message.id as BuiltinComponentId)) return {type: "component-ready", id: message.id as BuiltinComponentId};
   if (message.type === "dsh-work/window-key" && keyedWindowActions.includes(message.action as WindowAction)) {
     return {type: "window-key", action: message.action as WindowAction};
   }

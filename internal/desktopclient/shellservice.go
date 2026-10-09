@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/pet"
@@ -19,12 +20,117 @@ type ShellService struct {
 	Pet func(ctx context.Context, visible *bool) (app.PetPanel, error)
 	// SaveZoomLevel stores the workbench zoom factor in the background settings.
 	SaveZoomLevel func(ctx context.Context, zoom float64) error
+	// OnBuiltinComponentsChanged broadcasts transient DSH Client handshake state to every window.
+	OnBuiltinComponentsChanged func([]BuiltinComponentStatus)
+
+	componentsMu sync.RWMutex
+	components   map[string]string
 }
+
+// BuiltinComponentStatus is the read-only load state of an application-owned DSH Client.
+type BuiltinComponentStatus struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
+}
+
+var builtinComponentIDs = [...]string{"shell", "account", "activity"}
 
 // ShellPet is what the shell menu needs from the pet panel.
 type ShellPet struct {
 	Ready   bool `json:"ready"`
 	Visible bool `json:"visible"`
+}
+
+func workspaceWindow(ctx context.Context) error {
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		return err
+	}
+	if window.Name() != "workspace" {
+		return errors.New("workspace window required")
+	}
+	return nil
+}
+
+// BeginBuiltinComponents marks each built-in Client as loading for the current DSH frame.
+func (s *ShellService) BeginBuiltinComponents(ctx context.Context) error {
+	if err := workspaceWindow(ctx); err != nil {
+		return err
+	}
+	s.componentsMu.Lock()
+	s.components = make(map[string]string, len(builtinComponentIDs))
+	for _, id := range builtinComponentIDs {
+		s.components[id] = "loading"
+	}
+	s.componentsMu.Unlock()
+	s.publishBuiltinComponents()
+	return nil
+}
+
+// ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
+func (s *ShellService) ResetBuiltinComponents(ctx context.Context) error {
+	if err := workspaceWindow(ctx); err != nil {
+		return err
+	}
+	s.componentsMu.Lock()
+	s.components = nil
+	s.componentsMu.Unlock()
+	s.publishBuiltinComponents()
+	return nil
+}
+
+// ReportBuiltinComponent accepts a readiness handshake from the framed DSH Client.
+func (s *ShellService) ReportBuiltinComponent(ctx context.Context, id string) error {
+	if err := workspaceWindow(ctx); err != nil {
+		return err
+	}
+	known := false
+	for _, candidate := range builtinComponentIDs {
+		if id == candidate {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("unknown built-in component %q", id)
+	}
+	s.componentsMu.Lock()
+	if s.components[id] != "loading" {
+		s.componentsMu.Unlock()
+		return nil
+	}
+	s.components[id] = "loaded"
+	s.componentsMu.Unlock()
+	s.publishBuiltinComponents()
+	return nil
+}
+
+// GetBuiltinComponents returns a detached status snapshot to the workspace or Settings window.
+func (s *ShellService) GetBuiltinComponents(ctx context.Context) ([]BuiltinComponentStatus, error) {
+	if _, err := trustedWindow(ctx); err != nil {
+		return nil, err
+	}
+	return s.builtinComponentSnapshot(), nil
+}
+
+func (s *ShellService) builtinComponentSnapshot() []BuiltinComponentStatus {
+	s.componentsMu.RLock()
+	defer s.componentsMu.RUnlock()
+	result := make([]BuiltinComponentStatus, 0, len(builtinComponentIDs))
+	for _, id := range builtinComponentIDs {
+		state := s.components[id]
+		if state == "" {
+			state = "inactive"
+		}
+		result = append(result, BuiltinComponentStatus{ID: id, State: state})
+	}
+	return result
+}
+
+func (s *ShellService) publishBuiltinComponents() {
+	if s.OnBuiltinComponentsChanged != nil {
+		s.OnBuiltinComponentsChanged(s.builtinComponentSnapshot())
+	}
 }
 
 var shellSettingsSections = map[string]bool{

@@ -119,6 +119,8 @@ func runDesktopClient(identity string, resources Resources) error {
 		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
 	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
 		return client.JSON(ctx, "/zoom", zoom, nil)
+	}, OnBuiltinComponentsChanged: func(statuses []desktopclient.BuiltinComponentStatus) {
+		if desktop != nil { desktop.Event.Emit("builtin-components", statuses) }
 	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
 		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
