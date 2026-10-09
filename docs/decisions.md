@@ -265,20 +265,18 @@ dsh-work writes in a DSH profile, after the bundle list.
 ## ADR-0020 — Route-selected WebView transport over one authenticated pipe
 
 Keep the authenticated per-generation named pipe as the only transport between
-the Host, daemon and DSH Worker. Select the WebView carrier by request needs:
-ordinary finite HTTP may use Wails' internal HTTP handler, while streaming,
-cancellation-sensitive requests and WebSocket upgrades use the bounded Wails
-byte streams. Both paths forward to the same daemon and Worker pipe; the choice
-does not introduce a TCP listener or a second DSH protocol.
+the Host, daemon and DSH Worker. Select the WebView carrier per route: finite
+requests use the browser's own `fetch` through Wails' internal HTTP handler,
+and the routes that need streaming get their own carrier over the bounded Wails
+byte streams (ADR-0025). All forward to the same daemon and Worker pipe; none
+introduces a TCP listener or a second DSH protocol.
 
-The standard HTTP path remains opt-in through `DSH_WORK_STANDARD_HTTP=1` while
-the platform response semantics are limited. On Windows, Wails' AssetServer
-buffers the response until the handler completes and does not implement
-`http.Flusher`, so it cannot preserve early chunks or cancellation before
-end-of-body and cannot carry WebSocket upgrades. The stream path is therefore
-the default and the required path for long-running DSH output. Revisit the
-default only when the Wails HTTP handler provides equivalent streaming and
-upgrade behavior.
+On Windows, Wails' AssetServer buffers the response until the handler completes
+and does not implement `http.Flusher`, so it cannot preserve early chunks or
+cancellation before end-of-body and cannot carry WebSocket upgrades. DSH's
+Gateway stream (`/api/remote.mux`), attachment uploads and session exports
+therefore use dedicated carriers; everything else is finite. Revisit when the
+Wails HTTP handler provides equivalent streaming and upgrade behaviour.
 
 The HTTP proxy accepts only relative Worker paths, rejects CONNECT and TRACE,
 strips hop-by-hop, cookie and proxy headers, sets the internal Origin and keeps
@@ -333,8 +331,9 @@ DSH's account UI appears only when the renderer is marked as a desktop shell,
 and a desktop shell must open the browser and receive the OAuth return.
 dsh-work provides both around DSH's official account API:
 
-- The Worker bridge defines `dshDesktop` so DSH mounts its account UI.
-- dsh-work's per-launch client plugin follows `account/watch` and opens an
+- `@dsh-work/account` injects the `dshDesktop` marker so DSH mounts its
+  account UI.
+- The same plugin's Client half follows `account/watch` and opens an
   attempt's `authorizeUrl` in the system browser once, when the attempt
   reaches `waiting-browser`. The URL is not available when `startSignIn`
   returns, so the watch stream is the only reliable trigger. DSH's desktop
@@ -434,7 +433,8 @@ records stay in Settings Overview. Not offered: new window, command palette,
 focus mode, always on top and recent workspaces. DSH gives
 plugins no public command invoke, and its official desktop menu path
 (`dshDesktop.keyboard`) is active only when DSH runs in its Electron desktop
-runtime, so the dsh-work DSH plugin runs a command by dispatching its current
+runtime, so `@dsh-work/shell` calls DSH's public services where they exist
+(new session, left sidebar) and otherwise dispatches the command's current
 binding through DSH's keyboard path. The top bar takes DSH's
 `--dsw-specific-sidebar-fill`, the colour DSH's own Windows caption uses.
 
@@ -452,7 +452,7 @@ Costs and conditions to revisit:
 - Running commands by dispatching bindings depends on DSH accepting script
   keyboard events; an unbound command is disabled in the menu. Revisit if DSH
   publishes a plugin command invoke.
-- DSH lives only in the shell frame. The Worker bridge sends other-origin
+- DSH lives only in the shell frame. `@dsh-work/shell` sends other-origin
   links and `window.open` calls to the system browser and drops same-origin
   new-window requests (`target="_blank"` links, `window.open`): a top-level DSH
   page outside the shell would have no workbench streams. Revisit if DSH starts
@@ -463,3 +463,45 @@ reachable from DSH plugins and the chrome would die with DSH); two native
 WebViews in one window (no Wails API, and shell menus could not overlay the DSH
 view); a coloured native title bar (the menu stays on its own row); switching to
 Electron (rewrites the host).
+
+## ADR-0025 — Layered host integration: transport core and host plugins
+
+dsh-work extends DSH only through interfaces DSH already has, in four layers
+with one owner each:
+
+1. **Transport core** (always loaded). The authenticated pipe (ADR-0014/0020).
+   The DSH page keeps the browser's own `fetch`, `WebSocket` and `Worker`; only
+   the Gateway stream `/api/remote.mux`, the `dsh-file-upload` Worker and the
+   session-export download are adapted, each by exact route. Session exports
+   are written by the Host after a native save dialog, so archives never pass
+   through the WebView. `__DSH_TRANSPORT__` declares `ownsHost: true`, as DSH's
+   own desktop shell does for its non-loopback page; without it DSH keeps
+   every setting form in memory.
+2. **Host plugins** (always loaded, including safe mode). `@dsh-work/shell`,
+   `@dsh-work/account` and `@dsh-work/activity` are ordinary DSH plugins, one
+   per responsibility, embedded in dsh-work and inserted per launch by a core
+   `--patch` overlay below a version- and digest-named directory. The page
+   bootstrap arrives through DSH's `webserver/index-inject`, not by rewriting
+   DSH's HTML. Settings shows their load state and no switches.
+3. **User-data overlay** (by mode). DSH sessions, storage, attachments,
+   settings and credentials in dsh-work's user-data folder; omitted in safe
+   mode.
+4. **Profile plugins.** Owned by DSH's PluginManager (ADR-0021). Safe mode
+   starts a clean profile, so third-party plugins do not load.
+
+Why: the earlier page script replaced `fetch`, `WebSocket`, `window.open` and
+link clicks for every plugin in the page, and one hidden plugin named for the
+pet carried account and menu work. Safe mode dropped both overlays together,
+which disabled the menus. Each concern now has a named, testable owner, and
+safe mode means "DSH without custom plugins".
+
+Not chosen: starting DSH as a library (`runProfile` offers no seam for the
+pipe carrier); the full Electron desktop runtime (`dshDesktop.keyboard`,
+shortcut storage and native key capture), which may be revisited later;
+installing the host plugins into the user's profile (it would entangle them
+with profile switches, version recovery, uninstalls and safe mode).
+
+Costs: the adapters and `ownsHost` depend on DSH 0.2.x page globals
+(`__DSH_TRANSPORT__`, the `dsh-file-upload` Worker name, the export route) with
+no stability promise; `TestRealShellFrame` and the host-plugin tests guard them
+on each DSH upgrade.

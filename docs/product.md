@@ -61,8 +61,11 @@ silently mutate DSH-owned data.
   caused by damaged DSH session data names no plugin. In Settings Overview,
   “启动安全模式” sits beside “切换环境”.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
-  manager, then verifies startup. Safe mode uses a separate clean data directory
-  and preserves normal-environment success records. Once a normal environment
+  manager, then verifies startup. Safe mode is DSH without custom plugins: it
+  starts a clean profile in a separate data directory, so third-party plugins
+  and dsh-work's user data do not load, while the menus, sign-in and activity
+  that dsh-work's own plugins provide keep working. It preserves
+  normal-environment success records. Once a normal environment
   is running again, that data directory is discarded and no longer selectable.
 - Removing a DSH runtime deletes its installed files. A runtime used by the
   configured, current, known-good or safe-mode return environment cannot be
