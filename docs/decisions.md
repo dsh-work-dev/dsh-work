@@ -478,7 +478,7 @@ with one owner each:
    own desktop shell does for its non-loopback page; without it DSH keeps
    every setting form in memory.
 2. **Host plugins** (always loaded, including safe mode). `@dsh-work/shell`,
-   `@dsh-work/account` and `@dsh-work/activity` are ordinary DSH plugins, one
+   `@dsh-work/account` and `@dsh-work/pet` are ordinary DSH plugins, one
    per responsibility, embedded in dsh-work and inserted per launch by a core
    `--patch` overlay below a version- and digest-named directory. The page
    bootstrap arrives through DSH's `webserver/index-inject`, not by rewriting

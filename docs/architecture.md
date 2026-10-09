@@ -45,8 +45,8 @@ cannot grant themselves Host capabilities.
 | `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |
 | `internal/desktopbridge` | Worker resource delivery and HTTP forwarding, the Gateway WebSocket, upload and session-export carriers over Wails byte streams, external-link opening |
 | `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
-| `internal/hostplugins` | dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/activity`), installed per application version |
-| `internal/dshactivity` | Worker activity projection and the per-launch core overlay that loads the host plugins |
+| `internal/hostplugins` | dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
+| `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
@@ -155,7 +155,7 @@ layers:
 | Layer | What | Loaded |
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
-| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/activity` | Always, including safe mode |
+| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always, including safe mode |
 | User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Not in safe mode |
 | Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile; safe mode uses a clean one |
 
@@ -163,15 +163,17 @@ The host plugins are ordinary DSH plugins (a Host half and a Client half each).
 They are embedded in dsh-work, written below a directory named by application
 version and content digest, and inserted by a per-launch `--patch` core overlay
 rather than installed into a profile, so profile switches, version recovery and
-uninstalls do not touch them. Their Client halves report readiness to the
-shell; Settings lists them under 内置组件 with Loading, Loaded or Not loaded
-and offers no switches.
+uninstalls do not touch them. Preparing a launch writes a damaged file again,
+and removes the previous launch's patch and plugin versions no longer in use.
+Their Client halves report readiness to the shell; Settings lists them under
+内置组件 as Loading, Loaded, Failed to load (no report within 45 seconds of the
+frame loading) or Not loaded, and offers no switches.
 
 | Plugin | Host half | Client half |
 |---|---|---|
 | `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, surface colours |
-| `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; sign-out feedback |
-| `@dsh-work/activity` | Publishes the activity snapshot and navigation routes for one generation | Synchronizes session activity and opens requested conversations |
+| `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
+| `@dsh-work/pet` | Publishes the session activity snapshot and navigation routes the desktop pet uses, for one generation | Synchronizes session activity and opens the conversations the pet asks for |
 
 `__DSH_TRANSPORT__` declares `ownsHost: true`. DSH otherwise treats the
 non-loopback `wails.localhost` page as a remote browser and keeps every setting
@@ -392,7 +394,9 @@ Only development builds open a remote-debugging port, and only when
 `DSH_WORK_WEBVIEW_DEBUG_PORT` names one.
 
 DSH commands run from a fixed list through `@dsh-work/shell`. The plugin
-reports each command's current binding from `ctx.shortcuts.catalog`. 新会话 and
+reports each command's current binding from `ctx.shortcuts.catalog`; the
+workspace and layout services are optional, so a profile without them still
+gets the menu, with the commands they serve marked 不可用. 新会话 and
 左侧栏 call DSH's public services (`ctx.uiWorkspace.startSession()`,
 `ctx.layout.toggleSidebar()`), and the plugin reports the sidebar state so 左侧栏
 shows a check. Other commands are run by dispatching their binding through

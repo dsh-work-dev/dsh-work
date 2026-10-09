@@ -59,7 +59,7 @@ in the documents linked from `docs/README.md`.
 | Version record (internal: version snapshot) | Exact DSH and installed plugin versions/sources, dependency groups, bundle order, lock/workspace inputs and verification metadata used to reconstruct an environment. | A copy of installed package trees or conversation data. |
 | Last successful snapshot | The latest verified success record for a profile; a separate last-running pointer identifies the previous successful environment for switches. | Proof that a Worker is currently alive. |
 | Safe mode | DSH without custom plugins: a clean Host-prepared profile in a separate, disposable data directory with a saved return target. dsh-work's host plugins still load; third-party plugins and the user-data overlay do not. The data directory is discarded once a normal environment is healthy again. | A replacement for the normal environment's success record, a selectable data directory, or a mode without dsh-work's own integration. |
-| Host plugin | One of dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/activity`), embedded in the application and inserted per launch, outside any profile. | A third-party or profile plugin managed by DSH's PluginManager. |
+| Host plugin | One of dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), embedded in the application and inserted per launch, outside any profile. | A third-party or profile plugin managed by DSH's PluginManager. |
 | Launch context | The per-generation handoff containing a resolved Run context plus its separately resolved Workspace context. | A durable global configuration document. |
 
 ## Ownership rules
