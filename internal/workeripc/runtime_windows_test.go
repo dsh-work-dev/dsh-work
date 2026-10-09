@@ -17,6 +17,7 @@ import (
 
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
@@ -34,9 +35,15 @@ func TestRealWorkerPipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer transport.Close()
-	activity := dshactivity.New(filepath.Join(home, "activity"))
+	activity := dshactivity.New()
 	defer activity.Close()
-	patch, err := activity.Prepare("pipe-test")
+	petConfig, err := activity.Begin("pipe-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development").Prepare("pipe-test", map[string]map[string]string{
+		"shell": {"generation": "pipe-test"}, "pet": petConfig,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

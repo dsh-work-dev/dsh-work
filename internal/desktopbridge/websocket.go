@@ -33,6 +33,9 @@ func (b *Bridge) WebSocket(c ByteConn) error {
 	if err != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(meta.URL, "/") || strings.HasPrefix(meta.URL, "//") {
 		return errors.New("invalid WebSocket path")
 	}
+	if u.Path != "/api/remote.mux" {
+		return errors.New("unsupported Worker WebSocket route")
+	}
 	ctx, cancel := context.WithCancel(c.Context())
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(b.Origin, "http")+meta.URL, &websocket.DialOptions{HTTPClient: b.Client, HTTPHeader: http.Header{"Origin": {b.Origin}}, Subprotocols: meta.Protocols})

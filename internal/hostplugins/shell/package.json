@@ -1,0 +1,7 @@
+{
+  "name": "@dsh-work/shell",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {".": "./host.js", "./client": "./client.js"},
+  "dsh": {"client": {"platform": "web", "inject": ["@deepseek-ai/dsh-client-shortcuts"]}}
+}

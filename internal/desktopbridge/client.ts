@@ -1,17 +1,19 @@
 import {Stream} from '@wailsio/runtime';
-import {finishAccountSignOutFeedback, showAccountSignOutPending} from './account_feedback';
+import {createUploadWorkerAdapter, isGatewayRemoteMux, sessionExportDownloadRoute, sessionExportCommand, type StreamRequestInit} from './transport-core';
 export {Stream};
 
 const nativeFetch = globalThis.fetch.bind(globalThis);
 const generation = (globalThis as unknown as {__WORK_GENERATION__:string}).__WORK_GENERATION__;
 const chunkSize = 64 * 1024;
-// RC1 mounts its official account UI only inside a desktop renderer. dsh-work
-// supplies the native OAuth callback transport below without claiming the
-// optional Electron-only browser or update APIs.
-(globalThis as typeof globalThis & {dshDesktop?: Record<string, unknown>}).dshDesktop ??= {};
 
-export async function workerFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const request = new Request(input, init);
+export async function workerFetch(input: RequestInfo | URL, init?: StreamRequestInit): Promise<Response> {
+  const requestInit = {...init};
+  const uploadTotal = requestInit.uploadTotal;
+  const onUploadProgress = requestInit.onUploadProgress;
+  delete requestInit.duplex;
+  delete requestInit.uploadTotal;
+  delete requestInit.onUploadProgress;
+  const request = new Request(input, requestInit);
   const url = new URL(request.url);
   if (url.origin !== location.origin || url.pathname.startsWith('/wails/')) return nativeFetch(request);
   const socket = Stream('worker-fetch');
@@ -73,6 +75,7 @@ export async function workerFetch(input: RequestInfo | URL, init?: RequestInit):
         if(!request.body)return;
         const reader=request.body.getReader();
         uploadReader=reader;
+        let uploaded = 0;
         try{
           for(;;){
             const {done,value}=await reader.read();if(done)break;
@@ -80,6 +83,8 @@ export async function workerFetch(input: RequestInfo | URL, init?: RequestInit):
               if(finished)throw new Error('Worker upload closed');
               const part=value.subarray(offset,offset+chunkSize),frame=new Uint8Array(part.length+1);frame[0]=1;frame.set(part,1);
               await new Promise<void>((resolve,reject)=>{uploadAck=resolve;rejectUpload=reject;socket.send(frame);});
+              uploaded += part.length;
+              onUploadProgress?.({loaded: uploaded, ...(uploadTotal === undefined ? {} : {total: uploadTotal})});
             }
           }
           if(!finished)socket.send(new Uint8Array([2]));
@@ -88,28 +93,45 @@ export async function workerFetch(input: RequestInfo | URL, init?: RequestInit):
     };
   });
   signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
-  const accountSignOut = request.method === 'POST' && url.pathname === '/api/account/signOut';
-  if (accountSignOut) showAccountSignOutPending();
-  let result: Response;
-  try {
-    result = await response;
-  } catch (error) {
-    if (accountSignOut) finishAccountSignOutFeedback(false);
-    throw error;
-  }
-	if (accountSignOut) void finishAccountSignOutFeedback(result);
-  return result;
+	return response;
 }
 
-// Install only in the dedicated Worker surface, before the DSH entry modules.
-globalThis.fetch = workerFetch;
+// Explicit shell capability for link opening and the route-specific upload
+// adapter. Ordinary DSH and plugin requests keep the native Fetch implementation.
 (globalThis as any).WorkerBridge = {Stream,workerFetch};
 
-(globalThis as any).__DSH_TRANSPORT__ = {
-  ownsHost:true,
-  // DSH owns Remote stream framing, uplinks and peer admission on its
-  // published WebSocket route. The WorkerSocket below carries those bytes.
-};
+// The shell shows the outcome in its own localized, themed status line.
+function showSessionExportFeedback(result: 'saved'|'cancelled'|'error') {
+ const shellOrigin=window.parent!==window?location.ancestorOrigins?.[0]:undefined;
+ if(shellOrigin)window.parent.postMessage({version:1,type:'dsh-work/export-result',result},shellOrigin);
+}
+
+const exportInFlight=new Set<string>();
+const AnchorElement=globalThis.HTMLAnchorElement;
+if(typeof AnchorElement==='function'){
+ const nativeAnchorClick=AnchorElement.prototype.click;
+ AnchorElement.prototype.click=function(){
+  const route=sessionExportDownloadRoute(this.href,this.download,location.href);
+  if(!route||!this.download){nativeAnchorClick.call(this);return;}
+  if(exportInFlight.has(route.sessionId))return;
+  exportInFlight.add(route.sessionId);
+  void workerFetch(sessionExportCommand(route),{method:'POST'}).then(async response=>{
+   const result=await response.json() as {result?:string};
+   if(result.result==='saved')showSessionExportFeedback('saved');
+   else if(result.result==='cancelled')showSessionExportFeedback('cancelled');
+   else showSessionExportFeedback('error');
+  }).catch(()=>showSessionExportFeedback('error')).finally(()=>exportInFlight.delete(route.sessionId));
+ };
+}
+
+const NativeWorker=globalThis.Worker;
+if(typeof NativeWorker==='function'){
+ globalThis.Worker=new Proxy(NativeWorker,{construct(target,args,newTarget){
+  const worker=Reflect.construct(target,args,newTarget);
+  if((args[1] as WorkerOptions|undefined)?.name!=='dsh-file-upload')return worker;
+  return createUploadWorkerAdapter(worker,workerFetch,location.href);
+ }}) as typeof Worker;
+}
 
 const NativeWebSocket=globalThis.WebSocket;
 class WorkerSocket extends EventTarget {
@@ -149,51 +171,4 @@ class WorkerSocket extends EventTarget {
  private write(frame:Uint8Array){return new Promise<void>((resolve,reject)=>{if(this.readyState!==1){reject(new Error('WebSocket closed'));return;}this.ack=resolve;this.rejectAck=reject;this.socket.send(frame);});}
  close(code=1000,reason=''){if(code!==1000&&(code<3000||code>4999))throw new DOMException('Invalid close code','InvalidAccessError');if(new TextEncoder().encode(reason).length>123)throw new DOMException('Close reason too long','SyntaxError');if(this.readyState>=2)return;if(this.readyState===0){this.readyState=2;this.socket.close();return;}this.readyState=2;const data=new TextEncoder().encode(JSON.stringify({code,reason})),frame=new Uint8Array(data.length+1);frame[0]=6;frame.set(data,1);this.socket.send(frame);}
 }
-globalThis.WebSocket=new Proxy(NativeWebSocket,{construct(target,args){const u=new URL(args[0],location.href);const local=new URL(location.href);if(u.host===local.host)return new WorkerSocket(args[0],args[1]);return Reflect.construct(target,args);}});
-
-const recentlyOpenedExternal = new Map<string, number>();
-function openExternal(raw:string){
- const u=new URL(raw,location.href);if(!['http:','https:'].includes(u.protocol))return;
- const now=Date.now();
- recentlyOpenedExternal.forEach((openedAt,url)=>{if(now-openedAt>3000)recentlyOpenedExternal.delete(url);});
- if(now-(recentlyOpenedExternal.get(u.href)??0)<3000)return;
- recentlyOpenedExternal.set(u.href,now);
- void workerFetch('/__work/external?url='+encodeURIComponent(u.href),{method:'POST'})
-  .then(response=>{if(!response.ok)console.warn('Could not open the external browser.');})
-  .catch(()=>console.warn('Could not open the external browser.'));
-}
-// Other origins open in the system browser. DSH itself lives only in the shell
-// frame: a same-origin new window would be an unmanaged top-level DSH page
-// without the workbench's streams, so such requests are dropped.
-const newWindow=(target?:string)=>!!target&&!['_self','_parent','_top'].includes(target.toLowerCase());
-document.addEventListener('click',event=>{const anchor=(event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement|null;if(!anchor)return;const u=new URL(anchor.href,location.href);if(u.origin!==location.origin){event.preventDefault();openExternal(u.href);}else if(newWindow(anchor.target)){event.preventDefault();console.warn('dsh-work does not open DSH in a new window.');}},true);
-window.open=((url?:string|URL,target?:string)=>{const u=new URL(url??'',location.href);if(u.origin!==location.origin){openExternal(u.href);return null;}if(target===undefined||newWindow(target)){console.warn('dsh-work does not open DSH in a new window.');return null;}location.assign(u.href);return window;}) as typeof window.open;
-
-// Framed in the dsh-work shell: report DSH's base fill so the shell chrome
-// continues it. DSH's own Windows caption paints --dsw-specific-sidebar-fill,
-// so the shell reads the same semantic token. Only colours cross the
-// boundary, only to the embedder.
-const shellOrigin = window.parent !== window ? location.ancestorOrigins?.[0] : undefined;
-if (shellOrigin) {
-  let last = '', pending = 0;
-  const resolve = (token: string, fallback: string) => {
-    const probe = document.createElement('span');
-    probe.style.cssText = `position:absolute;visibility:hidden;color:var(${token},${fallback})`;
-    document.body.append(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  };
-  const report = () => {
-    pending = 0;
-    if (!document.body) return;
-    const style = getComputedStyle(document.body);
-    const surface = {type: 'dsh-work/surface', background: resolve('--dsw-specific-sidebar-fill', style.backgroundColor), color: style.color, scheme: getComputedStyle(document.documentElement).colorScheme};
-    const key = JSON.stringify(surface);
-    if (key !== last) { last = key; window.parent.postMessage(surface, shellOrigin); }
-  };
-  const schedule = () => { if (!pending) pending = requestAnimationFrame(report); };
-  new MutationObserver(schedule).observe(document.documentElement, {attributes: true, subtree: true, attributeFilter: ['class', 'style', 'data-theme']});
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', schedule);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', schedule); else schedule();
-}
+globalThis.WebSocket=new Proxy(NativeWebSocket,{construct(target,args,newTarget){if(isGatewayRemoteMux(args[0] as string|URL,location.href))return new WorkerSocket(args[0] as string|URL,args[1] as string|string[]|undefined);return Reflect.construct(target,args,newTarget);}});

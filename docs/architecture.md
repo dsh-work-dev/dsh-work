@@ -43,9 +43,10 @@ cannot grant themselves Host capabilities.
 | `internal/workspacecontext` | per-generation DSH Workspace context |
 | `internal/workerchannel` | per-generation channel, authentication cookies and activity lifetime |
 | `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |
-| `internal/desktopbridge` | resource delivery, Fetch and WebSocket over bounded Wails byte streams, desktop renderer marker and external-link opening |
+| `internal/desktopbridge` | Worker resource delivery and HTTP forwarding, the Gateway WebSocket, upload and session-export carriers over Wails byte streams, external-link opening |
 | `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
-| `internal/dshactivity` | per-launch DSH plugin for activity events, conversation navigation and account-browser opening |
+| `internal/hostplugins` | dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
+| `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
@@ -95,29 +96,26 @@ routing, not a TCP listener. A WebView cannot dial the named pipe directly.
 The daemon is the resident Host and forwarding owner; each DSH launch is a
 separately supervised Worker generation behind that boundary.
 
-The Worker WebView has two Host-side request paths, selected by route semantics:
+The DSH document keeps the browser's own `fetch`, `WebSocket` and `Worker`.
+Only four routes need more than a finite request, and each has its own carrier:
 
-| Request shape | WebView to Host | Host to daemon and Worker | Contract |
-|---|---|---|---|
-| Ordinary finite HTTP | Wails' internal HTTP asset handler and `fetch` | Existing authenticated generation pipe | Normal HTTP request and response bodies |
-| Streaming or cancellable HTTP | Wails bounded byte stream (`worker-fetch`) | Existing authenticated generation pipe | Backpressure, early chunks and cancellation |
-| WebSocket upgrade | Wails bounded byte stream (`worker-websocket`) | Existing authenticated generation pipe | Bidirectional WebSocket frames |
+| Request | WebView to Host | Contract |
+|---|---|---|
+| Ordinary finite HTTP (RPC, `/api` routes, plugin bundles, assets) | Native `fetch` through Wails' asset handler; non-GET requests are proxied to the Worker | Complete request and response bodies |
+| DSH Gateway stream `/api/remote.mux` | Wails byte stream (`worker-websocket`); only this exact same-origin route is adapted | Bidirectional WebSocket frames, carried unparsed |
+| Attachment upload `/api/session/uploadFileBinary` | DSH's `dsh-file-upload` Worker, adapted to a Wails byte stream (`worker-fetch`) | Upload progress and cancellation as DSH's Worker reports them |
+| Session export `/api/session.export` | DSH's download anchor is handed to the Host, which asks for a destination and writes the archive | The ZIP never enters the WebView |
 
-The standard HTTP path is an opt-in diagnostic path (`DSH_WORK_STANDARD_HTTP=1`).
-It removes the injected Worker fetch bridge for ordinary requests and lets the
-Wails HTTP handler call the same daemon transport used by the stream path. This
-does not add a port and does not change DSH or daemon pipe authentication. The
-regular application keeps the stream path as its default so that all existing
-streaming and WebSocket behavior remains available.
+Everything goes to the same daemon and generation pipe; no route opens a TCP
+listener. The Wails WebSocket bridge refuses any route other than
+`/api/remote.mux`.
 
 On Windows, the Wails 3 AssetServer response writer buffers its output until the
-handler finishes and does not expose `http.Flusher`. Consequently the standard
-HTTP path cannot provide early response chunks, cancellation before end-of-body,
-or WebSocket upgrades on that platform. Long-running DSH output, tool streams and
-WebSocket routes must continue to use the bounded byte streams until Wails offers
-a stream-capable HTTP handler. The Go proxy still validates relative paths,
-removes hop-by-hop and credential headers, sets the internal Origin and preserves
-the same generation checks as the stream path.
+handler finishes and does not expose `http.Flusher`, and requests carry no
+WebView cancellation. The asset path is therefore used only for requests whose
+complete bodies are acceptable; the Gateway stream, uploads and exports use the
+carriers above. The Go proxy validates relative paths, removes hop-by-hop and
+credential headers, sets the internal Origin and checks the generation.
 
 The workbench window (`workspace`) hosts the trusted shell document at
 `http://wails.localhost`; Settings has its own trusted window. DSH runs in an
@@ -138,27 +136,60 @@ response carries `Content-Security-Policy: frame-ancestors 'none'` so the
 frame cannot navigate itself into a same-origin shell page. Messages a framed
 document posts through `chrome.webview` do not reach Wails, so the frame has no
 native drag, resize or invoke channel. Worker service-worker registration is
-blocked. Links and `window.open` calls to other origins open in the system
-browser; same-origin new-window requests are dropped, so DSH never runs as an
-unmanaged top-level page outside the shell.
+blocked.
 
 Wails' host-prefix interception (including the port) is an implementation
 detail, not a documented contract; `TestRealShellFrame` (`DSH_WORK_SHELL_TEST=1`)
 exercises the framed Worker through the real bridge and must pass after Wails
 upgrades.
-Resources use the native asset handler and daemon Worker forwarding. The default
-Fetch and WebSocket bodies use Wails Streams with 64 KiB chunks, upload
-acknowledgements and download credits. The daemon forwards traffic to the
-generation pipe; the optional finite-request HTTP path is described below.
-HTTP full duplex and an independent bounded upload writer keep download credits
-and cancellation live while an upload is in progress.
-Every stream names its document generation. Worker authentication cookies stay
-in the Host cookie jar. External HTTP(S) links open through a narrow callback.
+The byte streams use 64 KiB chunks, upload acknowledgements and download
+credits; HTTP full duplex and an independent bounded upload writer keep credits
+and cancellation live during an upload. Every stream names its document
+generation. Worker authentication cookies stay in the Host cookie jar.
+
+### Page bootstrap and host plugins
+
+dsh-work extends DSH only through DSH's own plugin and page interfaces, in four
+layers:
+
+| Layer | What | Loaded |
+|---|---|---|
+| Transport core | The pipe carrier and the carriers above | Always |
+| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always, including safe mode |
+| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Not in safe mode |
+| Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile; safe mode uses a clean one |
+
+The host plugins are ordinary DSH plugins (a Host half and a Client half each).
+They are embedded in dsh-work, written below a directory named by application
+version and content digest, and inserted by a per-launch `--patch` core overlay
+rather than installed into a profile, so profile switches, version recovery and
+uninstalls do not touch them. The daemon installs them once per process
+(rewriting a damaged file and removing unused plugin versions); each launch
+then writes only a small patch carrying that generation's configuration, which
+replaces the previous launch's patch.
+Their Client halves report readiness to the shell; Settings lists them under
+内置组件 as Loading, Loaded, Failed to load (no report within 45 seconds of the
+frame loading) or Not loaded, and offers no switches.
+
+| Plugin | Host half | Client half |
+|---|---|---|
+| `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, surface colours |
+| `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
+| `@dsh-work/pet` | Publishes the session activity snapshot and navigation routes the desktop pet uses, for one generation | Synchronizes session activity and opens the conversations the pet asks for |
+
+`__DSH_TRANSPORT__` declares `ownsHost: true`. DSH otherwise treats the
+non-loopback `wails.localhost` page as a remote browser and keeps every setting
+form in memory, neither loading nor saving it. DSH's own desktop shell declares
+the same for its `dsh-app://` page.
+
+The link policy sends links and `window.open` calls to other origins to the
+system browser and drops same-origin new-window requests, so DSH never runs as
+an unmanaged top-level page outside the shell.
 
 The daemon owns the Worker independently of UI visibility and process lifetime.
 Restart closes streams and the pipe, verifies the process boundary, then starts
-the next generation. Safe mode uses the same channel with its own profile and
-omits optional activity and user-data overlays. The process supervisor remains
+the next generation. Safe mode uses the same channel and host plugins with a
+clean profile and without the user-data overlay. The process supervisor remains
 the authority for graceful stop, forced stop and process-tree cleanup.
 
 The OS transport uses `go-winio`, HTTP uses the Go/Node standard libraries and
@@ -175,14 +206,14 @@ frames to drive Host behaviour.
 
 ### Account sign-in
 
-DSH mounts its account UI only in a desktop renderer, so the Worker bridge
-defines the `dshDesktop` marker before DSH's entry modules load. Sign-in then
+DSH mounts its account UI only in a desktop renderer, so `@dsh-work/account`
+injects the `dshDesktop` marker before DSH's entry modules load. Sign-in then
 spans three owners:
 
 | Step | Owner | Behaviour |
 |---|---|---|
 | Start | DSH account UI | Calls `account/startSignIn` with a loopback callback origin. The call returns before an authorization URL exists. |
-| Open the browser | dsh-work client plugin | Follows the official `account/watch` stream. When an attempt reaches `waiting-browser`, it calls `window.open` with that attempt's HTTPS `authorizeUrl` once. The Worker bridge routes the call to the system browser. |
+| Open the browser | `@dsh-work/account` | Follows the official `account/watch` stream. When an attempt reaches `waiting-browser`, it calls `window.open` with that attempt's HTTPS `authorizeUrl` once; the shell link policy opens it in the system browser. |
 | Return | Daemon callback listener | Receives the browser redirect, relays it to the current Worker generation and shows a dsh-work result page. |
 
 The browser must reach the callback, and DSH accepts only an
@@ -364,11 +395,14 @@ Release builds include the WebView developer tools (`devtools` build tag), so
 Only development builds open a remote-debugging port, and only when
 `DSH_WORK_WEBVIEW_DEBUG_PORT` names one.
 
-DSH commands run from a fixed list through the dsh-work DSH client
-plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
-command's current binding from `ctx.shortcuts.catalog`, and runs a command the
-shell asks for by dispatching that binding through DSH's keyboard path, since
-DSH offers plugins no public command invoke. A command is disabled and marked
+DSH commands run from a fixed list through `@dsh-work/shell`. The plugin
+reports each command's current binding from `ctx.shortcuts.catalog`; the
+workspace and layout services are optional, so a profile without them still
+gets the menu, with the commands they serve marked 不可用. 新会话 and
+左侧栏 call DSH's public services (`ctx.uiWorkspace.startSession()`,
+`ctx.layout.toggleSidebar()`), and the plugin reports the sidebar state so 左侧栏
+shows a check. Other commands are run by dispatching their binding through
+DSH's keyboard path, since DSH offers plugins no public command invoke. A command is disabled and marked
 未绑定 when it has no binding, or 不可用 when the menu cannot press it: a
 conflicting, invalid or two-key binding, or DSH shortcut settings that are
 still loading. DSH prevents default on the key press it consumes, so the

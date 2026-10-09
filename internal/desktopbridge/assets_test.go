@@ -11,34 +11,32 @@ import (
 	"time"
 )
 
-func TestBootReportIsBoundToGenerationAndInjectedInBothTransports(t *testing.T) {
+func TestBootReportIsBoundToGenerationAndIndexIsNotEdited(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		io.WriteString(w, "<html><head></head><body><div id=\"root\"></div></body></html>")
 	}))
 	defer upstream.Close()
-	for _, standard := range []bool{false, true} {
-		var received string
-		bridge := &Bridge{Client: upstream.Client(), Origin: upstream.URL, Generation: "current", StandardHTTP: standard,
-			ReportBoot: func(_ context.Context, generation, detail string) error {
-				received = generation + ":" + detail
-				return nil
-			},
+	var received string
+	bridge := &Bridge{Client: upstream.Client(), Origin: upstream.URL, Generation: "current",
+		ReportBoot: func(_ context.Context, generation, detail string) error {
+			received = generation + ":" + detail
+			return nil
+		},
+	}
+	page := httptest.NewRecorder()
+	bridge.Assets(page, httptest.NewRequest("GET", "/", nil))
+	if strings.Contains(page.Body.String(), "data-dsh-boot-spinner") || strings.Contains(page.Body.String(), "__WORK_GENERATION__") {
+		t.Fatal("bridge edited the DSH index")
+	}
+	for _, generation := range []string{"old", "current"} {
+		result := httptest.NewRecorder()
+		bridge.Assets(result, httptest.NewRequest("POST", "/__work/web-boot", strings.NewReader(`{"Generation":"`+generation+`","Detail":"settingsScope"}`)))
+		if generation == "old" && (result.Code != 409 || received != "") {
+			t.Fatal("accepted stale report")
 		}
-		page := httptest.NewRecorder()
-		bridge.Assets(page, httptest.NewRequest("GET", "/", nil))
-		if !strings.Contains(page.Body.String(), "data-dsh-boot-spinner") {
-			t.Fatal("missing boot observer")
-		}
-		for _, generation := range []string{"old", "current"} {
-			result := httptest.NewRecorder()
-			bridge.Assets(result, httptest.NewRequest("POST", "/__work/web-boot", strings.NewReader(`{"Generation":"`+generation+`","Detail":"settingsScope"}`)))
-			if generation == "old" && (result.Code != 409 || received != "") {
-				t.Fatal("accepted stale report")
-			}
-			if generation == "current" && (result.Code != 204 || received != "current:settingsScope") {
-				t.Fatal("lost current report")
-			}
+		if generation == "current" && (result.Code != 204 || received != "current:settingsScope") {
+			t.Fatal("lost current report")
 		}
 	}
 }
@@ -67,6 +65,30 @@ func TestAssetsPreserveHEADAndRange(t *testing.T) {
 	bridge.Assets(ranged, request)
 	if ranged.Code != 206 || ranged.Body.String() != "234" || ranged.Header().Get("Content-Range") != "bytes 2-4/10" {
 		t.Fatalf("Range: status=%d body=%q headers=%v", ranged.Code, ranged.Body.String(), ranged.Header())
+	}
+}
+
+func TestAssetsProxyIndexWithoutEditingHTMLAndServeInjectedScripts(t *testing.T) {
+	const index = "<html><head></head><body>DSH</body></html>"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, index)
+	}))
+	defer upstream.Close()
+	bridge := &Bridge{Client: upstream.Client(), Origin: upstream.URL, Generation: "g1"}
+
+	page := httptest.NewRecorder()
+	bridge.Assets(page, httptest.NewRequest("GET", "/?generation=g1", nil))
+	if page.Code != http.StatusOK || page.Body.String() != index {
+		t.Fatalf("index was rewritten: status=%d body=%q", page.Code, page.Body.String())
+	}
+
+	for _, path := range []string{"/__work/bridge.js?generation=g1", "/__work/boot.js?generation=g1"} {
+		response := httptest.NewRecorder()
+		bridge.Assets(response, httptest.NewRequest("GET", path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/javascript") || response.Body.Len() == 0 {
+			t.Fatalf("bootstrap script %s: status=%d content-type=%q body length=%d", path, response.Code, response.Header().Get("Content-Type"), response.Body.Len())
+		}
 	}
 }
 

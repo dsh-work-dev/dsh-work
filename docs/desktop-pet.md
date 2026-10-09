@@ -41,10 +41,11 @@ accessibility or packaging acceptance.
 
 ## DSH activity integration
 
-`internal/dshactivity` mounts an embedded plugin through the Worker's launch
-patch. It uses DSH events and projections to publish bounded authenticated
-activity snapshots; generation-scoped credentials and cancellation isolate
-Worker replacements. The browser plugin handles conversation navigation and
+The `@dsh-work/pet` host plugin (`internal/hostplugins/pet`, mounted by the
+core overlay in every mode) uses DSH events and projections to publish bounded
+authenticated activity snapshots; `internal/dshactivity` reads them for the
+pet. Generation-scoped credentials and cancellation isolate Worker
+replacements. The plugin's Client half handles conversation navigation and
 focused read acknowledgement.
 
 The Host aggregates sessions, pending questions/approvals/plan review, terminal
@@ -93,7 +94,8 @@ on selection changes. Stale asynchronous responses cannot restore an old pet.
 | `internal/pet` | Catalog, community home resolution, package adapters, cache, runtime timelines and normalized playback plans |
 | `internal/settings` | Versioned pet preferences and monitor-relative position |
 | `internal/app/pet_*.go` | Trusted Settings/pet APIs, activity projection, media capabilities and hit-region validation |
-| `internal/dshactivity` | DSH launch plugin, authenticated activity bridge and navigation |
+| `internal/dshactivity` | Authenticated activity bridge and navigation requests to `@dsh-work/pet` |
+| `internal/hostplugins/pet` | The `@dsh-work/pet` DSH plugin: activity snapshot and conversation navigation inside DSH |
 | `internal/nativeui/pet_*.go` | Window options, activity sizing and platform-specific pointer sampling |
 | `internal/desktopapp/daemon.go` | Daemon-owned Pet service/window assembly and lifetime wiring |
 | `internal/desktopclient` | Settings proxies to daemon-owned Pet services |

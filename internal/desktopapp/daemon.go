@@ -22,6 +22,7 @@ import (
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
@@ -30,6 +31,7 @@ import (
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
+	"github.com/local/dsh-work/internal/version"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -95,18 +97,31 @@ func runDaemon(identity string, resources Resources) {
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
 	dsh.SetUserDataDirectory(storage.UserDataPath())
-	petActivity := dshactivity.New(filepath.Join(filepath.Dir(config.SettingsPath), "pet-activity-bridge"))
+	petActivity := dshactivity.New()
 	defer petActivity.Close()
-	dsh.SetLaunchPatch(petActivity.Prepare)
+	hostPlugins := hostplugins.NewOverlay(filepath.Join(filepath.Dir(config.SettingsPath), "host-plugins"), version.String())
+	coreOverlay := func(generation string) (string, error) {
+		petConfig, err := petActivity.Begin(generation)
+		if err != nil {
+			return "", err
+		}
+		return hostPlugins.Prepare(generation, map[string]map[string]string{
+			"shell": {"generation": generation},
+			"pet":   petConfig,
+		})
+	}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
-		dsh.SetLaunchPatch(func(generation string) (string, error) {
-			patch, err := petActivity.Prepare(generation)
+		probePatch := desktopprobe.Patch(filepath.Join(storage.Root, "probe"), config.DiscoveryRoot)
+		withProbe := coreOverlay
+		coreOverlay = func(generation string) (string, error) {
+			patch, err := withProbe(generation)
 			if err != nil {
 				return "", err
 			}
-			return desktopprobe.Patch(filepath.Join(storage.Root, "probe"), config.DiscoveryRoot)(patch)
-		})
+			return probePatch(patch)
+		}
 	}
+	dsh.SetCoreOverlayPatch(coreOverlay)
 	var managerRunner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}

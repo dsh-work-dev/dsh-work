@@ -1,23 +1,36 @@
 package dshadapter
 
 import (
-	"errors"
 	"github.com/local/dsh-work/internal/workspacecontext"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestSafeModeLaunchOmitsUserDataAndExtensionPatches(t *testing.T) {
+func TestSafeModeLaunchRetainsCoreOverlayAndOmitsUserData(t *testing.T) {
 	root := t.TempDir()
 	a := New(nil, SupportedVersion)
 	a.SetUserDataDirectory(filepath.Join(root, "original-data"))
-	a.SetLaunchPatch(func(string) (string, error) { return "", errors.New("broken host extension") })
-	plan, err := a.BuildLaunchPlan(LaunchContext{SafeMode: true, GenerationID: "safe-generation", Runtime: Runtime{Path: filepath.Join(root, "dsh.cmd"), Version: SupportedVersion}, BootstrapDirectory: filepath.Join(root, "bootstrap"), DataDirectory: filepath.Join(root, "rescue"), Profile: "web", Workspace: workspacecontext.Context{GenerationID: "safe-generation", State: workspacecontext.StateSelectionRequired}, HostPatch: "host.patch.json"})
+	corePatch := filepath.Join(root, "core-plugins.patch.json")
+	a.SetCoreOverlayPatch(func(generation string) (string, error) {
+		if generation != "safe-generation" {
+			t.Fatalf("core overlay prepared for generation %q", generation)
+		}
+		return corePatch, nil
+	})
+	plan, err := a.BuildLaunchPlan(LaunchContext{
+		UserDataOverlay: false, GenerationID: "safe-generation",
+		Runtime:            Runtime{Path: filepath.Join(root, "dsh.cmd"), Version: SupportedVersion},
+		BootstrapDirectory: filepath.Join(root, "bootstrap"),
+		DataDirectory:      filepath.Join(root, "rescue"), Profile: "web",
+		Workspace: workspacecontext.Context{GenerationID: "safe-generation", State: workspacecontext.StateSelectionRequired},
+		HostPatch: "host.patch.json",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(strings.Join(plan.Args, " "), "--patch") != 1 || plan.Args[1] != "host.patch.json" || plan.Env["DSH_HOME"] != filepath.Join(root, "rescue") {
-		t.Fatalf("unsafe launch = %#v", plan)
+	args := strings.Join(plan.Args, " ")
+	if strings.Count(args, "--patch") != 2 || !strings.Contains(args, corePatch) || !strings.Contains(args, "host.patch.json") || strings.Contains(args, "original-data") {
+		t.Fatalf("safe-mode overlays = %#v", plan.Args)
 	}
 }

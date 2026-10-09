@@ -96,6 +96,12 @@ test("DSH items wait for the catalog and show the current binding", () => {
   assert.equal(item(menus, "workspace.add").enabled, false);
 });
 
+test("left sidebar menu check follows the reported DSH state", () => {
+  const dsh = new Map([['sidebar.left.toggle', {id: 'sidebar.left.toggle', keys: [], state: 'ready' as const}]]);
+  assert.equal(item(buildMenus(state({dsh, sidebarLeftOpen: true}), t), 'sidebar.left.toggle').checked, true);
+  assert.equal(item(buildMenus(state({dsh, sidebarLeftOpen: false}), t), 'sidebar.left.toggle').checked, false);
+  assert.equal(item(buildMenus(state({dsh}), t), 'sidebar.left.toggle').checked, undefined);
+});
 test("window items show the keys the shell handles", () => {
   const menus = buildMenus(state({window: {fullscreen: false, zoom: 1.2}}), t);
   assert.equal(formatKeys(item(menus, "zoomIn").keys), "Ctrl+=");
@@ -139,6 +145,8 @@ test("every shell menu label is translated in every locale", () => {
   const keys = [
     "shell.menu.bar", "shell.menu.unbound", "shell.menu.unavailable", "shell.menu.updateAvailable", "shell.menu.updating",
     "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
+    "shell.toast.exportSaved", "shell.toast.exportFailed",
+    "shell.toast.signOutPending", "shell.toast.signedOut", "shell.toast.signOutFailed",
     "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
     ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
       .filter(key => !key.startsWith("manager.")),
@@ -167,7 +175,18 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/command-result", id: "session.new", handled: false}), {type: "command-result", id: "session.new", handled: false});
   assert.equal(parseFrameMessage({type: "dsh-work/command-result", id: "plugin.private", handled: false}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/window-key", action: "zoom-in"}), {type: "window-key", action: "zoom-in"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/sidebar-state", open: false}), {type: "sidebar-state", open: false});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/component-ready", id: "pet"}), {type: "component-ready", id: "pet"});
+  assert.equal(parseFrameMessage({type: "dsh-work/component-ready", id: "plugin.private"}), null);
+  assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "saved"}), {type: "export-result", result: "saved"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "error"}), {type: "export-result", result: "error"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "cancelled"}), {type: "export-result", result: "cancelled"});
+  assert.equal(parseFrameMessage({type: "dsh-work/export-result", result: "done"}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "pending"}), {type: "account-signout", state: "pending"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "error"}), {type: "account-signout", state: "error"});
+  assert.equal(parseFrameMessage({type: "dsh-work/account-signout", state: "maybe"}), null);
 });
 
 test("shortcut keys render as DSH shows them, without extra separators", () => {

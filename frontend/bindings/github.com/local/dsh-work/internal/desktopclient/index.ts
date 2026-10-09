@@ -17,5 +17,6 @@ export {
 };
 
 export type {
+    BuiltinComponentStatus,
     ShellPet
 } from "./models.js";

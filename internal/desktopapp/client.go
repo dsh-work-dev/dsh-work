@@ -79,11 +79,10 @@ func runDesktopClient(identity string, resources Resources) error {
 	applicationStarted, protocolOpenPending := false, false
 	var applicationShuttingDown atomic.Bool
 	current := state
-	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
 	// One frameless workbench window hosts the trusted shell document; DSH runs
 	// in a frame on its own authority (ADR-0024).
 	var workerSurface *desktopbridge.Surface
-	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, StandardHTTP: standardHTTP, Window: func() application.Window {
+	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, Window: func() application.Window {
 		windowMu.Lock()
 		defer windowMu.Unlock()
 		return workspace
@@ -94,7 +93,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		if snapshot.URL == "" {
 			return nil
 		}
-		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) }, StandardHTTP: standardHTTP,
+		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) },
 			ReportBoot: func(ctx context.Context, generation, detail string) error {
 				ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 				defer cancel()
@@ -102,6 +101,9 @@ func runDesktopClient(identity string, resources Resources) error {
 					Generation string
 					Detail     string
 				}{generation, detail}, nil)
+			},
+			SaveSessionExport: func(ctx context.Context, filename string, write func(io.Writer) error) (bool, error) {
+				return nativeui.SaveSessionLogArchive(desktop, filename, write)
 			},
 		}
 	}}
@@ -117,6 +119,10 @@ func runDesktopClient(identity string, resources Resources) error {
 		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
 	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
 		return client.JSON(ctx, "/zoom", zoom, nil)
+	}, OnBuiltinComponentsChanged: func(statuses []desktopclient.BuiltinComponentStatus) {
+		if desktop != nil {
+			desktop.Event.Emit("builtin-components", statuses)
+		}
 	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
 		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},

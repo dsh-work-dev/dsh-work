@@ -1,7 +1,7 @@
 // Installed as a per-launch DSH patch. It observes domain events and never answers a request.
 import {timingSafeEqual} from 'node:crypto';
 
-export const name = 'dsh-work-pet-activity';
+export const name = 'dsh-work-pet';
 export const inject = ['webServer', 'connection', 'sessions', 'sessionController', 'agents', 'sessionProjections'];
 const text = (value, max = 240) => typeof value === 'string' ? [...value.slice(0, max * 2).replace(/[\u0000-\u001f\u007f]/g, ' ').trim()].slice(0, max).join('') : '';
 const plain = blocks => {
@@ -193,7 +193,7 @@ export function apply(ctx, config) {
     for await (const chunk of req) { size += chunk.length; if (size > 65536) throw new Error('request too large'); chunks.push(chunk); }
     return JSON.parse(Buffer.concat(chunks).toString());
   }
-  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/activity', handler: async (req, res) => {
+  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/pet-activity', handler: async (req, res) => {
     const rejection = ctx.connection.requestRejection(req);
     if (rejection !== undefined) return reply(res, rejection, {});
     if (!authorized(req)) return reply(res, 403, {});
@@ -210,7 +210,7 @@ export function apply(ctx, config) {
     } catch { reply(res, 400, {}); }
   }}));
   // This route also passes through DSH's normal authenticated web trust boundary.
-  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/activity-client', handler: async (req, res) => {
+  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/pet-activity-client', handler: async (req, res) => {
     const rejection = ctx.connection.requestRejection(req);
     if (rejection !== undefined) return reply(res, rejection, {});
     if (req.method !== 'POST' || req.headers.origin !== `http://${req.headers.host}`) return reply(res, 403, {});

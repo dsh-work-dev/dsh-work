@@ -3,7 +3,8 @@ import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
-import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {buildBuiltinComponentViews} from "./builtin-components";
 import {diagnosticsReport} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
@@ -235,6 +236,28 @@ export function mountManager() {
   const renameControls = document.getElementById("profile-rename-controls") as HTMLElement;
   const profileBackup = document.getElementById("manager-profile-backup") as HTMLButtonElement;
   const profileDelete = document.getElementById("manager-profile-delete") as HTMLButtonElement;
+  const builtinComponentList = document.getElementById("manager-builtin-components") as HTMLDivElement;
+  let builtinComponentSnapshot: unknown;
+  const renderBuiltinComponents = (value: unknown = builtinComponentSnapshot) => {
+    builtinComponentSnapshot = value;
+    const rows = buildBuiltinComponentViews(value).map(component => {
+      const row = document.createElement("div");
+      row.className = "row";
+      const main = document.createElement("div");
+      main.className = "row-main";
+      const title = document.createElement("strong");
+      title.textContent = t(component.titleKey);
+      const detail = document.createElement("p");
+      detail.textContent = t(component.descriptionKey);
+      main.append(title, detail);
+      const trail = document.createElement("div");
+      trail.className = "row-trail";
+      trail.append(stateTag(t(component.stateKey)));
+      row.append(main, trail);
+      return row;
+    });
+    builtinComponentList.replaceChildren(...rows);
+  };
   const pluginEmpty = document.getElementById("manager-plugin-empty") as HTMLElement;
   const pluginDetail = document.getElementById("manager-plugin-detail") as HTMLElement;
   const pluginProfileLabel = document.getElementById("manager-plugin-profile") as HTMLElement;
@@ -1461,6 +1484,8 @@ export function mountManager() {
     if (section === "profiles" && profileView === "detail") { profileView = "list"; renderProfiles(); }
     showSection(section);
   });
+  Events.On("builtin-components", event => renderBuiltinComponents(event.data));
+  void ShellService.GetBuiltinComponents().then(renderBuiltinComponents).catch(() => renderBuiltinComponents(undefined));
   Events.On("lifecycle", () => void refresh());
   Events.On("update-state", (event) => {
     if (event.data && typeof event.data === "object") {
@@ -1522,6 +1547,7 @@ export function mountManager() {
     renderProfiles();
     renderRuntimes();
     renderUpdate();
+    renderBuiltinComponents();
     pets.renderLocale();
   });
 

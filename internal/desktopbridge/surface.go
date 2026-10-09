@@ -14,11 +14,10 @@ import (
 // Wails dispatches runtime calls or serves application files; Window only
 // scopes the Worker's streams to the workbench window.
 type Surface struct {
-	Host         string
-	Window       func() application.Window
-	Current      func() *Bridge
-	Assets       func(*Bridge) http.Handler
-	StandardHTTP bool
+	Host    string
+	Window  func() application.Window
+	Current func() *Bridge
+	Assets  func(*Bridge) http.Handler
 }
 
 func (s *Surface) forWindow(window application.Window) *Bridge {
@@ -90,7 +89,7 @@ func (s *Surface) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "Worker expired", http.StatusGone)
 			return
 		}
-		if s.StandardHTTP && r.URL.Path != "/__work/web-boot" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if r.URL.Path != "/__work/web-boot" && r.Method != http.MethodGet && r.Method != http.MethodHead {
 			bridge.ProxyHTTP(w, r)
 			return
 		}

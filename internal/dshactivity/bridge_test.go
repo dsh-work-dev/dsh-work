@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -54,8 +52,8 @@ func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 }
 
 func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.T) {
-	b := New(t.TempDir())
-	if _, err := b.Prepare("g1"); err != nil {
+	b := New()
+	if _, err := b.Begin("g1"); err != nil {
 		t.Fatal(err)
 	}
 	token := b.token
@@ -99,22 +97,15 @@ func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.
 	if err := b.Open(ctx, "arbitrary"); err == nil {
 		t.Fatal("unknown navigation admitted")
 	}
-	patch, err := b.Prepare("g2")
+	config, err := b.Begin("g2")
 	if err != nil {
 		t.Fatal(err)
-	}
-	if filepath.Dir(patch) != b.root {
-		t.Fatal("patch escaped Host directory")
 	}
 	b.accept("g1", Snapshot{SchemaVersion: 1, Generation: "g1", Sessions: []Activity{{SessionID: "old"}}})
 	if b.Snapshot().Connected || len(b.Snapshot().Sessions) != 0 {
 		t.Fatal("old generation published")
 	}
-	content, err := os.ReadFile(patch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !json.Valid(content) {
-		t.Fatal("invalid JSON/YAML patch")
+	if config["generation"] != "g2" || config["token"] != b.token || len(b.token) != 64 {
+		t.Fatalf("pet launch config = %#v", config)
 	}
 }

@@ -1,8 +1,10 @@
 package desktopbridge
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -46,5 +48,25 @@ func TestHostSurfaceSeparatesWorkerAndShellByAuthority(t *testing.T) {
 		if got := w.Header().Get("Content-Security-Policy") == "frame-ancestors 'none'"; got != c.framing {
 			t.Fatalf("%s: framing policy %v", c.name, got)
 		}
+	}
+}
+
+func TestWorkerMiddlewareUsesFiniteHTTPForOrdinaryRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/echo" {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		_, _ = io.Copy(w, r.Body)
+	}))
+	defer upstream.Close()
+	bridge := &Bridge{Client: upstream.Client(), Origin: upstream.URL, Generation: "g1"}
+	s := &Surface{Host: "wails.localhost:48217", Current: func() *Bridge { return bridge }}
+	request := httptest.NewRequest(http.MethodPost, "/api/echo", strings.NewReader("finite body"))
+	request.Host = "wails.localhost:48217"
+	response := httptest.NewRecorder()
+	s.Middleware(http.NotFoundHandler()).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "finite body" {
+		t.Fatalf("finite HTTP proxy: status=%d body=%q", response.Code, response.Body.String())
 	}
 }

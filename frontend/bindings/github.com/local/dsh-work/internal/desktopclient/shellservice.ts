@@ -16,6 +16,20 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * BeginBuiltinComponents marks each built-in Client as loading for the current DSH frame.
+ */
+export function BeginBuiltinComponents(): $CancellablePromise<void> {
+    return $Call.ByID(1175616448);
+}
+
+/**
+ * GetBuiltinComponents returns a detached status snapshot to the workspace or Settings window.
+ */
+export function GetBuiltinComponents(): $CancellablePromise<$models.BuiltinComponentStatus[] | null> {
+    return $Call.ByID(65460131);
+}
+
+/**
  * GetPet reports whether a pet is selected and visible.
  */
 export function GetPet(): $CancellablePromise<$models.ShellPet> {
@@ -27,6 +41,20 @@ export function GetPet(): $CancellablePromise<$models.ShellPet> {
  */
 export function OpenSettings(section: string): $CancellablePromise<void> {
     return $Call.ByID(671240417, section);
+}
+
+/**
+ * ReportBuiltinComponent accepts a readiness handshake from the framed DSH Client.
+ */
+export function ReportBuiltinComponent(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1278708676, id);
+}
+
+/**
+ * ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
+ */
+export function ResetBuiltinComponents(): $CancellablePromise<void> {
+    return $Call.ByID(2063574054);
 }
 
 /**

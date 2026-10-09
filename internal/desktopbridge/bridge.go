@@ -15,15 +15,12 @@ import (
 const ChunkSize = 64 << 10
 
 type Bridge struct {
-	Client       *http.Client
-	Origin       string
-	Generation   string
-	OpenExternal func(string) error
-	ReportBoot   func(context.Context, string, string) error
-	// StandardHTTP routes ordinary WebView requests through the Wails asset
-	// server instead of the JavaScript worker-fetch stream. The daemon and
-	// Worker named-pipe transports remain unchanged.
-	StandardHTTP bool
+	Client            *http.Client
+	Origin            string
+	Generation        string
+	OpenExternal      func(string) error
+	ReportBoot        func(context.Context, string, string) error
+	SaveSessionExport func(context.Context, string, func(io.Writer) error) (bool, error)
 }
 
 // ByteConn permits exercising the same Fetch implementation without a WebView.
@@ -159,7 +156,9 @@ func (b *Bridge) Serve(c ByteConn) error {
 		}
 	}()
 	var response *http.Response
-	if u.Path == "/__work/external" {
+	if u.Path == "/__work/session-export" {
+		response = b.sessionExport(ctx, u, meta)
+	} else if u.Path == "/__work/external" {
 		target, e := url.Parse(u.Query().Get("url"))
 		if e != nil || len(u.Query().Get("url")) > 4096 || target.User != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" || b.OpenExternal == nil || meta.Method != "POST" {
 			return errors.New("invalid external URL")
