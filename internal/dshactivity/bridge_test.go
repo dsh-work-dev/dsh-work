@@ -135,6 +135,12 @@ func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.
 		if !strings.Contains(name, "/versions/development/") {
 			t.Fatalf("plugin %s path is not versioned: %s", id, name)
 		}
+		if id == "dsh-work-shell" {
+			config, _ := entry["config"].(map[string]any)
+			if config["generation"] != "g2" {
+				t.Fatalf("shell config = %#v", config)
+			}
+		}
 		if id == "dsh-work-activity" {
 			config, _ := entry["config"].(map[string]any)
 			if config["generation"] != "g2" || config["token"] != b.token {

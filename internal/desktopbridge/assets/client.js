@@ -1,169 +1,213 @@
 import { Stream as e } from "/wails/runtime.js";
-//#region internal/desktopbridge/account_feedback.ts
-var t, n;
-function r(e) {
-	if (!e || typeof e != "object") return !1;
-	let t = e;
-	return t.type === "server-response" && t.result?.ok === !0;
-}
-function i(e) {
-	let r = document.body ?? document.documentElement;
-	r && ((!t || !t.isConnected) && (t = document.createElement("div"), t.setAttribute("role", "status"), t.setAttribute("aria-live", "polite"), Object.assign(t.style, {
-		position: "fixed",
-		top: "20px",
-		right: "20px",
-		zIndex: "2147483647",
-		maxWidth: "min(360px, calc(100vw - 40px))",
-		padding: "12px 16px",
-		borderRadius: "10px",
-		background: "rgba(24, 24, 27, 0.96)",
-		color: "#fff",
-		boxShadow: "0 8px 24px rgba(0, 0, 0, 0.22)",
-		font: "500 14px/1.5 system-ui, sans-serif",
-		pointerEvents: "none",
-		opacity: "0",
-		transition: "opacity 120ms ease"
-	}), r.appendChild(t)), n !== void 0 && window.clearTimeout(n), t.setAttribute("role", e === "error" ? "alert" : "status"), t.textContent = a(e), t.style.opacity = "1", e !== "pending" && (n = window.setTimeout(() => {
-		t && (t.style.opacity = "0");
-	}, 3e3)));
-}
-function a(e) {
-	return (document.documentElement.lang || navigator.language).toLowerCase().startsWith("zh") ? e === "pending" ? "正在退出登录…" : e === "success" ? "已退出登录" : "退出登录失败，请重试" : e === "pending" ? "Signing out…" : e === "success" ? "Signed out" : "Could not sign out. Try again.";
-}
-function o() {
-	i("pending");
-}
-async function s(e) {
-	if (!e.ok) return !1;
+//#region internal/desktopbridge/transport-core.ts
+function t(e, t) {
 	try {
-		return r(await e.clone().json());
+		let n = new URL(t), r = new URL(e, n), i = r.origin.replace(/^ws:/, "http:").replace(/^wss:/, "https:");
+		return r.username === "" && r.password === "" && i === n.origin && r.pathname === "/api/remote.mux";
 	} catch {
 		return !1;
 	}
 }
-async function c(e) {
-	let t = e === !0;
-	e instanceof Response && (t = await s(e)), i(t ? "success" : "error");
+function n(e, t) {
+	try {
+		let n = new URL(t), r = new URL(e, n);
+		return r.origin === n.origin && r.pathname === "/api/session/uploadFileBinary";
+	} catch {
+		return !1;
+	}
+}
+function r(e, t, r) {
+	let i, a = !1, o = () => {
+		a || (a = !0, e.terminate());
+	}, s = (t) => {
+		let n = new MessageEvent("message", { data: t });
+		typeof e.dispatchEvent == "function" ? e.dispatchEvent(n) : e.onmessage?.call(e, n);
+	}, c = (a, c) => {
+		let l = a;
+		if (typeof l?.url != "string" && !(l?.url instanceof URL)) {
+			e.postMessage(a, c);
+			return;
+		}
+		if (!n(l.url, r)) {
+			e.postMessage(a, c);
+			return;
+		}
+		if (o(), !(l.body instanceof Blob) && !(l.body instanceof ReadableStream)) {
+			s({
+				kind: "error",
+				message: "background upload worker received an invalid body"
+			});
+			return;
+		}
+		if (i) {
+			s({
+				kind: "error",
+				message: "background upload worker already has an active request"
+			});
+			return;
+		}
+		let u = new AbortController();
+		i = u;
+		let d = l.body instanceof Blob ? l.body.size : void 0, f = {
+			method: "POST",
+			headers: l.headers ?? {},
+			credentials: "include",
+			body: l.body,
+			signal: u.signal,
+			...l.body instanceof ReadableStream ? { duplex: "half" } : {},
+			...d === void 0 ? {} : { uploadTotal: d },
+			onUploadProgress: (e) => s({
+				kind: "progress",
+				...e
+			})
+		};
+		t(l.url, f).then(async (e) => {
+			let t = await e.text();
+			u.signal.aborted || s({
+				kind: "complete",
+				status: e.status,
+				body: t
+			});
+		}).catch((e) => {
+			u.signal.aborted || s({
+				kind: "error",
+				message: e instanceof Error ? e.message : String(e)
+			});
+		}).finally(() => {
+			i === u && (i = void 0);
+		});
+	};
+	return new Proxy(e, {
+		get(e, t) {
+			return t === "postMessage" ? c : t === "terminate" ? () => {
+				i?.abort(), i = void 0, o();
+			} : Reflect.get(e, t, e);
+		},
+		set(e, t, n) {
+			return Reflect.set(e, t, n, e);
+		}
+	});
 }
 //#endregion
 //#region internal/desktopbridge/client.ts
-var l = globalThis.fetch.bind(globalThis), u = globalThis.__WORK_GENERATION__, d = 64 * 1024;
-globalThis.dshDesktop ??= {};
-async function f(t, n) {
-	let r = new Request(t, n), i = new URL(r.url);
-	if (i.origin !== location.origin || i.pathname.startsWith("/wails/")) return l(r);
-	let a = e("worker-fetch");
-	a.binaryType = "arraybuffer";
-	let s = !1, f = !1, p, m, h, g, _, v = r.signal, y = () => {
-		f = !0, v.removeEventListener("abort", b), h?.(/* @__PURE__ */ Error("Worker upload closed")), g?.(), _?.cancel().catch(() => {}), a.close();
-	}, b = () => S(v.reason ?? new DOMException("Aborted", "AbortError")), x, S = (e) => {
-		if (!f) {
-			if (!s) x(e);
+var i = globalThis.fetch.bind(globalThis), a = globalThis.__WORK_GENERATION__, o = 64 * 1024;
+async function s(t, n) {
+	let r = { ...n }, s = r.uploadTotal, c = r.onUploadProgress;
+	delete r.duplex, delete r.uploadTotal, delete r.onUploadProgress;
+	let l = new Request(t, r), u = new URL(l.url);
+	if (u.origin !== location.origin || u.pathname.startsWith("/wails/")) return i(l);
+	let d = e("worker-fetch");
+	d.binaryType = "arraybuffer";
+	let f = !1, p = !1, m, h, g, _, v, y = l.signal, b = () => {
+		p = !0, y.removeEventListener("abort", x), g?.(/* @__PURE__ */ Error("Worker upload closed")), _?.(), v?.cancel().catch(() => {}), d.close();
+	}, x = () => C(y.reason ?? new DOMException("Aborted", "AbortError")), S, C = (e) => {
+		if (!p) {
+			if (!f) S(e);
 			else try {
-				p?.error(e);
+				m?.error(e);
 			} catch {}
-			h?.(e), g?.(), y();
+			g?.(e), _?.(), b();
 		}
-	}, C = new Promise((e, t) => {
-		x = t, a.onclose = () => {
-			f || S(/* @__PURE__ */ Error("Worker connection closed"));
-		}, a.onerror = () => S(/* @__PURE__ */ Error("Worker transport failed")), a.onmessage = (t) => {
+	}, w = new Promise((e, t) => {
+		S = t, d.onclose = () => {
+			p || C(/* @__PURE__ */ Error("Worker connection closed"));
+		}, d.onerror = () => C(/* @__PURE__ */ Error("Worker transport failed")), d.onmessage = (t) => {
 			try {
 				let n = new Uint8Array(t.data);
 				switch (n[0]) {
 					case 0: {
-						if (s) throw Error("duplicate headers");
-						let t = JSON.parse(new TextDecoder().decode(n.subarray(1))), i = new Headers();
-						for (let [e, n] of Object.entries(t.headers)) for (let t of n) i.append(e, t);
-						let o = r.method === "HEAD" || [
+						if (f) throw Error("duplicate headers");
+						let t = JSON.parse(new TextDecoder().decode(n.subarray(1))), r = new Headers();
+						for (let [e, n] of Object.entries(t.headers)) for (let t of n) r.append(e, t);
+						let i = l.method === "HEAD" || [
 							204,
 							205,
 							304
-						].includes(t.status), c = new ReadableStream({
+						].includes(t.status), a = new ReadableStream({
 							start(e) {
-								p = e;
+								m = e;
 							},
 							pull() {
 								return new Promise((e) => {
-									g = e, a.send(new Uint8Array([4]));
+									_ = e, d.send(new Uint8Array([4]));
 								});
 							},
 							cancel() {
-								y();
+								b();
 							}
 						}, { highWaterMark: 0 });
-						s = !0, e(new Response(o ? null : c, {
+						f = !0, e(new Response(i ? null : a, {
 							status: t.status,
-							headers: i
-						})), o && y();
+							headers: r
+						})), i && b();
 						break;
 					}
 					case 1: {
-						p.enqueue(n.slice(1));
-						let e = g;
-						g = void 0, e?.();
+						m.enqueue(n.slice(1));
+						let e = _;
+						_ = void 0, e?.();
 						break;
 					}
 					case 2:
-						p?.close(), g?.(), y();
+						m?.close(), _?.(), b();
 						break;
 					case 3: {
-						let e = m;
-						m = void 0, h = void 0, e?.();
+						let e = h;
+						h = void 0, g = void 0, e?.();
 						break;
 					}
 					default: throw Error("invalid Worker frame");
 				}
 			} catch (e) {
-				S(e);
+				C(e);
 			}
-		}, a.onopen = () => {
+		}, d.onopen = () => {
 			let e = {};
-			r.headers.forEach((t, n) => e[n] = [t]), a.send(new TextEncoder().encode(JSON.stringify({
-				generation: u,
-				url: i.pathname + i.search,
-				method: r.method,
+			l.headers.forEach((t, n) => e[n] = [t]), d.send(new TextEncoder().encode(JSON.stringify({
+				generation: a,
+				url: u.pathname + u.search,
+				method: l.method,
 				headers: e,
-				hasBody: !!r.body
+				hasBody: !!l.body
 			}))), (async () => {
-				if (!r.body) return;
-				let e = r.body.getReader();
-				_ = e;
+				if (!l.body) return;
+				let e = l.body.getReader();
+				v = e;
+				let t = 0;
 				try {
 					for (;;) {
-						let { done: t, value: n } = await e.read();
-						if (t) break;
-						for (let e = 0; e < n.length; e += d) {
-							if (f) throw Error("Worker upload closed");
-							let t = n.subarray(e, e + d), r = new Uint8Array(t.length + 1);
-							r[0] = 1, r.set(t, 1), await new Promise((e, t) => {
-								m = e, h = t, a.send(r);
+						let { done: n, value: r } = await e.read();
+						if (n) break;
+						for (let e = 0; e < r.length; e += o) {
+							if (p) throw Error("Worker upload closed");
+							let n = r.subarray(e, e + o), i = new Uint8Array(n.length + 1);
+							i[0] = 1, i.set(n, 1), await new Promise((e, t) => {
+								h = e, g = t, d.send(i);
+							}), t += n.length, c?.({
+								loaded: t,
+								...s === void 0 ? {} : { total: s }
 							});
 						}
 					}
-					f || a.send(new Uint8Array([2]));
+					p || d.send(new Uint8Array([2]));
 				} finally {
 					await e.cancel().catch(() => {}), e.releaseLock();
 				}
-			})().catch(S);
+			})().catch(C);
 		};
 	});
-	v.addEventListener("abort", b, { once: !0 }), v.aborted && b();
-	let w = r.method === "POST" && i.pathname === "/api/account/signOut";
-	w && o();
-	let T;
-	try {
-		T = await C;
-	} catch (e) {
-		throw w && c(!1), e;
-	}
-	return w && c(T), T;
+	return y.addEventListener("abort", x, { once: !0 }), y.aborted && x(), w;
 }
-globalThis.fetch = f, globalThis.WorkerBridge = {
+globalThis.WorkerBridge = {
 	Stream: e,
-	workerFetch: f
-}, globalThis.__DSH_TRANSPORT__ = { ownsHost: !0 };
-var p = globalThis.WebSocket, m = class extends EventTarget {
+	workerFetch: s
+};
+var c = globalThis.Worker;
+typeof c == "function" && (globalThis.Worker = new Proxy(c, { construct(e, t, n) {
+	let i = Reflect.construct(e, t, n);
+	return t[1]?.name === "dsh-file-upload" ? r(i, s, location.href) : i;
+} }));
+var l = globalThis.WebSocket, u = class extends EventTarget {
 	static {
 		this.CONNECTING = 0;
 	}
@@ -181,7 +225,7 @@ var p = globalThis.WebSocket, m = class extends EventTarget {
 			let e = new URL(this.url);
 			this.socket.send(new TextEncoder().encode(JSON.stringify({
 				url: e.pathname + e.search,
-				generation: u,
+				generation: a,
 				protocols: typeof n == "string" ? [n] : n ?? []
 			})));
 		}, this.socket.onmessage = (e) => {
@@ -236,8 +280,8 @@ var p = globalThis.WebSocket, m = class extends EventTarget {
 		let n = typeof e == "string" ? new TextEncoder().encode(e).length : e instanceof Blob ? e.size : e.byteLength;
 		this.bufferedAmount += n, this.queue = this.queue.then(async () => {
 			let r = typeof e == "string" ? new TextEncoder().encode(e) : e instanceof Blob ? new Uint8Array(await e.arrayBuffer()) : ArrayBuffer.isView(e) ? new Uint8Array(e.buffer, e.byteOffset, e.byteLength) : new Uint8Array(e);
-			for (let e = 0; e < r.length || e === 0; e += d) {
-				let n = r.subarray(e, e + d), i = new Uint8Array(n.length + 1);
+			for (let e = 0; e < r.length || e === 0; e += o) {
+				let n = r.subarray(e, e + o), i = new Uint8Array(n.length + 1);
 				i[0] = t, i.set(n, 1), await this.write(i);
 			}
 			await this.write(new Uint8Array([5])), this.bufferedAmount -= n;
@@ -268,63 +312,8 @@ var p = globalThis.WebSocket, m = class extends EventTarget {
 		r[0] = 6, r.set(n, 1), this.socket.send(r);
 	}
 };
-globalThis.WebSocket = new Proxy(p, { construct(e, t) {
-	let n = new URL(t[0], location.href), r = new URL(location.href);
-	return n.host === r.host ? new m(t[0], t[1]) : Reflect.construct(e, t);
+globalThis.WebSocket = new Proxy(l, { construct(e, n, r) {
+	return t(n[0], location.href) ? new u(n[0], n[1]) : Reflect.construct(e, n, r);
 } });
-var h = /* @__PURE__ */ new Map();
-function g(e) {
-	let t = new URL(e, location.href);
-	if (!["http:", "https:"].includes(t.protocol)) return;
-	let n = Date.now();
-	h.forEach((e, t) => {
-		n - e > 3e3 && h.delete(t);
-	}), !(n - (h.get(t.href) ?? 0) < 3e3) && (h.set(t.href, n), f("/__work/external?url=" + encodeURIComponent(t.href), { method: "POST" }).then((e) => {
-		e.ok || console.warn("Could not open the external browser.");
-	}).catch(() => console.warn("Could not open the external browser.")));
-}
-var _ = (e) => !!e && ![
-	"_self",
-	"_parent",
-	"_top"
-].includes(e.toLowerCase());
-document.addEventListener("click", (e) => {
-	let t = e.target?.closest?.("a[href]");
-	if (!t) return;
-	let n = new URL(t.href, location.href);
-	n.origin === location.origin ? _(t.target) && (e.preventDefault(), console.warn("dsh-work does not open DSH in a new window.")) : (e.preventDefault(), g(n.href));
-}, !0), window.open = ((e, t) => {
-	let n = new URL(e ?? "", location.href);
-	return n.origin === location.origin ? t === void 0 || _(t) ? (console.warn("dsh-work does not open DSH in a new window."), null) : (location.assign(n.href), window) : (g(n.href), null);
-});
-var v = window.parent === window ? void 0 : location.ancestorOrigins?.[0];
-if (v) {
-	let e = "", t = 0, n = (e, t) => {
-		let n = document.createElement("span");
-		n.style.cssText = `position:absolute;visibility:hidden;color:var(${e},${t})`, document.body.append(n);
-		let r = getComputedStyle(n).color;
-		return n.remove(), r;
-	}, r = () => {
-		if (t = 0, !document.body) return;
-		let r = getComputedStyle(document.body), i = {
-			type: "dsh-work/surface",
-			background: n("--dsw-specific-sidebar-fill", r.backgroundColor),
-			color: r.color,
-			scheme: getComputedStyle(document.documentElement).colorScheme
-		}, a = JSON.stringify(i);
-		a !== e && (e = a, window.parent.postMessage(i, v));
-	}, i = () => {
-		t ||= requestAnimationFrame(r);
-	};
-	new MutationObserver(i).observe(document.documentElement, {
-		attributes: !0,
-		subtree: !0,
-		attributeFilter: [
-			"class",
-			"style",
-			"data-theme"
-		]
-	}), matchMedia("(prefers-color-scheme: dark)").addEventListener("change", i), document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", i) : i();
-}
 //#endregion
-export { e as Stream, f as workerFetch };
+export { e as Stream, s as workerFetch };

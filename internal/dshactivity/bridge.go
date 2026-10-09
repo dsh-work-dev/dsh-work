@@ -118,6 +118,9 @@ func (b *Bridge) Prepare(generation string) (string, error) {
 			return "", fmt.Errorf("Host plugin %s is unavailable", name)
 		}
 		config := map[string]string{}
+		if name == "shell" {
+			config = map[string]string{"generation": generation}
+		}
 		if name == "activity" {
 			config = map[string]string{"generation": generation, "token": token}
 		}

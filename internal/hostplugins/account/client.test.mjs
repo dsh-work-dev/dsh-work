@@ -8,15 +8,26 @@ async function loadPlugin() {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const opened = [];
+  const children = [];
+  const body = {children, appendChild(element) { children.push(element); element.isConnected = true; }};
+  const document = {
+    visibilityState: 'visible',
+    hasFocus: () => true,
+    body,
+    documentElement: {lang: 'zh-CN'},
+    createElement: () => ({style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }}),
+  };
   globalThis.window = {
     __ModuleLoader__: {load: value => { definition = value; }},
     open: (url, target, features) => { opened.push({url, target, features}); return null; },
+    setTimeout: () => 1,
+    clearTimeout: () => {},
   };
   globalThis.dshDesktop = {};
   globalThis.fetch = () => new Promise(() => {});
-  globalThis.document = {visibilityState: 'visible', hasFocus: () => true};
+  globalThis.document = document;
   new Function(source)();
-  return {plugin: definition.factory(() => undefined), opened};
+  return {plugin: definition.factory(() => undefined), opened, document};
 }
 
 function accountStream() {
@@ -38,8 +49,9 @@ function accountStream() {
   return stream;
 }
 
-function context(stream) {
+function context(stream, accountOverrides = {}) {
   const disposers = [];
+  const account = {watch: signal => ({signal}), ...accountOverrides};
   const ctx = {
     sessions: {list: {getSnapshot: () => ({byId: {}})}},
     effect: fn => { disposers.push(fn()); },
@@ -48,11 +60,11 @@ function context(stream) {
       callback(ctx);
     },
     remote: {
-      account: {watch: signal => ({signal})},
+      account,
       $stream: options => { stream.open = options.open; return stream; },
     },
   };
-  return {ctx, dispose: () => { for (const dispose of disposers) dispose?.(); }};
+  return {ctx, account, dispose: () => { for (const dispose of disposers) dispose?.(); }};
 }
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -85,6 +97,41 @@ test('does not reopen an attempt that was already waiting when the page connecte
     stream.push({status: 'signed-out', attempt: {id: 'new', phase: 'waiting-browser', authorizeUrl: 'http://127.0.0.1:1/dsh/authorize'}});
     await tick();
     assert.deepEqual(opened, []);
+  } finally {
+    dispose();
+  }
+});
+
+test('wraps account sign-out with pending and success feedback, then restores the Remote method', async () => {
+  const {plugin, document} = await loadPlugin();
+  const stream = accountStream();
+  const signOut = async () => new Response(JSON.stringify({type: 'server-response', result: {ok: true}}));
+  const {ctx, account, dispose} = context(stream, {signOut});
+  plugin.apply(ctx);
+  try {
+    const pending = account.signOut();
+    assert.equal(document.body.children[0].textContent, '正在退出登录…');
+    const result = await pending;
+    assert.equal(result.ok, true);
+    await tick();
+    assert.equal(document.body.children[0].textContent, '已退出登录');
+    dispose();
+    assert.equal(account.signOut, signOut);
+  } finally {
+    dispose();
+  }
+});
+
+test('shows sign-out failure feedback when the Remote method rejects', async () => {
+  const {plugin, document} = await loadPlugin();
+  const stream = accountStream();
+  const {ctx, account, dispose} = context(stream, {signOut: async () => { throw new Error('network'); }});
+  plugin.apply(ctx);
+  try {
+    await assert.rejects(account.signOut(), /network/);
+    await tick();
+    assert.equal(document.body.children[0].textContent, '退出登录失败，请重试');
+    assert.equal(document.body.children[0].attributes.role, 'alert');
   } finally {
     dispose();
   }

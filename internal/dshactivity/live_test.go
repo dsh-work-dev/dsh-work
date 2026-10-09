@@ -145,8 +145,8 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	indexBody, _ := io.ReadAll(index.Body)
 	index.Body.Close()
-	if !strings.Contains(string(indexBody), "@dsh-work/pet-activity") {
-		t.Fatal("pet client missing from DSH boot graph")
+	if !strings.Contains(string(indexBody), "@dsh-work/activity") {
+		t.Fatal("activity client missing from DSH boot graph")
 	}
 	b.mu.Lock()
 	client, origin, token := b.client, b.origin, b.token

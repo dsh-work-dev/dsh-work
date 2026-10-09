@@ -79,11 +79,10 @@ func runDesktopClient(identity string, resources Resources) error {
 	applicationStarted, protocolOpenPending := false, false
 	var applicationShuttingDown atomic.Bool
 	current := state
-	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
 	// One frameless workbench window hosts the trusted shell document; DSH runs
 	// in a frame on its own authority (ADR-0024).
 	var workerSurface *desktopbridge.Surface
-	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, StandardHTTP: standardHTTP, Window: func() application.Window {
+	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, Window: func() application.Window {
 		windowMu.Lock()
 		defer windowMu.Unlock()
 		return workspace
@@ -94,7 +93,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		if snapshot.URL == "" {
 			return nil
 		}
-		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) }, StandardHTTP: standardHTTP,
+		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) },
 			ReportBoot: func(ctx context.Context, generation, detail string) error {
 				ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 				defer cancel()

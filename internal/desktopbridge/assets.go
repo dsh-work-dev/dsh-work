@@ -48,6 +48,13 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if r.URL.Path == "/__work/boot.js" {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		if r.Method != "HEAD" {
+			io.WriteString(w, bootScript)
+		}
+		return
+	}
 	u := *r.URL
 	u.Scheme = ""
 	u.Host = ""
@@ -85,37 +92,6 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method == "GET" && response.StatusCode == http.StatusOK && strings.Contains(response.Header.Get("Content-Type"), "text/html") {
-		data, err := io.ReadAll(io.LimitReader(response.Body, 4<<20+1))
-		if err != nil || len(data) > 4<<20 {
-			http.Error(w, "index too large", 502)
-			return
-		}
-		if b.StandardHTTP && b.ReportBoot == nil {
-			w.WriteHeader(response.StatusCode)
-			io.WriteString(w, string(data))
-			return
-		}
-		body := string(data)
-		at := strings.Index(strings.ToLower(body), "<head>")
-		if at < 0 {
-			http.Error(w, "invalid index", 502)
-			return
-		}
-		at += len("<head>")
-		generation, _ := json.Marshal(b.Generation)
-		injection := `<script>globalThis.__WORK_GENERATION__=` + string(generation) + `;</script>`
-		if b.ReportBoot != nil {
-			injection += `<script>` + bootScript + `</script>`
-		}
-		if !b.StandardHTTP {
-			injection += `<script type="module" src="/__work/bridge.js"></script>`
-		}
-		body = body[:at] + injection + body[at:]
-		w.WriteHeader(response.StatusCode)
-		io.WriteString(w, body)
-		return
-	}
 	w.WriteHeader(response.StatusCode)
 	flush := http.NewResponseController(w).Flush
 	buffer := make([]byte, 32<<10)

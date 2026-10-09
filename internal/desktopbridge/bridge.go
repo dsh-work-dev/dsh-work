@@ -20,10 +20,6 @@ type Bridge struct {
 	Generation   string
 	OpenExternal func(string) error
 	ReportBoot   func(context.Context, string, string) error
-	// StandardHTTP routes ordinary WebView requests through the Wails asset
-	// server instead of the JavaScript worker-fetch stream. The daemon and
-	// Worker named-pipe transports remain unchanged.
-	StandardHTTP bool
 }
 
 // ByteConn permits exercising the same Fetch implementation without a WebView.

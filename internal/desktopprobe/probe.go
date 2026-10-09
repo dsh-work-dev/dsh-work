@@ -24,10 +24,7 @@ func Patch(root, discoveryRoot string) func(string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		wsURL := (&url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(filepath.Join(discoveryRoot, "tools", "dsh", "node_modules", "ws", "wrapper.mjs"))}).String()
-		encodedWS, _ := json.Marshal(wsURL)
-		pluginSource := "import {WebSocketServer} from " + string(encodedWS) + ";\n" + probePlugin
-		if err = os.WriteFile(path, []byte(pluginSource), 0600); err != nil {
+		if err = os.WriteFile(path, []byte(probePlugin), 0600); err != nil {
 			return "", err
 		}
 		b, err := os.ReadFile(patch)
@@ -50,20 +47,16 @@ func Patch(root, discoveryRoot string) func(string) (string, error) {
 
 const probePlugin = `import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-export const inject=['webServer','sessions','connection'];
+export const inject=['webServer','sessions','sessionController'];
 export function apply(ctx){
 let cancelled=0,backgroundTicks=0,backgroundTimer,backgroundChild;
-const ws=new WebSocketServer({noServer:true});
-ws.on('connection',socket=>{socket.on('message',(data,binary)=>socket.send(data,{binary}));});
-ctx.effect(()=>ctx.webServer.registerUpgrade({path:'/__work/probe-ws',handler:(req,socket,head)=>{if(ctx.connection.requestRejection(req)){socket.destroy();return;}ws.handleUpgrade(req,socket,head,client=>ws.emit('connection',client));}}));
-ctx.effect(()=>()=>{for(const socket of ws.clients)socket.terminate();ws.close();});
 ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/__work/probe',handler:async(req,res)=>{
 const action=new URL(req.url,'http://local').searchParams.get('action');
 if(action==='background'){if(!backgroundTimer){backgroundTimer=setInterval(()=>backgroundTicks++,100);backgroundChild=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{windowsHide:true,stdio:'ignore'});}res.end('started');return;}
 if(action==='background-status'){res.setHeader('content-type','application/json');res.end(JSON.stringify({ticks:backgroundTicks,pid:process.pid,child:backgroundChild?.pid}));return;}
 if(action==='echo'){res.writeHead(200,{'content-type':'application/octet-stream'});for await(const chunk of req){if(!res.write(chunk))await once(res,'drain');}res.end();return;}
 if(action==='stream'){res.writeHead(200,{'content-type':'application/octet-stream'});res.write('first');const requestedDelay=Number(new URL(req.url,'http://local').searchParams.get('delayMs'));const delay=Number.isFinite(requestedDelay)&&requestedDelay>=0&&requestedDelay<=30000?requestedDelay:30000;const timer=setTimeout(()=>res.end('last'),delay);res.once('close',()=>{clearTimeout(timer);cancelled++;});return;}
-if(action==='session'){let s=ctx.sessions.get('pc-ipc-probe');if(!s)s=ctx.sessions.create('pc-ipc-probe');s.append('turn/start',{turn:1});s.append('turn/end',{turn:1,reason:{kind:'completed'}});res.end('ok');return;}
+if(action==='session'){if(!ctx.sessions.get('pc-ipc-probe'))await ctx.sessionController.create({sessionId:'pc-ipc-probe',cwd:process.cwd()});const s=ctx.sessions.get('pc-ipc-probe');if(!s)throw new Error('probe Session was not created');s.append('turn/start',{turn:1});s.append('turn/end',{turn:1,reason:{kind:'completed'}});res.end('ok');return;}
 res.setHeader('content-type','application/json');res.end(JSON.stringify({cancelled}));
 }}));
 }`
@@ -97,8 +90,8 @@ func Assets(bridge *desktopbridge.Bridge) http.HandlerFunc {
 const probeScript = `
 const results={ok:false,checks:[],timings:{},errors:[],fetchName:globalThis.fetch.name};
 const directTcpOrigin=__DSH_WORK_DIRECT_TCP_ORIGIN__;
-const standardHTTP=typeof globalThis.WorkerBridge==='undefined';
-results.transportMode=standardHTTP?'wails-http-proxy':'worker-stream';
+const standardHTTP=true;
+results.transportMode='wails-http-proxy+route-streams';
 window.addEventListener('error',e=>results.errors.push(String(e.message).slice(0,200)));
 window.addEventListener('unhandledrejection',e=>results.errors.push(String(e.reason).slice(0,200)));
 const report=async()=>{const {Stream}=await import('/wails/runtime.js');const c=Stream('probe-report');c.onopen=()=>c.send(new TextEncoder().encode(JSON.stringify(results)));};
@@ -107,7 +100,7 @@ try{
  const binarySamplesMs=[];
  for(let sample=0;sample<5;sample++){
   const started=performance.now();
-  const response=await fetch('/__work/probe?action=echo',{method:'POST',body:input});
+  const response=await WorkerBridge.workerFetch('/__work/probe?action=echo',{method:'POST',body:input});
   const output=new Uint8Array(await response.arrayBuffer());
   if(output.length!==input.length||!output.every((v,i)=>v===input[i]))throw new Error('binary mismatch');
   binarySamplesMs.push(performance.now()-started);
@@ -130,10 +123,10 @@ try{
   results.timings.directTcpPingMs=sortedDirectTcpPingSamples[Math.floor(sortedDirectTcpPingSamples.length/2)];
   results.checks.push('native WebView direct TCP loopback ping (5 samples)');
  }
- if(standardHTTP){results.checks.push('standard Wails HTTP path; WebSocket transport deferred');}else{await new Promise((resolve,reject)=>{const ws=new WebSocket(location.href.replace(/^http/,'ws').replace(/[?].*$/,'')+'__work/probe-ws');ws.binaryType='arraybuffer';const timer=setTimeout(()=>{ws.close();reject(new Error('WebSocket timed out'));},10000);let binary=false;ws.onerror=()=>{clearTimeout(timer);reject(new Error('WebSocket failed'));};ws.onopen=()=>ws.send(input);ws.onmessage=e=>{if(!binary){const bytes=new Uint8Array(e.data);if(bytes.length!==input.length||!bytes.every((v,i)=>v===input[i])){clearTimeout(timer);reject(new Error('WebSocket binary mismatch'));return;}binary=true;ws.send('text ✓');}else{clearTimeout(timer);ws.close();if(e.data!=='text ✓')reject(new Error('WebSocket text mismatch'));else resolve();}};});results.checks.push('WebSocket binary/text');}
+ if(globalThis.fetch.name!=='fetch')throw new Error('Fetch was replaced');results.checks.push('native Fetch unchanged; Gateway WebSocket check follows');
  const forbidden=await fetch('/wails/runtime?object=0&method=0',{headers:{'x-wails-window-name':'settings','x-wails-window-id':'0'}});if(forbidden.status!==403)throw new Error('Worker reached privileged runtime');results.checks.push('privileged runtime denied with spoofed headers');
  if(window.parent!==window){results.framed={origin:location.origin,embedder:location.ancestorOrigins?.[0]??'',previousGeneration:localStorage.getItem('dsh-work.probe.generation')??''};localStorage.setItem('dsh-work.probe.generation',globalThis.__WORK_GENERATION__??'');let reached=false;try{void window.parent.document.body;reached=true;}catch{}if(reached)throw new Error('framed Worker reached the shell document');results.checks.push('framed Worker isolated from shell document');}
- if(standardHTTP){const stale=await fetch('/?generation=stale-generation');if(stale.status!==410)throw new Error('stale generation reached Worker');}else{await new Promise((resolve,reject)=>{const stream=WorkerBridge.Stream('worker-fetch');const timer=setTimeout(()=>reject(new Error('stale generation accepted')),2000);stream.onopen=()=>stream.send(new TextEncoder().encode(JSON.stringify({generation:'stale-generation',url:'/',method:'GET',headers:{},hasBody:false})));stream.onclose=()=>{clearTimeout(timer);resolve();};stream.onmessage=()=>{clearTimeout(timer);reject(new Error('stale document reached Worker'));};});}results.checks.push('stale generation denied');
+ const stale=await fetch('/?generation=stale-generation');if(stale.status!==410)throw new Error('stale generation reached Worker');results.checks.push('stale generation denied');
  if(standardHTTP){
   const streamStart=performance.now();
   const streaming=await fetch('/__work/probe?action=stream&delayMs=1000');
@@ -165,8 +158,24 @@ try{
   await new Promise(r=>setTimeout(r,50));
  }
  if(!globalThis.__DSH_BOOT__)throw new Error('DSH boot graph missing');
- if(!document.getElementById('root')?.innerText.trim())throw new Error('DSH application not mounted');
- if(!standardHTTP){
+ if(!document.getElementById('root')?.innerText.trim())throw new Error('DSH application not mounted'); const uploadWorkerUrl=URL.createObjectURL(new Blob([''],{type:'text/javascript'}));
+ const uploadWorker=new Worker(uploadWorkerUrl,{name:'dsh-file-upload'});
+ URL.revokeObjectURL(uploadWorkerUrl);
+ let uploadProgress;
+ const uploaded=await new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>{uploadWorker.terminate();reject(new Error('DSH upload adapter timed out'));},30000);
+  uploadWorker.onmessage=event=>{
+   const frame=event.data;
+   if(frame.kind==='progress'){uploadProgress=frame;return;}
+   clearTimeout(timer);uploadWorker.terminate();
+   if(frame.kind==='complete')resolve(frame);else reject(new Error(frame.message||'DSH upload adapter failed'));
+  };
+  uploadWorker.postMessage({url:new URL('/api/session/uploadFileBinary?sessionId=pc-ipc-probe&name=E-32-probe.bin',location.href).href,headers:{'content-type':'application/octet-stream'},body:new Blob([input])});
+ });
+ const uploadedBody=JSON.parse(uploaded.body);
+ if(uploaded.status!==200||uploadedBody.ok!==true||uploadProgress?.loaded!==input.length||uploadProgress?.total!==input.length)throw new Error('2MiB DSH upload or progress mismatch');
+ results.checks.push('2MiB session upload through DSH XHR Worker adapter');
+ {
   await new Promise((resolve,reject)=>{
    const ws=new WebSocket(new URL('/api/remote.mux',location.href).href.replace(/^http/,'ws'));
    const timer=setTimeout(()=>{ws.close();reject(new Error('DSH Remote event readiness timed out'));},10000);

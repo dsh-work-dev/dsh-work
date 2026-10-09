@@ -22,7 +22,11 @@ type Package struct {
 
 var packageNames = []string{"shell", "account", "activity"}
 var safeVersion = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
-var packageFiles = []string{"package.json", "host.js", "client.js", "README.md"}
+var packageFiles = map[string][]string{
+	"shell":    {"package.json", "host.js", "client.js", "README.md"},
+	"account":  {"package.json", "host.js", "client.js", "README.md"},
+	"activity": {"package.json", "host.js", "client.js", "README.md"},
+}
 
 // Install publishes embedded DSH plugins below a content-addressed application
 // version directory. These are application-owned files, not npm packages; an
@@ -38,8 +42,8 @@ func Install(root, version string) (map[string]Package, error) {
 	contents := make(map[string]map[string][]byte, len(packageNames))
 	hash := sha256.New()
 	for _, name := range packageNames {
-		files := make(map[string][]byte, len(packageFiles))
-		for _, filename := range packageFiles {
+		files := make(map[string][]byte, len(packageFiles[name]))
+		for _, filename := range packageFiles[name] {
 			data, err := pluginAssets.ReadFile(path.Join(name, filename))
 			if err != nil {
 				return nil, fmt.Errorf("read embedded %s/%s: %w", name, filename, err)
@@ -79,7 +83,7 @@ func Install(root, version string) (map[string]Package, error) {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			return nil, fmt.Errorf("create %s package directory: %w", name, err)
 		}
-		for _, filename := range packageFiles {
+		for _, filename := range packageFiles[name] {
 			path := filepath.Join(directory, filename)
 			if err := writeImmutable(path, contents[name][filename]); err != nil {
 				return nil, fmt.Errorf("install %s/%s: %w", name, filename, err)
