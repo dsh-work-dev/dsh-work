@@ -1685,3 +1685,53 @@ func TestHealthyCommitResolvesOnlyMatchingFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotCountsPluginsOfProfilesThatAreNotRunning(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	for profile, manifest := range map[string]string{
+		"alpha": `{"dependencies":{"@example/alpha":"1.0.0"}}`,
+		"beta":  `{"dependencies":{"@example/beta":"2.0.0","@example/gamma":"3.0.0"}}`,
+	} {
+		if err := os.MkdirAll(filepath.Join(homePath, "profiles", profile), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(homePath, "profiles", profile, "package.json"), []byte(manifest), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(Config{
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.1.2-alpha.3", Path: runtimePath}},
+		DefaultRunContext: RunContext{
+			RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunContext{RuntimeID: "dsh-test", Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}
+	if _, err := manager.CommitCurrent(context.Background(), &want); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, profile := range snapshot.Profiles {
+		counts[profile.Ref.Name] = profile.PluginCount
+		if profile.PluginCount != len(profile.Plugins) {
+			t.Fatalf("%s count %d lists %d plugins", profile.Ref.Name, profile.PluginCount, len(profile.Plugins))
+		}
+	}
+	// Safe mode and profile switches make another profile current; the rest keep their real count.
+	if counts["alpha"] != 1 || counts["beta"] != 2 {
+		t.Fatalf("plugin counts = %#v, want alpha 1 and beta 2", counts)
+	}
+}
