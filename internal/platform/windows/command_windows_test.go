@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"fmt"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"os"
 	"path/filepath"
@@ -58,7 +59,14 @@ func TestCommandExecutorStreamsBeforeCommandExits(t *testing.T) {
 	ctx = dshadapter.WithCommandOutput(ctx, func(line string) { lines <- line })
 	done := make(chan error, 1)
 	go func() {
-		_, err := (CommandExecutor{}).Run(ctx, filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), []string{"-NoProfile", "-Command", "Write-Output 'download started'; Start-Sleep -Milliseconds 700; Write-Output 'installed'"}, nil, "")
+		// The test binary itself is the child: PowerShell's cold start on a CI
+		// runner can exceed the whole budget and says nothing about streaming.
+		self, err := os.Executable()
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = (CommandExecutor{}).Run(ctx, self, []string{"-test.run=^TestStreamingCommandHelper$", "--", streamingHelperArg}, nil, "")
 		done <- err
 	}()
 	select {
@@ -80,4 +88,18 @@ func TestCommandExecutorStreamsBeforeCommandExits(t *testing.T) {
 	if line := <-lines; line != "installed" {
 		t.Fatalf("last line = %q", line)
 	}
+}
+
+const streamingHelperArg = "dsh-work-streaming-helper"
+
+// TestStreamingCommandHelper is the child process of
+// TestCommandExecutorStreamsBeforeCommandExits; run directly it does nothing.
+func TestStreamingCommandHelper(t *testing.T) {
+	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != streamingHelperArg {
+		return
+	}
+	fmt.Println("download started")
+	time.Sleep(700 * time.Millisecond)
+	fmt.Println("installed")
+	os.Exit(0)
 }
