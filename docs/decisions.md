@@ -452,8 +452,11 @@ Costs and conditions to revisit:
 - Running commands by dispatching bindings depends on DSH accepting script
   keyboard events; an unbound command is disabled in the menu. Revisit if DSH
   publishes a plugin command invoke.
-- Same-origin `window.open` from DSH still opens an unmanaged WebView2 window.
-- `DSH_WORK_SHELL=0` keeps the earlier two-window workbench until it is removed.
+- DSH lives only in the shell frame. The Worker bridge sends other-origin
+  links and `window.open` calls to the system browser and drops same-origin
+  new-window requests (`target="_blank"` links, `window.open`): a top-level DSH
+  page outside the shell would have no workbench streams. Revisit if DSH starts
+  relying on same-origin pop-ups.
 
 Rejected: drawing the bar inside the DSH document (host commands would be
 reachable from DSH plugins and the chrome would die with DSH); two native

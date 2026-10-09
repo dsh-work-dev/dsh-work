@@ -79,9 +79,6 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	report := filepath.Join(root, "webview.json")
 	writeLifecyclePet(t, root)
 	t.Setenv("DSH_WORK_DESKTOP_ROOT", root)
-	// The default single-window shell (ADR-0024); a developer's DSH_WORK_SHELL=0
-	// must not switch this test to the two-window workbench.
-	t.Setenv("DSH_WORK_SHELL", "1")
 	t.Setenv("DSH_WORK_DESKTOP_REPORT", report)
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"version":2,"closeToTray":false,"locale":"zh-CN"}`), 0600); err != nil {
 		t.Fatal(err)

@@ -138,13 +138,14 @@ response carries `Content-Security-Policy: frame-ancestors 'none'` so the
 frame cannot navigate itself into a same-origin shell page. Messages a framed
 document posts through `chrome.webview` do not reach Wails, so the frame has no
 native drag, resize or invoke channel. Worker service-worker registration is
-blocked.
+blocked. Links and `window.open` calls to other origins open in the system
+browser; same-origin new-window requests are dropped, so DSH never runs as an
+unmanaged top-level page outside the shell.
 
 Wails' host-prefix interception (including the port) is an implementation
 detail, not a documented contract; `TestRealShellFrame` (`DSH_WORK_SHELL_TEST=1`)
 exercises the framed Worker through the real bridge and must pass after Wails
-upgrades. `DSH_WORK_SHELL=0` still selects the earlier two-window workbench, in
-which the DSH window (`worker`) is told apart by its native window ID.
+upgrades.
 Resources use the native asset handler and daemon Worker forwarding. The default
 Fetch and WebSocket bodies use Wails Streams with 64 KiB chunks, upload
 acknowledgements and download credits. The daemon forwards traffic to the
@@ -360,6 +361,8 @@ when an update is already found, downloading or not configured, it opens About
 instead.
 Release builds include the WebView developer tools (`devtools` build tag), so
 打开调试窗口 works for every user, as in other desktop apps built on web views.
+Only development builds open a remote-debugging port, and only when
+`DSH_WORK_WEBVIEW_DEBUG_PORT` names one.
 
 DSH commands run from a fixed list through the dsh-work DSH client
 plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
@@ -379,9 +382,8 @@ tray belongs to the daemon and can open Settings or the workbench, restart DSH,
 and explicitly stop the background. Pet and native notification adapters remain
 in the daemon, so closing the UI preserves them.
 
-Assign the initial Settings URL (and, in the two-window workbench, the Worker
-URL) before creating the window to avoid a
-second initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
+Assign the initial window URL before creating the window to avoid a second
+initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
 suppress the console; STARTF_USESHOWWINDOW/SW_HIDE would override the first
 native ShowWindow request and must not be used for the UI launch.
 

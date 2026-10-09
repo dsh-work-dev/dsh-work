@@ -946,31 +946,25 @@ type managerSnapshotReader interface {
 	Snapshot(context.Context) (dshmanager.Snapshot, error)
 }
 
-// hostWindowTheme maps dsh-work's own appearance to the native frame of its
-// startup and Settings windows. DSH content windows use dshWindowTheme.
+// updateMenuLabel names the tray update item for the current update phase.
+func updateMenuLabel(labels nativeui.Labels, state daemon.UpdateSnapshot) string {
+	switch state.Phase {
+	case daemon.UpdateReady:
+		return labels.UpdateAvailableMenu
+	case daemon.UpdateChecking, daemon.UpdateDownloading, daemon.UpdateVerifying, daemon.UpdateInstalling:
+		return labels.UpdateInProgressMenu
+	default:
+		return labels.CheckUpdates
+	}
+}
+
+// hostWindowTheme maps dsh-work's own appearance to the native frame of the
+// workbench and Settings windows.
 func hostWindowTheme(mode dshworksettings.AppearanceMode) application.Theme {
 	switch mode {
 	case dshworksettings.AppearanceLight:
 		return application.Light
 	case dshworksettings.AppearanceDark:
-		return application.Dark
-	default:
-		return application.SystemDefault
-	}
-}
-
-func dshWindowTheme(manager managerSnapshotReader) application.Theme {
-	if manager == nil {
-		return application.SystemDefault
-	}
-	snapshot, err := manager.Snapshot(context.Background())
-	if err != nil {
-		return application.SystemDefault
-	}
-	switch snapshot.Theme {
-	case dshmanager.ThemePreferenceLight:
-		return application.Light
-	case dshmanager.ThemePreferenceDark:
 		return application.Dark
 	default:
 		return application.SystemDefault

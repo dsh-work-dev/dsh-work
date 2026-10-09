@@ -283,19 +283,19 @@ function g(e) {
 		e.ok || console.warn("Could not open the external browser.");
 	}).catch(() => console.warn("Could not open the external browser.")));
 }
+var _ = (e) => !!e && ![
+	"_self",
+	"_parent",
+	"_top"
+].includes(e.toLowerCase());
 document.addEventListener("click", (e) => {
 	let t = e.target?.closest?.("a[href]");
 	if (!t) return;
 	let n = new URL(t.href, location.href);
-	n.origin !== location.origin && (e.preventDefault(), g(n.href));
-}, !0);
-var _ = window.open.bind(window);
-window.open = ((e, t, n) => {
-	if (e) {
-		let t = new URL(e, location.href);
-		if (t.origin !== location.origin) return g(t.href), null;
-	}
-	return _(e, t, n);
+	n.origin === location.origin ? _(t.target) && (e.preventDefault(), console.warn("dsh-work does not open DSH in a new window.")) : (e.preventDefault(), g(n.href));
+}, !0), window.open = ((e, t) => {
+	let n = new URL(e ?? "", location.href);
+	return n.origin === location.origin ? t === void 0 || _(t) ? (console.warn("dsh-work does not open DSH in a new window."), null) : (location.assign(n.href), window) : (g(n.href), null);
 });
 var v = window.parent === window ? void 0 : location.ancestorOrigins?.[0];
 if (v) {

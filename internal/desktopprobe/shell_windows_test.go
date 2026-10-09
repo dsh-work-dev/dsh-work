@@ -31,7 +31,6 @@ func TestRealShellFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := filepath.Join(root, "webview.json")
-	t.Setenv("DSH_WORK_SHELL", "1")
 	t.Setenv("DSH_WORK_DESKTOP_ROOT", root)
 	t.Setenv("DSH_WORK_DESKTOP_REPORT", report)
 	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(`{"version":2,"closeToTray":false,"locale":"zh-CN"}`), 0600); err != nil {

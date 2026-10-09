@@ -241,12 +241,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Window   string
 			Geometry settings.WindowGeometry
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Window != "workspace" && input.Window != "worker" && input.Window != "settings") {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Window != "workspace" && input.Window != "settings") {
 			http.Error(w, "invalid geometry", 400)
 			return
-		}
-		if input.Window == "worker" {
-			input.Window = "workspace"
 		}
 		if err := s.Settings.SetWindowGeometry(r.Context(), input.Window, input.Geometry); err != nil {
 			http.Error(w, err.Error(), 500)

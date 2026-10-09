@@ -162,9 +162,12 @@ function openExternal(raw:string){
   .then(response=>{if(!response.ok)console.warn('Could not open the external browser.');})
   .catch(()=>console.warn('Could not open the external browser.'));
 }
-document.addEventListener('click',event=>{const anchor=(event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement|null;if(!anchor)return;const u=new URL(anchor.href,location.href);if(u.origin!==location.origin){event.preventDefault();openExternal(u.href);}},true);
-const nativeOpen=window.open.bind(window);
-window.open=((url?:string|URL,target?:string,features?:string)=>{if(url){const u=new URL(url,location.href);if(u.origin!==location.origin){openExternal(u.href);return null;}}return nativeOpen(url,target,features);}) as typeof window.open;
+// Other origins open in the system browser. DSH itself lives only in the shell
+// frame: a same-origin new window would be an unmanaged top-level DSH page
+// without the workbench's streams, so such requests are dropped.
+const newWindow=(target?:string)=>!!target&&!['_self','_parent','_top'].includes(target.toLowerCase());
+document.addEventListener('click',event=>{const anchor=(event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement|null;if(!anchor)return;const u=new URL(anchor.href,location.href);if(u.origin!==location.origin){event.preventDefault();openExternal(u.href);}else if(newWindow(anchor.target)){event.preventDefault();console.warn('dsh-work does not open DSH in a new window.');}},true);
+window.open=((url?:string|URL,target?:string)=>{const u=new URL(url??'',location.href);if(u.origin!==location.origin){openExternal(u.href);return null;}if(target===undefined||newWindow(target)){console.warn('dsh-work does not open DSH in a new window.');return null;}location.assign(u.href);return window;}) as typeof window.open;
 
 // Framed in the dsh-work shell: report DSH's base fill so the shell chrome
 // continues it. DSH's own Windows caption paints --dsw-specific-sidebar-fill,
