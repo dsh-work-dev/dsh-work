@@ -42,6 +42,7 @@ dialog.restore-point-preview input { width: 100%; }
 
 /* ---------- plugins ---------- */
 .plugin-editor { margin-top: var(--space-5); }
+.plugin-editor + .section { margin-top: var(--space-5); }
 .plugin-list .row-main > strong, #manager-plugin-profile { font-family: var(--font-mono); }
 .plugin-official > summary { display: flex; align-items: center; min-height: var(--row-min-h); padding: var(--row-pad-y) var(--row-pad-x); cursor: pointer; font-weight: 500; }
 .plugin-official[open] > summary { border-bottom: var(--row-divider); }
