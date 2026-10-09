@@ -1,0 +1,7 @@
+{
+  "name": "@dsh-work/account",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {".": "./host.js", "./client": "./client.js"},
+  "dsh": {"client": {"platform": "web", "inject": ["@deepseek-ai/dsh-api-remotes", "@dsh-work/shell"]}}
+}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,5 +117,29 @@ func TestBridgeAuthenticatedSnapshotNavigationAndGenerationIsolation(t *testing.
 	}
 	if !json.Valid(content) {
 		t.Fatal("invalid JSON/YAML patch")
+	}
+	var patchRows []map[string]any
+	if err := json.Unmarshal(content, &patchRows); err != nil || len(patchRows) != 1 {
+		t.Fatalf("invalid launch patch: %s (%v)", content, err)
+	}
+	insert, ok := patchRows[0]["insert"].([]any)
+	if !ok || len(insert) != 3 {
+		t.Fatalf("launch patch did not mount three built-in plugins: %#v", patchRows)
+	}
+	for i, id := range []string{"dsh-work-shell", "dsh-work-account", "dsh-work-activity"} {
+		entry, ok := insert[i].(map[string]any)
+		if !ok || entry["id"] != id {
+			t.Fatalf("plugin %d = %#v, want %s", i, insert[i], id)
+		}
+		name, _ := entry["name"].(string)
+		if !strings.Contains(name, "/versions/development/") {
+			t.Fatalf("plugin %s path is not versioned: %s", id, name)
+		}
+		if id == "dsh-work-activity" {
+			config, _ := entry["config"].(map[string]any)
+			if config["generation"] != "g2" || config["token"] != b.token {
+				t.Fatalf("activity config = %#v", config)
+			}
+		}
 	}
 }

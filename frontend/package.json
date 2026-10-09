@@ -9,7 +9,7 @@
     "build": "vite build --mode production",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/state.test.ts tests/shell-menu.test.ts ../internal/desktopbridge/boot.test.mjs ../internal/desktopbridge/account_feedback.test.ts ../internal/dshactivity/client_account.test.mjs ../internal/dshactivity/client_shell.test.mjs"
+    "test": "tsx --test tests/state.test.ts tests/shell-menu.test.ts ../internal/desktopbridge/boot.test.mjs ../internal/desktopbridge/account_feedback.test.ts ../internal/hostplugins/account/client.test.mjs ../internal/hostplugins/shell/client.test.mjs ../internal/hostplugins/activity/client.test.mjs"
   },
   "dependencies": {
     "@wailsio/runtime": "3.0.0-beta.16",

@@ -6,7 +6,7 @@ const SHELL = 'http://wails.localhost';
 
 // Load the DSH client plugin framed by a fake shell, with a fake shortcut catalog.
 async function framed(entries, {status = 'ready', fixed = [], handles = () => true} = {}) {
-  const source = await readFile(new URL('./plugin/client.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const listeners = {};
   const posted = [];

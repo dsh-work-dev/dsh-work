@@ -5,7 +5,7 @@ import test from 'node:test';
 // Load the injected DSH client plugin with a fake module loader and Remote
 // account stream, then drive the official account/watch values through it.
 async function loadPlugin() {
-  const source = await readFile(new URL('./plugin/client.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const opened = [];
   globalThis.window = {

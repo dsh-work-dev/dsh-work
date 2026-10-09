@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -22,10 +21,10 @@ import (
 	"sync"
 	"time"
 	"unicode"
-)
 
-//go:embed plugin/*
-var plugin embed.FS
+	"github.com/local/dsh-work/internal/hostplugins"
+	"github.com/local/dsh-work/internal/version"
+)
 
 type Interaction struct {
 	Key   string `json:"key"`
@@ -87,8 +86,8 @@ type Bridge struct {
 
 func New(root string) *Bridge { return &Bridge{root: root} }
 
-// Prepare writes our embedded package and returns an ephemeral CLI patch.
-// The directory is Host-owned application data, separate from DSH profiles.
+// Prepare installs the immutable built-in plugin set and returns a generation
+// patch that mounts all packages without editing the user's profile.
 func (b *Bridge) Prepare(generation string) (string, error) {
 	b.lifecycleMu.Lock()
 	defer b.lifecycleMu.Unlock()
@@ -108,22 +107,30 @@ func (b *Bridge) Prepare(generation string) (string, error) {
 	if err = os.MkdirAll(root, 0700); err != nil {
 		return "", err
 	}
-	for _, name := range []string{"package.json", "host.js", "client.js"} {
-		content, err := plugin.ReadFile("plugin/" + name)
-		if err != nil {
-			return "", err
-		}
-		if err = os.WriteFile(filepath.Join(root, name), content, 0600); err != nil {
-			return "", err
-		}
+	packages, err := hostplugins.Install(root, version.String())
+	if err != nil {
+		return "", fmt.Errorf("install Host plugins: %w", err)
 	}
-	// JSON is valid YAML; the launcher consumes a patch-list overlay.
-	patch := []any{map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pet-activity", "name": moduleURL(filepath.Join(root, "host.js")), "config": map[string]string{"generation": generation, "token": token}}}}}
+	entries := make([]any, 0, len(packages))
+	for _, name := range []string{"shell", "account", "activity"} {
+		pkg, ok := packages[name]
+		if !ok {
+			return "", fmt.Errorf("Host plugin %s is unavailable", name)
+		}
+		config := map[string]string{}
+		if name == "activity" {
+			config = map[string]string{"generation": generation, "token": token}
+		}
+		entries = append(entries, map[string]any{
+			"id": pkg.ID, "name": moduleURL(filepath.Join(pkg.Directory, "host.js")), "config": config,
+		})
+	}
+	patch := []any{map[string]any{"insert": entries}}
 	data, err := json.Marshal(patch)
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(root, "launch.patch.yml")
+	path := filepath.Join(root, "launch-"+token[:12]+".patch.yml")
 	if err = os.WriteFile(path, data, 0600); err != nil {
 		return "", err
 	}
