@@ -145,6 +145,7 @@ test("every shell menu label is translated in every locale", () => {
   const keys = [
     "shell.menu.bar", "shell.menu.unbound", "shell.menu.unavailable", "shell.menu.updateAvailable", "shell.menu.updating",
     "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
+    "shell.toast.exportSaved", "shell.toast.exportFailed",
     "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
     ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
       .filter(key => !key.startsWith("manager.")),
@@ -178,6 +179,10 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/component-ready", id: "plugin.private"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "saved"}), {type: "export-result", result: "saved"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "error"}), {type: "export-result", result: "error"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "cancelled"}), {type: "export-result", result: "cancelled"});
+  assert.equal(parseFrameMessage({type: "dsh-work/export-result", result: "done"}), null);
 });
 
 test("shortcut keys render as DSH shows them, without extra separators", () => {

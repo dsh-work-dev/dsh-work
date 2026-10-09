@@ -227,51 +227,35 @@ globalThis.WorkerBridge = {
 	Stream: e,
 	workerFetch: u
 };
-var d, f;
-function p(e) {
-	let t = document.body ?? document.documentElement;
-	if (!t) return;
-	let n = (document.documentElement?.lang || navigator.language || "en").toLowerCase(), r = n.startsWith("zh"), i = n.startsWith("ja"), a = e === "saved" ? r ? "会话日志已保存" : i ? "セッションログを保存しました" : "Session log saved." : e === "cancelled" ? r ? "已取消导出" : i ? "エクスポートをキャンセルしました" : "Export cancelled." : r ? "无法导出会话日志，请重试。" : i ? "セッションログをエクスポートできませんでした。もう一度お試しください。" : "Could not export the session log. Try again.";
-	(!d || !d.isConnected) && (d = document.createElement("div"), Object.assign(d.style, {
-		position: "fixed",
-		top: "20px",
-		right: "20px",
-		zIndex: "2147483647",
-		maxWidth: "min(360px, calc(100vw - 40px))",
-		padding: "12px 16px",
-		borderRadius: "10px",
-		background: "rgba(24, 24, 27, 0.96)",
-		color: "#fff",
-		boxShadow: "0 8px 24px rgba(0, 0, 0, 0.22)",
-		font: "500 14px/1.5 system-ui, sans-serif",
-		pointerEvents: "none",
-		opacity: "0",
-		transition: "opacity 120ms ease"
-	}), t.appendChild(d)), d.setAttribute("role", e === "error" ? "alert" : "status"), d.setAttribute("aria-live", e === "error" ? "assertive" : "polite"), d.textContent = a, d.style.opacity = "1", f !== void 0 && window.clearTimeout(f), f = window.setTimeout(() => {
-		d && (d.style.opacity = "0");
-	}, 3500);
+function d(e) {
+	let t = window.parent === window ? void 0 : location.ancestorOrigins?.[0];
+	t && window.parent.postMessage({
+		version: 1,
+		type: "dsh-work/export-result",
+		result: e
+	}, t);
 }
-var m = /* @__PURE__ */ new Set(), h = globalThis.HTMLAnchorElement;
-if (typeof h == "function") {
-	let e = h.prototype.click;
-	h.prototype.click = function() {
+var f = /* @__PURE__ */ new Set(), p = globalThis.HTMLAnchorElement;
+if (typeof p == "function") {
+	let e = p.prototype.click;
+	p.prototype.click = function() {
 		let t = o(this.href, this.download, location.href);
 		if (!t || !this.download) {
 			e.call(this);
 			return;
 		}
-		m.has(t.sessionId) || (m.add(t.sessionId), u(a(t), { method: "POST" }).then(async (e) => {
+		f.has(t.sessionId) || (f.add(t.sessionId), u(a(t), { method: "POST" }).then(async (e) => {
 			let t = await e.json();
-			t.result === "saved" ? p("saved") : t.result === "cancelled" ? p("cancelled") : p("error");
-		}).catch(() => p("error")).finally(() => m.delete(t.sessionId)));
+			t.result === "saved" ? d("saved") : t.result === "cancelled" ? d("cancelled") : d("error");
+		}).catch(() => d("error")).finally(() => f.delete(t.sessionId)));
 	};
 }
-var g = globalThis.Worker;
-typeof g == "function" && (globalThis.Worker = new Proxy(g, { construct(e, t, n) {
+var m = globalThis.Worker;
+typeof m == "function" && (globalThis.Worker = new Proxy(m, { construct(e, t, n) {
 	let i = Reflect.construct(e, t, n);
 	return t[1]?.name === "dsh-file-upload" ? r(i, u, location.href) : i;
 } }));
-var _ = globalThis.WebSocket, v = class extends EventTarget {
+var h = globalThis.WebSocket, g = class extends EventTarget {
 	static {
 		this.CONNECTING = 0;
 	}
@@ -376,8 +360,8 @@ var _ = globalThis.WebSocket, v = class extends EventTarget {
 		r[0] = 6, r.set(n, 1), this.socket.send(r);
 	}
 };
-globalThis.WebSocket = new Proxy(_, { construct(e, n, r) {
-	return t(n[0], location.href) ? new v(n[0], n[1]) : Reflect.construct(e, n, r);
+globalThis.WebSocket = new Proxy(h, { construct(e, n, r) {
+	return t(n[0], location.href) ? new g(n[0], n[1]) : Reflect.construct(e, n, r);
 } });
 //#endregion
 export { e as Stream, u as workerFetch };

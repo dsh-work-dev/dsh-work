@@ -242,6 +242,10 @@ export function mountShell() {
     else if (message.type === "component-ready") void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
+    // A cancelled save dialog was the user's own choice and needs no message.
+    else if (message.type === "export-result") {
+      if (message.result !== "cancelled") toast.show(t(message.result === "saved" ? "shell.toast.exportSaved" : "shell.toast.exportFailed"));
+    }
     else if (message.type === "command-result") {
       if (!message.handled) toast.show(t("shell.toast.commandFailed", {command: t(`shell.command.${message.id}`)}));
     }

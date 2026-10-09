@@ -100,25 +100,10 @@ export async function workerFetch(input: RequestInfo | URL, init?: StreamRequest
 // adapter. Ordinary DSH and plugin requests keep the native Fetch implementation.
 (globalThis as any).WorkerBridge = {Stream,workerFetch};
 
-let sessionExportFeedback: HTMLDivElement | undefined;
-let sessionExportFeedbackTimer: number | undefined;
-
+// The shell shows the outcome in its own localized, themed status line.
 function showSessionExportFeedback(result: 'saved'|'cancelled'|'error') {
- const host=document.body??document.documentElement;
- if(!host)return;
- const language=(document.documentElement?.lang||navigator.language||'en').toLowerCase();
- const chinese=language.startsWith('zh'),japanese=language.startsWith('ja');
- const text=result==='saved'?(chinese?'会话日志已保存':japanese?'セッションログを保存しました':'Session log saved.'):
-  result==='cancelled'?(chinese?'已取消导出':japanese?'エクスポートをキャンセルしました':'Export cancelled.'):
-  chinese?'无法导出会话日志，请重试。':japanese?'セッションログをエクスポートできませんでした。もう一度お試しください。':'Could not export the session log. Try again.';
- if(!sessionExportFeedback || !sessionExportFeedback.isConnected){
-  sessionExportFeedback=document.createElement('div');
-  Object.assign(sessionExportFeedback.style,{position:'fixed',top:'20px',right:'20px',zIndex:'2147483647',maxWidth:'min(360px, calc(100vw - 40px))',padding:'12px 16px',borderRadius:'10px',background:'rgba(24, 24, 27, 0.96)',color:'#fff',boxShadow:'0 8px 24px rgba(0, 0, 0, 0.22)',font:'500 14px/1.5 system-ui, sans-serif',pointerEvents:'none',opacity:'0',transition:'opacity 120ms ease'});
-  host.appendChild(sessionExportFeedback);
- }
- sessionExportFeedback.setAttribute('role',result==='error'?'alert':'status');sessionExportFeedback.setAttribute('aria-live',result==='error'?'assertive':'polite');sessionExportFeedback.textContent=text;sessionExportFeedback.style.opacity='1';
- if(sessionExportFeedbackTimer!==undefined)window.clearTimeout(sessionExportFeedbackTimer);
- sessionExportFeedbackTimer=window.setTimeout(()=>{if(sessionExportFeedback)sessionExportFeedback.style.opacity='0';},3500);
+ const shellOrigin=window.parent!==window?location.ancestorOrigins?.[0]:undefined;
+ if(shellOrigin)window.parent.postMessage({version:1,type:'dsh-work/export-result',result},shellOrigin);
 }
 
 const exportInFlight=new Set<string>();
