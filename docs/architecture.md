@@ -7,8 +7,9 @@ User
   |
   v
 Desktop UI client (Go + Wails)
-  |-- trusted startup and Settings WebViews, application menu
-  |-- Worker WebView --> Wails HTTP handler or bounded byte streams
+  |-- workbench window: trusted shell (top bar, menus, startup)
+  |     `-- DSH frame on its own origin --> Wails HTTP handler or bounded byte streams
+  |-- trusted Settings window
   `-- current-user local IPC --------------------+
 Manager CLI --> current-user local IPC ----------|
                                                 v
@@ -118,10 +119,33 @@ a stream-capable HTTP handler. The Go proxy still validates relative paths,
 removes hop-by-hop and credential headers, sets the internal Origin and preserves
 the same generation checks as the stream path.
 
-The startup window (`workspace`) and Settings have fixed trusted roles.
-The DSH window (`worker`) has an immutable role. Native-stamped window identity
-selects resource handlers and denies its management runtime requests. Worker
-service-worker registration is blocked to protect the shared WebView origin.
+The workbench window (`workspace`) hosts the trusted shell document at
+`http://wails.localhost`; Settings has its own trusted window. DSH runs in an
+iframe inside the shell on the fixed authority `http://wails.localhost:48217`.
+That port is an origin label only: WebView2 requests to any `wails.localhost`
+authority are intercepted by the Wails asset server, so nothing listens on it.
+It stays fixed so DSH's browser storage (drafts, shortcut preferences) survives
+Worker generations.
+
+Every request from the frame carries the workbench window's native ID, so the
+request authority selects the role instead. Requests whose Host is the DSH
+authority get the Worker role: only `/wails/runtime.js`, `/wails/custom.js` and
+the two Stream endpoints pass, other `/wails/*` routes are denied, and the
+generation is checked. On the shell authority, requests whose `Origin` or
+`Referer` belongs to the DSH authority are refused, the shell may not open
+Streams (a frame reload would retire the shell's Stream session), and every
+response carries `Content-Security-Policy: frame-ancestors 'none'` so the
+frame cannot navigate itself into a same-origin shell page. Messages a framed
+document posts through `chrome.webview` do not reach Wails, so the frame has no
+native drag, resize or invoke channel. Worker service-worker registration is
+blocked. Links and `window.open` calls to other origins open in the system
+browser; same-origin new-window requests are dropped, so DSH never runs as an
+unmanaged top-level page outside the shell.
+
+Wails' host-prefix interception (including the port) is an implementation
+detail, not a documented contract; `TestRealShellFrame` (`DSH_WORK_SHELL_TEST=1`)
+exercises the framed Worker through the real bridge and must pass after Wails
+upgrades.
 Resources use the native asset handler and daemon Worker forwarding. The default
 Fetch and WebSocket bodies use Wails Streams with 64 KiB chunks, upload
 acknowledgements and download credits. The daemon forwards traffic to the
@@ -291,16 +315,75 @@ capabilities.
    resize does not leave persisted dimensions claiming a state the native window
    did not reach.
 
-## Native windows and menus
+## Windows and menus
 
-The UI client installs the application menu on both workbench windows. Settings
-has its own locale-aware title and no application menu. Native menu actions use
-the daemon services; the tray belongs to the daemon and can open Settings or
-the workbench, restart DSH, and explicitly stop the background. Pet and native
-notification adapters remain in the daemon, so closing the UI preserves them.
+The workbench is one frameless window using WebView2 composition hosting. The
+shell document draws a 40px top bar: the app icon, the menu bar, an empty
+caption area and the minimise, maximise and close buttons. The caption area and
+the three buttons are marked with `--wails-non-client-region`, so Windows
+hit-tests them natively: dragging, double-click maximise, Snap layouts on the
+maximise button and edge resizing work even where the DSH frame covers the
+window. Plain HWND hosting is not used: there Wails detects window edges from
+mouse moves in the top document, which never sees moves over the frame.
 
-Assign the initial Worker/Settings URL before creating the window to avoid a
-second initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
+The top bar takes DSH's `--dsw-specific-sidebar-fill` (the colour DSH's own
+Windows caption uses) and text colour, reported by the injected bridge, so the
+chrome continues DSH's surface in light and dark. Before DSH is ready it uses
+dsh-work's own tokens.
+
+The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`):
+
+| Menu | Items (DSH commands marked *) |
+|---|---|
+| 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 关闭窗口, 退出 |
+| 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
+| 运行 | 刷新, 重启 DSH · 启动安全模式 / 退出安全模式 |
+| 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
+| 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
+
+Host items call trusted bindings. `ShellService` runs in the UI process: it
+opens Settings at a section, and reads or sets Pet visibility on behalf of the
+Settings surface, which is the only surface the daemon grants Pet controls.
+Restart and quit keep the availability rules of the tray; safe mode uses the
+same `ManagerService` calls as Settings Overview and opens Overview when it
+fails. 刷新 reloads only the DSH frame; the Worker keeps running. Zoom, full
+screen and close use the Wails window API (close hides the window). Zoom
+scales the whole window, shell bar included, and cannot go below actual size
+(Wails clamps WebView2 zoom at 100%), so 缩小 and 实际大小 are off at 100%. 全屏
+is a checked item; full screen hides the window buttons and is left through
+the same item. Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0 and F11 run the same window
+items, also while DSH has focus, unless DSH binds that chord itself. The zoom
+factor is saved in Host settings and restored when the workbench opens. The
+links open the dsh-work docs and issue tracker and the DeepSeek Harness issue
+tracker in the system browser. 复制诊断信息 copies the same report as About. 检查更新
+starts a check and reports the outcome in a short status line under the bar;
+when an update is already found, downloading or not configured, it opens About
+instead.
+Release builds include the WebView developer tools (`devtools` build tag), so
+打开调试窗口 works for every user, as in other desktop apps built on web views.
+Only development builds open a remote-debugging port, and only when
+`DSH_WORK_WEBVIEW_DEBUG_PORT` names one.
+
+DSH commands run from a fixed list through the dsh-work DSH client
+plugin (`internal/dshactivity/plugin/client.js`). The plugin reports each
+command's current binding from `ctx.shortcuts.catalog`, and runs a command the
+shell asks for by dispatching that binding through DSH's keyboard path, since
+DSH offers plugins no public command invoke. A command is disabled and marked
+未绑定 when it has no binding, or 不可用 when the menu cannot press it: a
+conflicting, invalid or two-key binding, or DSH shortcut settings that are
+still loading. DSH prevents default on the key press it consumes, so the
+plugin reports whether DSH took the command; when DSH ignores it, the shell
+shows that the command could not run. The plugin also forwards Alt pressed
+alone and F10, which focus the menu bar, and the window keys above. Shell and plugin accept messages only from each other's
+window and origin.
+
+Settings is a separate window with its own locale-aware title and no menu. The
+tray belongs to the daemon and can open Settings or the workbench, restart DSH,
+and explicitly stop the background. Pet and native notification adapters remain
+in the daemon, so closing the UI preserves them.
+
+Assign the initial window URL before creating the window to avoid a second
+initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
 suppress the console; STARTF_USESHOWWINDOW/SW_HIDE would override the first
 native ShowWindow request and must not be used for the UI launch.
 

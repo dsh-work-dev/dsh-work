@@ -38,6 +38,9 @@ type Snapshot struct {
 	Events        []Event
 	Cursor        uint64
 	Diagnostics   supervisor.Diagnostics
+	// AccountCallback is the origin of the daemon's account sign-in callback
+	// listener (ADR-0022), or empty when it is unavailable.
+	AccountCallback string
 }
 type Server struct {
 	Services        map[string]any
@@ -124,7 +127,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.focusSeen = time.Now()
 			s.mu.Unlock()
 		}
-		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics()}
+		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics(), AccountCallback: s.AccountCallback.Origin()}
 		if state.Status.State == lifecycle.StateReady {
 			state.URL = state.Status.WorkspaceURL
 		} else if state.Status.State == lifecycle.StateStarting {
@@ -214,6 +217,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeJSON(w, true)
 		}
+	case "/zoom":
+		if s.maintenanceBusy() {
+			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+			return
+		}
+		var zoom float64
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64)).Decode(&zoom) != nil {
+			http.Error(w, "invalid zoom", 400)
+			return
+		}
+		if err := s.Settings.SetWorkspaceZoom(r.Context(), zoom); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, true)
 	case "/geometry":
 		if s.maintenanceBusy() {
 			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
@@ -223,12 +241,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Window   string
 			Geometry settings.WindowGeometry
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Window != "workspace" && input.Window != "worker" && input.Window != "settings") {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Window != "workspace" && input.Window != "settings") {
 			http.Error(w, "invalid geometry", 400)
 			return
-		}
-		if input.Window == "worker" {
-			input.Window = "workspace"
 		}
 		if err := s.Settings.SetWindowGeometry(r.Context(), input.Window, input.Geometry); err != nil {
 			http.Error(w, err.Error(), 500)

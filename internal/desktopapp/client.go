@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/accountcallback"
+	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
@@ -70,9 +71,8 @@ func runDesktopClient(identity string, resources Resources) error {
 	}
 	defer client.Close()
 	manager := remoteManagerSnapshot{client: client}
-	dshTheme := dshWindowTheme(manager)
 	var desktop *application.App
-	var workspace, worker, settingsWindow application.Window
+	var workspace, settingsWindow application.Window
 	var windowMu sync.Mutex
 	var mu sync.Mutex
 	var protocolMu sync.Mutex
@@ -80,8 +80,14 @@ func runDesktopClient(identity string, resources Resources) error {
 	var applicationShuttingDown atomic.Bool
 	current := state
 	standardHTTP := os.Getenv("DSH_WORK_STANDARD_HTTP") == "1"
+	// One frameless workbench window hosts the trusted shell document; DSH runs
+	// in a frame on its own authority (ADR-0024).
 	var workerSurface *desktopbridge.Surface
-	workerSurface = &desktopbridge.Surface{StandardHTTP: standardHTTP, Window: func() application.Window { windowMu.Lock(); defer windowMu.Unlock(); return worker }, Current: func() *desktopbridge.Bridge {
+	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, StandardHTTP: standardHTTP, Window: func() application.Window {
+		windowMu.Lock()
+		defer windowMu.Unlock()
+		return workspace
+	}, Current: func() *desktopbridge.Bridge {
 		mu.Lock()
 		snapshot := current
 		mu.Unlock()
@@ -102,19 +108,32 @@ func runDesktopClient(identity string, resources Resources) error {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
+	var open func(string)
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
+		var panel app.PetPanel
+		if visible == nil {
+			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel)
+		}
+		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
+	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
+		return client.JSON(ctx, "/zoom", zoom, nil)
+	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
-		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true},
+		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
-		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: uiAssets(client, application.AssetFileServerFS(resources.Assets))},
+			application.NewService(shellService),
+		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			return shellWorkerURL(current.URL)
+		}, uiAssets(client, application.AssetFileServerFS(resources.Assets)))},
 	})
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
 	ledger := lifecycle.NewWindowLedger("workspace", "settings")
-	var open func(string)
-	var loadedWorkerURL, settingsSection string
 	remember := func(window application.Window, options application.WebviewWindowOptions) {
 		store := remoteGeometry{client: client, values: state.Preferences}
 		flush := nativeui.RememberWindowGeometry(window, options, store)
@@ -123,7 +142,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		defer windowMu.Unlock()
-		if name == "workspace" && (workspace == nil || worker == nil || (window.ID() != workspace.ID() && window.ID() != worker.ID())) {
+		if name == "workspace" && (workspace == nil || window.ID() != workspace.ID()) {
 			return
 		}
 		if name == "settings" && (settingsWindow == nil || window.ID() != settingsWindow.ID()) {
@@ -136,14 +155,8 @@ func runDesktopClient(identity string, resources Resources) error {
 		if applicationShuttingDown.Load() {
 			return
 		}
-		// Keep the native window and WebView alive while hidden. The workspace
-		// startup/Worker pair is one logical workbench, so hide its companion too.
-		if name == "settings" {
-			window.Hide()
-			return
-		}
-		workspace.Hide()
-		worker.Hide()
+		// Keep the native window and WebView alive while hidden.
+		window.Hide()
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
 		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
@@ -151,7 +164,6 @@ func runDesktopClient(identity string, resources Resources) error {
 		mu.Lock()
 		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)
 		mu.Unlock()
-		options.UseApplicationMenu = name != "settings"
 		if name == "settings" {
 			options.Width, options.Height = 980, 720
 			options.MinWidth = 680
@@ -166,28 +178,21 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		workOptions := newOptions("workspace")
+		workOptions.Frameless = true
+		workOptions.URL = "/?shell=1"
+		// Composition hosting moves hit-testing to the native window: edge
+		// resizing and the caption/caption-button regions (Snap layouts) no
+		// longer depend on which document is under the pointer. Without it,
+		// Wails detects edges in the top document, which the DSH frame covers.
+		workOptions.Windows.WebView2CompositionHosting = true
+		workOptions.Zoom = state.Preferences.WorkspaceZoom
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
 		remember(workspace, workOptions)
-		workerOptions := workOptions
-		workerOptions.Name = "worker"
-		workerOptions.Permissions = webviewPermissions("worker")
-		workerOptions.Windows.Theme = dshTheme
-		mu.Lock()
-		if current.URL != "" {
-			workerOptions.URL = current.URL
-			loadedWorkerURL = current.URL
-		}
-		mu.Unlock()
-		workerWindow := desktop.Window.NewWithOptions(workerOptions)
-		worker = workerWindow
-		remember(worker, workerOptions)
 		if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
-			desktopprobe.InstallClient(desktop, worker, report)
+			desktopprobe.InstallClient(desktop, workspace, report)
 		}
-		ownWorkspace, ownWorker := workspace, worker
-		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorkspace, event) })
-		worker.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", ownWorker, event) })
+		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", workspaceWindow, event) })
 	}
 	open = func(section string) {
 		if section == "__boot" {
@@ -211,17 +216,14 @@ func runDesktopClient(identity string, resources Resources) error {
 				options.URL = settingsURL(manager, section)
 				newWindow := desktop.Window.NewWithOptions(options)
 				settingsWindow = newWindow
-				settingsSection = section
 				window := settingsWindow
 				remember(window, options)
 				window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("settings", window, event) })
+			} else {
+				desktop.Event.Emit("settings-section", section)
 			}
 			if !ledger.TryShow("settings") {
 				return
-			}
-			if settingsSection != section {
-				settingsWindow.SetURL(settingsURL(manager, section))
-				settingsSection = section
 			}
 			settingsWindow.Show().Focus()
 			return
@@ -232,21 +234,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		if !ledger.TryShow("workspace") {
 			return
 		}
-		mu.Lock()
-		ready := current.URL != ""
-		workerURL := current.URL
-		mu.Unlock()
-		if ready {
-			if loadedWorkerURL != workerURL {
-				worker.SetURL(workerURL)
-				loadedWorkerURL = workerURL
-			}
-			worker.Show().Focus()
-			workspace.Hide()
-		} else {
-			workspace.Show().Focus()
-			worker.Hide()
-		}
+		workspace.Show().Focus()
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if !isWorkspaceOpenURL(event.Context().URL()) {
@@ -262,14 +250,11 @@ func runDesktopClient(identity string, resources Resources) error {
 			open("")
 		}
 	})
-	refreshMenu := installDesktopMenu(desktop, client, state, open)
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
 		windowMu.Lock()
-		window := worker
+		window := workspace
 		if section == "settings" {
 			window = settingsWindow
-		} else if workspace != nil && workspace.IsVisible() {
-			window = workspace
 		}
 		windowMu.Unlock()
 		if window != nil {
@@ -290,7 +275,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		openRequestedByProtocol := protocolOpenPending
 		protocolOpenPending = false
 		protocolMu.Unlock()
-		// Settings-only launches also need a hidden Worker WebView to complete boot.
+		// Settings-only launches also need the hidden workbench, whose DSH frame completes boot.
 		windowMu.Lock()
 		createWorkspace()
 		windowMu.Unlock()
@@ -315,7 +300,7 @@ func runDesktopClient(identity string, resources Resources) error {
 					var next daemon.Snapshot
 					ctx, cancel := context.WithTimeout(pollCtx, 3*time.Second)
 					windowMu.Lock()
-					focused := (workspace != nil && workspace.IsFocused()) || (worker != nil && worker.IsFocused())
+					focused := workspace != nil && workspace.IsFocused()
 					windowMu.Unlock()
 					err := client.JSON(ctx, "/snapshot", struct {
 						Cursor  uint64
@@ -337,7 +322,6 @@ func runDesktopClient(identity string, resources Resources) error {
 					localeChanged := current.Preferences.Locale != next.Preferences.Locale
 					current = next
 					mu.Unlock()
-					refreshMenu(next)
 					windowMu.Lock()
 					if localeChanged && settingsWindow != nil {
 						settingsWindow.SetTitle(nativeui.LabelsFor(next.Preferences.Locale).Settings)
@@ -358,27 +342,8 @@ func runDesktopClient(identity string, resources Resources) error {
 						lastStatus = statusJSON
 					}
 					if next.URL != lastURL {
-						windowMu.Lock()
-						if workspace == nil {
-							windowMu.Unlock()
-							lastURL = next.URL
-							continue
-						}
-						visible := workspace.IsVisible() || worker.IsVisible()
-						if next.URL != "" {
-							worker.SetURL(next.URL)
-							loadedWorkerURL = next.URL
-							workspace.Hide()
-							if visible {
-								worker.Show()
-							}
-						} else {
-							worker.Hide()
-							if visible {
-								workspace.Show()
-							}
-						}
-						windowMu.Unlock()
+						// The shell swaps its frame; the native window stays put.
+						desktop.Event.Emit("worker-url", shellWorkerURL(next.URL))
 						lastURL = next.URL
 					}
 					if next.Update != lastUpdate {
@@ -398,6 +363,35 @@ func isWorkspaceOpenURL(raw string) bool {
 		return false
 	}
 	return strings.EqualFold(launched.Scheme, "dsh") || strings.EqualFold(launched.Scheme, accountcallback.DesktopReturnScheme)
+}
+
+// shellWorkerHost is the fixed authority of the framed Worker document. Wails
+// intercepts any wails.localhost authority inside the WebView, so the port is
+// an origin label only and nothing listens on it. It stays fixed so DSH's
+// browser storage survives Worker generations.
+const shellWorkerHost = "wails.localhost:48217"
+
+func shellWorkerURL(relative string) string {
+	if relative == "" {
+		return ""
+	}
+	return "http://" + shellWorkerHost + relative
+}
+
+// shellState answers the shell's initial frame address; later changes arrive
+// as worker-url events.
+func shellState(workerURL func() string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/__shell/worker" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(struct {
+			URL string `json:"url"`
+		}{workerURL()})
+	})
 }
 
 type uiWorkerTransport struct {
@@ -462,9 +456,6 @@ func (s remoteGeometry) Snapshot(context.Context) (settings.Values, error) { ret
 func (s remoteGeometry) SetWindowGeometry(ctx context.Context, window string, g settings.WindowGeometry) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	if window == "worker" {
-		window = "workspace"
-	}
 	return s.client.JSON(ctx, "/geometry", struct {
 		Window   string
 		Geometry settings.WindowGeometry

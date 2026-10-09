@@ -1,4 +1,4 @@
-import {Check, ChevronLeft, ChevronRight, createElement, LoaderCircle, TriangleAlert, type IconNode} from "lucide";
+import {Check, ChevronLeft, ChevronRight, Copy, createElement, LoaderCircle, Minus, Square, TriangleAlert, X, type IconNode} from "lucide";
 
 // One maintained icon family (lucide). Only icons in use are imported so the
 // bundle stays small; add names here rather than drawing ad-hoc glyphs.
@@ -6,8 +6,12 @@ const icons = {
   check: Check,
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,
+  copy: Copy,
   loader: LoaderCircle,
+  minus: Minus,
+  square: Square,
   "triangle-alert": TriangleAlert,
+  x: X,
 } satisfies Record<string, IconNode>;
 
 export type IconName = keyof typeof icons;

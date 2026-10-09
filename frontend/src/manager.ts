@@ -4,6 +4,7 @@ import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from
 import {Events} from "@wailsio/runtime";
 
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {diagnosticsReport} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
@@ -532,7 +533,7 @@ export function mountManager() {
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;
     try {
-      await navigator.clipboard.writeText(JSON.stringify({version: __APP_VERSION__, update: updateState, state: hostStatus?.state, current: snapshot?.current, failure: snapshot?.lastSwitchAttempt}, null, 2));
+      await navigator.clipboard.writeText(diagnosticsReport({update: updateState, state: hostStatus?.state, snapshot}));
       transientStatus(result, t("logs.copied"));
     } catch { result.textContent = t("logs.copyFailed"); }
   })());
@@ -1454,6 +1455,12 @@ export function mountManager() {
       showSection(section);
     });
   }
+  Events.On("settings-section", event => {
+    if (typeof event.data !== "string") return;
+    const section = sectionName(event.data);
+    if (section === "profiles" && profileView === "detail") { profileView = "list"; renderProfiles(); }
+    showSection(section);
+  });
   Events.On("lifecycle", () => void refresh());
   Events.On("update-state", (event) => {
     if (event.data && typeof event.data === "object") {

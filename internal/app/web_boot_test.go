@@ -14,11 +14,15 @@ func TestWebBootMustCompleteBeforeSuccessPoint(t *testing.T) {
 			f := newRunContextSwitchFixture(t)
 			defer f.dsh.server.Close()
 			f.host.config.RequireWebBoot = true
-			f.host.config.ReadinessTimeout = time.Second
+			// Leave time for assertions and reporting on a busy CI runner.
+			f.host.config.ReadinessTimeout = 10 * time.Second
+			if outcome == "timeout" {
+				f.host.config.ReadinessTimeout = time.Second
+			}
 			started := f.host.Start()
 			defer f.host.Cancel()
+			waitForWebBootPending(t, f.host)
 			// HTTP readiness must leave the generation in Starting and no success point.
-			time.Sleep(100 * time.Millisecond)
 			if status := f.host.Status(); status.State != lifecycle.StateStarting {
 				t.Fatalf("HTTP shell incorrectly completed startup: %+v", status)
 			}
@@ -57,11 +61,36 @@ func TestWebBootMustCompleteBeforeSuccessPoint(t *testing.T) {
 				if failed.Error == nil {
 					t.Fatal("missing web boot failure")
 				}
+				if outcome == "timeout" && (failed.Error.Code != lifecycle.ErrorDSHReadinessTimeout || failed.Error.Summary != "DSH did not finish loading its workspace.") {
+					t.Fatalf("expected WebView boot timeout, got: %+v", failed.Error)
+				}
 			}
 			snapshot, err = f.manager.Snapshot(context.Background())
 			if err != nil || snapshot.RestorePoints.LastRunning != "" {
 				t.Fatalf("failed boot recorded success: %+v %v", snapshot.RestorePoints, err)
 			}
 		})
+	}
+}
+
+func waitForWebBootPending(t *testing.T, host *Host) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
+	// Starting also covers Worker preparation. Wait for the candidate URL,
+	// which is published after HTTP readiness and gates ReportWebBoot.
+	// The deadline only bounds a broken startup; elapsed time is not readiness.
+	for host.WebBootURL() == "" {
+		status := host.Status()
+		if status.State != lifecycle.StateStarting {
+			t.Fatalf("startup ended before web boot became pending: %+v", status)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for pending web boot: %+v", host.Status())
+		}
 	}
 }

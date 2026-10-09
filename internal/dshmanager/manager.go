@@ -2263,7 +2263,8 @@ func profileInfo(ctx context.Context, dataDirectory DataDirectoryInfo, name stri
 	profileRef := ProfileRef{DataDirectoryID: dataDirectory.ID, Name: name}
 	isFailedTarget := lastSwitchAttempt != nil && lastSwitchAttempt.Target.Profile == profileRef
 	isProtected := isCurrent || profileRefMatches(configured, profileRef) || profileRefMatches(knownGood, profileRef) || isFailedTarget
-	if exists && isCurrent && reader != nil {
+	// Every existing profile reports its manifest's plugins; only the current one can change them.
+	if exists && reader != nil {
 		if projected, err := reader.Read(ctx, filepath.Join(dataDirectory.Path, "profiles", name)); err == nil {
 			plugins = projected
 		}

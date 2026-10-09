@@ -23,7 +23,7 @@
   },
   "dsh": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.2.0-rc.2",
+    "version": "0.2.1-alpha.1",
     "profile": "web",
     "compatibility": "exact-version"
   },

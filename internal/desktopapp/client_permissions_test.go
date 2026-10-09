@@ -12,7 +12,6 @@ func TestWebviewPermissionsBySurface(t *testing.T) {
 		wantMicrophone application.Permission
 	}{
 		{name: "workspace", wantMicrophone: application.PermissionAllow},
-		{name: "worker", wantMicrophone: application.PermissionDeny},
 		{name: "settings", wantMicrophone: application.PermissionDeny},
 	}
 

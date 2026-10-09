@@ -2,15 +2,19 @@ package desktopbridge
 
 import (
 	"net/http"
-	"strconv"
+	"net/url"
 	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// Surface is a permanent Worker window role. Native-stamped IDs select the
-// boundary before Wails dispatches runtime calls or serves application files.
+// Surface is a permanent Worker role. The Worker is a framed document on its
+// own authority (Host) inside the shell window. Every request from that window
+// carries the same window ID, so the request authority selects the role before
+// Wails dispatches runtime calls or serves application files; Window only
+// scopes the Worker's streams to the workbench window.
 type Surface struct {
+	Host         string
 	Window       func() application.Window
 	Current      func() *Bridge
 	Assets       func(*Bridge) http.Handler
@@ -34,10 +38,32 @@ func (s *Surface) WebSocket(c *application.StreamConn) {
 		_ = b.WebSocket(c)
 	}
 }
+func (s *Surface) worker(r *http.Request) bool {
+	return strings.EqualFold(r.Host, s.Host)
+}
+
+// fromWorker reports a shell-authority request issued by the Worker document:
+// a cross-origin call carries Origin, and a navigation or no-cors read carries
+// at least the Referer origin.
+func (s *Surface) fromWorker(r *http.Request) bool {
+	for _, value := range []string{r.Header.Get("Origin"), r.Header.Get("Referer")} {
+		if u, err := url.Parse(value); err == nil && strings.EqualFold(u.Host, s.Host) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Surface) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		own := s.Window()
-		if own == nil || r.Header.Get("x-wails-window-id") != strconv.FormatUint(uint64(own.ID()), 10) {
+		if !s.worker(r) {
+			// A Worker that navigates its frame to the shell authority would
+			// become same-origin with the shell, so shell pages are never framed.
+			if s.fromWorker(r) || strings.HasPrefix(r.URL.Path, "/wails/stream/") {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 			next.ServeHTTP(w, r)
 			return
 		}

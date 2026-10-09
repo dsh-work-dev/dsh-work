@@ -181,7 +181,9 @@ func safePreferenceKey(value string) bool {
 type Values struct {
 	WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
 	SettingsWindow  WindowGeometry `json:"settingsWindow"`
-	Version         int            `json:"version"`
+	// WorkspaceZoom is the workbench WebView zoom factor; zero means actual size.
+	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
+	Version       int     `json:"version"`
 
 	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
 	Locale                   Locale                    `json:"locale"`
@@ -372,6 +374,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	var raw struct {
 		WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
 		SettingsWindow  WindowGeometry `json:"settingsWindow"`
+		WorkspaceZoom   float64        `json:"workspaceZoom"`
 		Version         int            `json:"version"`
 
 		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
@@ -386,6 +389,9 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	values := DefaultValues()
 	values.WorkspaceWindow = raw.WorkspaceWindow
 	values.SettingsWindow = raw.SettingsWindow
+	if validZoom(raw.WorkspaceZoom) {
+		values.WorkspaceZoom = raw.WorkspaceZoom
+	}
 	values.Version = stateVersion
 	if raw.Locale != nil && raw.Locale.Valid() {
 		values.Locale = *raw.Locale
