@@ -96,6 +96,12 @@ test("DSH items wait for the catalog and show the current binding", () => {
   assert.equal(item(menus, "workspace.add").enabled, false);
 });
 
+test("left sidebar menu check follows the reported DSH state", () => {
+  const dsh = new Map([['sidebar.left.toggle', {id: 'sidebar.left.toggle', keys: [], state: 'ready' as const}]]);
+  assert.equal(item(buildMenus(state({dsh, sidebarLeftOpen: true}), t), 'sidebar.left.toggle').checked, true);
+  assert.equal(item(buildMenus(state({dsh, sidebarLeftOpen: false}), t), 'sidebar.left.toggle').checked, false);
+  assert.equal(item(buildMenus(state({dsh}), t), 'sidebar.left.toggle').checked, undefined);
+});
 test("window items show the keys the shell handles", () => {
   const menus = buildMenus(state({window: {fullscreen: false, zoom: 1.2}}), t);
   assert.equal(formatKeys(item(menus, "zoomIn").keys), "Ctrl+=");
@@ -167,6 +173,8 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/command-result", id: "session.new", handled: false}), {type: "command-result", id: "session.new", handled: false});
   assert.equal(parseFrameMessage({type: "dsh-work/command-result", id: "plugin.private", handled: false}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/window-key", action: "zoom-in"}), {type: "window-key", action: "zoom-in"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/sidebar-state", open: false}), {type: "sidebar-state", open: false});
+  assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
 });
 

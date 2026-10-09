@@ -5,12 +5,25 @@ import test from 'node:test';
 const SHELL = 'http://wails.localhost';
 
 // Load the DSH client plugin framed by a fake shell, with a fake shortcut catalog.
-async function framed(entries, {status = 'ready', fixed = [], handles = () => true} = {}) {
+async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false} = {}) {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const listeners = {};
   const posted = [];
   const dispatched = [];
+  const publicCalls = [];
+  const observers = [];
+  let collapsed = sidebarCollapsed;
+  const layoutFrame = {
+    style: {gridTemplateColumns: '280px minmax(400px, 1fr) minmax(0px, 0px)'},
+    hasAttribute: name => name === 'data-sidebar-collapsed' && collapsed,
+  };
+  const root = {querySelector: selector => selector === '[style*="grid-template-columns"]' ? layoutFrame : null};
+  globalThis.MutationObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() { this.callback(); }
+    disconnect() {}
+  };
   const parent = {postMessage: (message, origin) => posted.push({message, origin})};
   globalThis.KeyboardEvent = class { constructor(type, init) { Object.assign(this, init, {type}); } };
   globalThis.window = {
@@ -21,30 +34,43 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
     removeEventListener: (type, fn) => { listeners[type] = (listeners[type] ?? []).filter(x => x !== fn); },
   };
   globalThis.fetch = () => new Promise(() => {});
-  // DSH prevents default on the keydown it consumes; `handles` decides whether it does.
-  globalThis.document = {visibilityState: 'visible', hasFocus: () => true, body: {dispatchEvent: event => {
-    dispatched.push(event);
-    if (handles(event)) event.defaultPrevented = true;
-    return !event.defaultPrevented;
-  }}};
+  globalThis.document = {
+    visibilityState: 'visible',
+    hasFocus: () => true,
+    body: {dispatchEvent: event => {
+      dispatched.push(event);
+      if (handles(event)) event.defaultPrevented = true;
+      return !event.defaultPrevented;
+    }},
+    documentElement: {},
+    getElementById: id => id === 'root' ? root : null,
+    querySelector: selector => root.querySelector(selector),
+  };
   new Function(source)();
   let snapshot = entries;
   let notify;
+  const uiWorkspace = publicServices ? {startSession: () => publicCalls.push('session.new')} : {};
+  const layout = publicServices ? {toggleSidebar: () => {
+    publicCalls.push('sidebar.left.toggle');
+    collapsed = !collapsed;
+    observers.forEach(observer => observer.callback());
+  }} : {};
   const ctx = {
     sessions: {list: {getSnapshot: () => ({byId: {}})}},
     effect: fn => { fn(); },
-    inject(deps, callback) { if (deps[0] === 'shortcuts') callback(ctx); },
+    inject(deps, callback) { if (deps.includes('shortcuts')) callback(ctx); },
     shortcuts: {
       catalog: {getSnapshot: () => snapshot, subscribe: fn => { notify = fn; return () => {}; }},
       config: {getSnapshot: () => ({status}), subscribe: () => () => {}},
       fixedCatalog: {getSnapshot: () => fixed, subscribe: () => () => {}},
     },
+    uiWorkspace,
+    layout,
   };
   definition.factory(() => undefined).apply(ctx);
   const emit = (type, event) => (listeners[type] ?? []).forEach(fn => fn(event));
-  return {posted, dispatched, emit, parent, update(next) { snapshot = next; notify(); }};
+  return {posted, dispatched, publicCalls, emit, parent, update(next) { snapshot = next; notify(); }};
 }
-
 const entry = (id, binding, keys = [], extra = {}) => ({id, label: id, keys, binding, conflicts: [], issue: null, ...extra});
 const messages = (posted, type) => posted.filter(p => p.message.type === type).map(p => p.message);
 const catalogs = posted => posted.filter(p => p.message.type === 'dsh-work/catalog').map(p => p.message.commands);
@@ -59,9 +85,13 @@ test('reports only the menu commands with their current binding', async () => {
   assert.deepEqual(catalogs(shell.posted).at(-1), [
     {id: 'session.new', keys: ['Ctrl', 'Alt', 'N'], state: 'ready'},
     {id: 'terminal.new', keys: [], state: 'unbound'},
+    {id: 'sidebar.left.toggle', keys: [], state: 'ready'},
   ]);
   shell.update([entry('session.new', null)]);
-  assert.deepEqual(catalogs(shell.posted).at(-1), [{id: 'session.new', keys: [], state: 'unbound'}]);
+  assert.deepEqual(catalogs(shell.posted).at(-1), [
+    {id: 'session.new', keys: [], state: 'ready'},
+    {id: 'sidebar.left.toggle', keys: [], state: 'ready'},
+  ]);
 });
 
 test('reports bindings the menu cannot run as unavailable', async () => {
@@ -71,9 +101,12 @@ test('reports bindings the menu cannot run as unavailable', async () => {
     entry('terminal.new', bound, ['Ctrl', 'N'], {issue: 'reserved'}),
     entry('browser.new', {code: 'KeyK', modifiers: ['control'], secondCode: 'KeyB'}, ['Ctrl', 'K', 'B']),
   ]);
-  assert.deepEqual(catalogs(shell.posted).at(-1).map(command => command.state), ['unavailable', 'unavailable', 'unavailable']);
-  const loading = await framed([entry('session.new', bound, ['Ctrl', 'N'])], {status: 'loading'});
-  assert.deepEqual(catalogs(loading.posted).at(-1), [{id: 'session.new', keys: ['Ctrl', 'N'], state: 'unavailable'}]);
+  assert.deepEqual(catalogs(shell.posted).at(-1).map(command => command.state), ['ready', 'unavailable', 'unavailable', 'ready']);
+  const loading = await framed([entry('session.new', bound, ['Ctrl', 'N'])], {status: 'loading', publicServices: false});
+  assert.deepEqual(catalogs(loading.posted).at(-1), [
+    {id: 'session.new', keys: [], state: 'unavailable'},
+    {id: 'sidebar.left.toggle', keys: [], state: 'unavailable'},
+  ]);
 });
 
 test('tells the shell whether DSH took the command', async () => {
@@ -88,7 +121,7 @@ test('tells the shell whether DSH took the command', async () => {
   assert.deepEqual(messages(shell.posted, 'dsh-work/command-result').map(({id, handled}) => [id, handled]), [
     ['session.new', true], ['terminal.new', false], ['browser.new', false],
   ]);
-  assert.equal(shell.dispatched.length, 2);
+  assert.equal(shell.dispatched.length, 1);
 });
 
 test('forwards window zoom and full-screen keys that DSH does not use', async () => {
@@ -112,19 +145,36 @@ test('forwards window zoom and full-screen keys that DSH does not use', async ()
 });
 
 test('runs a command from the shell by dispatching its binding', async () => {
-  const shell = await framed([entry('sidebar.left.toggle', {code: 'KeyB', modifiers: ['control', 'shift']}, ['Ctrl', 'Shift', 'B'])]);
-  shell.emit('message', {source: shell.parent, origin: SHELL, data: {version: 1, type: 'dsh-work/command', id: 'sidebar.left.toggle'}});
+  const shell = await framed([entry('terminal.new', {code: 'Backquote', modifiers: ['control', 'shift']}, ['Ctrl', 'Shift', 'Backquote'])]);
+  shell.emit('message', {source: shell.parent, origin: SHELL, data: {version: 1, type: 'dsh-work/command', id: 'terminal.new'}});
   assert.equal(shell.dispatched.length, 1);
   const event = shell.dispatched[0];
   assert.equal(event.type, 'keydown');
-  assert.equal(event.code, 'KeyB');
-  assert.equal(event.key, 'b');
+  assert.equal(event.code, 'Backquote');
+  assert.equal(event.key, 'Backquote');
   assert.equal(event.ctrlKey, true);
   assert.equal(event.shiftKey, true);
   assert.equal(event.altKey, false);
   assert.equal(event.bubbles, true);
 });
 
+test('uses public Workspace and Layout services and reports the live sidebar state', async () => {
+  const shell = await framed([], {sidebarCollapsed: true});
+  assert.deepEqual(catalogs(shell.posted).at(-1), [
+    {id: 'session.new', keys: [], state: 'ready'},
+    {id: 'sidebar.left.toggle', keys: [], state: 'ready'},
+  ]);
+  assert.deepEqual(messages(shell.posted, 'dsh-work/sidebar-state').map(message => message.open), [false]);
+  for (const id of ['session.new', 'sidebar.left.toggle']) {
+    shell.emit('message', {source: shell.parent, origin: SHELL, data: {version: 1, type: 'dsh-work/command', id}});
+  }
+  assert.deepEqual(shell.publicCalls, ['session.new', 'sidebar.left.toggle']);
+  assert.equal(shell.dispatched.length, 0);
+  assert.deepEqual(messages(shell.posted, 'dsh-work/command-result').map(({id, handled}) => [id, handled]), [
+    ['session.new', true], ['sidebar.left.toggle', true],
+  ]);
+  assert.deepEqual(messages(shell.posted, 'dsh-work/sidebar-state').map(message => message.open), [false, true]);
+});
 test('ignores commands from other origins, other windows or outside the menu', async () => {
   const shell = await framed([
     entry('session.new', {code: 'KeyN', modifiers: ['control']}),

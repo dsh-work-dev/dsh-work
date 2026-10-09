@@ -25,40 +25,86 @@ function keyForCode(code) {
 function connectShell(ctx) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
   if (!shellOrigin) return;
-  ctx.inject(['shortcuts'], ctx => {
+  ctx.inject(['shortcuts', 'uiWorkspace', 'layout'], ctx => {
     const {catalog, config, fixedCatalog} = ctx.shortcuts;
+    const uiWorkspace = ctx.uiWorkspace;
+    const layout = ctx.layout;
     const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
     const entries = () => new Map(catalog.getSnapshot().map(entry => [entry.id, entry]));
     const ready = () => (config?.getSnapshot().status ?? 'ready') === 'ready';
-    const state = entry => {
+    const hasPublicService = id => id === 'session.new'
+      ? typeof uiWorkspace?.startSession === 'function'
+      : id === 'sidebar.left.toggle' && typeof layout?.toggleSidebar === 'function';
+    const shortcutState = entry => {
       if (!entry.binding) return 'unbound';
       if (!ready() || entry.issue || entry.conflicts?.length || entry.binding.secondCode !== undefined) return 'unavailable';
       return 'ready';
+    };
+    const commandState = (id, entry) => {
+      if (id === 'session.new' || id === 'sidebar.left.toggle') return hasPublicService(id) ? 'ready' : 'unavailable';
+      return shortcutState(entry);
     };
     const report = () => {
       const current = entries();
       post({type: 'dsh-work/catalog', commands: SHELL_COMMANDS.flatMap(id => {
         const entry = current.get(id);
-        return entry ? [{id, keys: entry.binding ? [...entry.keys] : [], state: state(entry)}] : [];
+        const direct = id === 'session.new' || id === 'sidebar.left.toggle';
+        if (!entry && !direct) return [];
+        const canPress = !!entry?.binding && ready() && !entry.issue && !entry.conflicts?.length && entry.binding.secondCode === undefined;
+        return [{id, keys: canPress ? [...entry.keys] : [], state: commandState(id, entry)}];
       })});
     };
     ctx.effect(() => catalog.subscribe(report));
     if (config) ctx.effect(() => config.subscribe(report));
     report();
+
+    let lastSidebarState;
+    const root = document.getElementById('root') ?? document.documentElement;
+    const reportSidebar = () => {
+      const frame = root?.querySelector?.('[style*="grid-template-columns"]');
+      if (!frame) return;
+      const open = !frame.hasAttribute('data-sidebar-collapsed');
+      if (open === lastSidebarState) return;
+      lastSidebarState = open;
+      post({type: 'dsh-work/sidebar-state', open});
+    };
+    ctx.effect(() => {
+      const observer = new MutationObserver(reportSidebar);
+      observer.observe(root, {attributes: true, attributeFilter: ['data-sidebar-collapsed', 'style'], childList: true, subtree: true});
+      reportSidebar();
+      return () => observer.disconnect();
+    });
+
     const onMessage = event => {
       if (event.source !== window.parent || event.origin !== shellOrigin) return;
       const data = event.data;
       if (data?.type !== 'dsh-work/command' || !SHELL_COMMANDS.includes(data.id)) return;
-      const entry = entries().get(data.id);
       let handled = false;
-      if (entry && state(entry) === 'ready') {
-        const modifiers = new Set(entry.binding.modifiers);
-        const press = new KeyboardEvent('keydown', {
-          code: entry.binding.code, key: keyForCode(entry.binding.code), bubbles: true, cancelable: true,
-          ctrlKey: modifiers.has('control'), altKey: modifiers.has('alt'), shiftKey: modifiers.has('shift'), metaKey: modifiers.has('meta'),
-        });
-        // DSH prevents default on input it consumes, whether it runs the command or declines it.
-        handled = !document.body.dispatchEvent(press);
+      try {
+        if (data.id === 'session.new') {
+          if (typeof uiWorkspace?.startSession === 'function') {
+            uiWorkspace.startSession();
+            handled = true;
+          }
+        } else if (data.id === 'sidebar.left.toggle') {
+          if (typeof layout?.toggleSidebar === 'function') {
+            layout.toggleSidebar();
+            handled = true;
+          }
+        } else {
+          const entry = entries().get(data.id);
+          if (entry && shortcutState(entry) === 'ready') {
+            const modifiers = new Set(entry.binding.modifiers);
+            const press = new KeyboardEvent('keydown', {
+              code: entry.binding.code, key: keyForCode(entry.binding.code), bubbles: true, cancelable: true,
+              ctrlKey: modifiers.has('control'), altKey: modifiers.has('alt'), shiftKey: modifiers.has('shift'), metaKey: modifiers.has('meta'),
+            });
+            // DSH prevents default on input it consumes, whether it runs the command or declines it.
+            handled = !document.body.dispatchEvent(press);
+          }
+        }
+      } catch {
+        handled = false;
       }
       post({type: 'dsh-work/command-result', id: data.id, handled});
     };
@@ -96,8 +142,6 @@ function connectShell(ctx) {
     });
   });
 }
-
-
 // Other origins open in the system browser. DSH itself lives only in the shell
 // frame: same-origin new windows would be unmanaged DSH pages.
 const recentlyOpenedExternal = new Map();

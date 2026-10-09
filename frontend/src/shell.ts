@@ -191,7 +191,7 @@ export function mountShell() {
   let eventSeen = false;
   const show = (url: string) => {
     if (!url) {
-      setMenu({dsh: null, framed: false});
+      setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
       frame.hidden = true;
       frame.removeAttribute("src");
       host?.removeAttribute("hidden");
@@ -201,7 +201,7 @@ export function mountShell() {
     }
     if (frame.getAttribute("src") !== url) {
       // A new DSH document reports its own catalog once it is ready.
-      setMenu({dsh: null});
+      setMenu({dsh: null, sidebarLeftOpen: undefined});
       frame.src = url;
     }
     setMenu({framed: true});
@@ -212,7 +212,7 @@ export function mountShell() {
   const reloadFrame = () => {
     const src = frame.getAttribute("src");
     if (!src) return;
-    setMenu({dsh: null});
+    setMenu({dsh: null, sidebarLeftOpen: undefined});
     frame.setAttribute("src", src);
   };
   Events.On("worker-url", event => {
@@ -230,6 +230,7 @@ export function mountShell() {
     const message = parseFrameMessage(event.data);
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
+    else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
     else if (message.type === "command-result") {
       if (!message.handled) toast.show(t("shell.toast.commandFailed", {command: t(`shell.command.${message.id}`)}));

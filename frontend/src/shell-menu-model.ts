@@ -22,6 +22,8 @@ export interface MenuState {
   framed: boolean;
   /** Reported by the DSH plugin; null until DSH is ready. */
   dsh: Map<string, DshCommand> | null;
+  /** Live open state reported by the DSH AppFrame; undefined until its first report. */
+  sidebarLeftOpen?: boolean;
 }
 
 export type SettingsSection = "overview" | "settings" | "notifications" | "pets" | "runtimes" | "profiles" | "plugins" | "data-directories" | "about";
@@ -78,6 +80,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
     return {
       type: "item", key: id, label: t(`shell.command.${id}`), enabled: ready,
       keys: ready ? command.keys : undefined, hint: command && !ready ? t(`shell.menu.${command.state}`) : undefined,
+      ...(id === "sidebar.left.toggle" && state.sidebarLeftOpen !== undefined ? {checked: state.sidebarLeftOpen} : {}),
       action: {kind: "dsh", id},
     };
   };

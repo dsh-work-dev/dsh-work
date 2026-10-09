@@ -3,6 +3,7 @@ import {dshMenuCommands, keyedWindowActions, type DshCommand, type DshCommandSta
 export type FrameMessage =
   | {type: "catalog"; commands: Map<string, DshCommand>}
   | {type: "command-result"; id: string; handled: boolean}
+  | {type: "sidebar-state"; open: boolean}
   | {type: "window-key"; action: WindowAction}
   | {type: "menu-key"}
   | {type: "surface"; background: string; color: string};
@@ -25,6 +26,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   if (message.type === "dsh-work/command-result" && typeof message.id === "string" && dshMenuCommands.includes(message.id) && typeof message.handled === "boolean") {
     return {type: "command-result", id: message.id, handled: message.handled};
   }
+  if (message.type === "dsh-work/sidebar-state" && typeof message.open === "boolean") return {type: "sidebar-state", open: message.open};
   if (message.type === "dsh-work/window-key" && keyedWindowActions.includes(message.action as WindowAction)) {
     return {type: "window-key", action: message.action as WindowAction};
   }
