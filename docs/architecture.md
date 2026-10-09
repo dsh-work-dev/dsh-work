@@ -163,8 +163,10 @@ The host plugins are ordinary DSH plugins (a Host half and a Client half each).
 They are embedded in dsh-work, written below a directory named by application
 version and content digest, and inserted by a per-launch `--patch` core overlay
 rather than installed into a profile, so profile switches, version recovery and
-uninstalls do not touch them. Preparing a launch writes a damaged file again,
-and removes the previous launch's patch and plugin versions no longer in use.
+uninstalls do not touch them. The daemon installs them once per process
+(rewriting a damaged file and removing unused plugin versions); each launch
+then writes only a small patch carrying that generation's configuration, which
+replaces the previous launch's patch.
 Their Client halves report readiness to the shell; Settings lists them under
 内置组件 as Loading, Loaded, Failed to load (no report within 45 seconds of the
 frame loading) or Not loaded, and offers no switches.

@@ -98,3 +98,25 @@ func TestOverlayRejectsUnsafeGenerations(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlayInstallsPluginsOncePerProcess(t *testing.T) {
+	root := t.TempDir()
+	overlay := NewOverlay(root, "1.0.0")
+	installs := 0
+	overlay.install = func(root, version string) (map[string]Package, error) {
+		installs++
+		return Install(root, version)
+	}
+	for _, generation := range []string{"g1", "g2", "g3"} {
+		if _, err := overlay.Prepare(generation, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if installs != 1 {
+		t.Fatalf("plugins installed %d times for three launches, want once", installs)
+	}
+	patches, _ := filepath.Glob(filepath.Join(root, "launch-*.patch.yml"))
+	if len(patches) != 1 || filepath.Base(patches[0]) != "launch-g3.patch.yml" {
+		t.Fatalf("launch patches = %v, want only the current one", patches)
+	}
+}
