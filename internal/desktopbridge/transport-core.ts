@@ -101,7 +101,9 @@ export function createUploadWorkerAdapter(worker: Worker, streamFetch: StreamFet
         controller = undefined;
         stopWorker();
       };
-      return Reflect.get(target, property, target);
+      const value = Reflect.get(target, property, target);
+      // Native Worker methods require the Worker itself as `this`.
+      return typeof value === 'function' ? value.bind(target) : value;
     },
     set(target, property, value) {
       return Reflect.set(target, property, value, target);

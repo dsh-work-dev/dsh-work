@@ -150,7 +150,7 @@ func TestServeSessionExportReturnsOnlyTheHostSaveResult(t *testing.T) {
 		t.Fatalf("response header frame = %v", header)
 	}
 	var responseHeader struct {
-		Status int ` + 'json:"status"' + @`
+		Status int `json:"status"`
 	}
 	if err := json.Unmarshal(header[1:], &responseHeader); err != nil || responseHeader.Status != http.StatusOK {
 		t.Fatalf("response header = %#v, err=%v", responseHeader, err)

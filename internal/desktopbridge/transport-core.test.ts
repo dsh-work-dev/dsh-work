@@ -85,6 +85,23 @@ test('delegates non-upload Worker messages and aborts the stream when terminated
   assert.equal(native.terminations, 1);
 });
 
+test('runs the native Worker methods on the Worker itself', () => {
+  // Native Worker methods throw "Illegal invocation" unless `this` is the Worker.
+  const listeners: string[] = [];
+  const worker = {
+    onmessage: null,
+    postMessage() {},
+    terminate() {},
+    addEventListener(this: unknown, type: string) {
+      if (this !== worker) throw new TypeError('Illegal invocation');
+      listeners.push(type);
+    },
+  } as unknown as Worker;
+  const adapter = createUploadWorkerAdapter(worker, async () => new Response(''), page);
+  adapter.addEventListener('message', () => {});
+  assert.deepEqual(listeners, ['message']);
+});
+
 test('recognizes only the same-origin DSH session export route', () => {
   const route = parseSessionExportRoute('/api/session.export?sessionId=s%2F1&includeDescendants=true', page);
   assert.deepEqual(route, {sessionId: 's/1', includeDescendants: true});

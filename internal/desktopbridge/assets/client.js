@@ -79,9 +79,12 @@ function r(e, t, r) {
 	};
 	return new Proxy(e, {
 		get(e, t) {
-			return t === "postMessage" ? c : t === "terminate" ? () => {
+			if (t === "postMessage") return c;
+			if (t === "terminate") return () => {
 				i?.abort(), i = void 0, o();
-			} : Reflect.get(e, t, e);
+			};
+			let n = Reflect.get(e, t, e);
+			return typeof n == "function" ? n.bind(e) : n;
 		},
 		set(e, t, n) {
 			return Reflect.set(e, t, n, e);
