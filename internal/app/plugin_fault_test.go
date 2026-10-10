@@ -52,6 +52,28 @@ func (w *exitingWorker) Diagnostics() supervisor.Diagnostics {
 
 func newFaultTestHost(t *testing.T, stderr string) (*Host, *exitingSupervisor, chan lifecycle.Status, string) {
 	t.Helper()
+	supervisorAdapter := &exitingSupervisor{stderr: stderr}
+	host, statuses, profilePath := newFaultTestHostWith(t, supervisorAdapter)
+	return host, supervisorAdapter, statuses, profilePath
+}
+
+// readyThenExitSupervisor starts one Worker that reaches readiness and exits
+// when the test closes it, with the given captured stderr.
+type readyThenExitSupervisor struct {
+	stderr string
+	worker *exitingWorker
+}
+
+func (s *readyThenExitSupervisor) Start(_ context.Context, _ supervisor.LaunchPlan, rawHandler supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	s.worker = &exitingWorker{testWorker: newTestWorker(), stderr: s.stderr}
+	if rawHandler != nil {
+		rawHandler(supervisor.StreamStdout, "ready")
+	}
+	return s.worker, nil
+}
+
+func newFaultTestHostWith(t *testing.T, supervisorAdapter supervisor.Adapter) (*Host, chan lifecycle.Status, string) {
+	t.Helper()
 	root := t.TempDir()
 	dataDirectory := filepath.Join(root, "dsh-work")
 	profilePath := filepath.Join(dataDirectory, "profiles", "web")
@@ -91,7 +113,6 @@ func newFaultTestHost(t *testing.T, stderr string) (*Host, *exitingSupervisor, c
 	}
 	dsh := newTestDSH()
 	t.Cleanup(dsh.server.Close)
-	supervisorAdapter := &exitingSupervisor{stderr: stderr}
 	host := NewHost(Dependencies{DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server}}, Config{
 		BootstrapDirectory: t.TempDir(),
 		DSHDataDirectory:   t.TempDir(),
@@ -102,7 +123,7 @@ func newFaultTestHost(t *testing.T, stderr string) (*Host, *exitingSupervisor, c
 	})
 	statuses := make(chan lifecycle.Status, 32)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
-	return host, supervisorAdapter, statuses, profilePath
+	return host, statuses, profilePath
 }
 
 func TestStoredDataRejectionOffersNoPlugin(t *testing.T) {
@@ -155,21 +176,7 @@ func TestDisableFaultPluginsDeselectsEveryThirdPartyBundle(t *testing.T) {
 			t.Fatalf("plugin still enabled: %+v", plugin)
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(profilePath, "package.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest struct {
-		Dependencies map[string]string `json:"dependencies"`
-		DSH          struct {
-			Profile struct {
-				Bundles []string `json:"bundles"`
-			} `json:"profile"`
-		} `json:"dsh"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		t.Fatal(err)
-	}
+	manifest := readFaultProfile(t, profilePath)
 	if !reflect.DeepEqual(manifest.DSH.Profile.Bundles, []string{"@deepseek-ai/dsh-web-app"}) {
 		t.Fatalf("bundles = %v", manifest.DSH.Profile.Bundles)
 	}
@@ -179,4 +186,44 @@ func TestDisableFaultPluginsDeselectsEveryThirdPartyBundle(t *testing.T) {
 	if _, err := host.DisableFaultPlugin(context.Background(), "@acme/widget"); err == nil {
 		t.Fatal("disabled an already disabled plugin")
 	}
+}
+
+func TestReadyWorkerExitOffersProfilePlugins(t *testing.T) {
+	supervisorAdapter := &readyThenExitSupervisor{stderr: "Error: dsh: failed to apply loader entry ws (@acme/widget/workspace): boom"}
+	host, statuses, profilePath := newFaultTestHostWith(t, supervisorAdapter)
+	host.Start()
+	waitForStatus(t, statuses, lifecycle.StateReady)
+	supervisorAdapter.worker.once.Do(func() { close(supervisorAdapter.worker.exited) })
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	if failed.PluginFault == nil || len(failed.PluginFault.Plugins) != 3 || !failed.PluginFault.Plugins[0].Suspected || failed.PluginFault.Plugins[0].Package != "@acme/widget" {
+		t.Fatalf("plugins = %+v", failed.PluginFault)
+	}
+	if _, err := host.DisableFaultPlugin(context.Background(), "@acme/widget"); err != nil {
+		t.Fatalf("disable after a ready Worker exit: %v", err)
+	}
+	if bundles := readFaultProfile(t, profilePath).DSH.Profile.Bundles; slices.Contains(bundles, "@acme/widget") {
+		t.Fatalf("widget still selected: %v", bundles)
+	}
+}
+
+type faultProfile struct {
+	Dependencies map[string]string `json:"dependencies"`
+	DSH          struct {
+		Profile struct {
+			Bundles []string `json:"bundles"`
+		} `json:"profile"`
+	} `json:"dsh"`
+}
+
+func readFaultProfile(t *testing.T, profilePath string) faultProfile {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(profilePath, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest faultProfile
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	return manifest
 }
