@@ -1402,6 +1402,10 @@ func (h *Host) run(run *generationRun) {
 			EffectOccurred: true,
 		}
 		_ = announcement
+		// A plugin enabled while DSH runs can take the Worker down just as
+		// one loaded at startup can.
+		diagnostics := worker.Diagnostics()
+		h.recordPluginFault(run, diagnostics.StdoutTail+"\n"+diagnostics.StderrTail)
 		h.finish(run, &failure)
 	}
 }

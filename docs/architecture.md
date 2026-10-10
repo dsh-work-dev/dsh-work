@@ -353,8 +353,9 @@ non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
 disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
 commands through the manager.
 
-A failed start has no Worker to call. The startup window then lists every
-installed third-party bundle of the failed profile and can disable or remove
+A failed start has no Worker to call. The same holds when a ready Worker exits
+unexpectedly, for example after a plugin was enabled while it ran. The startup
+window then lists every installed third-party bundle of the failed profile and can disable or remove
 one, or disable all enabled ones, with the switch lock held, no Run context
 current, and each package confirmed as an installed, non-`@deepseek-ai` bundle
 of that profile. Disabling removes the package from the profile manifest's

@@ -88,13 +88,14 @@ Startup shows Node, DSH, profile/plugins and service-start steps. When a step
 fails, its summary, available recovery actions and bounded diagnostic output
 appear together. Copy is available beside the diagnostics. A failure with no
 known step is presented as a general failure rather than assigned to Node.
-When the Worker fails to start, a panel lists the failed profile's third-party
-plugins with Disable and Remove. Plugins the failure output names (up to three)
-come first and are marked; already disabled plugins show their state and offer
-only Remove. With two or more enabled plugins, Disable all and start turns them
-all off in one step. Each action asks for confirmation and then starts again.
-Disable keeps the plugin installed; turn it back on in Plugins once DSH is
-running, one at a time to find the one that fails.
+When the Worker fails to start or stops unexpectedly, a panel lists that
+profile's third-party plugins with Disable and Remove. Plugins the failure
+output names (up to three) come first and are marked; already disabled plugins
+show their state and offer only Remove. With two or more enabled plugins,
+Disable all and start turns them all off in one step. Each action asks for
+confirmation and then starts again. Disable keeps the plugin installed; turn it
+back on in Plugins once DSH is running, one at a time to find the one that
+fails.
 
 Normal startup exposes optional logs and cancellation. Failed startup exposes
 logs automatically and initially positions them at the error. Manual log scroll
