@@ -12,6 +12,7 @@ export {
 
 export type {
     Failure,
+    FaultPlugin,
     LaunchSelection,
     PluginFault,
     RuntimePreparation,

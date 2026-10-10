@@ -42,6 +42,13 @@ export interface RuntimePreparation {
   };
 }
 
+/** A third-party plugin of the profile that failed to start; suspected ones are named in its output. */
+export interface FaultPlugin {
+  package: string;
+  enabled: boolean;
+  suspected: boolean;
+}
+
 export interface LifecycleStatus {
   launchSelection?: {runtimeId: string; nodeId: string; profileName?: string; runtimeVersion?: string; runtimePath?: string; nodeVersion?: string; nodePath?: string; dataDirectoryPath?: string};
   state: LifecycleState;
@@ -51,7 +58,7 @@ export interface LifecycleStatus {
   workspace?: WorkspaceContext;
   runtimePreparation?: RuntimePreparation;
   error?: LifecycleFailure;
-  pluginFault?: {plugins: string[]};
+  pluginFault?: {plugins: FaultPlugin[]};
   canRetry: boolean;
   canCancel: boolean;
   correlationId?: string;

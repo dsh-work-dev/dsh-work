@@ -29,6 +29,10 @@ export function DisableFaultPlugin(packageName: string): $CancellablePromise<lif
     return $Call.ByID(598114413, packageName);
 }
 
+export function DisableFaultPlugins(): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(1025224506);
+}
+
 export function GetAppearance(): $CancellablePromise<settings$0.Appearance> {
     return $Call.ByID(652882904);
 }

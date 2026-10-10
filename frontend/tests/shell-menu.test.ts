@@ -7,32 +7,21 @@ import {buildMenus, formatKeys, stepItem, windowKeyAction, type Menu, type MenuI
 
 const t = (key: string) => key;
 const state = (overrides: Partial<MenuState> = {}): MenuState => ({
-  lifecycle: "Ready", busy: false, pet: {ready: true, visible: false}, safeMode: {available: true, active: false}, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: true, dsh: null, ...overrides,
+  lifecycle: "Ready", busy: false, pet: {ready: true, visible: false}, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: true, dsh: null, ...overrides,
 });
 const item = (menus: Menu[], key: string) => menus.flatMap(menu => menu.items).find(entry => entry.type === "item" && entry.key === key) as MenuItem;
 
 const keysOf = (menu: Menu) => menu.items.map(entry => entry.type === "item" ? entry.key : "-");
 
-test("menus follow the 文件／视图／运行／设置／帮助 layout", () => {
+test("menus follow the 文件／视图／设置／帮助 layout", () => {
   const menus = buildMenus(state(), t);
-  assert.deepEqual(menus.map(menu => menu.id), ["file", "view", "run", "settings", "help"]);
+  assert.deepEqual(menus.map(menu => menu.id), ["file", "view", "settings", "help"]);
   assert.deepEqual(menus.map(keysOf), [
-    ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "closeWindow", "quit"],
+    ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "refresh", "restart", "-", "closeWindow", "quit"],
     ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
-    ["refresh", "restart", "-", "safeMode"],
     ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "-", "settings.open"],
     ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "copyDiagnostics", "devtools", "-", "update", "about"],
   ]);
-});
-
-test("safe mode follows the environment and the restart rules", () => {
-  const enter = item(buildMenus(state(), t), "safeMode");
-  assert.equal(enter.label, "shell.menu.enterSafeMode");
-  assert.equal(enter.enabled, true);
-  assert.equal(item(buildMenus(state({safeMode: {available: true, active: true}}), t), "safeMode").label, "shell.menu.exitSafeMode");
-  assert.equal(item(buildMenus(state({safeMode: null}), t), "safeMode").enabled, false);
-  assert.equal(item(buildMenus(state({safeMode: {available: false, active: false}}), t), "safeMode").enabled, false);
-  assert.equal(item(buildMenus(state({lifecycle: "Stopping"}), t), "safeMode").enabled, false);
 });
 
 test("full screen shows its state and zoom stops at actual size", () => {
@@ -62,7 +51,7 @@ test("host items follow the native menu availability rules", () => {
   const stopping = buildMenus(state({lifecycle: "Stopping"}), t);
   assert.equal(item(stopping, "quit").enabled, false);
   const busy = buildMenus(state({busy: true}), t);
-  for (const key of ["restart", "quit", "showPet", "safeMode"]) assert.equal(item(busy, key).enabled, false, key);
+  for (const key of ["restart", "quit", "showPet"]) assert.equal(item(busy, key).enabled, false, key);
   assert.equal(item(busy, "closeWindow").enabled, true);
   assert.equal(item(busy, "settings.settings").enabled, true);
 });
@@ -133,11 +122,11 @@ test("help reflects the update phase", () => {
 });
 
 test("keyboard steps skip separators and wrap", () => {
-  const items = buildMenus(state(), t)[2].items;
-  assert.equal(items[2].type, "separator");
-  assert.equal(stepItem(items, 1, 1), 3);
-  assert.equal(stepItem(items, 3, -1), 1);
-  assert.equal(stepItem(items, 3, 1), 0);
+  const items = buildMenus(state(), t)[0].items;
+  assert.equal(items[3].type, "separator");
+  assert.equal(stepItem(items, 2, 1), 4);
+  assert.equal(stepItem(items, 4, -1), 2);
+  assert.equal(stepItem(items, items.length - 1, 1), 0);
   assert.equal(stepItem(items, -1, 1), 0);
 });
 
@@ -147,7 +136,6 @@ test("every shell menu label is translated in every locale", () => {
     "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
     "shell.toast.exportSaved", "shell.toast.exportFailed",
     "shell.toast.signOutPending", "shell.toast.signedOut", "shell.toast.signOutFailed",
-    "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
     ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
       .filter(key => !key.startsWith("manager.")),
     "shell.window.minimise", "shell.window.maximise", "shell.window.restore", "shell.window.close",

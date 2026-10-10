@@ -105,6 +105,13 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 	return value, err
 }
 
+func (s *HostService) DisableFaultPlugins(ctx context.Context) (lifecycle.Status, error) {
+	if s.Local != nil { return s.Local.DisableFaultPlugins(ctx) }
+	var value lifecycle.Status
+	err := call(ctx, s.Client, "HostService", "DisableFaultPlugins", []any{}, &value)
+	return value, err
+}
+
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
 	if s.Local != nil { return s.Local.Quit(ctx) }
 	var value lifecycle.Status

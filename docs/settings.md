@@ -68,7 +68,7 @@ the current Settings instance.
 
 | Page | Current layout |
 |---|---|
-| Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save; safe mode. |
+| Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save. |
 | Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. Removing a runtime shows a short confirmation below the runtime list. |
 | Profiles | One column, list then detail. All profiles is a group of rows (name, current tag, kind and plugin count) with Import on its heading; choosing a row opens that profile's detail, and All profiles returns to the list, as does choosing Profiles in the sidebar. The detail has the name with Switch on its heading, a group with backups (manage history, back up now) and plugins, and a Profile actions group with one row each for clone, export, rename and delete. |
 | Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). When two or more plugins have updates, Upgrade all on the Installed heading upgrades them in one change: the Worker stops once, every package updates in order, then one health check decides. A failure is handled as one plugin change, so automatic rollback returns the profile to its state before the first upgrade. While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry. Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. A 内置组件 section lists dsh-work's own DSH plugins (shell, account and desktop pet integration) with their load state and no controls. |
@@ -88,10 +88,13 @@ Startup shows Node, DSH, profile/plugins and service-start steps. When a step
 fails, its summary, available recovery actions and bounded diagnostic output
 appear together. Copy is available beside the diagnostics. A failure with no
 known step is presented as a general failure rather than assigned to Node.
-When the failure output names installed third-party plugins, a panel lists up
-to three of them with Disable and Remove. Each action asks for confirmation and
-then starts again. Disable keeps the plugin installed; turn it back on in
-Plugins once DSH is running.
+When the Worker fails to start, a panel lists the failed profile's third-party
+plugins with Disable and Remove. Plugins the failure output names (up to three)
+come first and are marked; already disabled plugins show their state and offer
+only Remove. With two or more enabled plugins, Disable all and start turns them
+all off in one step. Each action asks for confirmation and then starts again.
+Disable keeps the plugin installed; turn it back on in Plugins once DSH is
+running, one at a time to find the one that fails.
 
 Normal startup exposes optional logs and cancellation. Failed startup exposes
 logs automatically and initially positions them at the error. Manual log scroll

@@ -24,11 +24,16 @@ var (
 // storedDataRejections are errors DSH raises about its own stored session
 // data. The plugin whose loader entry surfaced one is not its cause.
 var storedDataRejections = []string{
+	"corrupt session log",
 	"corrupt Zstandard session log",
+	"empty or header-less session log",
 	"first frame is not exactly one header line",
 	"header frame failed validation",
 	"invalid frame magic at byte",
-	"torn physical tail",
+	"current session generation has a torn physical tail",
+	"unrecognized historical child generation",
+	"cannot encode an empty path segment",
+	"cannot encode an empty project path",
 }
 
 // StoredDataRejected reports whether a failed start's output is DSH rejecting
@@ -38,6 +43,21 @@ func StoredDataRejected(output string) bool {
 		if strings.Contains(output, signature) {
 			return true
 		}
+	}
+	if strings.Contains(output, `session "`) && strings.Contains(output, " uses log format v") {
+		return true
+	}
+	if strings.Contains(output, `session "`) && strings.Contains(output, "contains event type") && strings.Contains(output, "unknown to this harness and not marked ignorable") {
+		return true
+	}
+	if strings.Contains(output, `session "`) && strings.Contains(output, "unsupported legacy reason") {
+		return true
+	}
+	if strings.Contains(output, "session artifact ") && strings.Contains(output, "uses the unsupported flat-file layout") {
+		return true
+	}
+	if strings.Contains(output, "session artifact ") && strings.Contains(output, "backend is configured for compression") {
+		return true
 	}
 	return false
 }

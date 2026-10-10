@@ -174,9 +174,9 @@ layers:
 | Layer | What | Loaded |
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
-| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always, including safe mode |
-| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Not in safe mode |
-| Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile; safe mode uses a clean one |
+| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always |
+| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Always |
+| Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile |
 
 The host plugins are ordinary DSH plugins (a Host half and a Client half each).
 They are embedded in dsh-work, written below a directory named by application
@@ -221,9 +221,7 @@ on each DSH upgrade.
 
 The daemon owns the Worker independently of UI visibility and process lifetime.
 Restart closes streams and the pipe, verifies the process boundary, then starts
-the next generation. Safe mode uses the same channel and host plugins with a
-clean profile and without the user-data overlay. The process supervisor remains
-the authority for graceful stop, forced stop and process-tree cleanup.
+the next generation. The process supervisor remains the authority for graceful stop, forced stop and process-tree cleanup.
 
 The OS transport uses `go-winio`, HTTP uses the Go/Node standard libraries and
 WebSocket uses `coder/websocket` plus the selected profile's upstream routes.
@@ -355,16 +353,28 @@ non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
 disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
 commands through the manager.
 
-A failed start has no Worker to call. The startup window can then disable a
-third-party bundle that the failure output names, with the switch lock held,
-no Run context current, and the package confirmed as an installed,
-non-`@deepseek-ai` bundle of the failed profile. It removes the package from
-the profile manifest's `dsh.profile.bundles`, keeping the installed files and
-loader patches, and starts again; this is the same persisted choice as
+A failed start has no Worker to call. The startup window then lists every
+installed third-party bundle of the failed profile and can disable or remove
+one, or disable all enabled ones, with the switch lock held, no Run context
+current, and each package confirmed as an installed, non-`@deepseek-ai` bundle
+of that profile. Disabling removes the package from the profile manifest's
+`dsh.profile.bundles`, keeping the installed files and loader patches, and
+starts again; this is the same persisted choice as
 `setBundleEnabled(name, false)`. The DSH adapter reads the packages named in
-the captured output. Only third-party packages installed in the failed profile
-are offered, and a failure caused by DSH rejecting its own stored session data
-offers none, because the plugin that reported it did not cause it.
+the captured output and the list puts those first, marked. A failure caused by
+DSH rejecting its own stored session data offers no plugins, because the
+plugin that reported it did not cause it.
+
+This is the whole startup-recovery surface for plugins; there is no separate
+safe mode. A broken plugin is the common cause, and disabling it persistently
+from the failure page fixes it without a second environment. When the output
+names no plugin, disabling all of them and re-enabling one at a time in Plugins
+finds the cause with the normal running-Worker controls. A safe mode (a
+temporary home without third-party plugins, with a return target) is rejected:
+it adds a second state machine (fault target, return target, fallback) yet
+cannot repair stored-data or runtime failures, which use the same data or
+runtime in any mode. Revisit if a failure class appears that a persistent disable cannot
+reach, such as a broken profile manifest or home patch.
 
 Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
 unload semantics as they change. The cost is that activation changes need a
@@ -480,18 +490,15 @@ window, command palette, focus mode, always on top and recent workspaces.
 
 | Menu | Items (DSH commands marked *) |
 |---|---|
-| 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 关闭窗口, 退出 |
+| 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 刷新, 重启 DSH · 关闭窗口, 退出 |
 | 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
-| 运行 | 刷新, 重启 DSH · 启动安全模式 / 退出安全模式 |
 | 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
 | 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
 
 Host items call trusted bindings. `ShellService` runs in the UI process: it
 opens Settings at a section, and reads or sets Pet visibility on behalf of the
 Settings surface, which is the only surface the daemon grants Pet controls.
-Restart and quit keep the availability rules of the tray; safe mode uses the
-same `ManagerService` calls as Settings Overview and opens Overview when it
-fails. 刷新 reloads only the DSH frame; the Worker keeps running. Zoom, full
+Restart and quit keep the availability rules of the tray. 刷新 reloads only the DSH frame; the Worker keeps running. Zoom, full
 screen and close use the Wails window API (close hides the window). Zoom
 scales the whole window, shell bar included, and cannot go below actual size
 (Wails clamps WebView2 zoom at 100%), so 缩小 and 实际大小 are off at 100%. 全屏

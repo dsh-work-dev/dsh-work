@@ -1,10 +1,9 @@
 import {mountRestorePoints} from "./restore-points";
 import {Events} from "@wailsio/runtime";
-import {safeModeActive} from "./recovery";
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {NodeSelectionKind, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
-import {runningLaunchSelection, startupProfileName, type LifecycleStatus} from "./lifecycle";
+import {runningLaunchSelection, startupProfileName, type FaultPlugin, type LifecycleStatus} from "./lifecycle";
 import {acquisitionPreparation, runtimePreparationText, formatRuntimeBytes} from "./acquisition-view";
 import {mountOperationLog} from "./operation-log";
 import {applyLocale, subscribeLocale, t} from "./i18n";
@@ -47,33 +46,60 @@ export function mountHost() {
   const progressMessage = element("startup-progress-message");
   const progressBar = element<HTMLProgressElement>("startup-progress-bar");
   const pluginFault = element("startup-plugin-fault");
+  const pluginFaultTitle = element("startup-plugin-fault-title");
   const pluginFaultList = element("startup-plugin-fault-list");
+  const pluginFaultActions = element("startup-plugin-fault-actions");
+  const disablePlugins = element<HTMLButtonElement>("startup-disable-plugins");
 
   // A failed Worker has no live PluginManager connection, so recovery offers
-  // a persisted bundle disable or uninstall before retrying startup.
-  function renderPluginFault(plugins: string[]) {
+  // a persisted bundle disable or uninstall of the failed profile's plugins
+  // before retrying startup. Plugins named in the output come first.
+  function renderPluginFault(plugins: FaultPlugin[]) {
     pluginFault.hidden = plugins.length === 0;
+    const titleKey = plugins.some(plugin => plugin.suspected) ? "fault.title" : "fault.titleProfile";
+    pluginFaultTitle.dataset.i18n = titleKey;
+    pluginFaultTitle.textContent = t(titleKey);
     pluginFaultList.replaceChildren(...plugins.map(plugin => {
       const row = document.createElement("li");
-      const name = document.createElement("span");
-      name.textContent = plugin;
       row.className = "row";
-      name.className = "row-main mono";
-      const disable = document.createElement("button");
-      disable.type = "button";
-      disable.className = "button button-compact";
-      disable.textContent = t("action.disable");
-      disable.disabled = busy;
-      disable.addEventListener("click", () => void resolvePluginFault(plugin, "disable"));
+      const text = document.createElement("div");
+      text.className = "row-main";
+      const name = document.createElement("strong");
+      const label = document.createElement("span");
+      label.className = "mono";
+      label.textContent = plugin.package;
+      name.append(label);
+      if (plugin.suspected) name.append(tag(t("fault.suspected")));
+      if (!plugin.enabled) name.append(tag(t("value.pluginDisabled")));
+      text.append(name);
+      row.append(text);
+      if (plugin.enabled) {
+        const disable = document.createElement("button");
+        disable.type = "button";
+        disable.className = "button button-compact";
+        disable.textContent = t("action.disable");
+        disable.disabled = busy;
+        disable.addEventListener("click", () => void resolvePluginFault(plugin.package, "disable"));
+        row.append(disable);
+      }
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "button button-compact button-quiet";
       remove.textContent = t("action.remove");
       remove.disabled = busy;
-      remove.addEventListener("click", () => void resolvePluginFault(plugin, "remove"));
-      row.append(name, disable, remove);
+      remove.addEventListener("click", () => void resolvePluginFault(plugin.package, "remove"));
+      row.append(remove);
       return row;
     }));
+    pluginFaultActions.hidden = plugins.filter(plugin => plugin.enabled).length < 2;
+    disablePlugins.disabled = busy;
+  }
+
+  function tag(label: string) {
+    const span = document.createElement("span");
+    span.className = "tag";
+    span.textContent = label;
+    return span;
   }
 
   function resolvePluginFault(plugin: string, operation: "disable" | "remove") {
@@ -85,6 +111,15 @@ export function mountHost() {
       await prepareAndStart();
     });
   }
+
+  disablePlugins.addEventListener("click", () => {
+    const count = status.pluginFault?.plugins.filter(plugin => plugin.enabled).length ?? 0;
+    if (!window.confirm(t("fault.confirmDisableAll", {count}))) return;
+    void action(async () => {
+      status = await HostService.DisableFaultPlugins() as LifecycleStatus;
+      await prepareAndStart();
+    });
+  });
 
   const installedNode = () => selectedNode === "system" ? !!snapshot?.systemNode : !!snapshot?.nodes?.some(n => n.id === selectedNode && n.installed && n.verified);
   const installedRuntime = () => snapshot?.runtimes?.find(r => r.id === selectedRuntime && r.installed);
@@ -147,15 +182,11 @@ export function mountHost() {
     node.disabled = dsh.disabled = releases.disabled = busy || active() || !snapshot;
     downloadNode.disabled = busy || active() || !snapshot;
     downloadDsh.disabled = busy || active() || !downloadableVersion() || !!installedRuntime();
-    const safe = element<HTMLButtonElement>("startup-safe-mode");
-    safe.hidden = !failed && !stopped;
     const restoring = snapshot?.restorePoints?.operation?.status === "running";
     restoreButton.hidden = !failed && !stopped && !restoring;
     restoreButton.disabled = !snapshot || busy || (active() && !restoring);
     restoreButton.textContent = t(restoring ? "startup.restoreProgress" : "startup.restore");
     versionPoints.render(snapshot, busy || active());
-    safe.disabled = busy || active() || !snapshot?.configured || !installedRuntime() || !installedNode();
-    safe.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
     retry.disabled = busy || active() || !snapshot || !selectedVersion();
     retry.hidden = busy || active() || !!missing;
     errorPanel.hidden = !lastError;
@@ -172,7 +203,7 @@ export function mountHost() {
         row.querySelector(".check-marker")!.textContent = String(index + 1);
       });
       retry.hidden = false; retry.disabled = busy; retry.textContent = t("common.retry");
-      cancel.hidden = true; safe.hidden = true; restoreButton.hidden = true;
+      cancel.hidden = true; restoreButton.hidden = true;
     }
   }
 
@@ -205,9 +236,6 @@ export function mountHost() {
     renderEnvironment();
   }
 
-  element("startup-safe-mode").addEventListener("click", () => void action(async () => {
-    snapshot = await (safeModeActive(snapshot) ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode());
-  }));
 
   function showError(error: unknown) {
     const value = error as {message?: string; summary?: string; detail?: string};

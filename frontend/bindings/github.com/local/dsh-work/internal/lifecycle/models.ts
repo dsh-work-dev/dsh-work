@@ -75,6 +75,16 @@ export interface Failure {
 }
 
 /**
+ * FaultPlugin is one third-party plugin of the failed profile. Suspected marks
+ * a plugin the failure output names; Enabled is whether the profile selects it.
+ */
+export interface FaultPlugin {
+    "package": string;
+    "enabled": boolean;
+    "suspected": boolean;
+}
+
+/**
  * LaunchSelection identifies the executables actually selected for this attempt.
  */
 export interface LaunchSelection {
@@ -111,11 +121,12 @@ export enum Phase {
 };
 
 /**
- * PluginFault names the installed third-party plugins a failed start's output
- * pointed at. It is advisory: the user decides whether to disable or remove one.
+ * PluginFault lists the installed third-party plugins of a profile whose
+ * Worker failed to start, the ones its output names first. It is advisory: the
+ * user decides which to disable or remove.
  */
 export interface PluginFault {
-    "plugins": string[] | null;
+    "plugins": FaultPlugin[] | null;
 }
 
 /**

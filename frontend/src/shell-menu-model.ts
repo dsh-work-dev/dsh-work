@@ -13,8 +13,6 @@ export interface MenuState {
   lifecycle: string;
   busy: boolean;
   pet: {ready: boolean; visible: boolean};
-  /** Null until the environment snapshot is read. */
-  safeMode: {available: boolean; active: boolean} | null;
   updatePhase: string;
   /** The workbench window's state; zoom is the WebView factor, 1 at actual size. */
   window: {fullscreen: boolean; zoom: number};
@@ -49,12 +47,12 @@ export function windowKeyAction(event: KeyFacts): WindowAction | undefined {
 export type LinkTarget = "docs" | "feedback-desktop" | "feedback-dsh";
 export type MenuAction =
   | {kind: "settings"; section: SettingsSection} | {kind: "window"; action: WindowAction} | {kind: "link"; target: LinkTarget}
-  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "safe-mode"} | {kind: "quit"}
+  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "quit"}
   | {kind: "update"} | {kind: "about"} | {kind: "diagnostics"} | {kind: "devtools"} | {kind: "dsh"; id: string};
 export interface MenuItem { type: "item"; key: string; label: string; enabled: boolean; checked?: boolean; keys?: string[]; hint?: string; action: MenuAction }
 export interface MenuSeparator { type: "separator" }
 export type MenuEntry = MenuItem | MenuSeparator;
-export type MenuId = "file" | "view" | "run" | "settings" | "help";
+export type MenuId = "file" | "view" | "settings" | "help";
 export interface Menu { id: MenuId; label: string; badge: boolean; items: MenuEntry[] }
 
 const updating = new Set(["checking", "downloading", "verifying", "installing"]);
@@ -90,6 +88,9 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       separator,
       dsh("terminal.new"), dsh("browser.new"),
       separator,
+      host("refresh", {kind: "refresh"}, state.framed),
+      host("restart", {kind: "restart"}, restartable),
+      separator,
       host("closeWindow", {kind: "window", action: "close"}),
       host("quit", {kind: "quit"}, quittable),
     ]},
@@ -103,12 +104,6 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       {...windowItem("fullscreen", "fullscreen"), checked: state.window.fullscreen},
       separator,
       {...host("showPet", {kind: "pet"}, !state.busy && state.pet.ready), checked: state.pet.visible},
-    ]},
-    {id: "run", label: t("shell.menu.run"), badge: false, items: [
-      host("refresh", {kind: "refresh"}, state.framed),
-      host("restart", {kind: "restart"}, restartable),
-      separator,
-      {...host(state.safeMode?.active ? "exitSafeMode" : "enterSafeMode", {kind: "safe-mode"}, restartable && state.safeMode?.available === true), key: "safeMode"},
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
       settings("overview", "overview"),

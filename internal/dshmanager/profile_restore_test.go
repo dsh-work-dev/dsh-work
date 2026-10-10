@@ -227,42 +227,6 @@ func TestProfileRestoreRejectsUnsafeArchivesWithoutPublication(t *testing.T) {
 	}
 }
 
-func TestSafeModeHomeAndReturnTargetSurviveReload(t *testing.T) {
-	m := newTestManager(t)
-	original := *m.configured
-	target, err := m.PrepareSafeMode(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	launch, err := m.ResolveLaunch(context.Background(), LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if launch.DataDirectory.Path == m.config.DataDirectories[0].Path {
-		t.Fatal("safe mode reused original home")
-	}
-	if err := m.PrepareRunContext(context.Background(), launch); err != nil {
-		t.Fatalf("safe mode required package installation: %v", err)
-	}
-	if _, err := m.SetConfigured(context.Background(), target); err != nil {
-		t.Fatal(err)
-	}
-	reloaded, err := New(Config{StatePath: m.config.StatePath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := reloaded.SafeModeReturnTarget(context.Background())
-	if err != nil || got != original {
-		t.Fatalf("return = %#v, %v", got, err)
-	}
-	if _, err := reloaded.DeleteProfile(context.Background(), ProfileDeleteRequest{Profile: original.Profile}); err == nil {
-		t.Fatal("return profile deleted")
-	}
-	if _, err := reloaded.RemoveRuntime(context.Background(), original.RuntimeID); err == nil {
-		t.Fatal("return runtime removed")
-	}
-}
-
 func TestProfileRestoreRejectsLinkedProfilesDirectory(t *testing.T) {
 	m := newTestManager(t)
 	m.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web"}}}
@@ -291,30 +255,6 @@ func TestProfileRestoreRejectsLinkedProfilesDirectory(t *testing.T) {
 	}
 }
 
-func TestAbortedSafeModeRemovesUnusedHome(t *testing.T) {
-	m := newTestManager(t)
-	target, err := m.PrepareSafeMode(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	launch, err := m.ResolveLaunch(context.Background(), LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.AbortPreparedSafeMode(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(launch.DataDirectory.Path); !os.IsNotExist(err) {
-		t.Fatalf("unused home retained: %v", err)
-	}
-	reloaded, err := New(Config{StatePath: m.config.StatePath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reloaded.SafeModeReturnTarget(context.Background()); err == nil {
-		t.Fatal("unused reservation persisted")
-	}
-}
 func TestDeleteProfileBackupOnlyRemovesSelectedArchive(t *testing.T) {
 	m := newTestManager(t)
 	m.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web"}}}

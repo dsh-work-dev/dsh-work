@@ -177,10 +177,19 @@ type LaunchSelection struct {
 	NodeID            string `json:"nodeId"`
 }
 
-// PluginFault names the installed third-party plugins a failed start's output
-// pointed at. It is advisory: the user decides whether to disable or remove one.
+// PluginFault lists the installed third-party plugins of a profile whose
+// Worker failed to start, the ones its output names first. It is advisory: the
+// user decides which to disable or remove.
 type PluginFault struct {
-	Plugins []string `json:"plugins"`
+	Plugins []FaultPlugin `json:"plugins"`
+}
+
+// FaultPlugin is one third-party plugin of the failed profile. Suspected marks
+// a plugin the failure output names; Enabled is whether the profile selects it.
+type FaultPlugin struct {
+	Package   string `json:"package"`
+	Enabled   bool   `json:"enabled"`
+	Suspected bool   `json:"suspected"`
 }
 
 // Status is the immutable read model consumed by the frontend.

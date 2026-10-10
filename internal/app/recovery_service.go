@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 
 	"github.com/local/dsh-work/internal/dshmanager"
@@ -96,81 +95,6 @@ func (s *ManagerService) OpenProfileBackups(ctx context.Context, ref dshmanager.
 		return err
 	}
 	return s.openBackups(path)
-}
-
-func (s *ManagerService) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	if s == nil || s.manager == nil || s.host == nil {
-		return dshmanager.Snapshot{}, managerUnavailable()
-	}
-	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Safe mode is available in Settings or startup.")
-	}
-	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
-	defer cancel()
-	return s.host.EnterSafeMode(ctx)
-}
-
-func (s *ManagerService) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	if s == nil || s.manager == nil || s.host == nil {
-		return dshmanager.Snapshot{}, managerUnavailable()
-	}
-	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Safe mode is available in Settings or startup.")
-	}
-	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
-	defer cancel()
-	return s.host.ExitSafeMode(ctx)
-}
-
-func (h *Host) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	h.switchMu.Lock()
-	defer h.switchMu.Unlock()
-	manager, ok := h.deps.Manager.(interface {
-		PrepareSafeMode(context.Context) (dshmanager.RunContext, error)
-		AbortPreparedSafeMode(context.Context) error
-	})
-	if !ok {
-		return dshmanager.Snapshot{}, managerUnavailable()
-	}
-	target, err := manager.PrepareSafeMode(ctx)
-	if err != nil {
-		return dshmanager.Snapshot{}, err
-	}
-	snapshot, err := h.applyRunContextLocked(ctx, target, nil, nil, false)
-	if err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), h.config.ShutdownTimeout)
-		defer cancel()
-		err = errors.Join(err, manager.AbortPreparedSafeMode(cleanupCtx))
-		snapshot, _ = h.deps.Manager.Snapshot(context.Background())
-	}
-	return snapshot, err
-}
-
-func (h *Host) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	h.switchMu.Lock()
-	defer h.switchMu.Unlock()
-	manager, ok := h.deps.Manager.(interface {
-		SafeModeReturnTarget(context.Context) (dshmanager.RunContext, error)
-	})
-	if !ok {
-		return dshmanager.Snapshot{}, managerUnavailable()
-	}
-	target, err := manager.SafeModeReturnTarget(ctx)
-	if err != nil {
-		return dshmanager.Snapshot{}, err
-	}
-	snapshot, err := h.deps.Manager.Snapshot(ctx)
-	if err != nil {
-		return snapshot, err
-	}
-	selected := snapshot.Current
-	if selected == nil {
-		selected = snapshot.Configured
-	}
-	if selected == nil || selected.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID {
-		return snapshot, errors.New("safe mode is not active")
-	}
-	return h.applyRunContextLocked(ctx, target, nil, nil, false)
 }
 
 func SetProfileExportAction(s *ManagerService, choose func(string) (string, error)) {

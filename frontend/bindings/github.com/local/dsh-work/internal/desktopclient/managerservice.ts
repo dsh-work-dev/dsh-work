@@ -41,14 +41,6 @@ export function DeleteRestorePoint(id: string): $CancellablePromise<dshmanager$0
     return $Call.ByID(1854083254, id);
 }
 
-export function EnterSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(3176544163);
-}
-
-export function ExitSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
-    return $Call.ByID(952449787);
-}
-
 export function ExportProfile(ref: dshmanager$0.ProfileRef): $CancellablePromise<string> {
     return $Call.ByID(2628283212, ref);
 }

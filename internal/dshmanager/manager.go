@@ -181,7 +181,6 @@ type Manager struct {
 	versionRecovery   *VersionRecoveryState
 	verifiedPoint     *storedRestorePoint
 	restoreSaveError  string
-	safeMode          *SafeModeState
 	latestNode        *NodeReleaseInfo
 	dshReleases       []DSHReleaseInfo
 	pluginProvenance  []PluginProvenanceRecord
@@ -367,7 +366,7 @@ func (m *Manager) RemoveNode(ctx context.Context, id string) (Snapshot, error) {
 	nodes := cloneNodes(m.config.Nodes)
 	installer := m.config.NodeInstaller
 	selected := false
-	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked()} {
+	for _, target := range []*RunContext{m.configured, m.current, m.knownGood} {
 		if target != nil && target.Node.Kind == NodeSelectionManaged && target.Node.InstallationID == id {
 			selected = true
 			break
@@ -435,7 +434,6 @@ func New(config Config) (*Manager, error) {
 		if err := validateState(*state); err != nil {
 			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted Run context has an unsupported shape")
 		}
-		discardInactiveSafeMode(state)
 		if len(state.DataDirectories) > 0 {
 			normalized.DataDirectories = mergeDataDirectories(normalized.DataDirectories, state.DataDirectories)
 		}
@@ -451,13 +449,11 @@ func New(config Config) (*Manager, error) {
 		}
 	}
 	manager.config = normalized
-	removeSafeModeSessions(normalized.StatePath, normalized.DataDirectories)
 	if state != nil {
 		manager.versionRecovery = cloneVersionRecovery(state.VersionRecovery)
 		if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
 			manager.knownGood = cloneRunContext(&p.Target)
 		}
-		manager.safeMode = cloneSafeMode(state.SafeMode)
 		manager.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
 		manager.latestNode = cloneNodeRelease(state.LatestNode)
 		manager.dshReleases = cloneDSHReleases(state.DSHReleases)
@@ -549,7 +545,7 @@ func (m *Manager) InstallRuntimeWithProgress(ctx context.Context, version string
 	runtimeID := "dsh-" + version
 	m.mu.RLock()
 	runtimeInUse := false
-	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked()} {
+	for _, target := range []*RunContext{m.configured, m.current, m.knownGood} {
 		if target == nil {
 			continue
 		}
@@ -731,7 +727,7 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "the runtime is not in the catalog")
 	}
-	if (m.safeMode != nil && m.safeMode.ReturnTo.RuntimeID == id) || (m.configured != nil && m.configured.RuntimeID == id) || (m.current != nil && m.current.RuntimeID == id) || (m.knownGood != nil && m.knownGood.RuntimeID == id) {
+	if (m.configured != nil && m.configured.RuntimeID == id) || (m.current != nil && m.current.RuntimeID == id) || (m.knownGood != nil && m.knownGood.RuntimeID == id) {
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorRuntimeInUse, "DSH runtime is still selected", "choose another runtime before removing it")
 	}
@@ -827,7 +823,7 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the data directory is not in the catalog")
 	}
-	if (m.safeMode != nil && m.safeMode.ReturnTo.Profile.DataDirectoryID == id) || (m.configured != nil && m.configured.Profile.DataDirectoryID == id) || (m.current != nil && m.current.Profile.DataDirectoryID == id) || (m.knownGood != nil && m.knownGood.Profile.DataDirectoryID == id) {
+	if (m.configured != nil && m.configured.Profile.DataDirectoryID == id) || (m.current != nil && m.current.Profile.DataDirectoryID == id) || (m.knownGood != nil && m.knownGood.Profile.DataDirectoryID == id) {
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH data directory is still selected", "choose another profile before removing it")
 	}
@@ -862,7 +858,6 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	latestNode := cloneNodeRelease(m.latestNode)
 	dshReleases := cloneDSHReleases(m.dshReleases)
 	lastSwitchAttempt := cloneSwitchAttempt(m.lastSwitchAttempt)
-	safeMode := cloneSafeMode(m.safeMode)
 	versionPoints := m.versionViewLocked()
 	provenance := append([]PluginProvenanceRecord(nil), m.pluginProvenance...)
 	m.mu.RUnlock()
@@ -870,14 +865,6 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader, current, configured, knownGood, lastSwitchAttempt)
 	for i := range profiles {
 		applyPluginProvenance(profiles[i].Plugins, profiles[i].Ref, profiles[i].Path, provenance)
-	}
-	if safeMode != nil {
-		for i := range profiles {
-			if profiles[i].Ref == safeMode.ReturnTo.Profile {
-				profiles[i].Deletable = false
-				profiles[i].Renamable = false
-			}
-		}
 	}
 	var systemNode *ResolvedNode
 	if config.NodeResolver != nil {
@@ -887,7 +874,6 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	return Snapshot{
-		SafeMode:          safeMode,
 		RestorePoints:     versionPoints,
 		Runtimes:          refreshRuntimes(config.Runtimes),
 		DSHReleases:       dshReleases,
@@ -991,12 +977,6 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 	}
 	if err := validateProfileRef(request.Profile); err != nil {
 		return Snapshot{}, err
-	}
-	m.mu.RLock()
-	protected := m.safeMode != nil && m.safeMode.ReturnTo.Profile == request.Profile
-	m.mu.RUnlock()
-	if protected {
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "profile is retained for leaving safe mode", "return to the previous environment before renaming it")
 	}
 	newName := strings.TrimSpace(request.NewName)
 	if !validProfileName(newName) {
@@ -2141,7 +2121,6 @@ func (m *Manager) acquireOperation(ctx context.Context) (func(), error) {
 
 func (m *Manager) stateLocked() State {
 	return State{
-		SafeMode:          cloneSafeMode(m.safeMode),
 		VersionRecovery:   cloneVersionRecovery(m.versionRecovery),
 		LastSwitchAttempt: cloneSwitchAttempt(m.lastSwitchAttempt),
 		DataDirectories:   cloneDataDirectories(m.config.DataDirectories),

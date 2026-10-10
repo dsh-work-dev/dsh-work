@@ -17,7 +17,6 @@ import (
 // Current remains process-local; persisted health is not a claim of a live Worker.
 type State struct {
 	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
-	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
 	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
 	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
@@ -70,7 +69,6 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 // without making an older build lose the user's selection.
 type persistedState struct {
 	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
-	SafeMode          *SafeModeState           `json:"safeMode,omitempty"`
 	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
 	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
 	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
@@ -94,7 +92,6 @@ func decodeState(data []byte) (State, error) {
 		return State{}, err
 	}
 	state := State{
-		SafeMode:          persisted.SafeMode,
 		VersionRecovery:   persisted.VersionRecovery,
 		LastSwitchAttempt: persisted.LastSwitchAttempt,
 		DataDirectories:   persisted.DataDirectories,
@@ -164,17 +161,6 @@ func validateVersionRecovery(s *VersionRecoveryState) error {
 func validateState(state State) error {
 	if err := validateVersionRecovery(state.VersionRecovery); err != nil {
 		return err
-	}
-	if state.SafeMode != nil {
-		if err := validateRunContext(state.SafeMode.ReturnTo); err != nil {
-			return err
-		}
-		if err := validateRunContext(state.SafeMode.Target); err != nil {
-			return err
-		}
-		if state.SafeMode.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID || state.SafeMode.Target.Profile.Name != "web" || state.SafeMode.ReturnTo.Profile.DataDirectoryID == SafeModeDataDirectoryID {
-			return errors.New("invalid safe mode state")
-		}
 	}
 	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))
 	for _, dataDirectory := range state.DataDirectories {
