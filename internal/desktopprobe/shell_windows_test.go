@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
@@ -28,6 +29,14 @@ func TestRealShellFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	userData := filepath.Join(root, "user-data")
+	if err := os.MkdirAll(userData, 0700); err != nil {
+		t.Fatal(err)
+	}
+	userDataSentinel := filepath.Join(userData, "safe-mode-survives.json")
+	if err := os.WriteFile(userDataSentinel, []byte(`{"safeMode":"shared"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	report := filepath.Join(root, "webview.json")
@@ -133,4 +142,34 @@ func TestRealShellFrame(t *testing.T) {
 		t.Fatalf("framed storage lost across restart: saw %q, want %q", again.Framed.PreviousGeneration, first.Status.GenerationID)
 	}
 	t.Logf("generation %s re-framed in UI %d: %d checks", second.Status.GenerationID, again.UIPID, len(again.Checks))
+
+	var safeSnapshot dshmanager.Snapshot
+	if err := client.Call(context.Background(), "ManagerService", "EnterSafeModeWithOptions", "workspace", []any{dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeWithData}}, &safeSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	if safeSnapshot.SafeMode == nil || safeSnapshot.SafeMode.Mode != dshmanager.SafeModeWithData {
+		t.Fatalf("desktop probe did not enter with-data safe mode: %+v", safeSnapshot.SafeMode)
+	}
+	safe := ready(second.Status.GenerationID)
+	safeFrame := read(report + ".3")
+	if safeFrame.UIPID != result.UIPID || safeFrame.Framed.PreviousGeneration != second.Status.GenerationID {
+		t.Fatalf("safe-mode frame did not reuse the desktop shell: first=%+v safe=%+v", result.Framed, safeFrame.Framed)
+	}
+
+	var returned dshmanager.Snapshot
+	if err := client.Call(context.Background(), "ManagerService", "ExitSafeMode", "workspace", nil, &returned); err != nil {
+		t.Fatal(err)
+	}
+	if returned.SafeMode != nil {
+		t.Fatalf("desktop probe returned while safe mode remained configured: %+v", returned.SafeMode)
+	}
+	normal := ready(safe.Status.GenerationID)
+	finalFrame := read(report + ".4")
+	if finalFrame.UIPID != result.UIPID || finalFrame.Framed.PreviousGeneration != safe.Status.GenerationID {
+		t.Fatalf("return from safe mode replaced the desktop shell: first=%+v normal=%+v", result.Framed, finalFrame.Framed)
+	}
+	if _, err := os.Stat(userDataSentinel); err != nil {
+		t.Fatalf("safe-mode UI cleanup removed shared user data: %v", err)
+	}
+	t.Logf("safe mode generation %s and return generation %s stayed in UI %d", safe.Status.GenerationID, normal.Status.GenerationID, result.UIPID)
 }

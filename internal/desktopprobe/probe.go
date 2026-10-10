@@ -47,7 +47,10 @@ func Patch(root, discoveryRoot string) func(string) (string, error) {
 
 const probePlugin = `import {once} from 'node:events';
 import {spawn} from 'node:child_process';
-export const inject=['webServer','sessions','sessionController'];
+import {dirname,join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const probeCwd=join(dirname(fileURLToPath(import.meta.url)),'..','probe-workspace');
+export const inject=['webServer','sessions','sessionController','sessionQuery'];
 export function apply(ctx){
 let cancelled=0,backgroundTicks=0,backgroundTimer,backgroundChild;
 ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/__work/probe',handler:async(req,res)=>{
@@ -56,7 +59,7 @@ if(action==='background'){if(!backgroundTimer){backgroundTimer=setInterval(()=>b
 if(action==='background-status'){res.setHeader('content-type','application/json');res.end(JSON.stringify({ticks:backgroundTicks,pid:process.pid,child:backgroundChild?.pid}));return;}
 if(action==='echo'){res.writeHead(200,{'content-type':'application/octet-stream'});for await(const chunk of req){if(!res.write(chunk))await once(res,'drain');}res.end();return;}
 if(action==='stream'){res.writeHead(200,{'content-type':'application/octet-stream'});res.write('first');const requestedDelay=Number(new URL(req.url,'http://local').searchParams.get('delayMs'));const delay=Number.isFinite(requestedDelay)&&requestedDelay>=0&&requestedDelay<=30000?requestedDelay:30000;const timer=setTimeout(()=>res.end('last'),delay);res.once('close',()=>{clearTimeout(timer);cancelled++;});return;}
-if(action==='session'){if(!ctx.sessions.get('pc-ipc-probe'))await ctx.sessionController.create({sessionId:'pc-ipc-probe',cwd:process.cwd()});const s=ctx.sessions.get('pc-ipc-probe');if(!s)throw new Error('probe Session was not created');s.append('turn/start',{turn:1});s.append('turn/end',{turn:1,reason:{kind:'completed'}});res.end('ok');return;}
+if(action==='session'){let existed=false;try{await ctx.sessionQuery.readSession('pc-ipc-probe');existed=true;}catch(error){if(error?.code!=='SESSION_QUERY_SESSION_NOT_FOUND')throw error;}await ctx.sessionController.create({sessionId:'pc-ipc-probe',cwd:probeCwd});const s=ctx.sessions.get('pc-ipc-probe');if(!s)throw new Error('probe Session was not created');if(!existed){s.append('turn/start',{turn:1});s.append('turn/end',{turn:1,reason:{kind:'completed'}});}res.end(existed?'reused':'created');return;}
 res.setHeader('content-type','application/json');res.end(JSON.stringify({cancelled}));
 }}));
 }`
@@ -149,7 +152,7 @@ try{
   let stats;for(let i=0;i<50;i++){stats=await(await fetch('/__work/probe')).json();if(stats.cancelled)break;await new Promise(r=>setTimeout(r,50));}
   if(!stats.cancelled)throw new Error('cancellation did not reach Worker');results.checks.push('cancel propagated');
  }
- const session=await fetch('/__work/probe?action=session');if(!session.ok)throw new Error('session fixture failed');results.checks.push('real Session events');
+ const session=await fetch('/__work/probe?action=session');if(!session.ok)throw new Error('session fixture failed ('+session.status+'): '+await session.text());const sessionResult=await session.text();if(sessionResult==='reused')results.checks.push('persisted Session reused across Worker generation');else results.checks.push('real Session events');
  const bootDeadline=performance.now()+30000;
  while(document.querySelector('[data-dsh-boot]')){
   const boot=document.querySelector('[data-dsh-boot]');

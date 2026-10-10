@@ -14,6 +14,7 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/workerchannel"
+	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
 // This explicitly enabled integration uses the installed package managers and
@@ -141,10 +142,23 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 	}
 	work := t.TempDir()
 	home := filepath.Join(work, "home")
+	userData := filepath.Join(work, "user-data")
+	workspace := filepath.Join(work, "workspace")
+	if err := os.MkdirAll(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(userData, 0700); err != nil {
+		t.Fatal(err)
+	}
+	userDataSentinel := filepath.Join(userData, "safe-mode-survives.json")
+	if err := os.WriteFile(userDataSentinel, []byte(`{"safeMode":"shared"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	fixture := filepath.Join(root, "tools", "dsh", "run-dsh.cmd")
 	run := CommandExecutor{}
 	adapter := dshadapter.New(run, dshadapter.SupportedVersion)
 	adapter.SetDiscoveryRoot(root)
+	adapter.SetUserDataDirectory(userData)
 	m, err := dshmanager.New(dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, filepath.Join(work, "runtimes")), NodeResolver: NewRunNodeResolver(run, filepath.Join(work, "runtimes")), ProfileCatalog: adapter, Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}, DefaultRunContext: dshmanager.RunContext{RuntimeID: "fixture", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "home", Name: "web"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +177,7 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 		default:
 		}
 	})
-	h.Start()
+	h.StartWithWorkspace(workspacecontext.Request{ID: "isolated-workspace", Path: workspace, Title: "Isolated workspace"})
 	deadline := time.NewTimer(75 * time.Second)
 	defer deadline.Stop()
 	for ready := false; !ready; {
@@ -181,16 +195,52 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 	if err != nil || s.RestorePoints.LastRunning == "" {
 		t.Fatalf("first boot did not record snapshot: %+v %v", s.RestorePoints, err)
 	}
+	if status := h.Status(); status.Workspace == nil || status.Workspace.Path != workspace {
+		t.Fatalf("real startup lost selected Workspace: %+v", status.Workspace)
+	}
 	id := s.RestorePoints.LastRunning
 	if _, err = m.SaveRestorePoint(context.Background(), "Real first boot"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.EnterSafeMode(context.Background()); err != nil {
+	if _, err = h.EnterSafeModeWithOptions(context.Background(), dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeWithData}); err != nil {
 		t.Fatal(err)
 	}
 	s, err = m.Snapshot(context.Background())
-	if err != nil || s.RestorePoints.LastRunning != id || s.RestorePoints.CanSave {
+	if err != nil || s.RestorePoints.LastRunning != id || s.RestorePoints.CanSave || s.SafeMode == nil || s.SafeMode.Mode != dshmanager.SafeModeWithData {
 		t.Fatalf("safe mode changed normal snapshot: %+v %v", s.RestorePoints, err)
+	}
+	if status := h.Status(); status.Workspace == nil || status.Workspace.Path != workspace {
+		t.Fatalf("safe mode did not restore the selected Workspace: %+v", status.Workspace)
+	}
+	resolved, err := m.ResolveLaunch(context.Background(), dshmanager.LaunchRequest{RuntimeID: s.SafeMode.Target.RuntimeID, Node: s.SafeMode.Target.Node, Profile: s.SafeMode.Target.Profile})
+	if err != nil || !resolved.UserDataOverlay {
+		t.Fatalf("with-data safe-mode launch did not select shared user data: overlay=%v err=%v", resolved.UserDataOverlay, err)
+	}
+	if _, err := h.ExitSafeMode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(userDataSentinel); err != nil {
+		t.Fatalf("safe-mode exit removed shared user data: %v", err)
+	}
+	if status := h.Status(); status.Workspace == nil || status.Workspace.Path != workspace {
+		t.Fatalf("return from safe mode did not restore the selected Workspace: %+v", status.Workspace)
+	}
+	if _, err := h.EnterSafeModeWithOptions(context.Background(), dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeDiagnostic}); err != nil {
+		t.Fatal(err)
+	}
+	s, err = m.Snapshot(context.Background())
+	if err != nil || s.SafeMode == nil || s.SafeMode.Mode != dshmanager.SafeModeDiagnostic {
+		t.Fatalf("diagnostic safe mode did not start: safeMode=%+v err=%v", s.SafeMode, err)
+	}
+	resolved, err = m.ResolveLaunch(context.Background(), dshmanager.LaunchRequest{RuntimeID: s.SafeMode.Target.RuntimeID, Node: s.SafeMode.Target.Node, Profile: s.SafeMode.Target.Profile})
+	if err != nil || resolved.UserDataOverlay {
+		t.Fatalf("diagnostic safe-mode launch selected shared user data: overlay=%v err=%v", resolved.UserDataOverlay, err)
+	}
+	if _, err := h.ExitSafeMode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(userDataSentinel); err != nil {
+		t.Fatalf("diagnostic cleanup removed shared user data: %v", err)
 	}
 	if err = h.ShutdownForApp(); err != nil {
 		t.Fatal(err)
