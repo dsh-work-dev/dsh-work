@@ -5,6 +5,7 @@ html[data-shell] #host-surface { flex: 1; min-height: 0; overflow: auto; }
 html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 
 .shell-bar {
+  position: relative; z-index: 20;
   flex: none; display: flex; align-items: center; height: 40px;
   user-select: none;
 }
@@ -16,6 +17,7 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-controls button:nth-child(2) { --wails-non-client-region: maximize; }
 .shell-controls button:nth-child(3) { --wails-non-client-region: close; }
 .shell-controls { display: flex; align-self: stretch; }
+.shell-controls { position: relative; z-index: 6; }
 .shell-controls[hidden] { display: none; }
 .shell-controls button {
   width: 46px; border: 0; padding: 0; background: transparent; color: inherit;
@@ -25,8 +27,15 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-controls button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
 .shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
-/* Chrome colours follow the DSH surface when the frame reports it. */
-.shell-bar { background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text)); }
+.shell-bar { background: var(--canvas); color: var(--text); }
+.shell-modal-mask {
+  position: absolute; z-index: 5; inset: 0;
+  background: var(--shell-modal-mask, transparent);
+  backdrop-filter: var(--shell-modal-blur, none);
+  -webkit-backdrop-filter: var(--shell-modal-blur, none);
+  cursor: default;
+}
+.shell-modal-mask[hidden] { display: none; }
 .shell-brand img { width: 18px; height: 18px; display: block; }
 .shell-menubar { display: flex; align-self: stretch; align-items: center; gap: 2px; padding-right: 8px; }
 .shell-menu-button {
@@ -41,7 +50,7 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 }
 .shell-menu {
   position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: 8px;
-  background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text));
+  background: var(--canvas); color: var(--text);
   border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
   font-size: var(--fs-control);
 }
@@ -59,7 +68,13 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-toast {
   position: fixed; z-index: 30; top: 48px; left: 50%; transform: translateX(-50%); max-width: min(480px, calc(100vw - 32px));
   padding: 8px 14px; border-radius: 8px; font-size: var(--fs-control);
-  background: var(--shell-surface, var(--canvas)); color: var(--shell-text, var(--text));
+  background: var(--canvas); color: var(--text);
   border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
 .shell-toast[hidden] { display: none; }
+
+/* Settings is a modal surface inside the workbench; DSH stays mounted beneath it. */
+html[data-shell] #manager-surface:not([hidden]) {
+  position: fixed; z-index: 10; inset: 40px 0 0; height: auto; min-height: 0;
+  background: var(--canvas);
+}

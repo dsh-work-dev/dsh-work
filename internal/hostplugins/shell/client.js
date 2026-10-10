@@ -22,13 +22,183 @@ function keyForCode(code) {
   return code;
 }
 
+const dshThemeAliases = {
+  '--dsw-alias-bg-base': 'canvas',
+  '--dsw-alias-bg-layer-1': 'surface',
+  '--dsw-alias-bg-layer-2': 'surface',
+  '--dsw-alias-bg-overlay': 'wash',
+  '--dsw-alias-bg-module-platform': 'nav',
+  '--dsw-alias-bg-multi-select': 'nav',
+  '--dsw-alias-bg-mask-1': 'backdrop',
+  '--dsw-alias-border-l1': 'line',
+  '--dsw-alias-border-l2': 'line',
+  '--dsw-alias-brand-primary': 'accent',
+  '--dsw-alias-brand-text': 'text',
+  '--dsw-alias-button-primary-fill': 'accent',
+  '--dsw-alias-button-primary-hover': 'accentHover',
+  '--dsw-alias-interactive-bg-active': 'selection',
+  '--dsw-alias-interactive-bg-hover': 'hover',
+  '--dsw-alias-interactive-bg-hover-solid': 'hover',
+  '--dsw-alias-label-caption': 'muted',
+  '--dsw-alias-label-primary': 'text',
+  '--dsw-alias-label-primary-foreground': 'onAccent',
+  '--dsw-alias-label-primary-inverted': 'onAccent',
+  '--dsw-alias-label-secondary': 'muted',
+  '--dsw-alias-label-tertiary': 'muted',
+  '--dsw-alias-link': 'accent',
+  '--dsw-alias-state-business-primary': 'accent',
+  '--dsw-alias-state-error-primary': 'failed',
+  '--dsw-specific-sidebar-fill': 'nav',
+};
+const hostAppearanceColors = Object.values(dshThemeAliases);
+
+function parseHostAppearance(value) {
+  if (!value || typeof value !== 'object' || !['light', 'dark'].includes(value.mode) || !value.tokens || typeof value.tokens !== 'object') return null;
+  const tokens = {};
+  for (const key of hostAppearanceColors) {
+    const token = value.tokens[key];
+    if (typeof token !== 'string' || !CSS.supports('color', token)) return null;
+    tokens[key] = token;
+  }
+  return {mode: value.mode, tokens};
+}
+
+const modalSelector = '[role="dialog"][aria-modal="true"], [data-shortcut-modal][role="dialog"]';
+function visibleModal() {
+  return Array.from(document.querySelectorAll(modalSelector)).filter(element => {
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+  }).at(-1);
+}
+
+function modalMaskFor(modal) {
+  let current = modal;
+  while (current?.parentElement && current.parentElement !== document.body) {
+    const parent = current.parentElement;
+    const mask = Array.from(parent.children).find(element => {
+      if (element === current || element.getAttribute('aria-hidden') !== 'true') return false;
+      const name = typeof element.className === 'string' ? element.className : '';
+      return /mask|backdrop/i.test(name);
+    });
+    if (mask) return mask;
+    current = parent;
+  }
+  return null;
+}
+
+function modalMaskStyle(modal) {
+  const mask = modalMaskFor(modal);
+  const bodyStyle = getComputedStyle(document.body);
+  const fallbackBackground = bodyStyle.getPropertyValue('--dsw-alias-bg-mask-1').trim() || 'rgba(0, 0, 0, 0.24)';
+  const fallbackBlur = bodyStyle.getPropertyValue('--dsw-mask-blur').trim() || 'none';
+  if (!mask) return {background: fallbackBackground, blur: fallbackBlur};
+  const style = getComputedStyle(mask);
+  const after = getComputedStyle(mask, '::after');
+  const afterBackground = after.backgroundColor;
+  const background = afterBackground && afterBackground !== 'rgba(0, 0, 0, 0)' ? afterBackground : style.backgroundColor;
+  const blur = style.backdropFilter !== 'none' ? style.backdropFilter : after.backdropFilter;
+  return {
+    background: background && background !== 'rgba(0, 0, 0, 0)' ? background : fallbackBackground,
+    blur: blur && blur !== 'none' ? blur : fallbackBlur,
+  };
+}
+
 function connectShell(ctx) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
   if (!shellOrigin) return;
+  const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
   // The workspace and layout services are optional: the menu keeps working
   // without them, and the commands they serve report unavailable.
   const services = {uiWorkspace: undefined, layout: undefined};
   let report = () => {};
+  let pendingAppearance;
+  let applyHostAppearance = () => {};
+
+  ctx.inject(['theme'], themeContext => {
+    const theme = themeContext.theme;
+    const body = document.body;
+    const originalDark = body.hasAttribute('data-ds-dark-theme');
+    const originalBodyScheme = body.style.getPropertyValue('color-scheme');
+    const originalRootScheme = document.documentElement.style.getPropertyValue('color-scheme');
+    let activeMode;
+    let disposeOverride;
+    const enforceMode = () => {
+      if (!activeMode) return;
+      const isDark = body.hasAttribute('data-ds-dark-theme');
+      if (activeMode === 'dark' && !isDark) body.setAttribute('data-ds-dark-theme', '');
+      else if (activeMode === 'light' && isDark) body.removeAttribute('data-ds-dark-theme');
+      body.style.setProperty('color-scheme', activeMode);
+      document.documentElement.style.setProperty('color-scheme', activeMode);
+    };
+    applyHostAppearance = value => {
+      const appearance = parseHostAppearance(value);
+      if (!appearance) return;
+      pendingAppearance = appearance;
+      activeMode = appearance.mode;
+      enforceMode();
+      if (typeof theme.overrideTokens !== 'function') return;
+      disposeOverride?.();
+      disposeOverride = undefined;
+      const overrides = Object.fromEntries(Object.entries(dshThemeAliases).map(([name, key]) => [name, {
+        light: appearance.tokens[key], dark: appearance.tokens[key],
+      }]));
+      try {
+        // The official token layer composes with DSH and is removed on plugin cleanup.
+        disposeOverride = theme.overrideTokens('@dsh-work/shell', overrides);
+      } catch (error) {
+        console.warn('Could not apply the dsh-work appearance to DSH', error);
+      }
+    };
+    themeContext.effect(() => {
+      const observer = new MutationObserver(enforceMode);
+      observer.observe(body, {attributes: true, attributeFilter: ['data-ds-dark-theme']});
+      return () => observer.disconnect();
+    });
+    if (pendingAppearance) applyHostAppearance(pendingAppearance);
+    themeContext.effect(() => () => {
+      disposeOverride?.();
+      applyHostAppearance = () => {};
+      if (originalDark) body.setAttribute('data-ds-dark-theme', '');
+      else body.removeAttribute('data-ds-dark-theme');
+      if (originalBodyScheme) body.style.setProperty('color-scheme', originalBodyScheme);
+      else body.style.removeProperty('color-scheme');
+      if (originalRootScheme) document.documentElement.style.setProperty('color-scheme', originalRootScheme);
+      else document.documentElement.style.removeProperty('color-scheme');
+    });
+  });
+
+  let modalFrame = 0;
+  let lastModalState = '';
+  const reportModal = () => {
+    const modal = visibleModal();
+    const style = modal ? modalMaskStyle(modal) : {
+      background: getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-mask-1').trim() || 'rgba(0, 0, 0, 0.24)',
+      blur: getComputedStyle(document.body).getPropertyValue('--dsw-mask-blur').trim() || 'none',
+    };
+    const state = {active: !!modal, background: style.background, blur: style.blur};
+    const key = JSON.stringify(state);
+    if (key === lastModalState) return;
+    lastModalState = key;
+    post({type: 'dsh-work/modal-mask', ...state});
+  };
+  ctx.effect(() => {
+    const schedule = () => {
+      if (modalFrame) return;
+      modalFrame = requestAnimationFrame(() => { modalFrame = 0; reportModal(); });
+    };
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.documentElement, {
+      attributes: true, subtree: true,
+      attributeFilter: ['aria-hidden', 'aria-modal', 'class', 'data-shortcut-modal', 'hidden', 'role', 'style'],
+      childList: true,
+    });
+    schedule();
+    return () => {
+      observer.disconnect();
+      if (modalFrame) cancelAnimationFrame(modalFrame);
+    };
+  });
+
   for (const name of Object.keys(services)) {
     ctx.inject([name], ctx => {
       services[name] = ctx[name];
@@ -38,7 +208,6 @@ function connectShell(ctx) {
   }
   ctx.inject(['shortcuts'], ctx => {
     const {catalog, config, fixedCatalog} = ctx.shortcuts;
-    const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
     const entries = () => new Map(catalog.getSnapshot().map(entry => [entry.id, entry]));
     const ready = () => (config?.getSnapshot().status ?? 'ready') === 'ready';
     const hasPublicService = id => id === 'session.new'
@@ -87,6 +256,21 @@ function connectShell(ctx) {
     const onMessage = event => {
       if (event.source !== window.parent || event.origin !== shellOrigin) return;
       const data = event.data;
+      if (data?.version !== 1) return;
+      if (data.type === 'dsh-work/appearance') {
+        const appearance = parseHostAppearance(data);
+        if (appearance) {
+          pendingAppearance = appearance;
+          applyHostAppearance(appearance);
+        }
+        return;
+      }
+      if (data.type === 'dsh-work/modal-mask-click') {
+        const modal = visibleModal();
+        const mask = modal && modalMaskFor(modal);
+        if (mask && mask !== modal) mask.click();
+        return;
+      }
       if (data?.type !== 'dsh-work/command' || !SHELL_COMMANDS.includes(data.id)) return;
       let handled = false;
       try {
@@ -124,6 +308,10 @@ function connectShell(ctx) {
     // Alt pressed alone or F10 opens the shell menu bar, as in a native window.
     let altAlone = false;
     const keydown = event => {
+      if (visibleModal() && (event.key === 'F10' || event.key === 'Alt')) {
+        altAlone = false;
+        return;
+      }
       if (event.key === 'F10' && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
         event.preventDefault();
         post({type: 'dsh-work/menu-key', key: 'F10'});
@@ -201,46 +389,10 @@ function installLinkPolicy() {
     return window;
   });
 }
-function installSurfaceReporter() {
-  const shellOrigin = window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
-  if (!shellOrigin || !document?.documentElement || !document?.createElement) return;
-  let last = '', pending = 0;
-  const resolve = (token, fallback) => {
-    const probe = document.createElement('span');
-    probe.style.cssText = 'position:absolute;visibility:hidden;color:var(' + token + ',' + fallback + ')';
-    document.body.append(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  };
-  const report = () => {
-    pending = 0;
-    if (!document.body) return;
-    const style = getComputedStyle(document.body);
-    const surface = {
-      type: 'dsh-work/surface',
-      background: resolve('--dsw-specific-sidebar-fill', style.backgroundColor),
-      color: style.color,
-      scheme: getComputedStyle(document.documentElement).colorScheme
-    };
-    const key = JSON.stringify(surface);
-    if (key !== last) {
-      last = key;
-      window.parent.postMessage(surface, shellOrigin);
-    }
-  };
-  const schedule = () => { if (!pending) pending = requestAnimationFrame(report); };
-  new MutationObserver(schedule).observe(document.documentElement, {
-    attributes: true, subtree: true, attributeFilter: ['class', 'style', 'data-theme']
-  });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', schedule);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', schedule); else schedule();
-}
 window.__ModuleLoader__.load({id: '@dsh-work/shell', factory: () => ({
   inject: ['shortcuts'],
   apply(ctx) {
     connectShell(ctx);
     installLinkPolicy();
-    installSurfaceReporter();
   }
 })});

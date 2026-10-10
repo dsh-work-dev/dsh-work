@@ -1483,6 +1483,7 @@ export function mountManager() {
     const section = sectionName(event.data);
     if (section === "profiles" && profileView === "detail") { profileView = "list"; renderProfiles(); }
     showSection(section);
+    window.dispatchEvent(new Event("dsh-work:settings-open"));
   });
   Events.On("builtin-components", event => renderBuiltinComponents(event.data));
   void ShellService.GetBuiltinComponents().then(renderBuiltinComponents).catch(() => renderBuiltinComponents(undefined));

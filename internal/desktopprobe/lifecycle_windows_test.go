@@ -300,8 +300,8 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if uiPIDs[0] != uiPIDs[1] {
 		t.Fatalf("reopen replaced hidden UI client: %v", uiPIDs)
 	}
-	// Reuse the hidden UI for a multi-window close. The UI singleton keeps this
-	// process alive, so a second --ui invocation is not expected to replace it.
+	// Reuse the hidden UI for the in-workbench Settings panel. The UI singleton
+	// keeps this process alive, so a second --ui invocation is not expected to replace it.
 	uiPID := uiPIDs[0]
 	if err := uiClient.JSON(context.Background(), "/open", "", nil); err != nil {
 		t.Fatal(err)
@@ -310,21 +310,21 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUntil(t, 5*time.Second, func() bool {
-		return workbenchVisible(uiPID) && nativeWindowVisible(uiPID, "设置")
+		return workbenchVisible(uiPID) && !nativeWindowVisible(uiPID, "设置")
 	})
-	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, 5*time.Second, func() bool { return nativeWindowVisible(uiPID, "设置") })
-	if !processAlive(uiPID) {
-		t.Fatal("closing workbench also closed Settings")
-	}
 	if err := uiClient.JSON(context.Background(), "/close", "settings", nil); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, 5*time.Second, func() bool { return !nativeWindowVisible(uiPID, "设置") })
+	waitUntil(t, 5*time.Second, func() bool { return workbenchVisible(uiPID) })
 	if !processAlive(uiPID) {
-		t.Fatal("closing Settings exited the hidden UI client")
+		t.Fatal("closing Settings exited the visible workbench")
+	}
+	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool { return !workbenchVisible(uiPID) })
+	if !processAlive(uiPID) {
+		t.Fatal("closing the workbench exited the hidden UI client")
 	}
 	if err := uiClient.JSON(context.Background(), "/stop", nil, nil); err != nil {
 		t.Fatal(err)

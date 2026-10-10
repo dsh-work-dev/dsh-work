@@ -1010,9 +1010,9 @@ func (r managerCommandRunner) Run(ctx context.Context, executable string, args [
 	return dshmanager.CommandResult{Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-func settingsURL(manager managerSnapshotReader, section string) string {
+func workspaceURL(manager managerSnapshotReader, section string) string {
 	values := url.Values{}
-	values.Set("surface", "settings")
+	values.Set("shell", "1")
 	if section != "" {
 		values.Set("section", section)
 	}

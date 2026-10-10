@@ -159,7 +159,7 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/command", id: "session.new"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/menu-key", key: "Tab"}), null);
   assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/menu-key", key: "F10"}), {type: "menu-key"});
-  assert.deepEqual(parseFrameMessage({type: "dsh-work/surface", background: "rgb(1, 2, 3)", color: "red"}), {type: "surface", background: "rgb(1, 2, 3)", color: "red"});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/modal-mask", active: true, background: "rgb(1, 2, 3)", blur: "blur(4px)"}), {type: "modal-mask", active: true, background: "rgb(1, 2, 3)", blur: "blur(4px)"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/command-result", id: "session.new", handled: false}), {type: "command-result", id: "session.new", handled: false});
   assert.equal(parseFrameMessage({type: "dsh-work/command-result", id: "plugin.private", handled: false}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/window-key", action: "zoom-in"}), {type: "window-key", action: "zoom-in"});

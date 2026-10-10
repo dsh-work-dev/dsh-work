@@ -4,6 +4,7 @@ import {icon} from "./ui/icons";
 export interface MenuBar {
   element: HTMLElement;
   render(state: MenuState): void;
+  close(): void;
   /** Focus the menu bar from the keyboard (Alt or F10). */
   focus(): void;
 }
@@ -156,5 +157,5 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     if (openIndex >= 0) open(openIndex, false);
   };
 
-  return {element: bar, render, focus: () => buttons()[0]?.focus()};
+  return {element: bar, render, close: () => close(false), focus: () => buttons()[0]?.focus()};
 }

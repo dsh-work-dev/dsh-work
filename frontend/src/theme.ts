@@ -34,6 +34,7 @@ export function applyAppearance(value: AppearanceInput) {
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
   try { localStorage.setItem(cacheKey, JSON.stringify(current)); } catch { /* cache only */ }
+  window.dispatchEvent(new Event("dsh-work:appearance"));
 }
 
 export function currentAppearance() {
