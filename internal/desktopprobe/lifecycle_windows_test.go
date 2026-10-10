@@ -384,7 +384,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if json.Unmarshal(sampleData, &sample) != nil || sample.Error != "" || len(sample.UDPEndpoints) != 0 {
 		t.Fatalf("process/network sample: %s", sampleData)
 	}
-	// ADR-0022: the daemon's account sign-in callback is the only listener, on
+	// The daemon's account sign-in callback is the only listener, on
 	// the 127.0.0.1 port the daemon reports for it.
 	callback, err := url.Parse(baseline.AccountCallback)
 	if err != nil || callback.Scheme != "http" || callback.Hostname() != "127.0.0.1" || callback.Port() == "" {

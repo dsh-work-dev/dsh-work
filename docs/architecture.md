@@ -25,6 +25,16 @@ its windows and projects daemon state. A UI process crash therefore leaves the
 Worker and its tasks running. The DSH Worker and rendered Workspace content
 cannot grant themselves Host capabilities.
 
+The Host is Go and Wails 3; DSH runs as a separate, supervised process of one
+exact version. DSH, Wails and platform behaviour sit behind adapters, and
+embedded content gets no broad native bridge.
+
+The daemon is a separate process so that tasks survive a crash of the whole UI
+process, not only a hidden window; portless communication alone would not
+require the split. The cost is a local transport hop and typed projection of
+state and events. The daemon is neither a remote access service nor a
+system-wide Windows service.
+
 ## Implemented modules
 
 | Module | Responsibility |
@@ -114,8 +124,10 @@ On Windows, the Wails 3 AssetServer response writer buffers its output until the
 handler finishes and does not expose `http.Flusher`, and requests carry no
 WebView cancellation. The asset path is therefore used only for requests whose
 complete bodies are acceptable; the Gateway stream, uploads and exports use the
-carriers above. The Go proxy validates relative paths, removes hop-by-hop and
-credential headers, sets the internal Origin and checks the generation.
+carriers above. The Go proxy validates relative paths, rejects CONNECT and
+TRACE, removes hop-by-hop and credential headers, sets the internal Origin and
+checks the generation. Revisit the dedicated carriers when the Wails HTTP
+handler can stream and upgrade.
 
 The workbench window (`workspace`) hosts the trusted shell document at
 `http://wails.localhost`; Settings has its own trusted window. DSH runs in an
@@ -146,6 +158,13 @@ The byte streams use 64 KiB chunks, upload acknowledgements and download
 credits; HTTP full duplex and an independent bounded upload writer keep credits
 and cancellation live during an upload. Every stream names its document
 generation. Worker authentication cookies stay in the Host cookie jar.
+
+Serving the DSH page from DSH's own loopback HTTP server is rejected. DSH's
+`SameSite=Strict` session cookie is not sent from a cross-site iframe, and the
+only working workaround, turning off DSH session authentication, would let any
+local process drive the agent. Measured in the WebView, the stream path costs
+about 1 ms per message round trip and carries about 116 MB/s; a direct
+WebSocket is faster, but not visibly in the UI.
 
 ### Page bootstrap and host plugins
 
@@ -184,7 +203,21 @@ the same for its `dsh-app://` page.
 
 The link policy sends links and `window.open` calls to other origins to the
 system browser and drops same-origin new-window requests, so DSH never runs as
-an unmanaged top-level page outside the shell.
+an unmanaged top-level page outside the shell. Revisit this if DSH starts
+relying on same-origin pop-ups.
+
+Each concern has one named, testable owner. Adapting routes by exact path
+leaves every other plugin's `fetch`, `WebSocket`, `window.open` and link clicks
+untouched, and because the host plugins load independently of user data, safe
+mode keeps the menus, sign-in and the pet. Not chosen: starting DSH as a
+library (`runProfile` offers no seam for the pipe carrier), and the full
+Electron desktop runtime (`dshDesktop.keyboard`, shortcut storage and native
+key capture), which may be revisited later.
+
+The adapters and `ownsHost` depend on DSH 0.2.x page globals
+(`__DSH_TRANSPORT__`, the `dsh-file-upload` Worker name, the export route) with
+no stability promise; `TestRealShellFrame` and the host-plugin tests guard them
+on each DSH upgrade.
 
 The daemon owns the Worker independently of UI visibility and process lifetime.
 Restart closes streams and the pipe, verifies the process boundary, then starts
@@ -245,6 +278,34 @@ application later claims `dsh://`. Both `dsh://open` and `dsh-work://open`
 focus or open the workspace. macOS and Linux declare the same schemes through
 the Wails build configuration.
 
+The callback listener is the one exception to "no TCP listener". It accepts no
+Worker traffic and only local requests. Revisit it if DSH offers a callback
+that does not need a loopback origin.
+
+## Runtime catalog
+
+dsh-work keeps an external catalog of exact-version DSH runtimes and explicit
+Node, data-directory and profile selections. Normal startup resolves local
+files only. Version recovery is the separate path that force-reinstalls the
+recorded DSH version into its managed directory through npm or pnpm and may
+download packages; a matching version alone does not skip repair.
+
+Each runtime owns independent files. pnpm installs use
+`package-import-method=clone-or-copy` instead of hard-linking from the user's
+store, because Windows refuses to delete any link of a native module that a
+running Worker has mapped, so a shared file would pin every other runtime.
+Copy-on-write clones are used where the volume supports them; otherwise each
+runtime costs a full copy on disk. The store location is left to the user's
+pnpm configuration.
+
+Removing a runtime first renames its directory aside inside the store, then
+deletes it. The catalog is updated once the rename succeeds; a locked file
+that blocks the rename fails the removal with the runtime intact. Deletion
+after the rename is best effort: a file still held open stays aside and is
+retried on later removals without blocking them. Directories not in the
+catalog are never swept, because a lost or reset manager state would otherwise
+delete every installed runtime.
+
 ## Launch adapter and byte semantics
 
 The desktop carrier preserves upstream opaque resource queries, including DSH
@@ -274,6 +335,40 @@ covering snapshot inputs, per-profile success pointers and recovery progress.
 Saving uses an atomic replace so a completed write contains one complete set of
 known fields. A malformed required identity is reported as invalid manager
 state instead of being used for a launch.
+
+Without a marker, startup asks whether the selected configuration is usable
+rather than whether a marker matches the running build; the required identity
+checks still keep an ambiguous or incomplete selection from reaching launch.
+Global Host preferences are a separate, versioned `internal/settings` contract
+stored apart from DSH data.
+
+## Plugin activation
+
+When a profile's Worker is Ready, enabling or disabling a plugin bundle or an
+official loader entry calls DSH's own PluginManager Remote methods,
+`setBundleEnabled` and `setPluginEnabled`, over the current Worker's
+authenticated session. The Host checks that the session generation matches the
+current Host generation and that the target is the running profile. DSH saves
+and applies the change, including dependency retention and runtime unload.
+Switches appear only where PluginManager reports an item can be toggled; a
+non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
+disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
+commands through the manager.
+
+A failed start has no Worker to call. The startup window can then disable a
+third-party bundle that the failure output names, with the switch lock held,
+no Run context current, and the package confirmed as an installed,
+non-`@deepseek-ai` bundle of the failed profile. It removes the package from
+the profile manifest's `dsh.profile.bundles`, keeping the installed files and
+loader patches, and starts again; this is the same persisted choice as
+`setBundleEnabled(name, false)`. The DSH adapter reads the packages named in
+the captured output. Only third-party packages installed in the failed profile
+are offered, and a failure caused by DSH rejecting its own stored session data
+offers none, because the plugin that reported it did not cause it.
+
+Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
+unload semantics as they change. The cost is that activation changes need a
+running Worker, apart from the startup-failure path.
 
 ## Version recovery and window geometry
 
@@ -327,6 +422,10 @@ capabilities.
 5. Workspace navigation occurs only after authenticated readiness checks.
 6. Run-context switching stops and verifies the old generation before starting
    a candidate. Candidate and previous Worker generations never overlap.
+   Manager operations are serialized across desktop and CLI. Normal plugin
+   changes require the current healthy profile; recovery reapplies recorded
+   inputs after the Worker has stopped. Startup-failure bundle deselection
+   ([Plugin activation](#plugin-activation)) is the one exception.
 7. Readiness establishes the current Worker. It requires the authenticated
    channel checks and a terminal report from the current generation's WebView.
    The report says whether DSH replaced its boot placeholder
@@ -362,7 +461,22 @@ Windows caption uses) and text colour, reported by the injected bridge, so the
 chrome continues DSH's surface in light and dark. Before DSH is ready it uses
 dsh-work's own tokens.
 
-The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`):
+The shell owns every host command (restart, quit, update, Settings), so none is
+reachable from DSH plugins, and the chrome and recovery entry stay usable when
+DSH hangs or fails. A later same-window Settings panel reuses the same
+origin-based trust. DSH loses its Electron caption layout and runs as a plain
+web page under the bar. Rejected: drawing the bar inside the DSH document (host
+commands reachable from DSH plugins, chrome dies with DSH); two native WebViews
+in one window (no Wails API, and shell menus could not overlay DSH); a coloured
+native title bar (the menu stays on its own row); switching to Electron
+(rewrites the host). Composition hosting is an experimental Wails 3 beta
+option and is covered by the same `TestRealShellFrame` check after upgrades.
+
+The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`). Menus are
+grouped by what the user does, not by who implements an item. Per-session
+actions (rename, fork, archive, stop) stay in DSH's own menus; environment
+switching and version records stay in Settings Overview. Not offered: new
+window, command palette, focus mode, always on top and recent workspaces.
 
 | Menu | Items (DSH commands marked *) |
 |---|---|
@@ -411,6 +525,11 @@ shows that the command could not run. The plugin also forwards Alt pressed
 alone and F10, which focus the menu bar, and the window keys above. Shell and plugin accept messages only from each other's
 window and origin.
 
+DSH's official desktop menu path (`dshDesktop.keyboard`) is active only in its
+Electron desktop runtime, so dispatching bindings is the available route. It
+depends on DSH accepting script keyboard events; revisit it if DSH publishes a
+plugin command invoke.
+
 Settings is a separate window with its own locale-aware title and no menu. The
 tray belongs to the daemon and can open Settings or the workbench, restart DSH,
 and explicitly stop the background. Pet and native notification adapters remain
@@ -425,7 +544,11 @@ native ShowWindow request and must not be used for the UI launch.
 
 The shared Supervisor contract compiles for Windows, macOS and Linux. Windows
 has the production process-ownership implementation and daemon named-pipe
-transport. The daemon transport returns an unsupported-platform error on other
+transport. It uses `golang.org/x/sys/windows` to create the Worker suspended,
+assign it to a kill-on-close Job Object before resume, limit inherited handles
+and verify bounded cleanup; the more focused libraries evaluated did not cover
+that whole launch contract. Settings and manager files are written with a
+native replace/write-through operation behind the same boundary. The daemon transport returns an unsupported-platform error on other
 targets. Other targets must not be
 described as production-equivalent until native ownership and packaging tests
 exist.

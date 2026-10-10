@@ -30,3 +30,14 @@
 - This repository keeps `.research/` and `.evolve/` local and out of Git. Keep the
   repository RED Skill and `red.toml` tracked.
 - Run `red check --json` after changing RED configuration or artifacts.
+
+## Design decisions
+
+- There is no separate ADR register. Write a key technical decision (boundary,
+  transport, persistence contract, justified dependency, dsh-work/DSH
+  ownership) in the `docs/` section for the feature or architecture it
+  governs, with the reason, rejected options and revisit conditions that still
+  apply.
+- Describe only the current decision. When it changes, rewrite that section in
+  place; do not keep the old wording or a "superseded" note. Git keeps the
+  history.
