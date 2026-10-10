@@ -155,6 +155,43 @@ func TestRealShellFrame(t *testing.T) {
 	if safeFrame.UIPID != result.UIPID || safeFrame.Framed.PreviousGeneration != second.Status.GenerationID {
 		t.Fatalf("safe-mode frame did not reuse the desktop shell: first=%+v safe=%+v", result.Framed, safeFrame.Framed)
 	}
+	var pointSnapshot dshmanager.Snapshot
+	if err := client.Call(context.Background(), "ManagerService", "GetSnapshot", "settings", nil, &pointSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	pointID := pointSnapshot.RestorePoints.LastRunning
+	if pointID == "" {
+		t.Fatal("normal startup did not create a version restore point")
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Minute)
+	var restoredSnapshot dshmanager.Snapshot
+	err = client.Call(ctx, "ManagerService", "RestorePoint", "settings", []any{pointID}, &restoredSnapshot)
+	cancel()
+	if err != nil {
+		var afterFailure dshmanager.Snapshot
+		stateErr := client.Call(context.Background(), "ManagerService", "GetSnapshot", "settings", nil, &afterFailure)
+		t.Fatalf("same-version restore from safe mode failed: point=%s err=%v stateErr=%v state=%+v", pointID, err, stateErr, afterFailure)
+	}
+	if restoredSnapshot.SafeMode != nil || restoredSnapshot.Current == nil || restoredSnapshot.RestorePoints.Operation == nil || restoredSnapshot.RestorePoints.Operation.Status != "completed" {
+		t.Fatalf("same-version restore did not commit a normal run context: safeMode=%+v current=%+v operation=%+v", restoredSnapshot.SafeMode, restoredSnapshot.Current, restoredSnapshot.RestorePoints.Operation)
+	}
+	recovered := ready(safe.Status.GenerationID)
+	recoveredFrame := read(report + ".4")
+	if recoveredFrame.UIPID != result.UIPID || recoveredFrame.Framed.PreviousGeneration != safe.Status.GenerationID {
+		t.Fatalf("restored environment did not reuse the shell WebView: first=%+v restored=%+v", result.Framed, recoveredFrame.Framed)
+	}
+	if _, err := os.Stat(userDataSentinel); err != nil {
+		t.Fatalf("version restore removed shared user data: %v", err)
+	}
+	var safeAgain dshmanager.Snapshot
+	if err := client.Call(context.Background(), "ManagerService", "EnterSafeModeWithOptions", "workspace", []any{dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeWithData}}, &safeAgain); err != nil {
+		t.Fatal(err)
+	}
+	if safeAgain.SafeMode == nil || safeAgain.SafeMode.Mode != dshmanager.SafeModeWithData {
+		t.Fatalf("desktop probe could not re-enter safe mode after restore: %+v", safeAgain.SafeMode)
+	}
+	safeAfterRestore := ready(recovered.Status.GenerationID)
+	_ = read(report + ".5")
 
 	var returned dshmanager.Snapshot
 	if err := client.Call(context.Background(), "ManagerService", "ExitSafeMode", "workspace", nil, &returned); err != nil {
@@ -163,9 +200,9 @@ func TestRealShellFrame(t *testing.T) {
 	if returned.SafeMode != nil {
 		t.Fatalf("desktop probe returned while safe mode remained configured: %+v", returned.SafeMode)
 	}
-	normal := ready(safe.Status.GenerationID)
-	finalFrame := read(report + ".4")
-	if finalFrame.UIPID != result.UIPID || finalFrame.Framed.PreviousGeneration != safe.Status.GenerationID {
+	normal := ready(safeAfterRestore.Status.GenerationID)
+	finalFrame := read(report + ".6")
+	if finalFrame.UIPID != result.UIPID || finalFrame.Framed.PreviousGeneration != safeAfterRestore.Status.GenerationID {
 		t.Fatalf("return from safe mode replaced the desktop shell: first=%+v normal=%+v", result.Framed, finalFrame.Framed)
 	}
 	if _, err := os.Stat(userDataSentinel); err != nil {
