@@ -21,6 +21,9 @@
 - Do not expose implementation instructions, architecture rules, acceptance
   criteria, storage keys or internal enum names as UI copy.
 - Prefer concise labels and one short sentence when context is necessary.
+- The Host has one locale (`en`, `zh-CN`, `ja-JP`). Trusted WebViews and
+  native menu and tray chrome use the same typed vocabulary; DSH content is
+  not translated or modified.
 - Every applicable surface covers initial, loading, ready, busy, disabled,
   waiting, cancelled, recoverable failure and terminal failure states.
 - Use a named current step instead of a blank view, indefinite unlabeled spinner
@@ -32,6 +35,11 @@
 
 ## Visual system
 
+- Startup and Settings share one stylesheet stack under `frontend/src/ui/`:
+  tokens, base, components, layout, then page files. Layout owns structure,
+  order, slots, spacing rhythm and breakpoints; a theme supplies token values
+  and optional ornaments and never changes structure. The startup window
+  reserves a backdrop layer for a theme's ambient effect.
 - Feature code consumes semantic color, typography, spacing, border, elevation
   and motion tokens instead of inventing local constants.
 - Express hierarchy primarily through alignment, spacing and typography. Layout
@@ -52,7 +60,9 @@
   overriding component rules. When a theme needs a look no token covers, add a
   token whose default keeps the current appearance and move every theme to it.
   Theme files keep only decoration that tokens cannot express (inset row
-  dividers, raised panels, bevels, glow).
+  dividers, raised panels, bevels, glow). Per-theme overrides drift per
+  surface and make each new theme repeat geometry fixes; the cost of tokens is
+  a larger set in `tokens.css`.
 - Within one theme a component looks the same wherever it appears; it does not
   change with the page or container it sits in.
 - Product-style themes (ChatGPT, Claude, GitHub, LobeHub) take their values
@@ -60,7 +70,9 @@
   from its current settings page. Where a value leaves text below 4.5:1
   against its actual background, the theme darkens or lightens that one value;
   control borders and switch tracks follow the product even below 3:1, because
-  the label inside or beside the control identifies it.
+  the label inside or beside the control identifies it. An impression of the
+  brand drifts toward generic habits the products do not use. Revisit a
+  product-style theme when that product's settings page changes visibly.
 - Do not mark the current or selected item with a thick accent bar on one side
   unless the style being reproduced has one (GitHub's sidebar does). Themes
   show current and selected state through background, weight or their own
@@ -79,10 +91,16 @@
   and the search field's clear button uses the muted text colour.
 - Selection, focus, warning and failure must remain distinguishable without
   relying on color alone.
-- dsh-work owns the appearance of its trusted surfaces and publishes each saved
-  change to every window. DSH content keeps DSH's `ui-theme.preference`.
-- Use one maintained icon family (lucide, see ADR-0023). Do not use emoji or improvised text glyphs as
-  production controls.
+- dsh-work owns the appearance of its trusted surfaces (`settings.Appearance`:
+  theme id and system/light/dark mode). SettingsService is the only writer and
+  publishes each saved change to every window as the `appearance` event. DSH
+  content keeps DSH's `ui-theme.preference`. Native window frames take the
+  mode when the window is created; Wails 3 beta has no runtime frame-theme
+  switch.
+- Use one maintained icon family, `lucide` (ISC, tree-shaken ES modules,
+  stroke icons whose weight and caps follow tokens); only imported icons ship.
+  Do not use emoji, improvised text glyphs or a hand-drawn set as production
+  controls.
 
 ## Interaction and accessibility
 

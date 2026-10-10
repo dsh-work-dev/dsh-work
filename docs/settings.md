@@ -30,7 +30,7 @@ history or dense record detail can justify a management dialog; a simple set of
 controls does not require a summary screen merely for consistency.
 
 Startup, Settings and their dialogs share one theme-neutral layout (see
-ADR-0023). The default theme is square and monochrome with system sans-serif
+[Interface standards](standards/interface.md#visual-system)). The default theme is square and monochrome with system sans-serif
 type; monospace is limited to versions, paths and logs. Other themes may
 restyle the content area boldly but never change page structure, order or
 copy. General lists Theme and

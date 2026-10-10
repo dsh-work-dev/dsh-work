@@ -80,7 +80,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	var applicationShuttingDown atomic.Bool
 	current := state
 	// One frameless workbench window hosts the trusted shell document; DSH runs
-	// in a frame on its own authority (ADR-0024).
+	// in a frame on its own authority (docs/architecture.md, Windows and menus).
 	var workerSurface *desktopbridge.Surface
 	workerSurface = &desktopbridge.Surface{Host: shellWorkerHost, Window: func() application.Window {
 		windowMu.Lock()

@@ -121,7 +121,8 @@ bin\dsh-work-cli.exe plugin list --data-directory dsh-work --profile web
   bounded lifetime.
 - Propagate cancellation and verify cleanup on every terminal path.
 - Preserve user-owned DSH data by default. Safely replace persisted dsh-work
-  state; the manager State follows the field-compatible contract in ADR-0009,
+  state; the manager State follows the field-compatible contract in
+  [Manager persistence](docs/architecture.md#manager-persistence),
   while global Host preferences remain versioned.
 - Never expose arbitrary native methods to WebView content or log credentials,
   cookies, sensitive form values or full page content.
@@ -157,7 +158,8 @@ tokens or raw diagnostic bundles.
 Before review, confirm that:
 
 - observable behavior and accepted documentation agree;
-- boundary or dependency decisions are reflected in `docs/decisions.md`;
+- boundary or dependency decisions are stated, with their reasons, in the
+  document section for the feature or boundary they govern;
 - cancellation, failure and cleanup paths are tested;
 - persisted or wire-format changes document their compatibility contract;
   versioned contracts carry a marker, while explicitly field-compatible

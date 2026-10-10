@@ -39,7 +39,8 @@ type Snapshot struct {
 	Cursor        uint64
 	Diagnostics   supervisor.Diagnostics
 	// AccountCallback is the origin of the daemon's account sign-in callback
-	// listener (ADR-0022), or empty when it is unavailable.
+	// listener (docs/architecture.md, Account sign-in), or empty when it is
+	// unavailable.
 	AccountCallback string
 }
 type Server struct {

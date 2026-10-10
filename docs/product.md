@@ -85,7 +85,9 @@ silently mutate DSH-owned data.
   Completed, interaction-required and error notifications are enabled by
   default; routine lifecycle notifications are disabled.
 - Routine completion delivery is suppressed while the Workspace is active.
-  Notification preferences do not hide DSH-owned in-page notices.
+  Notification preferences do not hide DSH-owned in-page notices. A failed
+  native delivery is recorded as a diagnostic and does not change the outcome
+  of the event that caused it.
 - dsh-work persists the appearance of its own windows (General → Theme and
   Appearance). A theme offers only the light/dark modes it supports; choosing
   a theme without the current mode switches to one it supports. It does not change DSH's appearance, and DSH
