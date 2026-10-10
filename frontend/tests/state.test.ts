@@ -7,6 +7,7 @@ import {buildOverviewModel, sameRunContext} from "../src/overview";
 import {filterLoaderLayers, mergePluginObservation, runtimePreparationArtifactKind, runtimePreparationProgressPercent} from "../src/manager";
 import {hasTranslationInEveryLocale, isStaticCopy} from "../src/i18n";
 import {DataDirectoryOwnership, NodeSelectionKind, RuntimeSource, ThemePreference, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {safeModeActive} from "../src/recovery";
 
 const status = (overrides: Partial<LifecycleStatus>): LifecycleStatus => ({
   state: "Starting",
@@ -148,6 +149,28 @@ test("overview shows the configured context when DSH is stopped", () => {
   assert.equal(model.configured?.dataDirectory?.name, "dsh-work DSH data directory");
   assert.equal(model.configured?.target?.profile.name, "coding");
   assert.equal(model.state, "not-running");
+});
+
+test("safe mode follows the active safe profile and keeps the failed target separate", () => {
+  const original = {runtimeId: "dsh-current", node: {kind: NodeSelectionKind.NodeSelectionSystem}, profile: {dataDirectoryId: "dsh-work", name: "web"}};
+  const safe = {runtimeId: "dsh-current", node: {kind: NodeSelectionKind.NodeSelectionSystem}, profile: {dataDirectoryId: "dsh-work-safe-mode", name: "web"}};
+  const snapshot = managerSnapshot({
+    current: safe,
+    safeMode: {mode: "with-data", target: safe, faultTarget: original, returnTo: original}
+  } as unknown as Partial<Snapshot>);
+
+  assert.equal(safeModeActive(snapshot), true);
+  assert.equal(safeModeActive(managerSnapshot({
+    current: original,
+    configured: safe,
+    safeMode: snapshot.safeMode
+  })), false);
+  assert.equal(safeModeActive(managerSnapshot({
+    configured: safe,
+    safeMode: snapshot.safeMode
+  })), true);
+  assert.equal(snapshot.safeMode?.faultTarget.profile.name, "web");
+  assert.equal(snapshot.safeMode?.returnTo.profile.name, "web");
 });
 
 test("runtime acquisition progress keeps Node and DSH cards independent", () => {

@@ -1,5 +1,6 @@
-import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {ProfileBackupResult, ProfileCloneResult, ProfileRef, Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {SafeModeMode} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {currentLocale, t} from "./i18n";
 
 export function safeModeActive(snapshot?: Snapshot): boolean {
@@ -22,6 +23,12 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   const openButton = document.getElementById("backup-open") as HTMLButtonElement;
   const refreshButton = document.getElementById("backup-refresh") as HTMLButtonElement;
   const safeButton = document.getElementById("manager-safe-mode") as HTMLButtonElement;
+  const diagnosticButton = document.getElementById("manager-safe-diagnostic") as HTMLButtonElement;
+  const tryButton = document.getElementById("manager-safe-try") as HTMLButtonElement;
+  const returnButton = document.getElementById("manager-safe-return") as HTMLButtonElement;
+  const safeState = document.getElementById("manager-safe-state")!;
+  const safeRepair = document.getElementById("safe-repair")!;
+  const safePlugins = document.getElementById("safe-plugin-list")!;
   const safeFeedback = document.getElementById("safe-feedback")!;
   const backupResult = document.getElementById("profile-backup-result")!;
   const backupMessage = document.getElementById("profile-backup-message")!;
@@ -34,13 +41,60 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   let request = 0;
 
   function controls() {
+    const active = safeModeActive(snapshot);
     historyOpen.disabled = !selectedProfile;
     importButton.disabled = busy || blocked || !(snapshot?.current ?? snapshot?.configured);
     for (const button of [openButton, refreshButton, ...Array.from(list.querySelectorAll<HTMLButtonElement>("button"))]) button.disabled = busy || blocked || !selectedProfile;
-    safeButton.disabled = busy || blocked || !snapshot?.configured;
+    safeButton.disabled = diagnosticButton.disabled = busy || blocked || !snapshot?.configured;
+    tryButton.disabled = returnButton.disabled = busy || blocked || !active;
     backupOpen.disabled = busy || !createdBackup;
-    safeButton.classList.toggle("button-primary", !!snapshot?.lastSwitchAttempt);
-    safeButton.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
+    safeButton.hidden = diagnosticButton.hidden = active;
+    tryButton.hidden = returnButton.hidden = !active;
+    safeState.textContent = active
+      ? t(snapshot?.safeMode?.mode === "with-data" ? "safe.activeData" : "safe.activeDiagnostic")
+      : t("safe.description");
+    safeRepair.hidden = !active;
+    renderSafePlugins();
+  }
+
+  function renderSafePlugins() {
+    safePlugins.replaceChildren();
+    if (!safeModeActive(snapshot) || !snapshot?.safeMode) return;
+    const target = snapshot.safeMode.faultTarget;
+    const profile = snapshot.profiles?.find(item => item.ref.dataDirectoryId === target.profile.dataDirectoryId && item.ref.name === target.profile.name);
+    const plugins = (profile?.plugins ?? []).filter(plugin => plugin.installed && !(plugin.package || plugin.name).startsWith("@deepseek-ai/"));
+    if (plugins.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = t("safe.noPlugins");
+      safePlugins.append(empty);
+      return;
+    }
+    for (const plugin of plugins) {
+      const packageName = plugin.package || plugin.name;
+      const row = document.createElement("div"); row.className = "row";
+      const name = document.createElement("span"); name.className = "row-main mono"; name.textContent = packageName;
+      const disable = document.createElement("button"); disable.type = "button"; disable.className = "button button-compact"; disable.textContent = t("action.disable");
+      disable.disabled = busy || blocked;
+      disable.onclick = () => {
+        if (!window.confirm(t("fault.confirmDisable", {plugin: packageName}))) return;
+        void run(async () => {
+          updated(await HostService.RepairSafeModePlugin(packageName, "disable"));
+          safeFeedback.textContent = t("safe.pluginDisabled", {plugin: packageName});
+        }, true);
+      };
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "button button-compact button-quiet"; remove.textContent = t("action.remove");
+      remove.disabled = busy || blocked;
+      remove.onclick = () => {
+        if (!window.confirm(t("fault.confirmRemove", {plugin: packageName}))) return;
+        void run(async () => {
+          updated(await HostService.RepairSafeModePlugin(packageName, "remove"));
+          safeFeedback.textContent = t("safe.pluginRemoved", {plugin: packageName});
+        }, true);
+      };
+      const actions = document.createElement("div"); actions.className = "row-trail"; actions.append(disable, remove);
+      row.append(name, actions); safePlugins.append(row);
+    }
   }
 
   async function refresh() {
@@ -128,7 +182,16 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     finally { controls(); }
   })());
   safeButton.addEventListener("click", () => void run(async () => {
-    updated(await (safeModeActive(snapshot) ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode()));
+    updated(await ManagerService.EnterSafeModeWithOptions({mode: SafeModeMode.SafeModeWithData}));
+  }, true));
+  diagnosticButton.addEventListener("click", () => void run(async () => {
+    updated(await ManagerService.EnterSafeModeWithOptions({mode: SafeModeMode.SafeModeDiagnostic}));
+  }, true));
+  tryButton.addEventListener("click", () => void run(async () => {
+    updated(await ManagerService.TrySafeModeTarget());
+  }, true));
+  returnButton.addEventListener("click", () => void run(async () => {
+    updated(await ManagerService.ExitSafeMode());
   }, true));
   controls();
   return {

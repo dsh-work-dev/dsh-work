@@ -14,7 +14,7 @@ export interface MenuState {
   busy: boolean;
   pet: {ready: boolean; visible: boolean};
   /** Null until the environment snapshot is read. */
-  safeMode: {available: boolean; active: boolean} | null;
+  safeMode: {available: boolean; active: boolean; mode?: "with-data" | "diagnostic"} | null;
   updatePhase: string;
   /** The workbench window's state; zoom is the WebView factor, 1 at actual size. */
   window: {fullscreen: boolean; zoom: number};
@@ -49,7 +49,8 @@ export function windowKeyAction(event: KeyFacts): WindowAction | undefined {
 export type LinkTarget = "docs" | "feedback-desktop" | "feedback-dsh";
 export type MenuAction =
   | {kind: "settings"; section: SettingsSection} | {kind: "window"; action: WindowAction} | {kind: "link"; target: LinkTarget}
-  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "safe-mode"} | {kind: "quit"}
+  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "safe-mode"; mode: "with-data" | "diagnostic"}
+  | {kind: "safe-mode-exit"} | {kind: "safe-mode-try"} | {kind: "quit"}
   | {kind: "update"} | {kind: "about"} | {kind: "diagnostics"} | {kind: "devtools"} | {kind: "dsh"; id: string};
 export interface MenuItem { type: "item"; key: string; label: string; enabled: boolean; checked?: boolean; keys?: string[]; hint?: string; action: MenuAction }
 export interface MenuSeparator { type: "separator" }
@@ -84,6 +85,20 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       action: {kind: "dsh", id},
     };
   };
+  const safeItems: MenuItem[] = [];
+  if (state.safeMode?.active) {
+    safeItems.push(
+      host("tryNormal", {kind: "safe-mode-try"}, restartable),
+      host("exitSafeMode", {kind: "safe-mode-exit"}, restartable),
+    );
+    const nextMode = state.safeMode.mode === "with-data" ? "diagnostic" : "with-data";
+    safeItems.push({type: "item", key: "safeModeChange", label: t(nextMode === "with-data" ? "shell.menu.safeWithData" : "shell.menu.safeDiagnostic"), enabled: restartable && state.safeMode.available, action: {kind: "safe-mode", mode: nextMode}});
+  } else {
+    safeItems.push(
+      host("safeWithData", {kind: "safe-mode", mode: "with-data"}, restartable && state.safeMode?.available === true),
+      host("safeDiagnostic", {kind: "safe-mode", mode: "diagnostic"}, restartable && state.safeMode?.available === true),
+    );
+  }
   return [
     {id: "file", label: t("shell.menu.file"), badge: false, items: [
       dsh("session.new"), dsh("session.search"), dsh("workspace.add"),
@@ -108,7 +123,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       host("refresh", {kind: "refresh"}, state.framed),
       host("restart", {kind: "restart"}, restartable),
       separator,
-      {...host(state.safeMode?.active ? "exitSafeMode" : "enterSafeMode", {kind: "safe-mode"}, restartable && state.safeMode?.available === true), key: "safeMode"},
+      ...safeItems,
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
       settings("overview", "overview"),

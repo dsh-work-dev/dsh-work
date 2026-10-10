@@ -19,20 +19,28 @@ test("menus follow the 文件／视图／运行／设置／帮助 layout", () =>
   assert.deepEqual(menus.map(keysOf), [
     ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "closeWindow", "quit"],
     ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
-    ["refresh", "restart", "-", "safeMode"],
+    ["refresh", "restart", "-", "safeWithData", "safeDiagnostic"],
     ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "-", "settings.open"],
     ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "copyDiagnostics", "devtools", "-", "update", "about"],
   ]);
 });
 
 test("safe mode follows the environment and the restart rules", () => {
-  const enter = item(buildMenus(state(), t), "safeMode");
-  assert.equal(enter.label, "shell.menu.enterSafeMode");
-  assert.equal(enter.enabled, true);
-  assert.equal(item(buildMenus(state({safeMode: {available: true, active: true}}), t), "safeMode").label, "shell.menu.exitSafeMode");
-  assert.equal(item(buildMenus(state({safeMode: null}), t), "safeMode").enabled, false);
-  assert.equal(item(buildMenus(state({safeMode: {available: false, active: false}}), t), "safeMode").enabled, false);
-  assert.equal(item(buildMenus(state({lifecycle: "Stopping"}), t), "safeMode").enabled, false);
+  const menus = buildMenus(state(), t);
+  const withData = item(menus, "safeWithData");
+  const diagnostic = item(menus, "safeDiagnostic");
+  assert.equal(withData.label, "shell.menu.safeWithData");
+  assert.equal(withData.enabled, true);
+  assert.deepEqual(withData.action, {kind: "safe-mode", mode: "with-data"});
+  assert.deepEqual(diagnostic.action, {kind: "safe-mode", mode: "diagnostic"});
+  const safeWithData = buildMenus(state({safeMode: {available: true, active: true, mode: "with-data"}}), t);
+  assert.equal(item(safeWithData, "tryNormal").label, "shell.menu.tryNormal");
+  assert.equal(item(safeWithData, "exitSafeMode").label, "shell.menu.exitSafeMode");
+  assert.equal(item(safeWithData, "safeModeChange").label, "shell.menu.safeDiagnostic");
+  assert.equal(item(buildMenus(state({safeMode: {available: true, active: true, mode: "diagnostic"}}), t), "safeModeChange").label, "shell.menu.safeWithData");
+  assert.equal(item(buildMenus(state({safeMode: null}), t), "safeWithData").enabled, false);
+  assert.equal(item(buildMenus(state({safeMode: {available: false, active: false}}), t), "safeDiagnostic").enabled, false);
+  assert.equal(item(buildMenus(state({lifecycle: "Stopping"}), t), "safeWithData").enabled, false);
 });
 
 test("full screen shows its state and zoom stops at actual size", () => {
@@ -62,7 +70,7 @@ test("host items follow the native menu availability rules", () => {
   const stopping = buildMenus(state({lifecycle: "Stopping"}), t);
   assert.equal(item(stopping, "quit").enabled, false);
   const busy = buildMenus(state({busy: true}), t);
-  for (const key of ["restart", "quit", "showPet", "safeMode"]) assert.equal(item(busy, key).enabled, false, key);
+  for (const key of ["restart", "quit", "showPet", "safeWithData", "safeDiagnostic"]) assert.equal(item(busy, key).enabled, false, key);
   assert.equal(item(busy, "closeWindow").enabled, true);
   assert.equal(item(busy, "settings.settings").enabled, true);
 });
@@ -137,7 +145,7 @@ test("keyboard steps skip separators and wrap", () => {
   assert.equal(items[2].type, "separator");
   assert.equal(stepItem(items, 1, 1), 3);
   assert.equal(stepItem(items, 3, -1), 1);
-  assert.equal(stepItem(items, 3, 1), 0);
+  assert.equal(stepItem(items, items.length - 1, 1), 0);
   assert.equal(stepItem(items, -1, 1), 0);
 });
 
@@ -147,7 +155,7 @@ test("every shell menu label is translated in every locale", () => {
     "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
     "shell.toast.exportSaved", "shell.toast.exportFailed",
     "shell.toast.signOutPending", "shell.toast.signedOut", "shell.toast.signOutFailed",
-    "shell.menu.enterSafeMode", "shell.menu.exitSafeMode",
+    "shell.menu.safeWithData", "shell.menu.safeDiagnostic", "shell.menu.tryNormal", "shell.menu.exitSafeMode",
     ...buildMenus(state(), t).flatMap(menu => [menu.label, ...menu.items.flatMap(entry => entry.type === "item" ? [entry.label] : [])])
       .filter(key => !key.startsWith("manager.")),
     "shell.window.minimise", "shell.window.maximise", "shell.window.restore", "shell.window.close",

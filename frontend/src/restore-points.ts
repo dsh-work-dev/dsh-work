@@ -80,13 +80,22 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
 
   function date(value: string) { return new Intl.DateTimeFormat(currentLocale(), {dateStyle: "medium", timeStyle: "short"}).format(new Date(value)); }
   function name(p: RestorePoint) { return p.label || date(p.createdAt); }
+  function safeFaultTarget(): RestorePoint["target"]["profile"] | undefined {
+    const safe = snapshot?.safeMode;
+    const selected = snapshot?.current ?? snapshot?.configured;
+    return safe && selected?.profile.dataDirectoryId === safe.target.profile.dataDirectoryId ? safe.faultTarget.profile : undefined;
+  }
+  function visiblePoints(view = snapshot?.restorePoints): RestorePoint[] {
+    const fault = safeFaultTarget();
+    return (view?.points ?? []).filter(point => !fault || (point.target.profile.dataDirectoryId === fault.dataDirectoryId && point.target.profile.name === fault.name));
+  }
   function controls() {
     const operation = snapshot?.restorePoints?.operation;
     const recovering = operation?.status === "running";
     heading.hidden = startup;
     historyTitle.textContent = t("points.title"); historyClose.textContent = t("startup.close");
-    browse.textContent = t("points.browse", {count: snapshot?.restorePoints?.points?.length ?? 0});
-    browse.disabled = !snapshot?.restorePoints?.points?.length;
+    browse.textContent = t("points.browse", {count: visiblePoints().length});
+    browse.disabled = visiblePoints().length === 0;
     for (const button of Array.from(inspector.querySelectorAll<HTMLButtonElement>("button[data-mutation]"))) button.disabled = busy || blocked || recovering || button.dataset.unavailable === "true";
     heading.textContent = t("points.title"); save.textContent = t("points.save"); cancel.textContent = t("common.cancel");
     save.hidden = startup; save.disabled = busy || blocked || recovering || !snapshot?.restorePoints?.canSave;
@@ -107,16 +116,18 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   function render() {
     const view = snapshot?.restorePoints;
     summary.textContent = view?.saveError ? `${t("points.saveFailed")} ${view.saveError}` : t("points.empty");
-    const target = snapshot?.current ?? snapshot?.configured;
+    const faultTarget = safeFaultTarget();
+    const target = faultTarget ? {profile: faultTarget} : snapshot?.current ?? snapshot?.configured;
     const lastID = target ? view?.lastByProfile?.[`${target.profile.dataDirectoryId}/${target.profile.name}`] : undefined;
     const last = view?.points?.find(p => p.id === lastID);
     if (last && !view?.saveError) summary.textContent = startup
       ? `${t("points.last")} · ${date(last.lastVerifiedAt)} · DSH ${last.dshVersion}`
       : `DSH ${last.dshVersion} · ${t("points.verifiedAt", {time: date(last.lastVerifiedAt)})}`;
-    const nextSignature = JSON.stringify([view?.points, lastID, currentLocale(), startup]);
+    const points = visiblePoints(view);
+    const nextSignature = JSON.stringify([points, lastID, currentLocale(), startup, faultTarget]);
     if (signature !== nextSignature) {
       signature = nextSignature; list.replaceChildren();
-      for (const p of [...(view?.points ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      for (const p of [...points].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
         const row = document.createElement("div"); row.className = "row";
         const text = document.createElement("div"); text.className = "row-main";
         const title = document.createElement("strong"); title.textContent = startup ? name(p) : p.label || `DSH ${p.dshVersion}`;

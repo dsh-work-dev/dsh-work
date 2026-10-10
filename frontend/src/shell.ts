@@ -7,6 +7,7 @@ import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
 import {safeModeActive} from "./recovery";
+import {SafeModeMode} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {icon, type IconName} from "./ui/icons";
 
 const links: Record<LinkTarget, string> = {
@@ -77,10 +78,15 @@ export function mountShell() {
   const refreshSafeMode = async () => {
     try {
       const snapshot = await ManagerService.GetSnapshot();
-      setMenu({safeMode: {available: !!snapshot.configured, active: safeModeActive(snapshot)}});
+      setMenu({safeMode: {available: !!snapshot.configured, active: safeModeActive(snapshot), mode: safeMenuMode(snapshot.safeMode?.mode)}});
     } catch (error) {
       console.warn("environment state unavailable", error);
     }
+  };
+  const safeMenuMode = (mode?: SafeModeMode): "with-data" | "diagnostic" | undefined => {
+    if (mode === SafeModeMode.SafeModeWithData) return "with-data";
+    if (mode === SafeModeMode.SafeModeDiagnostic) return "diagnostic";
+    return undefined;
   };
   const toast = createToast();
   const copyDiagnostics = async () => {
@@ -149,10 +155,28 @@ export function mountShell() {
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
       case "safe-mode": void busyAction(async () => {
         try {
-          const snapshot = await (menuState.safeMode?.active ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode());
-          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot)};
+          const snapshot = await ManagerService.EnterSafeModeWithOptions({mode: action.mode === "with-data" ? SafeModeMode.SafeModeWithData : SafeModeMode.SafeModeDiagnostic});
+          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot), mode: safeMenuMode(snapshot.safeMode?.mode)};
         } catch (error) {
           // Settings Overview shows why the switch failed.
+          void ShellService.OpenSettings("overview");
+          throw error;
+        }
+      }); break;
+      case "safe-mode-exit": void busyAction(async () => {
+        try {
+          const snapshot = await ManagerService.ExitSafeMode();
+          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot), mode: safeMenuMode(snapshot.safeMode?.mode)};
+        } catch (error) {
+          void ShellService.OpenSettings("overview");
+          throw error;
+        }
+      }); break;
+      case "safe-mode-try": void busyAction(async () => {
+        try {
+          const snapshot = await ManagerService.TrySafeModeTarget();
+          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot), mode: safeMenuMode(snapshot.safeMode?.mode)};
+        } catch (error) {
           void ShellService.OpenSettings("overview");
           throw error;
         }
