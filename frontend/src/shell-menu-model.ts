@@ -52,7 +52,7 @@ export type MenuAction =
 export interface MenuItem { type: "item"; key: string; label: string; enabled: boolean; checked?: boolean; keys?: string[]; hint?: string; action: MenuAction }
 export interface MenuSeparator { type: "separator" }
 export type MenuEntry = MenuItem | MenuSeparator;
-export type MenuId = "file" | "view" | "run" | "settings" | "help";
+export type MenuId = "file" | "view" | "settings" | "help";
 export interface Menu { id: MenuId; label: string; badge: boolean; items: MenuEntry[] }
 
 const updating = new Set(["checking", "downloading", "verifying", "installing"]);
@@ -88,6 +88,9 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       separator,
       dsh("terminal.new"), dsh("browser.new"),
       separator,
+      host("refresh", {kind: "refresh"}, state.framed),
+      host("restart", {kind: "restart"}, restartable),
+      separator,
       host("closeWindow", {kind: "window", action: "close"}),
       host("quit", {kind: "quit"}, quittable),
     ]},
@@ -101,10 +104,6 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       {...windowItem("fullscreen", "fullscreen"), checked: state.window.fullscreen},
       separator,
       {...host("showPet", {kind: "pet"}, !state.busy && state.pet.ready), checked: state.pet.visible},
-    ]},
-    {id: "run", label: t("shell.menu.run"), badge: false, items: [
-      host("refresh", {kind: "refresh"}, state.framed),
-      host("restart", {kind: "restart"}, restartable),
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
       settings("overview", "overview"),

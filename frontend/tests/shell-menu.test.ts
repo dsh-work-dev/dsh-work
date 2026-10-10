@@ -13,13 +13,12 @@ const item = (menus: Menu[], key: string) => menus.flatMap(menu => menu.items).f
 
 const keysOf = (menu: Menu) => menu.items.map(entry => entry.type === "item" ? entry.key : "-");
 
-test("menus follow the 文件／视图／运行／设置／帮助 layout", () => {
+test("menus follow the 文件／视图／设置／帮助 layout", () => {
   const menus = buildMenus(state(), t);
-  assert.deepEqual(menus.map(menu => menu.id), ["file", "view", "run", "settings", "help"]);
+  assert.deepEqual(menus.map(menu => menu.id), ["file", "view", "settings", "help"]);
   assert.deepEqual(menus.map(keysOf), [
-    ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "closeWindow", "quit"],
+    ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "refresh", "restart", "-", "closeWindow", "quit"],
     ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
-    ["refresh", "restart"],
     ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "-", "settings.open"],
     ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "copyDiagnostics", "devtools", "-", "update", "about"],
   ]);
