@@ -2485,8 +2485,8 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 }
 
 func (s *HostService) RepairSafeModePlugin(ctx context.Context, packageName, operation string) (dshmanager.Snapshot, error) {
-	if !s.authorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	if s == nil || s.host == nil || (!isTrustedWindow(ctx, "workspace") && !isTrustedWindow(ctx, "settings")) {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Plugins can be changed only from Settings or the dsh-work window.")
 	}
 	return s.host.RepairSafeModePlugin(ctx, packageName, operation)
 }

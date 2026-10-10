@@ -170,7 +170,13 @@ func TestSafeModeRepairDisablesPluginInStoredFaultTarget(t *testing.T) {
 	if _, err := f.host.EnterSafeModeWithOptions(context.Background(), dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeWithData, FaultTarget: &faultTarget}); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := f.host.RepairSafeModePlugin(context.Background(), "@example/plugin", "disable")
+	service := NewHostService(f.host, nil)
+	if _, err := service.RepairSafeModePlugin(context.Background(), "@example/plugin", "disable"); err == nil {
+		t.Fatal("safe-mode plugin repair accepted an untrusted surface")
+	} else if failure, ok := err.(lifecycle.Failure); !ok || failure.Code != lifecycle.ErrorTrustedSurfaceRequired {
+		t.Fatalf("untrusted repair error = %#v", err)
+	}
+	snapshot, err := service.RepairSafeModePlugin(LocalClientContext(context.Background(), "settings"), "@example/plugin", "disable")
 	if err != nil {
 		t.Fatal(err)
 	}
