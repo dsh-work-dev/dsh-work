@@ -55,10 +55,11 @@ silently mutate DSH-owned data.
   Settings Overview presents a compact record summary and save action, with
   history and selected-record management in a dedicated dialog.
 - Settings General offers automatic recovery of the last successful snapshot or
-  user choice. The failed-startup surface offers retry and snapshot recovery.
-  When the failure output names installed third-party plugins, it also offers
-  to disable or remove each one and then starts again; a failure caused by
-  damaged DSH session data names no plugin.
+  user choice. The failed-startup surface offers retry and snapshot recovery,
+  and lists the failed profile's third-party plugins so the user can disable
+  or remove one, or disable all of them, and start again. Plugins the failure
+  output names come first; a failure caused by damaged DSH session data offers
+  no plugins.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
   manager, then verifies startup.
 - Removing a DSH runtime deletes its installed files. A runtime used by the

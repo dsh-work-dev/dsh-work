@@ -2412,7 +2412,7 @@ func (s *HostService) Restart(ctx context.Context) lifecycle.Status {
 	return s.host.Restart()
 }
 
-// RemoveFaultPlugin uninstalls a plugin named by the current startup failure.
+// RemoveFaultPlugin uninstalls a plugin of the profile that failed to start.
 func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
 	if !s.authorized(ctx) {
 		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
@@ -2420,12 +2420,21 @@ func (s *HostService) RemoveFaultPlugin(ctx context.Context, packageName string)
 	return s.host.RemoveFaultPlugin(ctx, packageName)
 }
 
-// DisableFaultPlugin disables a plugin named by the current startup failure.
+// DisableFaultPlugin disables a plugin of the profile that failed to start.
 func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
 	if !s.authorized(ctx) {
 		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
 	}
 	return s.host.DisableFaultPlugin(ctx, packageName)
+}
+
+// DisableFaultPlugins disables every enabled plugin of the profile that failed
+// to start.
+func (s *HostService) DisableFaultPlugins(ctx context.Context) (lifecycle.Status, error) {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	}
+	return s.host.DisableFaultPlugins(ctx)
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {

@@ -50,24 +50,41 @@ func readProfileManifestBytes(profilePath string) ([]byte, error) {
 	return data, nil
 }
 
-// ProfilePluginPackages lists third-party packages installed in the resolved
-// launch's profile so startup failures can only name possible plugin causes.
-func (m *Manager) ProfilePluginPackages(ctx context.Context, launch ResolvedLaunch) ([]string, error) {
+// ProfilePlugin is one installed third-party bundle of a profile; Enabled is
+// whether the profile manifest currently selects it.
+type ProfilePlugin struct {
+	Package string
+	Enabled bool
+}
+
+// ProfilePlugins lists the third-party bundles installed in the resolved
+// launch's profile, sorted by package name, so a startup failure can offer
+// each one without a running Worker. Dependencies that are not DSH bundles
+// are left out because there is nothing to disable.
+func (m *Manager) ProfilePlugins(ctx context.Context, launch ResolvedLaunch) ([]ProfilePlugin, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
 	}
-	manifest, err := readProfileBundleManifest(filepath.Join(launch.DataDirectory.Path, "profiles", launch.Target.Profile.Name))
+	profilePath := filepath.Join(launch.DataDirectory.Path, "profiles", launch.Target.Profile.Name)
+	manifest, err := readProfileBundleManifest(profilePath)
 	if err != nil {
 		return nil, err
 	}
-	packages := make([]string, 0, len(manifest.Dependencies))
+	selected := make(map[string]bool, len(manifest.Bundles()))
+	for _, bundle := range manifest.Bundles() {
+		selected[bundle] = true
+	}
+	plugins := make([]ProfilePlugin, 0, len(manifest.Dependencies))
 	for name := range manifest.Dependencies {
-		if validPackageName(name) && !IsCorePluginPackage(name) {
-			packages = append(packages, name)
+		if !validPackageName(name) || IsCorePluginPackage(name) {
+			continue
+		}
+		if selected[name] || installedPackageHasBundle(profilePath, name) {
+			plugins = append(plugins, ProfilePlugin{Package: name, Enabled: selected[name]})
 		}
 	}
-	sort.Strings(packages)
-	return packages, nil
+	sort.Slice(plugins, func(i, j int) bool { return plugins[i].Package < plugins[j].Package })
+	return plugins, nil
 }
 
 // requireNoCurrentRunContext prevents package-manager operations from editing

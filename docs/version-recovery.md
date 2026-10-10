@@ -29,10 +29,11 @@ opens metadata, plugin versions and restore/rename/delete actions in the same
 dialog. Restore confirmation replaces those details. Closing returns focus to
 the originating control.
 
-Startup failure places retry, version recovery and visible bounded
-diagnostics beside the failing step, including a direct copy action. Version
-selection and confirmation use a focused dialog. Recovery shows its current
-installation/startup stage and cancellation beside the active operation.
+Startup failure places retry, plugin disable/remove, version recovery and
+visible bounded diagnostics beside the failing step, including a direct copy
+action. Version selection and confirmation use a focused dialog. Recovery
+shows its current installation/startup stage and cancellation beside the
+active operation.
 
 Recording failure is visible but does not stop a healthy Worker or replace the
 previous durable success point.

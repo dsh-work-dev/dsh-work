@@ -2,8 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,11 +17,15 @@ import (
 	"github.com/local/dsh-work/internal/supervisor"
 )
 
+// The profile has two selected bundles, one installed but unselected bundle
+// and one plain library dependency.
 const faultProfileManifest = `{
-  "dependencies": {"@acme/widget": "1.0.0", "@acme/other": "1.0.0"},
+  "dependencies": {"@acme/widget": "1.0.0", "@acme/other": "1.0.0", "@acme/idle": "1.0.0", "@acme/lib": "1.0.0"},
   "dsh": {"profile": {"bundles": ["@deepseek-ai/dsh-web-app", "@acme/widget", "@acme/other"]}}
 }
 `
+
+var faultBundles = []string{"@acme/widget", "@acme/other", "@acme/idle"}
 
 // exitingSupervisor starts Workers that exit before readiness with the given
 // captured stderr, the shape of a plugin tree that failed to load.
@@ -52,6 +60,19 @@ func newFaultTestHost(t *testing.T, stderr string) (*Host, *exitingSupervisor, c
 	}
 	if err := os.WriteFile(filepath.Join(profilePath, "package.json"), []byte(faultProfileManifest), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range append(slices.Clone(faultBundles), "@acme/lib") {
+		packagePath := filepath.Join(append([]string{profilePath, "node_modules"}, strings.Split(name, "/")...)...)
+		if err := os.MkdirAll(packagePath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		manifest := `{"name":"` + name + `","version":"1.0.0"}`
+		if slices.Contains(faultBundles, name) {
+			manifest = `{"name":"` + name + `","version":"1.0.0","dsh":{"bundle":{"patch":"patch.yml"}}}`
+		}
+		if err := os.WriteFile(filepath.Join(packagePath, "package.json"), []byte(manifest), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	runtimePath := filepath.Join(root, "dsh.cmd")
 	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
@@ -90,5 +111,72 @@ func TestStoredDataRejectionOffersNoPlugin(t *testing.T) {
 	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
 	if failed.PluginFault != nil {
 		t.Fatalf("stored-data rejection blamed a plugin: %+v", failed.PluginFault)
+	}
+}
+
+func TestPluginFaultListsProfilePluginsWithSuspectsFirst(t *testing.T) {
+	host, _, statuses, _ := newFaultTestHost(t, "Error: dsh: plugin tree failed to load: failed to apply loader entry ws (@acme/widget/workspace): boom")
+	host.Start()
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	want := []lifecycle.FaultPlugin{
+		{Package: "@acme/widget", Enabled: true, Suspected: true},
+		{Package: "@acme/idle"},
+		{Package: "@acme/other", Enabled: true},
+	}
+	if failed.PluginFault == nil || !reflect.DeepEqual(failed.PluginFault.Plugins, want) {
+		t.Fatalf("plugins = %+v", failed.PluginFault)
+	}
+}
+
+func TestPluginFaultWithoutNamedPluginStillOffersPlugins(t *testing.T) {
+	host, _, statuses, _ := newFaultTestHost(t, "Error: worker exited")
+	host.Start()
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	if failed.PluginFault == nil || len(failed.PluginFault.Plugins) != 3 {
+		t.Fatalf("plugins = %+v", failed.PluginFault)
+	}
+	for _, plugin := range failed.PluginFault.Plugins {
+		if plugin.Suspected {
+			t.Fatalf("unnamed plugin marked suspected: %+v", plugin)
+		}
+	}
+}
+
+func TestDisableFaultPluginsDeselectsEveryThirdPartyBundle(t *testing.T) {
+	host, _, statuses, profilePath := newFaultTestHost(t, "Error: worker exited")
+	host.Start()
+	waitForStatus(t, statuses, lifecycle.StateFailed)
+	status, err := host.DisableFaultPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plugin := range status.PluginFault.Plugins {
+		if plugin.Enabled {
+			t.Fatalf("plugin still enabled: %+v", plugin)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(profilePath, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+		DSH          struct {
+			Profile struct {
+				Bundles []string `json:"bundles"`
+			} `json:"profile"`
+		} `json:"dsh"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(manifest.DSH.Profile.Bundles, []string{"@deepseek-ai/dsh-web-app"}) {
+		t.Fatalf("bundles = %v", manifest.DSH.Profile.Bundles)
+	}
+	if len(manifest.Dependencies) != 4 {
+		t.Fatalf("disabling removed installed packages: %v", manifest.Dependencies)
+	}
+	if _, err := host.DisableFaultPlugin(context.Background(), "@acme/widget"); err == nil {
+		t.Fatal("disabled an already disabled plugin")
 	}
 }

@@ -75,9 +75,8 @@ in the documents linked from `docs/README.md`.
    user switches the run context to that profile. Snapshot recovery may reapply
    recorded plugin inputs while the Worker is stopped. While the profile runs,
    enabling and disabling go through DSH's own plugin manager. When a start
-   fails, dsh-work may also disable or remove a third-party plugin that the
-   failure output named, in the profile that failed, while no Worker is running
-   and no run context is current.
+   fails, dsh-work may also disable or remove third-party plugins of the profile
+   that failed, while no Worker is running and no run context is current.
 6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch follows the configured recovery policy.

@@ -42,6 +42,7 @@
           <section id="startup-plugin-fault" class="notice startup-plugin-fault" hidden aria-labelledby="startup-plugin-fault-title">
             <div class="notice-head"><span data-icon="triangle-alert"></span><strong id="startup-plugin-fault-title" data-i18n="fault.title">可能是插件导致 DSH 无法启动</strong></div>
             <ul id="startup-plugin-fault-list" class="rows"></ul>
+            <div id="startup-plugin-fault-actions" class="actions" hidden><button id="startup-disable-plugins" class="button" type="button" data-i18n="fault.disableAll">全部禁用并启动</button></div>
           </section>
           <div class="startup-actions actions"><button id="retry" class="button button-primary" type="button" hidden>重试</button><button id="open-startup-restore" class="button" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" class="button button-quiet" type="button" data-i18n="common.cancel" hidden>取消</button></div>
           <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">

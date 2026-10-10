@@ -353,16 +353,28 @@ non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
 disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
 commands through the manager.
 
-A failed start has no Worker to call. The startup window can then disable a
-third-party bundle that the failure output names, with the switch lock held,
-no Run context current, and the package confirmed as an installed,
-non-`@deepseek-ai` bundle of the failed profile. It removes the package from
-the profile manifest's `dsh.profile.bundles`, keeping the installed files and
-loader patches, and starts again; this is the same persisted choice as
+A failed start has no Worker to call. The startup window then lists every
+installed third-party bundle of the failed profile and can disable or remove
+one, or disable all enabled ones, with the switch lock held, no Run context
+current, and each package confirmed as an installed, non-`@deepseek-ai` bundle
+of that profile. Disabling removes the package from the profile manifest's
+`dsh.profile.bundles`, keeping the installed files and loader patches, and
+starts again; this is the same persisted choice as
 `setBundleEnabled(name, false)`. The DSH adapter reads the packages named in
-the captured output. Only third-party packages installed in the failed profile
-are offered, and a failure caused by DSH rejecting its own stored session data
-offers none, because the plugin that reported it did not cause it.
+the captured output and the list puts those first, marked. A failure caused by
+DSH rejecting its own stored session data offers no plugins, because the
+plugin that reported it did not cause it.
+
+This is the whole startup-recovery surface for plugins; there is no separate
+safe mode. A broken plugin is the common cause, and disabling it persistently
+from the failure page fixes it without a second environment. When the output
+names no plugin, disabling all of them and re-enabling one at a time in Plugins
+finds the cause with the normal running-Worker controls. A safe mode (a
+temporary home without third-party plugins, with a return target) is rejected:
+it adds a second state machine (fault target, return target, fallback) yet
+cannot repair stored-data or runtime failures, which use the same data or
+runtime in any mode. Revisit if a failure class appears that a persistent disable cannot
+reach, such as a broken profile manifest or home patch.
 
 Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
 unload semantics as they change. The cost is that activation changes need a
