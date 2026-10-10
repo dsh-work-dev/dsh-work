@@ -402,6 +402,18 @@ func (w *jobWorker) WaitEmpty(ctx context.Context) error {
 }
 
 func (w *jobWorker) activeProcesses() (uint32, error) {
+	w.closeMu.Lock()
+	defer w.closeMu.Unlock()
+	if w.closed {
+		return 0, nil
+	}
+	return w.queryActiveProcesses()
+}
+
+// queryActiveProcesses reads the Job Object while closeMu is held by either
+// activeProcesses or Close. Keeping the handle check and query under one lock
+// prevents Diagnostics from querying a handle after Close releases it.
+func (w *jobWorker) queryActiveProcesses() (uint32, error) {
 	// JOB_OBJECT_BASIC_PROCESS_ID_LIST returns the current process count and
 	// avoids depending on the accounting record layout, which differs across
 	// Windows SDKs.
@@ -450,7 +462,7 @@ func (w *jobWorker) Close() error {
 	}
 	w.stopOnce.Do(func() { close(w.stop) })
 	var closeErr error
-	active, activeErr := w.activeProcesses()
+	active, activeErr := w.queryActiveProcesses()
 	if activeErr != nil || active > 0 {
 		if err := win.TerminateJobObject(w.job, 1); err != nil && !isAlreadyExited(err) {
 			closeErr = fmt.Errorf("terminate DSH job during close: %w", err)

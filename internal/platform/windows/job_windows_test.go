@@ -96,6 +96,36 @@ func TestJobObjectWorkerCapturesOutputAndReachesEmpty(t *testing.T) {
 	}
 }
 
+func TestJobObjectWorkerDiagnosticsRemainAvailableAfterClose(t *testing.T) {
+	comspec := os.Getenv("ComSpec")
+	if comspec == "" {
+		comspec = "cmd.exe"
+	}
+	plan := supervisor.LaunchPlan{
+		GenerationID:     "windows-closed-diagnostics-test",
+		Executable:       comspec,
+		Args:             []string{"/d", "/c", "exit 0"},
+		WorkingDirectory: t.TempDir(),
+		ExpectedOrigin:   "http://127.0.0.1:4321",
+	}
+	worker, err := NewJobObjectAdapter().Start(context.Background(), plan, nil)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	select {
+	case <-worker.Exited():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for worker exit")
+	}
+	if err := worker.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	diagnostics := worker.Diagnostics()
+	if diagnostics.ActiveProcesses != 0 || !diagnostics.Exit.Started || diagnostics.Exit.Code != 0 {
+		t.Fatalf("closed Worker diagnostics = %+v", diagnostics)
+	}
+}
+
 func TestJobObjectWorkerPassesExplicitEnvironment(t *testing.T) {
 	comspec := os.Getenv("ComSpec")
 	if comspec == "" {
