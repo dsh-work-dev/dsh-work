@@ -105,6 +105,14 @@ func decodeState(data []byte) (State, error) {
 		PluginProvenance:  persisted.PluginProvenance,
 		Configured:        persisted.Configured,
 	}
+	if state.SafeMode != nil {
+		if state.SafeMode.Mode == "" {
+			state.SafeMode.Mode = SafeModeDiagnostic
+		}
+		if state.SafeMode.FaultTarget.RuntimeID == "" {
+			state.SafeMode.FaultTarget = state.SafeMode.ReturnTo
+		}
+	}
 	for index := range state.Runtimes {
 		normalized, err := normalizeRuntime(state.Runtimes[index])
 		if err != nil {
@@ -166,13 +174,19 @@ func validateState(state State) error {
 		return err
 	}
 	if state.SafeMode != nil {
+		if !validSafeModeMode(state.SafeMode.Mode) {
+			return errors.New("invalid safe mode mode")
+		}
 		if err := validateRunContext(state.SafeMode.ReturnTo); err != nil {
+			return err
+		}
+		if err := validateRunContext(state.SafeMode.FaultTarget); err != nil {
 			return err
 		}
 		if err := validateRunContext(state.SafeMode.Target); err != nil {
 			return err
 		}
-		if state.SafeMode.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID || state.SafeMode.Target.Profile.Name != "web" || state.SafeMode.ReturnTo.Profile.DataDirectoryID == SafeModeDataDirectoryID {
+		if state.SafeMode.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID || state.SafeMode.Target.Profile.Name != "web" || state.SafeMode.ReturnTo.Profile.DataDirectoryID == SafeModeDataDirectoryID || state.SafeMode.FaultTarget.Profile.DataDirectoryID == SafeModeDataDirectoryID {
 			return errors.New("invalid safe mode state")
 		}
 	}

@@ -54,8 +54,8 @@ type ReadyAnnouncement struct {
 // resolved separately for this generation and is never persisted by the
 // manager.
 type LaunchContext struct {
-	// UserDataOverlay places DSH user data in dsh-work's user-data folder; safe
-	// mode leaves it out. The core overlay (host plugins) always loads.
+	// UserDataOverlay places DSH user data in dsh-work's user-data folder. Safe
+	// mode enables it only for the with-data mode. The core overlay always loads.
 	UserDataOverlay    bool
 	GenerationID       string
 	Runtime            Runtime

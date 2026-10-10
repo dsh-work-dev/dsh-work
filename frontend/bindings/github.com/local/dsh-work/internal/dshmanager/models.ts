@@ -489,8 +489,25 @@ export enum RuntimeToolchain {
     RuntimeToolchainManagedNodeNPM = "managed-node-npm",
 };
 
+export enum SafeModeMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    SafeModeWithData = "with-data",
+    SafeModeDiagnostic = "diagnostic",
+};
+
+export interface SafeModeRequest {
+    "mode": SafeModeMode;
+    "faultTarget"?: RunContext | null;
+}
+
 export interface SafeModeState {
+    "mode": SafeModeMode;
     "target": RunContext;
+    "faultTarget": RunContext;
     "returnTo": RunContext;
 }
 

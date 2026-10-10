@@ -45,6 +45,10 @@ export function EnterSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3176544163);
 }
 
+export function EnterSafeModeWithOptions(request: dshmanager$0.SafeModeRequest): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(2319409999, request);
+}
+
 export function ExitSafeMode(): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(952449787);
 }
@@ -167,6 +171,10 @@ export function SetPluginDisabled(request: dshmanager$0.PluginDisableRequest): $
 
 export function SetRunContext(target: dshmanager$0.RunContext): $CancellablePromise<dshmanager$0.Snapshot> {
     return $Call.ByID(3418084503, target);
+}
+
+export function TrySafeModeTarget(): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3841629949);
 }
 
 export function UpgradePlugin(request: dshmanager$0.PluginUpgradeRequest): $CancellablePromise<dshmanager$0.PluginResult> {

@@ -27,6 +27,11 @@ func (h *Host) RestoreVersionPoint(ctx context.Context, id string) (dshmanager.S
 	if err != nil {
 		return dshmanager.Snapshot{}, err
 	}
+	if snapshot, err := h.deps.Manager.Snapshot(ctx); err != nil {
+		return dshmanager.Snapshot{}, err
+	} else if snapshot.SafeMode != nil && ((snapshot.Current != nil && snapshot.Current.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID) || (snapshot.Configured != nil && snapshot.Configured.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID)) && p.Target != snapshot.SafeMode.FaultTarget {
+		return snapshot, errors.New("safe mode can restore version points only for its fault target")
+	}
 	return h.applyRunContext(context.WithValue(ctx, restorePointKey{}, id), p.Target, nil, nil, true)
 }
 

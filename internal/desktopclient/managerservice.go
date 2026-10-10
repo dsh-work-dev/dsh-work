@@ -244,6 +244,20 @@ func (s *ManagerService) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot
 	return value, err
 }
 
+func (s *ManagerService) EnterSafeModeWithOptions(ctx context.Context, request dshmanager.SafeModeRequest) (dshmanager.Snapshot, error) {
+	if s.Local != nil { return s.Local.EnterSafeModeWithOptions(ctx, request) }
+	var value dshmanager.Snapshot
+	err := call(ctx, s.Client, "ManagerService", "EnterSafeModeWithOptions", []any{request}, &value)
+	return value, err
+}
+
+func (s *ManagerService) TrySafeModeTarget(ctx context.Context) (dshmanager.Snapshot, error) {
+	if s.Local != nil { return s.Local.TrySafeModeTarget(ctx) }
+	var value dshmanager.Snapshot
+	err := call(ctx, s.Client, "ManagerService", "TrySafeModeTarget", []any{}, &value)
+	return value, err
+}
+
 func (s *ManagerService) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
 	if s.Local != nil { return s.Local.ExitSafeMode(ctx) }
 	var value dshmanager.Snapshot

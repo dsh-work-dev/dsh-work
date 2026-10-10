@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -99,6 +100,10 @@ func (s *ManagerService) OpenProfileBackups(ctx context.Context, ref dshmanager.
 }
 
 func (s *ManagerService) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
+	return s.EnterSafeModeWithOptions(ctx, dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeDiagnostic})
+}
+
+func (s *ManagerService) EnterSafeModeWithOptions(ctx context.Context, request dshmanager.SafeModeRequest) (dshmanager.Snapshot, error) {
 	if s == nil || s.manager == nil || s.host == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -107,7 +112,19 @@ func (s *ManagerService) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
-	return s.host.EnterSafeMode(ctx)
+	return s.host.EnterSafeModeWithOptions(ctx, request)
+}
+
+func (s *ManagerService) TrySafeModeTarget(ctx context.Context) (dshmanager.Snapshot, error) {
+	if s == nil || s.manager == nil || s.host == nil {
+		return dshmanager.Snapshot{}, managerUnavailable()
+	}
+	if !s.runtimeSurfaceAuthorized(ctx) {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Safe mode recovery is available in Settings or startup.")
+	}
+	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
+	defer cancel()
+	return s.host.TrySafeModeTarget(ctx)
 }
 
 func (s *ManagerService) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
@@ -123,16 +140,40 @@ func (s *ManagerService) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot,
 }
 
 func (h *Host) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
+	return h.EnterSafeModeWithOptions(ctx, dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeDiagnostic})
+}
+
+func (h *Host) EnterSafeModeWithOptions(ctx context.Context, request dshmanager.SafeModeRequest) (dshmanager.Snapshot, error) {
 	h.switchMu.Lock()
 	defer h.switchMu.Unlock()
 	manager, ok := h.deps.Manager.(interface {
-		PrepareSafeMode(context.Context) (dshmanager.RunContext, error)
+		PrepareSafeMode(context.Context, ...dshmanager.SafeModeRequest) (dshmanager.RunContext, error)
 		AbortPreparedSafeMode(context.Context) error
 	})
 	if !ok {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	target, err := manager.PrepareSafeMode(ctx)
+	if request.Mode == "" {
+		request.Mode = dshmanager.SafeModeDiagnostic
+	}
+	if request.FaultTarget == nil {
+		snapshot, err := h.deps.Manager.Snapshot(ctx)
+		if err != nil {
+			return dshmanager.Snapshot{}, err
+		}
+		switch {
+		case snapshot.Current != nil && snapshot.Current.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID:
+			request.FaultTarget = snapshot.Current
+		case snapshot.SafeMode != nil:
+			fault := snapshot.SafeMode.FaultTarget
+			request.FaultTarget = &fault
+		case snapshot.LastSwitchAttempt != nil:
+			request.FaultTarget = &snapshot.LastSwitchAttempt.Target
+		case snapshot.Configured != nil:
+			request.FaultTarget = snapshot.Configured
+		}
+	}
+	target, err := manager.PrepareSafeMode(ctx, request)
 	if err != nil {
 		return dshmanager.Snapshot{}, err
 	}
@@ -171,6 +212,64 @@ func (h *Host) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
 		return snapshot, errors.New("safe mode is not active")
 	}
 	return h.applyRunContextLocked(ctx, target, nil, nil, false)
+}
+
+func (h *Host) TrySafeModeTarget(ctx context.Context) (dshmanager.Snapshot, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return dshmanager.Snapshot{}, err
+	}
+	if snapshot.SafeMode == nil || (snapshot.Current == nil && (snapshot.Configured == nil || snapshot.Configured.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID)) {
+		return snapshot, errors.New("safe mode is not active")
+	}
+	return h.applyRunContextLocked(ctx, snapshot.SafeMode.FaultTarget, nil, nil, false)
+}
+
+func (h *Host) RepairSafeModePlugin(ctx context.Context, packageName, operation string) (dshmanager.Snapshot, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	if operation != "disable" && operation != "remove" {
+		return dshmanager.Snapshot{}, errors.New("unsupported safe mode plugin operation")
+	}
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return dshmanager.Snapshot{}, err
+	}
+	if snapshot.SafeMode == nil || snapshot.Current == nil || snapshot.Current.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID || h.Status().State != lifecycle.StateReady {
+		return snapshot, errors.New("safe mode must be running before its fault target can be repaired")
+	}
+	manager, ok := h.deps.Manager.(PluginFaultManager)
+	if !ok {
+		return snapshot, errors.New("safe mode plugin repair is unavailable")
+	}
+	target := snapshot.SafeMode.FaultTarget
+	launch, err := h.deps.Manager.ResolveLaunch(ctx, dshmanager.LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
+	if err != nil {
+		return snapshot, err
+	}
+	installed, err := manager.ProfilePluginPackages(ctx, launch)
+	if err != nil {
+		return snapshot, err
+	}
+	if !slices.Contains(installed, packageName) {
+		return snapshot, errors.New("the plugin is not installed in the safe mode fault target")
+	}
+	var repairErr error
+	next, switchErr := h.applyRunContextLocked(ctx, *snapshot.Current, func(operationCtx context.Context, _ dshmanager.ResolvedLaunch) error {
+		if operation == "disable" {
+			repairErr = manager.DisableFaultPlugin(operationCtx, launch, packageName)
+		} else {
+			_, repairErr = manager.ApplyPlugin(operationCtx, launch, packageName, "remove")
+		}
+		// Keep the safe Worker available even when the package operation fails.
+		return nil
+	}, nil, false)
+	if repairErr != nil {
+		return next, errors.Join(repairErr, switchErr)
+	}
+	return next, switchErr
 }
 
 func SetProfileExportAction(s *ManagerService, choose func(string) (string, error)) {

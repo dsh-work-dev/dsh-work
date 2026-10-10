@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/workspacecontext"
@@ -102,6 +103,13 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 	if s.Local != nil { return s.Local.DisableFaultPlugin(ctx, packageName) }
 	var value lifecycle.Status
 	err := call(ctx, s.Client, "HostService", "DisableFaultPlugin", []any{packageName}, &value)
+	return value, err
+}
+
+func (s *HostService) RepairSafeModePlugin(ctx context.Context, packageName, operation string) (dshmanager.Snapshot, error) {
+	if s.Local != nil { return s.Local.RepairSafeModePlugin(ctx, packageName, operation) }
+	var value dshmanager.Snapshot
+	err := call(ctx, s.Client, "HostService", "RepairSafeModePlugin", []any{packageName, operation}, &value)
 	return value, err
 }
 

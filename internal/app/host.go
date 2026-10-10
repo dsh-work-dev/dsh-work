@@ -389,7 +389,7 @@ func (h *Host) beginRunLocked(parent context.Context, workspaceRequest workspace
 	return run, status, nil
 }
 
-func (h *Host) beginResolvedRun(ctx context.Context, launch dshmanager.ResolvedLaunch) (*generationRun, lifecycle.Status, error) {
+func (h *Host) beginResolvedRun(ctx context.Context, launch dshmanager.ResolvedLaunch, workspaceRequest workspacecontext.Request) (*generationRun, lifecycle.Status, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.current != nil {
@@ -399,7 +399,7 @@ func (h *Host) beginResolvedRun(ctx context.Context, launch dshmanager.ResolvedL
 			Why:  "a Worker generation is still owned by the Host",
 		}
 	}
-	return h.beginRunLocked(ctx, workspacecontext.Request{}, &launch)
+	return h.beginRunLocked(ctx, workspaceRequest, &launch)
 }
 
 func cloneResolvedLaunch(launch *dshmanager.ResolvedLaunch) *dshmanager.ResolvedLaunch {
@@ -905,6 +905,17 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	if !ok {
 		return dshmanager.Snapshot{}, h.failureFor(errors.New("Run context manager is unavailable"), lifecycle.ErrorManagerStateInvalid, "dsh-work could not switch its Run context.", true)
 	}
+	var safeModeFallback *dshmanager.RunContext
+	if target.Profile.DataDirectoryID != dshmanager.SafeModeDataDirectoryID {
+		if snapshot, err := manager.Snapshot(ctx); err == nil && snapshot.SafeMode != nil {
+			currentSafe := snapshot.Current != nil && snapshot.Current.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID
+			configuredSafe := snapshot.Configured != nil && snapshot.Configured.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID
+			if currentSafe || configuredSafe {
+				fallback := snapshot.SafeMode.Target
+				safeModeFallback = &fallback
+			}
+		}
+	}
 
 	if startupFailure != nil && h.Status().State != lifecycle.StateFailed {
 		return manager.Snapshot(context.Background())
@@ -991,6 +1002,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	var candidateFailure *lifecycle.Failure
 	var candidateStatus lifecycle.Status
 	activeRun := h.activeRun()
+	workspaceRequest := workspaceRequestForSafeModeSwitch(activeRun, target)
 	if startupFailure == nil && !restore {
 		var err error
 		resolved, err = manager.ResolveLaunch(switchCtx, dshmanager.LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
@@ -1036,7 +1048,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	if candidateFailure == nil {
 		var beginErr error
 		dshadapter.ReportCommandOutput(switchCtx, "Starting the candidate and checking health…")
-		candidateStatus, candidateFailure, beginErr = h.runResolvedContext(switchCtx, resolved)
+		candidateStatus, candidateFailure, beginErr = h.runResolvedContext(switchCtx, resolved, workspaceRequest)
 		if beginErr != nil {
 			// The previous Worker has already been stopped at this point. Treat a
 			// candidate generation-boundary failure exactly like any other
@@ -1055,6 +1067,26 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 		candidateFailure = failureFromStatus(candidateStatus)
 	}
 	if versioned && (ctx.Err() != nil || target.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID) {
+		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, false)
+	}
+	if safeModeFallback != nil {
+		if restore && versioned {
+			versions.FailVersionRecovery(context.Background())
+		}
+		if run := h.activeRun(); run != nil && run.cleanupPending() {
+			return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, false, dshmanager.RollbackFailed, errors.New("candidate cleanup has not completed"), false)
+		}
+		fallback, err := manager.ResolveLaunch(switchCtx, dshmanager.LaunchRequest{RuntimeID: safeModeFallback.RuntimeID, Node: safeModeFallback.Node, Profile: safeModeFallback.Profile})
+		if err != nil {
+			return h.finishContextSwitchFailure(manager, candidateFailure, err)
+		}
+		status, failure, beginErr := h.runResolvedContext(switchCtx, fallback, workspaceRequest)
+		if beginErr != nil || failure != nil || status.State != lifecycle.StateReady {
+			if beginErr == nil && failure == nil {
+				failure = failureFromStatus(status)
+			}
+			return h.finishContextSwitchFailure(manager, candidateFailure, errors.Join(beginErr, failure))
+		}
 		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, false)
 	}
 	if restore && versioned {
@@ -1096,7 +1128,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, rollbackErr, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, rollbackErr)
 	}
-	rollbackStatus, rollbackFailure, beginErr := h.runResolvedContext(rollbackCtx, rollbackLaunch)
+	rollbackStatus, rollbackFailure, beginErr := h.runResolvedContext(rollbackCtx, rollbackLaunch, workspaceRequest)
 	if beginErr != nil {
 		_, _ = h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptRollback, candidateFailure, true, dshmanager.RollbackFailed, beginErr, false)
 		return h.finishContextSwitchFailure(manager, candidateFailure, beginErr)
@@ -1171,11 +1203,11 @@ func (h *Host) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error
 	return snapshot, errors.New("version recovery is unavailable")
 }
 
-func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.ResolvedLaunch) (lifecycle.Status, *lifecycle.Failure, error) {
+func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.ResolvedLaunch, workspaceRequest workspacecontext.Request) (lifecycle.Status, *lifecycle.Failure, error) {
 	// The Host owns a generation beyond the request that made it ready.
 	// waitForRun cancels and drains startup when the operation is cancelled;
 	// after readiness, only Host lifecycle actions should stop this Worker.
-	run, status, err := h.beginResolvedRun(context.WithoutCancel(ctx), resolved)
+	run, status, err := h.beginResolvedRun(context.WithoutCancel(ctx), resolved, workspaceRequest)
 	if err != nil {
 		return status, h.failureFor(err, lifecycle.ErrorInvalidTransition, "dsh-work could not start the Run context.", true), err
 	}
@@ -1183,6 +1215,29 @@ func (h *Host) runResolvedContext(ctx context.Context, resolved dshmanager.Resol
 	go h.run(run)
 	status, failure := h.waitForRun(ctx, run)
 	return status, failure, nil
+}
+
+func workspaceRequestForSafeModeSwitch(activeRun *generationRun, target dshmanager.RunContext) workspacecontext.Request {
+	if activeRun == nil {
+		return workspacecontext.Request{}
+	}
+	activeRun.mu.RLock()
+	workspace := activeRun.workspace
+	activeTarget := activeRun.launch
+	if activeTarget != nil {
+		activeTarget = cloneResolvedLaunch(activeTarget)
+	}
+	if activeTarget == nil && activeRun.target != nil {
+		copy := *activeRun.target
+		activeTarget = &dshmanager.ResolvedLaunch{Target: copy}
+	}
+	activeRun.mu.RUnlock()
+	fromSafeMode := activeTarget != nil && activeTarget.Target.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID
+	toSafeMode := target.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID
+	if !fromSafeMode && !toSafeMode || workspace.State != workspacecontext.StateSelected {
+		return workspacecontext.Request{}
+	}
+	return workspacecontext.Request{ID: workspace.ID, Path: workspace.Path, Title: workspace.Title}
 }
 
 func (h *Host) Quit() lifecycle.Status {
@@ -1493,7 +1548,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	run.setChannel(channel)
 	plan, err := h.deps.DSH.BuildLaunchPlan(dshadapter.LaunchContext{
-		UserDataOverlay:    launch.dataDirectory.ID != dshmanager.SafeModeDataDirectoryID,
+		UserDataOverlay:    launch.dataDirectory.ID != dshmanager.SafeModeDataDirectoryID || (launch.resolved != nil && launch.resolved.UserDataOverlay),
 		GenerationID:       run.generation,
 		Runtime:            launch.runtime,
 		BootstrapDirectory: h.config.BootstrapDirectory,
@@ -2427,6 +2482,13 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
 	}
 	return s.host.DisableFaultPlugin(ctx, packageName)
+}
+
+func (s *HostService) RepairSafeModePlugin(ctx context.Context, packageName, operation string) (dshmanager.Snapshot, error) {
+	if !s.authorized(ctx) {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Plugins can be changed only from the dsh-work window.")
+	}
+	return s.host.RepairSafeModePlugin(ctx, packageName, operation)
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {

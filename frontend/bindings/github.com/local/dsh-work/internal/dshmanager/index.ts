@@ -12,6 +12,7 @@ export {
     RuntimeArtifactSource,
     RuntimeSource,
     RuntimeToolchain,
+    SafeModeMode,
     SwitchAttemptStage,
     ThemePreference
 } from "./models.js";
@@ -52,6 +53,7 @@ export type {
     RestorePointsView,
     RunContext,
     RuntimeInfo,
+    SafeModeRequest,
     SafeModeState,
     Snapshot,
     SwitchAttempt,

@@ -367,7 +367,7 @@ func (m *Manager) RemoveNode(ctx context.Context, id string) (Snapshot, error) {
 	nodes := cloneNodes(m.config.Nodes)
 	installer := m.config.NodeInstaller
 	selected := false
-	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked()} {
+	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked(), m.safeModeFaultLocked()} {
 		if target != nil && target.Node.Kind == NodeSelectionManaged && target.Node.InstallationID == id {
 			selected = true
 			break
@@ -549,7 +549,7 @@ func (m *Manager) InstallRuntimeWithProgress(ctx context.Context, version string
 	runtimeID := "dsh-" + version
 	m.mu.RLock()
 	runtimeInUse := false
-	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked()} {
+	for _, target := range []*RunContext{m.configured, m.current, m.knownGood, m.safeModeReturnLocked(), m.safeModeFaultLocked()} {
 		if target == nil {
 			continue
 		}
@@ -731,7 +731,7 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "the runtime is not in the catalog")
 	}
-	if (m.safeMode != nil && m.safeMode.ReturnTo.RuntimeID == id) || (m.configured != nil && m.configured.RuntimeID == id) || (m.current != nil && m.current.RuntimeID == id) || (m.knownGood != nil && m.knownGood.RuntimeID == id) {
+	if (m.safeMode != nil && (m.safeMode.ReturnTo.RuntimeID == id || m.safeMode.FaultTarget.RuntimeID == id)) || (m.configured != nil && m.configured.RuntimeID == id) || (m.current != nil && m.current.RuntimeID == id) || (m.knownGood != nil && m.knownGood.RuntimeID == id) {
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorRuntimeInUse, "DSH runtime is still selected", "choose another runtime before removing it")
 	}
@@ -827,7 +827,7 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileNotFound, "DSH data directory was not found", "the data directory is not in the catalog")
 	}
-	if (m.safeMode != nil && m.safeMode.ReturnTo.Profile.DataDirectoryID == id) || (m.configured != nil && m.configured.Profile.DataDirectoryID == id) || (m.current != nil && m.current.Profile.DataDirectoryID == id) || (m.knownGood != nil && m.knownGood.Profile.DataDirectoryID == id) {
+	if (m.safeMode != nil && (m.safeMode.ReturnTo.Profile.DataDirectoryID == id || m.safeMode.FaultTarget.Profile.DataDirectoryID == id)) || (m.configured != nil && m.configured.Profile.DataDirectoryID == id) || (m.current != nil && m.current.Profile.DataDirectoryID == id) || (m.knownGood != nil && m.knownGood.Profile.DataDirectoryID == id) {
 		m.mu.RUnlock()
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "DSH data directory is still selected", "choose another profile before removing it")
 	}
@@ -873,7 +873,7 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	if safeMode != nil {
 		for i := range profiles {
-			if profiles[i].Ref == safeMode.ReturnTo.Profile {
+			if profiles[i].Ref == safeMode.ReturnTo.Profile || profiles[i].Ref == safeMode.FaultTarget.Profile {
 				profiles[i].Deletable = false
 				profiles[i].Renamable = false
 			}
@@ -993,7 +993,7 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 		return Snapshot{}, err
 	}
 	m.mu.RLock()
-	protected := m.safeMode != nil && m.safeMode.ReturnTo.Profile == request.Profile
+	protected := m.safeMode != nil && (m.safeMode.ReturnTo.Profile == request.Profile || m.safeMode.FaultTarget.Profile == request.Profile)
 	m.mu.RUnlock()
 	if protected {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "profile is retained for leaving safe mode", "return to the previous environment before renaming it")
@@ -1581,6 +1581,7 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 
 	m.mu.RLock()
 	config := m.configSnapshotLocked()
+	safeMode := cloneSafeMode(m.safeMode)
 	m.mu.RUnlock()
 
 	selection, err := normalizeNodeSelection(request.Node)
@@ -1616,7 +1617,10 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 		return ResolvedLaunch{}, err
 	}
 
+	userDataOverlay := request.Profile.DataDirectoryID != SafeModeDataDirectoryID ||
+		(safeMode != nil && safeMode.Target.Profile == request.Profile && safeMode.Mode == SafeModeWithData)
 	return ResolvedLaunch{
+		UserDataOverlay: userDataOverlay,
 		Target: RunContext{
 			RuntimeID: request.RuntimeID,
 			Node:      selection,

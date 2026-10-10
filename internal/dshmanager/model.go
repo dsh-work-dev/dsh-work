@@ -424,6 +424,7 @@ type ResolvedLaunch struct {
 	VersionUninitialized bool                `json:"-"`
 	VersionSeed          *storedRestorePoint `json:"-"`
 	VersionError         string              `json:"-"`
+	UserDataOverlay      bool                `json:"-"`
 	Target               RunContext          `json:"target"`
 	Runtime              RuntimeInfo         `json:"runtime"`
 	Node                 ResolvedNode        `json:"node"`

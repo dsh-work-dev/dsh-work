@@ -13,6 +13,9 @@ import * as app$0 from "../app/models.js";
 import * as daemon$0 from "../daemon/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as dshmanager$0 from "../dshmanager/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as lifecycle$0 from "../lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -63,6 +66,10 @@ export function Quit(): $CancellablePromise<lifecycle$0.Status> {
 
 export function RemoveFaultPlugin(packageName: string): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(3791506921, packageName);
+}
+
+export function RepairSafeModePlugin(packageName: string, operation: string): $CancellablePromise<dshmanager$0.Snapshot> {
+    return $Call.ByID(3677846466, packageName, operation);
 }
 
 export function Restart(): $CancellablePromise<lifecycle$0.Status> {

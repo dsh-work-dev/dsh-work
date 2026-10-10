@@ -106,3 +106,93 @@ func TestNewKeepsActiveSafeModeSession(t *testing.T) {
 		t.Fatalf("orphan session retained: %v", err)
 	}
 }
+
+func TestSafeModePersistsModeFaultTargetAndIndependentReturnTarget(t *testing.T) {
+	m := newTestManager(t)
+	configured := *m.configured
+	faultTarget := configured
+	faultTarget.Profile.Name = "broken"
+
+	target, err := m.PrepareSafeMode(context.Background(), SafeModeRequest{
+		Mode:        SafeModeWithData,
+		FaultTarget: &faultTarget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Profile.DataDirectoryID != SafeModeDataDirectoryID {
+		t.Fatalf("safe target = %#v", target)
+	}
+	launch, err := m.ResolveLaunch(context.Background(), LaunchRequest{RuntimeID: target.RuntimeID, Node: target.Node, Profile: target.Profile})
+	if err != nil || !launch.UserDataOverlay {
+		t.Fatalf("with-data launch overlay = %v, %v", launch.UserDataOverlay, err)
+	}
+
+	reloaded, err := New(Config{StatePath: m.config.StatePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SafeMode == nil {
+		t.Fatal("safe mode state was not restored")
+	}
+	if snapshot.SafeMode.Mode != SafeModeWithData {
+		t.Fatalf("mode = %q", snapshot.SafeMode.Mode)
+	}
+	if snapshot.SafeMode.FaultTarget != faultTarget {
+		t.Fatalf("fault target = %#v, want %#v", snapshot.SafeMode.FaultTarget, faultTarget)
+	}
+	if snapshot.SafeMode.ReturnTo != configured {
+		t.Fatalf("return target = %#v, want %#v", snapshot.SafeMode.ReturnTo, configured)
+	}
+}
+
+func TestSafeModeFaultTargetRemainsProtectedForRepair(t *testing.T) {
+	m := newTestManager(t)
+	m.config.ProfileCatalog = testProfileCatalog{}
+	fault := *m.configured
+	fault.Profile.Name = "broken"
+	faultPath := filepath.Join(m.config.DataDirectories[0].Path, "profiles", fault.Profile.Name)
+	if err := os.MkdirAll(faultPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(faultPath, "package.json"), []byte(`{"dependencies":{"@example/plugin":"1.0.0"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.PrepareSafeMode(context.Background(), SafeModeRequest{Mode: SafeModeWithData, FaultTarget: &fault}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := m.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range snapshot.Profiles {
+		if profile.Ref == fault.Profile {
+			if profile.Deletable || profile.Renamable {
+				t.Fatalf("fault target was exposed as mutable: %#v", profile)
+			}
+			if len(profile.Plugins) != 1 || profile.Plugins[0].Name != "@example/plugin" {
+				t.Fatalf("fault target plugins = %#v", profile.Plugins)
+			}
+			return
+		}
+	}
+	t.Fatal("fault target profile was not visible")
+}
+
+func TestDecodeLegacySafeModeDefaultsToEmptyDiagnostic(t *testing.T) {
+	data := []byte(`{"safeMode":{"target":{"runtimeId":"dsh-test","profile":{"dataDirectoryId":"dsh-work-safe-mode","name":"web"}},"returnTo":{"runtimeId":"dsh-test","profile":{"dataDirectoryId":"dsh-work","name":"web"}}}}`)
+	state, err := decodeState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SafeMode.Mode != SafeModeDiagnostic {
+		t.Fatalf("legacy mode = %q", state.SafeMode.Mode)
+	}
+	if state.SafeMode.FaultTarget != state.SafeMode.ReturnTo {
+		t.Fatalf("legacy fault target = %#v, want return target %#v", state.SafeMode.FaultTarget, state.SafeMode.ReturnTo)
+	}
+}

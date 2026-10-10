@@ -12,9 +12,23 @@ import (
 
 const SafeModeDataDirectoryID = "dsh-work-safe-mode"
 
+type SafeModeMode string
+
+const (
+	SafeModeWithData   SafeModeMode = "with-data"
+	SafeModeDiagnostic SafeModeMode = "diagnostic"
+)
+
+type SafeModeRequest struct {
+	Mode        SafeModeMode `json:"mode"`
+	FaultTarget *RunContext  `json:"faultTarget,omitempty"`
+}
+
 type SafeModeState struct {
-	Target   RunContext `json:"target"`
-	ReturnTo RunContext `json:"returnTo"`
+	Mode        SafeModeMode `json:"mode"`
+	Target      RunContext   `json:"target"`
+	FaultTarget RunContext   `json:"faultTarget"`
+	ReturnTo    RunContext   `json:"returnTo"`
 }
 
 func cloneSafeMode(state *SafeModeState) *SafeModeState {
@@ -25,10 +39,9 @@ func cloneSafeMode(state *SafeModeState) *SafeModeState {
 	return &copy
 }
 
-// PrepareSafeMode reserves a fresh home and persists the return target before
-// Host starts the normal serialized switch. DSH initializes its built-in web
-// profile on launch; nothing is copied from the failed profile or home patches.
-func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resultErr error) {
+// PrepareSafeMode reserves a fresh home and persists distinct fault and return
+// targets before Host starts the normal serialized switch.
+func (m *Manager) PrepareSafeMode(ctx context.Context, requests ...SafeModeRequest) (result RunContext, resultErr error) {
 	defer func() {
 		resultErr = recoveryFailure(resultErr, lifecycle.ErrorManagerStateInvalid, "Safe mode could not be prepared.")
 	}()
@@ -39,6 +52,16 @@ func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resul
 	defer release()
 	if err := m.ensureMutationAllowed(); err != nil {
 		return RunContext{}, err
+	}
+	request := SafeModeRequest{Mode: SafeModeDiagnostic}
+	if len(requests) > 0 {
+		request = requests[0]
+		if request.Mode == "" {
+			request.Mode = SafeModeDiagnostic
+		}
+	}
+	if len(requests) > 1 || !validSafeModeMode(request.Mode) {
+		return RunContext{}, errors.New("invalid safe mode request")
 	}
 	m.mu.RLock()
 	state := m.stateLocked()
@@ -54,7 +77,25 @@ func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resul
 	if target == nil {
 		return RunContext{}, errors.New("select a local Node and DSH runtime first")
 	}
+	faultTarget := cloneRunContext(request.FaultTarget)
+	if faultTarget == nil {
+		faultTarget = cloneRunContext(state.Configured)
+	}
+	if faultTarget == nil {
+		faultTarget = cloneRunContext(target)
+	}
+	if faultTarget.Profile.DataDirectoryID == SafeModeDataDirectoryID {
+		return RunContext{}, errors.New("safe mode cannot repair itself")
+	}
 	if target.Profile.DataDirectoryID == SafeModeDataDirectoryID && state.SafeMode != nil {
+		state.SafeMode.Mode = request.Mode
+		state.SafeMode.FaultTarget = *faultTarget
+		if err := m.store.Save(ctx, statePath, state); err != nil {
+			return RunContext{}, err
+		}
+		m.mu.Lock()
+		m.safeMode = cloneSafeMode(state.SafeMode)
+		m.mu.Unlock()
 		return state.SafeMode.Target, nil
 	}
 	root := filepath.Join(filepath.Dir(statePath), "safe-mode")
@@ -87,7 +128,7 @@ func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resul
 	}
 	rescue := *target
 	rescue.Profile = ProfileRef{DataDirectoryID: entry.ID, Name: "web"}
-	state.SafeMode = &SafeModeState{Target: rescue, ReturnTo: *target}
+	state.SafeMode = &SafeModeState{Mode: request.Mode, Target: rescue, FaultTarget: *faultTarget, ReturnTo: *target}
 	if err := m.store.Save(ctx, statePath, state); err != nil {
 		return RunContext{}, err
 	}
@@ -97,6 +138,10 @@ func (m *Manager) PrepareSafeMode(ctx context.Context) (result RunContext, resul
 	m.mu.Unlock()
 	keep = true
 	return rescue, nil
+}
+
+func validSafeModeMode(mode SafeModeMode) bool {
+	return mode == SafeModeWithData || mode == SafeModeDiagnostic
 }
 
 // AbortPreparedSafeMode discards an unused rescue reservation after a failed
@@ -221,4 +266,11 @@ func (m *Manager) safeModeReturnLocked() *RunContext {
 		return nil
 	}
 	return &m.safeMode.ReturnTo
+}
+
+func (m *Manager) safeModeFaultLocked() *RunContext {
+	if m.safeMode == nil {
+		return nil
+	}
+	return &m.safeMode.FaultTarget
 }

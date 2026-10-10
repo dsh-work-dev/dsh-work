@@ -125,3 +125,43 @@ func TestVersionRecoveryHostPolicyAndReadyLifetime(t *testing.T) {
 		})
 	}
 }
+
+func TestSafeModeRestoresOnlyFaultTargetVersionPoint(t *testing.T) {
+	f := newRunContextSwitchFixture(t)
+	defer f.close()
+	f.startReady(t)
+
+	if _, err := f.host.SwitchRunContext(context.Background(), f.target("beta")); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := f.host.SwitchRunContext(context.Background(), f.target("alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alphaPoint, betaPoint string
+	for _, point := range snapshot.RestorePoints.Points {
+		switch point.Target.Profile {
+		case f.target("alpha").Profile:
+			alphaPoint = point.ID
+		case f.target("beta").Profile:
+			betaPoint = point.ID
+		}
+	}
+	if alphaPoint == "" || betaPoint == "" {
+		t.Fatalf("missing profile restore points: %#v", snapshot.RestorePoints.Points)
+	}
+	faultTarget := f.target("beta")
+	if _, err := f.host.EnterSafeModeWithOptions(context.Background(), dshmanager.SafeModeRequest{Mode: dshmanager.SafeModeWithData, FaultTarget: &faultTarget}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.host.RestoreVersionPoint(context.Background(), alphaPoint); err == nil {
+		t.Fatal("safe mode restored a version point outside its fault target")
+	}
+	snapshot, err = f.host.RestoreVersionPoint(context.Background(), betaPoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Current == nil || snapshot.Current.Profile != faultTarget.Profile || snapshot.SafeMode != nil {
+		t.Fatalf("explicit fault target restore = %#v", snapshot)
+	}
+}
