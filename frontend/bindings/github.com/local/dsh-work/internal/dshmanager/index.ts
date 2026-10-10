@@ -52,7 +52,6 @@ export type {
     RestorePointsView,
     RunContext,
     RuntimeInfo,
-    SafeModeState,
     Snapshot,
     SwitchAttempt,
     VersionPlugin

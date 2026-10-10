@@ -131,7 +131,7 @@ func TestVersionRestoreRealDSH(t *testing.T) {
 	}
 }
 
-func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
+func TestVersionPointRealStartup(t *testing.T) {
 	if os.Getenv("DSH_WORK_VERSION_RESTORE_REAL") != "1" {
 		t.Skip("real DSH startup is opt-in")
 	}
@@ -181,16 +181,8 @@ func TestVersionPointRealStartupAndSafeMode(t *testing.T) {
 	if err != nil || s.RestorePoints.LastRunning == "" {
 		t.Fatalf("first boot did not record snapshot: %+v %v", s.RestorePoints, err)
 	}
-	id := s.RestorePoints.LastRunning
 	if _, err = m.SaveRestorePoint(context.Background(), "Real first boot"); err != nil {
 		t.Fatal(err)
-	}
-	if _, err = h.EnterSafeMode(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	s, err = m.Snapshot(context.Background())
-	if err != nil || s.RestorePoints.LastRunning != id || s.RestorePoints.CanSave {
-		t.Fatalf("safe mode changed normal snapshot: %+v %v", s.RestorePoints, err)
 	}
 	if err = h.ShutdownForApp(); err != nil {
 		t.Fatal(err)

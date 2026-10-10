@@ -98,16 +98,6 @@ func TestVersionRecoveryHostPolicyAndReadyLifetime(t *testing.T) {
 				if installer.calls != 0 || s.Current != nil {
 					t.Fatal("choose mode performed automatic installation")
 				}
-				if _, err = f.manager.PrepareSafeMode(context.Background()); err != nil {
-					t.Fatal(err)
-				}
-				returnTo, err := f.manager.SafeModeReturnTarget(context.Background())
-				if err != nil || returnTo != f.target("alpha") {
-					t.Fatalf("safe mode must return to the last successful environment: %+v %v", returnTo, err)
-				}
-				if err = f.manager.AbortPreparedSafeMode(context.Background()); err != nil {
-					t.Fatal(err)
-				}
 				if _, err = f.host.RestoreKnownGood(context.Background()); err != nil {
 					t.Fatal(err)
 				}

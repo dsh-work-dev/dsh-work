@@ -18,11 +18,6 @@ const maxProfileManifestBytes = 1 << 20
 // remains a read-only catalog operation, while a Host switch prepares the
 // candidate after stopping the current Worker.
 func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) error {
-	// A clean rescue home boots the shipped web composition directly. Running
-	// the plugin install command here would make rescue depend on provisioning.
-	if launch.Target.Profile.DataDirectoryID == SafeModeDataDirectoryID {
-		return contextError(ctx)
-	}
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return err

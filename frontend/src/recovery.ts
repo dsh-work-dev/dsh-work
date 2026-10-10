@@ -2,11 +2,6 @@ import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/des
 import type {ProfileBackupResult, ProfileCloneResult, ProfileRef, Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {currentLocale, t} from "./i18n";
 
-export function safeModeActive(snapshot?: Snapshot): boolean {
-  const selected = snapshot?.current ?? snapshot?.configured;
-  return !!snapshot?.safeMode && selected?.profile.dataDirectoryId === snapshot.safeMode.target.profile.dataDirectoryId;
-}
-
 export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef) => void) {
   const list = document.getElementById("profile-backups")!;
   const importFeedback = document.getElementById("backup-import-feedback")!;
@@ -21,8 +16,6 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   const importButton = document.getElementById("backup-import") as HTMLButtonElement;
   const openButton = document.getElementById("backup-open") as HTMLButtonElement;
   const refreshButton = document.getElementById("backup-refresh") as HTMLButtonElement;
-  const safeButton = document.getElementById("manager-safe-mode") as HTMLButtonElement;
-  const safeFeedback = document.getElementById("safe-feedback")!;
   const backupResult = document.getElementById("profile-backup-result")!;
   const backupMessage = document.getElementById("profile-backup-message")!;
   const backupOpen = document.getElementById("profile-backup-open") as HTMLButtonElement;
@@ -37,10 +30,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     historyOpen.disabled = !selectedProfile;
     importButton.disabled = busy || blocked || !(snapshot?.current ?? snapshot?.configured);
     for (const button of [openButton, refreshButton, ...Array.from(list.querySelectorAll<HTMLButtonElement>("button"))]) button.disabled = busy || blocked || !selectedProfile;
-    safeButton.disabled = busy || blocked || !snapshot?.configured;
     backupOpen.disabled = busy || !createdBackup;
-    safeButton.classList.toggle("button-primary", !!snapshot?.lastSwitchAttempt);
-    safeButton.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
   }
 
   async function refresh() {
@@ -85,7 +75,7 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
               createdBackup = undefined; backupResult.hidden = true;
             }
             await refresh();
-          }, false, "backup.deleteError").then(() => refreshButton.focus({preventScroll: true}));
+          }, "backup.deleteError").then(() => refreshButton.focus({preventScroll: true}));
         });
         const actions = document.createElement("div"); actions.className = "row-trail";
         actions.append(restore, remove);
@@ -101,12 +91,12 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     document.getElementById("profile-result")!.textContent = t("backup.restored", {profile: result.profile.name});
   }
 
-  async function run(work: () => Promise<void>, safe = false, errorKey = "backup.restoreError", importing = false) {
+  async function run(work: () => Promise<void>, errorKey = "backup.restoreError", importing = false) {
     if (busy || blocked) return;
-    const message = safe ? safeFeedback : importing ? importFeedback : feedback;
+    const message = importing ? importFeedback : feedback;
     busy = true; message.textContent = ""; controls();
     try { await work(); }
-    catch (error) { message.textContent = t(safe ? "safe.error" : errorKey); console.error(error); }
+    catch (error) { message.textContent = t(errorKey); console.error(error); }
     finally {
       busy = false;
       try { updated(await ManagerService.GetSnapshot()); } catch { /* Retain last result. */ }
@@ -118,8 +108,8 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
   importButton.addEventListener("click", () => void run(async () => {
     const result = await ManagerService.ImportProfileBackup();
     if (result) restored(result);
-  }, false, "backup.restoreError", true));
-  openButton.addEventListener("click", () => void run(async () => { if (selectedProfile) await ManagerService.OpenProfileBackups(selectedProfile); }, false, "backup.openError"));
+  }, "backup.restoreError", true));
+  openButton.addEventListener("click", () => void run(async () => { if (selectedProfile) await ManagerService.OpenProfileBackups(selectedProfile); }, "backup.openError"));
   backupOpen.addEventListener("click", () => void (async () => {
     if (!createdBackup || backupOpen.disabled) return;
     backupOpen.disabled = true;
@@ -127,9 +117,6 @@ export function mountRecovery(updated: (snapshot: Snapshot, profile?: ProfileRef
     catch { backupMessage.textContent = t("backup.openError"); }
     finally { controls(); }
   })());
-  safeButton.addEventListener("click", () => void run(async () => {
-    updated(await (safeModeActive(snapshot) ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode()));
-  }, true));
   controls();
   return {
     refresh,

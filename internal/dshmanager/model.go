@@ -462,7 +462,6 @@ type SwitchAttempt struct {
 
 type Snapshot struct {
 	RestorePoints     *RestorePointsView     `json:"restorePoints,omitempty"`
-	SafeMode          *SafeModeState         `json:"safeMode,omitempty"`
 	Runtimes          []RuntimeInfo          `json:"runtimes"`
 	DSHReleases       []DSHReleaseInfo       `json:"dshReleases"`
 	Nodes             []NodeInstallationInfo `json:"nodes"`

@@ -6,7 +6,6 @@ import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
-import {safeModeActive} from "./recovery";
 import {icon, type IconName} from "./ui/icons";
 
 const links: Record<LinkTarget, string> = {
@@ -61,7 +60,7 @@ export function mountShell() {
   frame.setAttribute("allow", "microphone; clipboard-read; clipboard-write; fullscreen");
   frame.hidden = true;
 
-  let menuState: MenuState = {lifecycle: "Starting", busy: false, pet: {ready: false, visible: false}, safeMode: null, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: false, dsh: null};
+  let menuState: MenuState = {lifecycle: "Starting", busy: false, pet: {ready: false, visible: false}, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: false, dsh: null};
   let sendCommand: (id: string) => void = () => {};
   const setMenu = (patch: Partial<MenuState>) => {
     menuState = {...menuState, ...patch};
@@ -72,14 +71,6 @@ export function mountShell() {
       setMenu({pet: await ShellService.GetPet()});
     } catch (error) {
       console.warn("pet state unavailable", error);
-    }
-  };
-  const refreshSafeMode = async () => {
-    try {
-      const snapshot = await ManagerService.GetSnapshot();
-      setMenu({safeMode: {available: !!snapshot.configured, active: safeModeActive(snapshot)}});
-    } catch (error) {
-      console.warn("environment state unavailable", error);
     }
   };
   const toast = createToast();
@@ -147,23 +138,12 @@ export function mountShell() {
       case "pet": void busyAction(async () => { menuState.pet = await ShellService.SetPetVisible(!menuState.pet.visible); }); break;
       case "refresh": reloadFrame(); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
-      case "safe-mode": void busyAction(async () => {
-        try {
-          const snapshot = await (menuState.safeMode?.active ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode());
-          menuState.safeMode = {available: !!snapshot.configured, active: safeModeActive(snapshot)};
-        } catch (error) {
-          // Settings Overview shows why the switch failed.
-          void ShellService.OpenSettings("overview");
-          throw error;
-        }
-      }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
       case "dsh": sendCommand(action.id); break;
     }
   };
   const menuBar = createMenuBar(t, run, id => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
-    if (id === "run") void refreshSafeMode();
   }, () => frame.contentWindow?.focus());
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, controls);
@@ -185,7 +165,6 @@ export function mountShell() {
   void HostService.GetStatus().then(status => setMenu({lifecycle: status.state})).catch(() => {});
   void HostService.GetUpdateState().then(update => setMenu({updatePhase: update.phase})).catch(() => {});
   void refreshPet();
-  void refreshSafeMode();
 
   const host = document.getElementById("host-surface");
   let frameRevision = 0;

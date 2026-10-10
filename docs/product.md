@@ -55,21 +55,14 @@ silently mutate DSH-owned data.
   Settings Overview presents a compact record summary and save action, with
   history and selected-record management in a dedicated dialog.
 - Settings General offers automatic recovery of the last successful snapshot or
-  user choice. The failed-startup surface offers retry, snapshot recovery and
-  safe mode. When the failure output names installed third-party plugins, it
-  also offers to disable or remove each one and then starts again; a failure
-  caused by damaged DSH session data names no plugin. In Settings Overview,
-  “启动安全模式” sits beside “切换环境”.
+  user choice. The failed-startup surface offers retry and snapshot recovery.
+  When the failure output names installed third-party plugins, it also offers
+  to disable or remove each one and then starts again; a failure caused by
+  damaged DSH session data names no plugin.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
-  manager, then verifies startup. Safe mode is DSH without custom plugins: it
-  starts a clean profile in a separate data directory, so third-party plugins
-  and dsh-work's user data do not load, while the menus, sign-in and activity
-  that dsh-work's own plugins provide keep working. It preserves
-  normal-environment success records. Once a normal environment
-  is running again, that data directory is discarded and no longer selectable.
+  manager, then verifies startup.
 - Removing a DSH runtime deletes its installed files. A runtime used by the
-  configured, current, known-good or safe-mode return environment cannot be
-  removed.
+  configured, current or known-good environment cannot be removed.
 - DSH's DeepSeek account sign-in works in the Workspace. Starting sign-in
   opens the authorization page in the system browser. After authorization,
   the browser shows a result page with a link back to dsh-work.

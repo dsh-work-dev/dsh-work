@@ -1,6 +1,5 @@
 import {mountRestorePoints} from "./restore-points";
 import {Events} from "@wailsio/runtime";
-import {safeModeActive} from "./recovery";
 import {HostService, ManagerService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {NodeSelectionKind, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
@@ -147,15 +146,11 @@ export function mountHost() {
     node.disabled = dsh.disabled = releases.disabled = busy || active() || !snapshot;
     downloadNode.disabled = busy || active() || !snapshot;
     downloadDsh.disabled = busy || active() || !downloadableVersion() || !!installedRuntime();
-    const safe = element<HTMLButtonElement>("startup-safe-mode");
-    safe.hidden = !failed && !stopped;
     const restoring = snapshot?.restorePoints?.operation?.status === "running";
     restoreButton.hidden = !failed && !stopped && !restoring;
     restoreButton.disabled = !snapshot || busy || (active() && !restoring);
     restoreButton.textContent = t(restoring ? "startup.restoreProgress" : "startup.restore");
     versionPoints.render(snapshot, busy || active());
-    safe.disabled = busy || active() || !snapshot?.configured || !installedRuntime() || !installedNode();
-    safe.textContent = t(safeModeActive(snapshot) ? "safe.exit" : "safe.enter");
     retry.disabled = busy || active() || !snapshot || !selectedVersion();
     retry.hidden = busy || active() || !!missing;
     errorPanel.hidden = !lastError;
@@ -172,7 +167,7 @@ export function mountHost() {
         row.querySelector(".check-marker")!.textContent = String(index + 1);
       });
       retry.hidden = false; retry.disabled = busy; retry.textContent = t("common.retry");
-      cancel.hidden = true; safe.hidden = true; restoreButton.hidden = true;
+      cancel.hidden = true; restoreButton.hidden = true;
     }
   }
 
@@ -205,9 +200,6 @@ export function mountHost() {
     renderEnvironment();
   }
 
-  element("startup-safe-mode").addEventListener("click", () => void action(async () => {
-    snapshot = await (safeModeActive(snapshot) ? ManagerService.ExitSafeMode() : ManagerService.EnterSafeMode());
-  }));
 
   function showError(error: unknown) {
     const value = error as {message?: string; summary?: string; detail?: string};

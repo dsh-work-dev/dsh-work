@@ -27,25 +27,15 @@ Settings Overview shows a compact latest-verified summary, record count, save
 action and history entry. History uses newest-first rows; selecting a record
 opens metadata, plugin versions and restore/rename/delete actions in the same
 dialog. Restore confirmation replaces those details. Closing returns focus to
-the originating control. “启动安全模式” appears beside “切换环境”.
+the originating control.
 
-Startup failure places retry, safe mode, version recovery and visible bounded
+Startup failure places retry, version recovery and visible bounded
 diagnostics beside the failing step, including a direct copy action. Version
 selection and confirmation use a focused dialog. Recovery shows its current
 installation/startup stage and cancellation beside the active operation.
 
 Recording failure is visible but does not stop a healthy Worker or replace the
-previous durable success point. Safe-mode startup never advances normal success
-pointers. After a failure, safe mode prefers the known-good return environment
-when no current Worker exists.
-
-Each safe-mode entry creates a fresh data directory under the app's
-`safe-mode` folder; nothing is copied from the failed environment. When a
-normal environment becomes healthy again — by returning or by any other
-switch — the safe-mode data directory is removed from the catalog and its
-folder is deleted. Startup also removes a stale safe-mode entry and any
-session folder not owned by an active safe mode. Deletion is best effort: a
-locked folder is retried on the next start.
+previous durable success point.
 
 Removing a DSH runtime does not invalidate version records that name its
 version, because restore always reinstalls the recorded DSH version.
@@ -109,8 +99,7 @@ selected point. An unavailable target leaves recovery to the user.
 Automatic fallback is bounded to one attempt. An unfinished running operation
 left by process interruption may resume once when automatic recovery is enabled.
 A second interruption, a failed/cancelled recovery or user-choice mode requires
-user action. An explicit retry starts a fresh retry budget. Safe-mode startup
-bypasses unfinished normal recovery.
+user action. An explicit retry starts a fresh retry budget.
 
 Successful recovery retains a completed result for display; that result does not
 pin an automatic point indefinitely and is cleared when its point is removed.

@@ -43,7 +43,7 @@
             <div class="notice-head"><span data-icon="triangle-alert"></span><strong id="startup-plugin-fault-title" data-i18n="fault.title">可能是插件导致 DSH 无法启动</strong></div>
             <ul id="startup-plugin-fault-list" class="rows"></ul>
           </section>
-          <div class="startup-actions actions"><button id="retry" class="button button-primary" type="button" hidden>重试</button><button id="startup-safe-mode" class="button" type="button" data-i18n="safe.enter" hidden>启动安全模式</button><button id="open-startup-restore" class="button" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" class="button button-quiet" type="button" data-i18n="common.cancel" hidden>取消</button></div>
+          <div class="startup-actions actions"><button id="retry" class="button button-primary" type="button" hidden>重试</button><button id="open-startup-restore" class="button" type="button" data-i18n="startup.restore" hidden>恢复版本</button><button id="cancel" class="button button-quiet" type="button" data-i18n="common.cancel" hidden>取消</button></div>
           <section id="startup-diagnostics" class="startup-diagnostics" hidden aria-labelledby="startup-log-title">
             <div class="startup-diagnostic-actions"><strong id="startup-log-title" data-i18n="startup.log">日志</strong><span id="diagnostic-copy-status" class="note" role="status"></span><button id="copy-startup-output" class="button button-quiet button-compact" type="button" data-i18n="startup.copyDiagnostics">复制排查信息</button></div>
             <pre id="startup-output" tabindex="0"></pre>
@@ -179,17 +179,6 @@
             </section>
 
             <section id="version-restore-points" class="section restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
-
-            <section class="section" aria-labelledby="overview-safe-title">
-              <div class="section-head"><h2 id="overview-safe-title" data-i18n="safe.title">Safe mode</h2></div>
-              <div class="group">
-                <div class="row">
-                  <div class="row-main"><span class="row-meta" data-i18n="safe.description">Start a clean environment to troubleshoot plugins.</span></div>
-                  <div class="row-trail"><button id="manager-safe-mode" class="button" data-i18n="safe.enter" type="button">启动安全模式</button></div>
-                </div>
-              </div>
-              <p id="safe-feedback" class="result" role="status"></p>
-            </section>
           </section>
 
           <section id="manager-section-profiles" class="panel" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>

@@ -489,14 +489,8 @@ export enum RuntimeToolchain {
     RuntimeToolchainManagedNodeNPM = "managed-node-npm",
 };
 
-export interface SafeModeState {
-    "target": RunContext;
-    "returnTo": RunContext;
-}
-
 export interface Snapshot {
     "restorePoints"?: RestorePointsView | null;
-    "safeMode"?: SafeModeState | null;
     "runtimes": RuntimeInfo[] | null;
     "dshReleases": DSHReleaseInfo[] | null;
     "nodes": NodeInstallationInfo[] | null;

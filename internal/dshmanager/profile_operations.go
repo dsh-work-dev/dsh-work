@@ -131,12 +131,6 @@ func (m *Manager) DeleteProfile(ctx context.Context, request ProfileDeleteReques
 	if isBuiltInProfile(config.ProfileCatalog, request.Profile.Name) {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInvalid, "built-in DSH profiles cannot be deleted", "choose a custom profile")
 	}
-	m.mu.RLock()
-	protected := m.safeMode != nil && m.safeMode.ReturnTo.Profile == request.Profile
-	m.mu.RUnlock()
-	if protected {
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "profile is retained for leaving safe mode", "return to the previous environment before deleting it")
-	}
 	failedTarget := lastSwitchAttempt != nil && lastSwitchAttempt.Target.Profile == request.Profile
 	if profileRefMatches(current, request.Profile) || profileRefMatches(configured, request.Profile) || profileRefMatches(knownGood, request.Profile) || failedTarget {
 		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the selected DSH profile is in use", "switch to another profile before deleting it")

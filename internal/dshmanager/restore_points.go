@@ -124,7 +124,7 @@ func (s *VersionRecoveryState) point(id string) *storedRestorePoint {
 }
 func (m *Manager) versionViewLocked() *RestorePointsView {
 	s := cloneVersionRecovery(m.versionRecovery)
-	v := &RestorePointsView{Points: []RestorePoint{}, LastByProfile: s.LastByProfile, LastRunning: s.LastRunning, SaveError: m.restoreSaveError, Operation: s.Pending, CanSave: m.current != nil && m.current.Profile.DataDirectoryID != SafeModeDataDirectoryID && m.verifiedPoint != nil && !m.switching}
+	v := &RestorePointsView{Points: []RestorePoint{}, LastByProfile: s.LastByProfile, LastRunning: s.LastRunning, SaveError: m.restoreSaveError, Operation: s.Pending, CanSave: m.current != nil && m.verifiedPoint != nil && !m.switching}
 	for _, p := range s.Points {
 		v.Points = append(v.Points, p.RestorePoint)
 	}
@@ -135,9 +135,6 @@ func (m *Manager) versionViewLocked() *RestorePointsView {
 // CaptureLaunchVersions runs before starting the Worker; errors affect the
 // recorder, not the ability to start an otherwise usable environment.
 func (m *Manager) CaptureLaunchVersions(ctx context.Context, launch ResolvedLaunch) ResolvedLaunch {
-	if launch.Target.Profile.DataDirectoryID == SafeModeDataDirectoryID {
-		return launch
-	}
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		launch.VersionError = err.Error()
@@ -208,56 +205,50 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 	}
 	saveErr := launch.VersionError
 	var verified *storedRestorePoint
-	if launch.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID {
-		if launch.VersionSeed != nil {
-			actual, e := m.readVersionPoint(ctx, launch)
-			if e != nil {
-				saveErr = e.Error()
-			} else if actual.Digest != launch.VersionSeed.Digest {
-				saveErr = "Dependencies changed during startup; restart to record this environment"
-			} else {
-				now := time.Now().UTC().Format(time.RFC3339Nano)
-				verified = actual
-				id := s.LastByProfile[profilePointKey(launch.Target.Profile)]
-				if s.Pending != nil && s.Pending.Status == "running" {
-					id = s.Pending.PointID
-				}
-				existing := s.point(id)
-				if existing != nil && existing.Digest == actual.Digest {
-					existing.LastVerifiedAt = now
-					existing.Target = launch.Target
-					verified = existing
-				} else {
-					actual.ID = lifecycle.NewCorrelationID()
-					actual.Kind = "automatic"
-					actual.Label = ""
-					actual.CreatedAt = now
-					actual.LastVerifiedAt = now
-					s.Points = append(s.Points, *actual)
-				}
-				s.LastByProfile[profilePointKey(launch.Target.Profile)] = verified.ID
-				s.LastRunning = verified.ID
+	if launch.VersionSeed != nil {
+		actual, e := m.readVersionPoint(ctx, launch)
+		if e != nil {
+			saveErr = e.Error()
+		} else if actual.Digest != launch.VersionSeed.Digest {
+			saveErr = "Dependencies changed during startup; restart to record this environment"
+		} else {
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			verified = actual
+			id := s.LastByProfile[profilePointKey(launch.Target.Profile)]
+			if s.Pending != nil && s.Pending.Status == "running" {
+				id = s.Pending.PointID
 			}
-		} else if saveErr == "" {
-			saveErr = "No verified startup version record is available"
+			existing := s.point(id)
+			if existing != nil && existing.Digest == actual.Digest {
+				existing.LastVerifiedAt = now
+				existing.Target = launch.Target
+				verified = existing
+			} else {
+				actual.ID = lifecycle.NewCorrelationID()
+				actual.Kind = "automatic"
+				actual.Label = ""
+				actual.CreatedAt = now
+				actual.LastVerifiedAt = now
+				s.Points = append(s.Points, *actual)
+			}
+			s.LastByProfile[profilePointKey(launch.Target.Profile)] = verified.ID
+			s.LastRunning = verified.ID
 		}
-		if s.Pending != nil && verified != nil {
-			s.Pending.Status = "completed"
-			s.Pending.Stage = "ready"
-			s.Pending.Error = ""
-		}
-		if verified != nil {
-			copy := *verified
-			verified = &copy
-		}
-		pruneVersionPoints(s)
+	} else if saveErr == "" {
+		saveErr = "No verified startup version record is available"
 	}
+	if s.Pending != nil && verified != nil {
+		s.Pending.Status = "completed"
+		s.Pending.Stage = "ready"
+		s.Pending.Error = ""
+	}
+	if verified != nil {
+		copy := *verified
+		verified = &copy
+	}
+	pruneVersionPoints(s)
 	state.Configured = cloneRunContext(&launch.Target)
 	state.VersionRecovery = s
-	if launch.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID {
-		state.SafeMode = nil
-		discardInactiveSafeMode(&state)
-	}
 	if state.LastSwitchAttempt != nil && state.LastSwitchAttempt.Target == launch.Target {
 		state.LastSwitchAttempt = nil
 	}
@@ -272,17 +263,13 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 	m.verifiedPoint = verified
 	if err == nil {
 		m.versionRecovery = s
-		m.safeMode = cloneSafeMode(state.SafeMode)
 		m.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
 		m.config.DataDirectories = cloneDataDirectories(state.DataDirectories)
 	}
-	if launch.Target.Profile.DataDirectoryID != SafeModeDataDirectoryID && verified != nil {
+	if verified != nil {
 		m.knownGood = cloneRunContext(&launch.Target)
 	}
 	m.mu.Unlock()
-	if err == nil {
-		removeSafeModeSessions(m.config.StatePath, state.DataDirectories)
-	}
 	return m.Snapshot(context.Background())
 }
 func pruneVersionPoints(s *VersionRecoveryState) {
@@ -331,7 +318,7 @@ func (m *Manager) SaveRestorePoint(ctx context.Context, label string) (Snapshot,
 	current := cloneRunContext(m.current)
 	s := cloneVersionRecovery(m.versionRecovery)
 	m.mu.RUnlock()
-	if p == nil || current == nil || current.Profile.DataDirectoryID == SafeModeDataDirectoryID || *current != p.Target {
+	if p == nil || current == nil || *current != p.Target {
 		return Snapshot{}, errors.New("start the normal environment before saving a snapshot")
 	}
 	launch, err := m.ResolveLaunch(ctx, LaunchRequest{RuntimeID: current.RuntimeID, Node: current.Node, Profile: current.Profile})
@@ -610,18 +597,12 @@ func (m *Manager) PendingVersionRecovery() *RecoveryOperation {
 	return cloneVersionRecovery(m.versionRecovery).Pending
 }
 func (m *Manager) ResumeVersionRecovery(ctx context.Context, automatic bool) (*ResolvedLaunch, error) {
-	m.mu.RLock()
-	safe := m.configured != nil && m.configured.Profile.DataDirectoryID == SafeModeDataDirectoryID
-	m.mu.RUnlock()
-	if safe {
-		return nil, nil
-	}
 	p := m.PendingVersionRecovery()
 	if p == nil || p.Status == "completed" {
 		return nil, nil
 	}
 	if !automatic || p.ResumeCount >= 1 || p.Status == "failed" {
-		return nil, errors.New("the previous recovery is unfinished; choose a snapshot or enter safe mode")
+		return nil, errors.New("the previous recovery is unfinished; choose a snapshot")
 	}
 	release, err := m.acquireOperation(ctx)
 	if err != nil {

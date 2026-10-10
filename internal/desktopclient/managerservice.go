@@ -237,20 +237,6 @@ func (s *ManagerService) OpenProfileBackups(ctx context.Context, ref dshmanager.
 	return err
 }
 
-func (s *ManagerService) EnterSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	if s.Local != nil { return s.Local.EnterSafeMode(ctx) }
-	var value dshmanager.Snapshot
-	err := call(ctx, s.Client, "ManagerService", "EnterSafeMode", []any{}, &value)
-	return value, err
-}
-
-func (s *ManagerService) ExitSafeMode(ctx context.Context) (dshmanager.Snapshot, error) {
-	if s.Local != nil { return s.Local.ExitSafeMode(ctx) }
-	var value dshmanager.Snapshot
-	err := call(ctx, s.Client, "ManagerService", "ExitSafeMode", []any{}, &value)
-	return value, err
-}
-
 func (s *ManagerService) ExportProfile(ctx context.Context, ref dshmanager.ProfileRef) (string, error) {
 	if s.Local != nil { return s.Local.ExportProfile(ctx, ref) }
 	var value string

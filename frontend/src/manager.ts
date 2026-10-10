@@ -1257,7 +1257,7 @@ export function mountManager() {
         removeButton.type = "button";
         removeButton.textContent = t("action.remove");
         removeButton.dataset.contextMutation = "true";
-        const protectedRuntime = [snapshot?.configured, snapshot?.current, snapshot?.knownGood, snapshot?.safeMode?.returnTo].some((target) => target?.runtimeId === item.id);
+        const protectedRuntime = [snapshot?.configured, snapshot?.current, snapshot?.knownGood].some((target) => target?.runtimeId === item.id);
         removeButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight || protectedRuntime;
         removeButton.addEventListener("click", () => void (async () => {
           if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) {
@@ -1346,7 +1346,7 @@ export function mountManager() {
         removeButton.className = "button button-secondary";
         removeButton.type = "button";
         removeButton.textContent = t("action.remove");
-        const protectedNode = [snapshot?.configured, snapshot?.current, snapshot?.knownGood, snapshot?.safeMode?.returnTo].some((target) => target?.node.kind === NodeSelectionKind.NodeSelectionManaged && target.node.installationId === item.id);
+        const protectedNode = [snapshot?.configured, snapshot?.current, snapshot?.knownGood].some((target) => target?.node.kind === NodeSelectionKind.NodeSelectionManaged && target.node.installationId === item.id);
         removeButton.disabled = contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight || protectedNode;
         removeButton.addEventListener("click", () => void (async () => {
           if (contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight) return;

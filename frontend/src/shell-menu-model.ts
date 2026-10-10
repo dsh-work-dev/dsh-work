@@ -13,8 +13,6 @@ export interface MenuState {
   lifecycle: string;
   busy: boolean;
   pet: {ready: boolean; visible: boolean};
-  /** Null until the environment snapshot is read. */
-  safeMode: {available: boolean; active: boolean} | null;
   updatePhase: string;
   /** The workbench window's state; zoom is the WebView factor, 1 at actual size. */
   window: {fullscreen: boolean; zoom: number};
@@ -49,7 +47,7 @@ export function windowKeyAction(event: KeyFacts): WindowAction | undefined {
 export type LinkTarget = "docs" | "feedback-desktop" | "feedback-dsh";
 export type MenuAction =
   | {kind: "settings"; section: SettingsSection} | {kind: "window"; action: WindowAction} | {kind: "link"; target: LinkTarget}
-  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "safe-mode"} | {kind: "quit"}
+  | {kind: "pet"} | {kind: "refresh"} | {kind: "restart"} | {kind: "quit"}
   | {kind: "update"} | {kind: "about"} | {kind: "diagnostics"} | {kind: "devtools"} | {kind: "dsh"; id: string};
 export interface MenuItem { type: "item"; key: string; label: string; enabled: boolean; checked?: boolean; keys?: string[]; hint?: string; action: MenuAction }
 export interface MenuSeparator { type: "separator" }
@@ -107,8 +105,6 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
     {id: "run", label: t("shell.menu.run"), badge: false, items: [
       host("refresh", {kind: "refresh"}, state.framed),
       host("restart", {kind: "restart"}, restartable),
-      separator,
-      {...host(state.safeMode?.active ? "exitSafeMode" : "enterSafeMode", {kind: "safe-mode"}, restartable && state.safeMode?.available === true), key: "safeMode"},
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
       settings("overview", "overview"),

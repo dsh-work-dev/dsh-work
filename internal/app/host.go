@@ -1054,7 +1054,7 @@ func (h *Host) applyRunContextLocked(ctx context.Context, target dshmanager.RunC
 	if candidateFailure == nil {
 		candidateFailure = failureFromStatus(candidateStatus)
 	}
-	if versioned && (ctx.Err() != nil || target.Profile.DataDirectoryID == dshmanager.SafeModeDataDirectoryID) {
+	if versioned && ctx.Err() != nil {
 		return h.recordSwitchAttempt(manager, target, dshmanager.SwitchAttemptCandidate, candidateFailure, false, dshmanager.RollbackDisabled, nil, false)
 	}
 	if restore && versioned {
@@ -1493,7 +1493,6 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	}
 	run.setChannel(channel)
 	plan, err := h.deps.DSH.BuildLaunchPlan(dshadapter.LaunchContext{
-		UserDataOverlay:    launch.dataDirectory.ID != dshmanager.SafeModeDataDirectoryID,
 		GenerationID:       run.generation,
 		Runtime:            launch.runtime,
 		BootstrapDirectory: h.config.BootstrapDirectory,
