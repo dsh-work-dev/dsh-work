@@ -56,17 +56,20 @@ silently mutate DSH-owned data.
   history and selected-record management in a dedicated dialog.
 - Settings General offers automatic recovery of the last successful snapshot or
   user choice. The failed-startup surface offers retry, snapshot recovery and
-  safe mode. When the failure output names installed third-party plugins, it
-  also offers to disable or remove each one and then starts again; a failure
-  caused by damaged DSH session data names no plugin. In Settings Overview,
-  “启动安全模式” sits beside “切换环境”.
+  two safe-mode choices. When the failure output names installed third-party
+  plugins, it also offers to disable or remove each one and then starts again;
+  recognized DSH session-persistence errors are not attributed to a plugin. In
+  Settings Overview, safe mode sits beside “切换环境”.
 - Snapshot recovery reinstalls exact DSH and plugin versions through the package
-  manager, then verifies startup. Safe mode is DSH without custom plugins: it
-  starts a clean profile in a separate data directory, so third-party plugins
-  and dsh-work's user data do not load, while the menus, sign-in and activity
-  that dsh-work's own plugins provide keep working. It preserves
-  normal-environment success records. Once a normal environment
-  is running again, that data directory is discarded and no longer selectable.
+  manager, then verifies startup. Safe mode is DSH without third-party profile
+  plugins and offers two temporary profiles. With saved data, sessions,
+  storage, attachments, settings and credentials use the existing shared
+  user-data root; empty diagnostic omits those paths. Both keep dsh-work's Host
+  plugins and preserve normal-environment success records. The safe-mode
+  workbench can disable or remove plugins from the affected profile, restore
+  that profile's version point, try it in normal mode, or return to the saved
+  environment. A failed normal attempt returns to safe mode. A healthy normal
+  startup removes the temporary safe-mode home.
 - Removing a DSH runtime deletes its installed files. A runtime used by the
   configured, current, known-good or safe-mode return environment cannot be
   removed.

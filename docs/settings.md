@@ -68,7 +68,7 @@ the current Settings instance.
 
 | Page | Current layout |
 |---|---|
-| Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save; safe mode. |
+| Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save; safe-mode entry and recovery workbench. |
 | Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. Removing a runtime shows a short confirmation below the runtime list. |
 | Profiles | One column, list then detail. All profiles is a group of rows (name, current tag, kind and plugin count) with Import on its heading; choosing a row opens that profile's detail, and All profiles returns to the list, as does choosing Profiles in the sidebar. The detail has the name with Switch on its heading, a group with backups (manage history, back up now) and plugins, and a Profile actions group with one row each for clone, export, rename and delete. |
 | Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). When two or more plugins have updates, Upgrade all on the Installed heading upgrades them in one change: the Worker stops once, every package updates in order, then one health check decides. A failure is handled as one plugin change, so automatic rollback returns the profile to its state before the first upgrade. While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry. Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. A 内置组件 section lists dsh-work's own DSH plugins (shell, account and desktop pet integration) with their load state and no controls. |
@@ -81,6 +81,12 @@ same dialog rather than expanding every record inline. Backup history has its
 own management dialog. Closing dialogs restores the originating focus.
 Version records and profile backups are separate operations: a version record
 reconstructs dependency versions; it does not archive conversation data.
+
+Overview offers safe mode with saved user data and empty diagnostic mode. The
+active workbench identifies which mode is running and lists the fault target's
+installed third-party plugins. It offers return, an attempt to start the fault
+target normally, version restore for that target, and plugin disable/remove
+actions.
 
 ## Startup and operation feedback
 

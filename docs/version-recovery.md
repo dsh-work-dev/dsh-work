@@ -27,7 +27,8 @@ Settings Overview shows a compact latest-verified summary, record count, save
 action and history entry. History uses newest-first rows; selecting a record
 opens metadata, plugin versions and restore/rename/delete actions in the same
 dialog. Restore confirmation replaces those details. Closing returns focus to
-the originating control. “启动安全模式” appears beside “切换环境”.
+the originating control. Safe mode with saved data and empty diagnostic mode
+appear beside “切换环境”.
 
 Startup failure places retry, safe mode, version recovery and visible bounded
 diagnostics beside the failing step, including a direct copy action. Version
@@ -36,16 +37,38 @@ installation/startup stage and cancellation beside the active operation.
 
 Recording failure is visible but does not stop a healthy Worker or replace the
 previous durable success point. Safe-mode startup never advances normal success
-pointers. After a failure, safe mode prefers the known-good return environment
-when no current Worker exists.
+pointers. Safe mode stores a **fault target** separately from its **return
+target**. Startup-failure entry uses the failed launch target when available;
+entry from a running environment uses the current context. Return chooses the
+current context, then the last known-good context, then the configured context.
+The return context may therefore differ from the environment being repaired.
 
-Each safe-mode entry creates a fresh data directory under the app's
-`safe-mode` folder; nothing is copied from the failed environment. When a
-normal environment becomes healthy again — by returning or by any other
-switch — the safe-mode data directory is removed from the catalog and its
-folder is deleted. Startup also removes a stale safe-mode entry and any
-session folder not owned by an active safe mode. Deletion is best effort: a
-locked folder is retried on the next start.
+Each safe-mode entry creates a fresh temporary DSH home under the app's
+`safe-mode` folder and starts the built-in `web` profile. Both modes keep the
+transport and dsh-work Host plugins, and neither loads third-party profile
+plugins. **With saved data** enables the DSH user-data overlay and points
+sessions, storage, attachments, settings and credentials at the existing
+shared user-data root. Those files are neither copied into nor removed with the
+temporary home. **Empty diagnostic** omits that overlay and keeps those DSH
+data paths isolated. The selected Workspace context is rebound and revalidated
+for each Worker generation; with no selected Workspace, DSH continues to the
+Workspace selection page.
+
+The safe-mode workbench can list the fault target's installed third-party
+plugins and disable or remove them while the safe Worker is stopped. These
+operations are serialized and checked against the explicit fault target. The
+workbench can also restore a version point for that target, try the target in
+normal mode, or return to the saved return context. If trying the target fails,
+the Host starts safe mode again. A successful healthy normal startup clears the
+safe-mode registration and removes its temporary home. Startup also removes a
+stale safe-mode entry and any session folder not owned by an active safe mode.
+Deletion is best effort: a locked folder is retried on the next start.
+
+Stored-data failure attribution recognizes specific DSH session-persistence
+error signatures. It prevents those recognized failures from being assigned
+to a plugin; it is not a general detector for every possible damaged user-data
+file. Version restore reconstructs dependency versions and does not repair
+conversation data or Workspace files.
 
 Removing a DSH runtime does not invalidate version records that name its
 version, because restore always reinstalls the recorded DSH version.

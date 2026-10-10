@@ -175,8 +175,8 @@ layers:
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
 | Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always, including safe mode |
-| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Not in safe mode |
-| Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile; safe mode uses a clean one |
+| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | In safe mode with saved data; omitted in empty diagnostic mode |
+| Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile; neither safe mode loads them |
 
 The host plugins are ordinary DSH plugins (a Host half and a Client half each).
 They are embedded in dsh-work, written below a directory named by application
@@ -221,9 +221,11 @@ on each DSH upgrade.
 
 The daemon owns the Worker independently of UI visibility and process lifetime.
 Restart closes streams and the pipe, verifies the process boundary, then starts
-the next generation. Safe mode uses the same channel and host plugins with a
-clean profile and without the user-data overlay. The process supervisor remains
-the authority for graceful stop, forced stop and process-tree cleanup.
+the next generation. Safe mode uses the same channel and Host plugins with a
+clean `web` profile. Its with-data mode routes the five DSH user-data stores to
+the shared user-data root; empty diagnostic mode omits those routes. Neither
+mode loads third-party profile plugins. The process supervisor remains the
+authority for graceful stop, forced stop and process-tree cleanup.
 
 The OS transport uses `go-winio`, HTTP uses the Go/Node standard libraries and
 WebSocket uses `coder/websocket` plus the selected profile's upstream routes.
@@ -363,12 +365,22 @@ the profile manifest's `dsh.profile.bundles`, keeping the installed files and
 loader patches, and starts again; this is the same persisted choice as
 `setBundleEnabled(name, false)`. The DSH adapter reads the packages named in
 the captured output. Only third-party packages installed in the failed profile
-are offered, and a failure caused by DSH rejecting its own stored session data
-offers none, because the plugin that reported it did not cause it.
+are offered. Specific DSH session-persistence rejection signatures recognized
+by the adapter suppress plugin attribution; this is not a general detector for
+every possible user-data failure.
+
+The safe-mode workbench adds a narrow explicit-target repair path. While the
+safe Worker is Ready, the Host stops it under the switch lock, holds the manager
+mutation guard, applies a disable or removal to the recorded fault profile, and
+starts the safe Worker again. A failed package operation still returns to the
+safe Worker. This does not make other non-current profiles writable. Version
+restore from safe mode is limited to the recorded fault target and uses the
+existing stopped-Worker recovery transaction.
 
 Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
 unload semantics as they change. The cost is that activation changes need a
-running Worker, apart from the startup-failure path.
+running Worker, apart from the startup-failure and explicit safe-mode repair
+paths.
 
 ## Version recovery and window geometry
 
@@ -482,7 +494,7 @@ window, command palette, focus mode, always on top and recent workspaces.
 |---|---|
 | 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 关闭窗口, 退出 |
 | 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
-| 运行 | 刷新, 重启 DSH · 启动安全模式 / 退出安全模式 |
+| 运行 | 刷新, 重启 DSH · 启动带数据安全模式 / 启动空环境诊断 · 切换安全模式 / 退出安全模式 |
 | 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
 | 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
 
