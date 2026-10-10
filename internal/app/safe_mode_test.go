@@ -106,6 +106,10 @@ func TestSafeModeRebindsSelectedWorkspaceToNewGeneration(t *testing.T) {
 	f := newRunContextSwitchFixture(t)
 	defer f.close()
 	workspacePath := t.TempDir()
+	expectedWorkspacePath, pathErr := filepath.EvalSymlinks(workspacePath)
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
 	requests := make([]workspacecontext.Request, 0, 2)
 	f.host.deps.WorkspaceResolver = workspacecontext.ResolverFunc(func(_ context.Context, generation string, request workspacecontext.Request) (workspacecontext.Context, error) {
 		requests = append(requests, request)
@@ -122,7 +126,7 @@ func TestSafeModeRebindsSelectedWorkspaceToNewGeneration(t *testing.T) {
 	if len(requests) != 2 {
 		t.Fatalf("workspace resolve requests = %#v", requests)
 	}
-	if requests[1].ID != "workspace-1" || requests[1].Path != workspacePath || requests[1].Title != "Project" {
+	if requests[1].ID != "workspace-1" || requests[1].Path != expectedWorkspacePath || requests[1].Title != "Project" {
 		t.Fatalf("workspace was not rebound: %#v", requests[1])
 	}
 	snapshot, err := f.host.TrySafeModeTarget(context.Background())
@@ -132,7 +136,7 @@ func TestSafeModeRebindsSelectedWorkspaceToNewGeneration(t *testing.T) {
 	if snapshot.SafeMode != nil || snapshot.Current == nil || snapshot.Current.Profile.Name != "alpha" {
 		t.Fatalf("successful normal attempt did not complete repair: %#v", snapshot)
 	}
-	if len(requests) != 3 || requests[2].ID != "workspace-1" || requests[2].Path != workspacePath || requests[2].Title != "Project" {
+	if len(requests) != 3 || requests[2].ID != "workspace-1" || requests[2].Path != expectedWorkspacePath || requests[2].Title != "Project" {
 		t.Fatalf("normal attempt did not rebind workspace: %#v", requests)
 	}
 }
