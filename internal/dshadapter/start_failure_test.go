@@ -16,8 +16,24 @@ func TestStoredDataRejectionIsNotAPluginFault(t *testing.T) {
 	if !StoredDataRejected(incidentStderr) {
 		t.Fatal("the session-log rejection was not recognized")
 	}
+	for _, output := range []string{
+		"corrupt session log: invalid committed event at line 4",
+		"empty or header-less session log",
+		`session "s-1" uses log format v9, but this harness reads only v8: upgrade the harness to open it`,
+		`session "s-1" contains event type "future.event" unknown to this harness and not marked ignorable`,
+		"session artifact \"a.jsonl\" uses the unsupported flat-file layout",
+		"session artifact uses .jsonl.zst, but this backend is configured for compression none",
+		"cannot encode an empty project path",
+	} {
+		if !StoredDataRejected(output) {
+			t.Errorf("stored-data failure was not recognized: %q", output)
+		}
+	}
 	if StoredDataRejected("dsh: plugin tree failed to load: failed to apply loader entry ui (@acme/widget): boom") {
 		t.Fatal("an ordinary plugin failure was read as a stored-data rejection")
+	}
+	if StoredDataRejected("plugin validation failed: unknown to this harness and not marked ignorable") {
+		t.Fatal("an unrelated plugin error was read as a stored-data rejection")
 	}
 }
 
