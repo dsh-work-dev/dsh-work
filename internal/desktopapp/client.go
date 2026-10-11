@@ -114,9 +114,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
 		var panel app.PetPanel
 		if visible == nil {
-			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel)
+			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel)
 		}
-		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
+		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "workspace", []any{*visible}, &panel)
 	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
 		return client.JSON(ctx, "/zoom", zoom, nil)
 	}, OnBuiltinComponentsChanged: func(statuses []desktopclient.BuiltinComponentStatus) {
@@ -148,10 +148,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		defer windowMu.Unlock()
-		if name == "workspace" && (workspace == nil || window.ID() != workspace.ID()) {
-			return
-		}
-		if name != "workspace" {
+		if workspace == nil || window.ID() != workspace.ID() {
 			return
 		}
 		if !applicationShuttingDown.Load() {
@@ -210,13 +207,14 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		created := workspace == nil
-		if workspace == nil {
+		if created {
 			createWorkspace(section)
 		}
 		if !ledger.TryShow("workspace") {
 			return
 		}
 		workspace.Show().Focus()
+		// A new workbench reads its section from the URL; a live one switches panels.
 		if !created {
 			if section == "" {
 				desktop.Event.Emit("settings-close", struct{}{})
@@ -265,7 +263,15 @@ func runDesktopClient(identity string, resources Resources) error {
 		openRequestedByProtocol := protocolOpenPending
 		protocolOpenPending = false
 		protocolMu.Unlock()
-		// A Settings-only launch opens the workbench with its Settings panel selected.
+		// Every launch creates the workbench, hidden until opened: its DSH frame
+		// completes boot, and a Settings launch starts with that panel open.
+		launchSection := section
+		if launchSection == "__boot" {
+			launchSection = ""
+		}
+		windowMu.Lock()
+		createWorkspace(launchSection)
+		windowMu.Unlock()
 		open(section)
 		if openRequestedByProtocol {
 			open("")
@@ -429,7 +435,7 @@ type remoteManagerSnapshot struct{ client *daemon.Client }
 func (s remoteManagerSnapshot) Snapshot(ctx context.Context) (value dshmanager.Snapshot, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	err = s.client.Call(ctx, "ManagerService", "GetSnapshot", "settings", nil, &value)
+	err = s.client.Call(ctx, "ManagerService", "GetSnapshot", "workspace", nil, &value)
 	return
 }
 

@@ -23,7 +23,7 @@ export function BeginBuiltinComponents(): $CancellablePromise<void> {
 }
 
 /**
- * GetBuiltinComponents returns a detached status snapshot to the workspace or Settings window.
+ * GetBuiltinComponents returns a detached status snapshot to the workbench shell.
  */
 export function GetBuiltinComponents(): $CancellablePromise<$models.BuiltinComponentStatus[] | null> {
     return $Call.ByID(65460131);

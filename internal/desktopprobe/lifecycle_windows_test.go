@@ -140,7 +140,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	t.Logf("daemon=%d Worker=%d generation=%s root=%s", baseline.PID, baseline.Diagnostics.PID, baseline.Status.GenerationID, root)
 	var panel app.PetPanel
-	if err := client.Call(context.Background(), "PetSettingsService", "RefreshPetCatalog", "settings", nil, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "RefreshPetCatalog", "workspace", nil, &panel); err != nil {
 		t.Fatal(err)
 	}
 	var petKey string
@@ -152,13 +152,13 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if petKey == "" {
 		t.Fatal("lifecycle Pet fixture not discovered")
 	}
-	if err := client.Call(context.Background(), "PetSettingsService", "SelectPet", "settings", []any{petKey}, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "SelectPet", "workspace", []any{petKey}, &panel); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Call(context.Background(), "PetSettingsService", "SetPetVisibility", "settings", []any{true}, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "SetPetVisibility", "workspace", []any{true}, &panel); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "settings", []any{"completed", false}, nil); err != nil {
+	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "workspace", []any{"completed", false}, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitUntil(t, 10*time.Second, func() bool { return nativeWindowVisible(baseline.PID, "dsh-work Pet") })
@@ -209,7 +209,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
 			t.Fatal("UI lifecycle hid background Pet")
 		}
-		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel); err != nil {
+		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel); err != nil {
 			t.Fatal(err)
 		}
 		if panel.Runtime.EffectiveVisibility != pet.VisibilityVisible || state.Preferences.Notifications.Completed {

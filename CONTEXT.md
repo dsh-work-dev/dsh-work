@@ -21,12 +21,12 @@ in the documents linked from `docs/README.md`.
 | Term | Meaning | Not this |
 |---|---|---|
 | Daemon | The per-user background process owning Host state, Worker lifetime, tray, Pet and notifications. | The desktop window process or a remote access endpoint. |
-| Desktop UI client | The process owning workbench and Settings windows and projecting daemon state. | The owner of background tasks. |
+| Desktop UI client | The process owning the workbench window (with its Settings panel) and projecting daemon state. | The owner of background tasks. |
 | Shell | dsh-work's trusted top-level document in the workbench window: top bar, menus, window buttons and startup view. | DSH's own UI or a DSH plugin surface. |
 | DSH frame | The iframe in the shell that shows DSH on its own origin with the Worker role. | A separate native window or a trusted dsh-work surface. |
 | Desktop Pet | A dsh-work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
 | Pet catalog | The Host-controlled set of validated Pet assets available for selection. | A package execution environment or a DSH plugin registry. |
-| Appearance | dsh-work's persisted theme and light/dark mode for its own startup and Settings windows. | DSH's appearance preference, which DSH content windows keep following. |
+| Appearance | dsh-work's persisted theme and light/dark mode for the workbench: startup, Settings and the DSH frame. | DSH's stored appearance preference, which dsh-work leaves unchanged. |
 | Theme | A built-in look for dsh-work windows that changes styling only and declares the light/dark modes it supports. | A layout, a page structure or user-supplied CSS. |
 | Pet visibility intent | The user's persisted choice to show or hide the selected Pet. | Proof that a native window is currently visible. |
 | Pet position | A persisted monitor-relative anchor plus native window dimensions and scale. | A DSH Workspace directory or a screen-absolute promise that survives every monitor layout. |

@@ -24,10 +24,16 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
   display: grid; place-items: center; cursor: default;
 }
 .shell-controls button svg { width: 15px; height: 15px; stroke-width: 1.5; }
-.shell-controls button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.shell-controls button:hover { background: var(--nav-hover-bg); }
 .shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
 .shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
-.shell-bar { background: var(--canvas); color: var(--text); }
+/* The bar continues the sidebar: the shell sets --shell-bar-bg to the colour DSH paints it with. */
+.shell-bar {
+  --bar-fill: var(--shell-bar-bg, var(--nav-bg));
+  /* Composited over the canvas, as DSH composites its sidebar over its base. */
+  background: linear-gradient(var(--bar-fill), var(--bar-fill)), var(--canvas);
+  color: var(--shell-bar-fg, var(--nav-fg)); font-family: var(--font-body);
+}
 .shell-modal-mask {
   position: absolute; z-index: 5; inset: 0;
   background: var(--shell-modal-mask, transparent);
@@ -39,37 +45,38 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-brand img { width: 18px; height: 18px; display: block; }
 .shell-menubar { display: flex; align-self: stretch; align-items: center; gap: 2px; padding-right: 8px; }
 .shell-menu-button {
-  height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: inherit;
-  font: inherit; font-size: var(--fs-control); cursor: default; position: relative;
+  height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit;
+  font: inherit; font-size: var(--fs-control); font-weight: var(--nav-weight); cursor: default; position: relative;
 }
-.shell-menu-button:hover, .shell-menu-button[aria-expanded="true"], .shell-menu-button:focus-visible {
-  background: color-mix(in srgb, currentColor 10%, transparent); outline: none;
-}
+.shell-menu-button:hover { background: var(--nav-hover-bg); }
+.shell-menu-button[aria-expanded="true"] { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+.shell-menu-button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .shell-menu-badge::after {
   content: ""; position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #2f6feb);
 }
+/* Menus and the status line are small dialogs: they take the theme's dialog frame. */
 .shell-menu {
-  position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: 8px;
-  background: var(--canvas); color: var(--text);
-  border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
-  font-size: var(--fs-control);
+  position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: var(--radius-group);
+  background: var(--group-bg); color: var(--text); border: var(--dialog-border); box-shadow: var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%);
+  backdrop-filter: blur(24px);
+  font-family: var(--font-body); font-size: var(--fs-control);
 }
 .shell-menu-item {
   display: flex; align-items: center; gap: 24px; width: 100%; min-height: 30px;
-  padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: default;
+  padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; font: inherit; text-align: left; cursor: default;
 }
 .shell-menu-label { flex: 1; white-space: nowrap; }
-.shell-menu-item:focus { background: color-mix(in srgb, currentColor 10%, transparent); outline: none; }
+.shell-menu-item:focus { background: var(--selection); color: var(--selection-fg); outline: none; }
 .shell-menu-item[aria-disabled="true"] { opacity: 0.45; }
-.shell-menu-trailing { display: flex; align-items: center; opacity: 0.6; font-size: var(--fs-meta); white-space: nowrap; }
-.shell-menu-checked { opacity: 1; }
+.shell-menu-trailing { display: flex; align-items: center; color: var(--muted); font-size: var(--fs-meta); white-space: nowrap; }
+.shell-menu-checked { color: inherit; }
 .shell-menu-trailing svg { width: 14px; height: 14px; }
-.shell-menu-separator { height: 1px; margin: 4px 6px; background: color-mix(in srgb, currentColor 14%, transparent); }
+.shell-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
 .shell-toast {
   position: fixed; z-index: 30; top: 48px; left: 50%; transform: translateX(-50%); max-width: min(480px, calc(100vw - 32px));
-  padding: 8px 14px; border-radius: 8px; font-size: var(--fs-control);
-  background: var(--canvas); color: var(--text);
-  border: 1px solid color-mix(in srgb, currentColor 14%, transparent); box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  padding: 8px 14px; border-radius: var(--radius-group); font-family: var(--font-body); font-size: var(--fs-control);
+  background: var(--group-bg); color: var(--text); border: var(--dialog-border); box-shadow: var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%);
+  backdrop-filter: blur(24px);
 }
 .shell-toast[hidden] { display: none; }
 
@@ -78,3 +85,5 @@ html[data-shell] #manager-surface:not([hidden]) {
   position: fixed; z-index: 10; inset: 40px 0 0; height: auto; min-height: 0;
   background: var(--canvas);
 }
+.manager-back { margin-bottom: var(--space-3); }
+.manager-back svg { width: 16px; height: 16px; flex: none; }

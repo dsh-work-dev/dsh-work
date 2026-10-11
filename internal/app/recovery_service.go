@@ -19,7 +19,7 @@ func (s *ManagerService) ListProfileBackups(ctx context.Context, ref dshmanager.
 	if s == nil || s.manager == nil {
 		return nil, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return nil, trustedSurfaceRequired("Profile backups are available in Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
@@ -31,7 +31,7 @@ func (s *ManagerService) DeleteProfileBackup(ctx context.Context, ref dshmanager
 	if s == nil || s.manager == nil {
 		return managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return trustedSurfaceRequired("Profile backups are available in Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
@@ -43,7 +43,7 @@ func (s *ManagerService) RestoreProfileBackup(ctx context.Context, request dshma
 	if s == nil || s.manager == nil {
 		return dshmanager.ProfileCloneResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.ProfileCloneResult{}, trustedSurfaceRequired("Profile backups are available in Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
@@ -55,7 +55,7 @@ func (s *ManagerService) ImportProfileBackup(ctx context.Context) (*dshmanager.P
 	if s == nil || s.manager == nil || s.chooseBackup == nil {
 		return nil, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return nil, trustedSurfaceRequired("Profile backups are available in Settings.")
 	}
 	snapshot, err := s.manager.Snapshot(ctx)
@@ -87,7 +87,7 @@ func (s *ManagerService) OpenProfileBackups(ctx context.Context, ref dshmanager.
 	if s == nil || s.manager == nil || s.openBackups == nil {
 		return managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return trustedSurfaceRequired("Profile backups are available in Settings.")
 	}
 	path, err := s.manager.ProfileBackupDirectory(ctx, ref)
@@ -105,7 +105,7 @@ func (s *ManagerService) ExportProfile(ctx context.Context, ref dshmanager.Profi
 	if s == nil || s.manager == nil || s.chooseExport == nil {
 		return "", managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return "", trustedSurfaceRequired("Profile export is available in Settings.")
 	}
 	path, err := s.chooseExport(ref.Name + ".zip")

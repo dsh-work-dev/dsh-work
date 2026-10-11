@@ -242,7 +242,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Window   string
 			Geometry settings.WindowGeometry
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || (input.Window != "workspace" && input.Window != "settings") {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || input.Window != "workspace" {
 			http.Error(w, "invalid geometry", 400)
 			return
 		}
@@ -369,7 +369,7 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 			err = errors.New("background call failed")
 		}
 	}()
-	if call.Surface != "workspace" && call.Surface != "settings" {
+	if call.Surface != "workspace" {
 		return nil, errors.New("invalid client surface")
 	}
 	service, ok := s.Services[call.Service]

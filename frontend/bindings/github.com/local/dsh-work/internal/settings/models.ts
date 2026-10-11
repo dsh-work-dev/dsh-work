@@ -117,7 +117,6 @@ export enum ThemeID {
  */
 export interface Values {
     "workspaceWindow": WindowGeometry;
-    "settingsWindow": WindowGeometry;
 
     /**
      * WorkspaceZoom is the workbench WebView zoom factor; zero means actual size.

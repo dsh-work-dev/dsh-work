@@ -50,7 +50,7 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 				Summary:       "dsh-work is already running.",
 				Retryable:     true,
 				CorrelationID: lifecycle.NewCorrelationID(),
-				Detail:        "Use the running dsh-work Settings window for Run context and profile plugin changes.",
+				Detail:        "Use dsh-work Settings in the running app for Run context and profile plugin changes.",
 			}
 		}
 		return nil, fmt.Errorf("lock dsh-work manager process boundary: %w", err)

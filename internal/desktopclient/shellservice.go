@@ -141,7 +141,7 @@ func (s *ShellService) ReportBuiltinComponent(ctx context.Context, id string) er
 	return nil
 }
 
-// GetBuiltinComponents returns a detached status snapshot to the workspace or Settings window.
+// GetBuiltinComponents returns a detached status snapshot to the workbench shell.
 func (s *ShellService) GetBuiltinComponents(ctx context.Context) ([]BuiltinComponentStatus, error) {
 	if _, err := trustedWindow(ctx); err != nil {
 		return nil, err

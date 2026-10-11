@@ -406,7 +406,7 @@ func NewPetSettingsService(manager *settings.Manager, catalog pet.PetCatalog, re
 		previewRefs:         make(map[string]petPreviewRefEntry),
 		overlayCapabilities: pet.CurrentOverlayCapabilities(),
 		trustedSurface: func(ctx context.Context) bool {
-			return isTrustedWindow(ctx, "settings")
+			return isTrustedWindow(ctx, "workspace")
 		},
 	}
 }
@@ -1206,7 +1206,7 @@ func (s *PetSettingsService) setGenerationLocked(generation string) {
 }
 
 func (s *PetSettingsService) beginOperation(ctx context.Context) (context.Context, context.CancelFunc, error) {
-	return s.beginOperationForSurface(ctx, "settings")
+	return s.beginOperationForSurface(ctx, "workspace")
 }
 
 func (s *PetSettingsService) beginHostOperation(ctx context.Context) (context.Context, context.CancelFunc, error) {

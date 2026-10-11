@@ -180,7 +180,6 @@ func safePreferenceKey(value string) bool {
 // Values is the versioned, platform-neutral dsh-work preference contract.
 type Values struct {
 	WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
-	SettingsWindow  WindowGeometry `json:"settingsWindow"`
 	// WorkspaceZoom is the workbench WebView zoom factor; zero means actual size.
 	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
 	Version       int     `json:"version"`
@@ -373,7 +372,6 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	}
 	var raw struct {
 		WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
-		SettingsWindow  WindowGeometry `json:"settingsWindow"`
 		WorkspaceZoom   float64        `json:"workspaceZoom"`
 		Version         int            `json:"version"`
 
@@ -388,7 +386,6 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	}
 	values := DefaultValues()
 	values.WorkspaceWindow = raw.WorkspaceWindow
-	values.SettingsWindow = raw.SettingsWindow
 	if validZoom(raw.WorkspaceZoom) {
 		values.WorkspaceZoom = raw.WorkspaceZoom
 	}

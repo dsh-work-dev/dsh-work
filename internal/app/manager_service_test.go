@@ -32,7 +32,7 @@ func TestProfileImportUsesCurrentDirectoryAndExportUsesNativeSelection(t *testin
 		t.Fatal(err)
 	}
 	service := NewManagerService(f.manager)
-	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "settings"})
+	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "workspace"})
 	archive := filepath.Join(t.TempDir(), "export.zip")
 	SetProfileExportAction(service, func(string) (string, error) { return archive, nil })
 	if file, err := service.ExportProfile(ctx, current); err != nil || file != "export.zip" {
@@ -66,16 +66,12 @@ func TestRuntimeSurfaceRequiresPermanentWindowRole(t *testing.T) {
 	if service.runtimeSurfaceAuthorized(ctx) {
 		t.Fatal("Worker window received runtime management access")
 	}
-	ctx = context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "settings"})
-	if !service.runtimeSurfaceAuthorized(ctx) {
-		t.Fatal("Settings access rejected")
-	}
 	if service.runtimeSurfaceAuthorized(context.Background()) {
 		t.Fatal("missing window accepted")
 	}
 }
 
-func TestManagerServiceRequiresTheSettingsWindow(t *testing.T) {
+func TestManagerServiceRequiresTheWorkbench(t *testing.T) {
 	root := t.TempDir()
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath: filepath.Join(root, "manager.json"),

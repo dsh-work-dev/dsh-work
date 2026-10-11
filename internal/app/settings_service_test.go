@@ -7,22 +7,22 @@ import (
 	"github.com/local/dsh-work/internal/settings"
 )
 
-func TestSetAppearanceRequiresSettingsWindowAndPublishesAfterSave(t *testing.T) {
+func TestSetAppearanceRequiresTheWorkbenchAndPublishesAfterSave(t *testing.T) {
 	manager := newPetServiceManager(t, settings.DefaultValues())
 	service := NewSettingsService(manager, nil, nil)
 	var published []settings.Appearance
 	SetAppearanceChanged(service, func(appearance settings.Appearance) { published = append(published, appearance) })
 
-	if _, err := service.SetAppearance(LocalClientContext(context.Background(), "workspace"), "monochrome", "dark"); err == nil {
-		t.Fatal("the startup surface changed the appearance")
+	if _, err := service.SetAppearance(LocalClientContext(context.Background(), "worker"), "monochrome", "dark"); err == nil {
+		t.Fatal("an untrusted surface changed the appearance")
 	}
-	if _, err := service.SetAppearance(LocalClientContext(context.Background(), "settings"), "monochrome", "sepia"); err == nil {
+	if _, err := service.SetAppearance(LocalClientContext(context.Background(), "workspace"), "monochrome", "sepia"); err == nil {
 		t.Fatal("an unsupported mode was accepted")
 	}
 	if len(published) != 0 {
 		t.Fatalf("published before a successful save: %#v", published)
 	}
-	values, err := service.SetAppearance(LocalClientContext(context.Background(), "settings"), "monochrome", "dark")
+	values, err := service.SetAppearance(LocalClientContext(context.Background(), "workspace"), "monochrome", "dark")
 	if err != nil {
 		t.Fatal(err)
 	}

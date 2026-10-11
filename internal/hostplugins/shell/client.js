@@ -22,43 +22,140 @@ function keyForCode(code) {
   return code;
 }
 
-const dshThemeAliases = {
-  '--dsw-alias-bg-base': 'canvas',
-  '--dsw-alias-bg-layer-1': 'surface',
-  '--dsw-alias-bg-layer-2': 'surface',
-  '--dsw-alias-bg-overlay': 'wash',
-  '--dsw-alias-bg-module-platform': 'nav',
-  '--dsw-alias-bg-multi-select': 'nav',
-  '--dsw-alias-bg-mask-1': 'backdrop',
-  '--dsw-alias-border-l1': 'line',
-  '--dsw-alias-border-l2': 'line',
-  '--dsw-alias-brand-primary': 'accent',
-  '--dsw-alias-brand-text': 'text',
-  '--dsw-alias-button-primary-fill': 'accent',
-  '--dsw-alias-button-primary-hover': 'accentHover',
-  '--dsw-alias-interactive-bg-active': 'selection',
-  '--dsw-alias-interactive-bg-hover': 'hover',
-  '--dsw-alias-interactive-bg-hover-solid': 'hover',
-  '--dsw-alias-label-caption': 'muted',
-  '--dsw-alias-label-primary': 'text',
-  '--dsw-alias-label-primary-foreground': 'onAccent',
-  '--dsw-alias-label-primary-inverted': 'onAccent',
-  '--dsw-alias-label-secondary': 'muted',
-  '--dsw-alias-label-tertiary': 'muted',
-  '--dsw-alias-link': 'accent',
-  '--dsw-alias-state-business-primary': 'accent',
-  '--dsw-alias-state-error-primary': 'failed',
-  '--dsw-specific-sidebar-fill': 'nav',
-};
-const hostAppearanceColors = Object.values(dshThemeAliases);
-
+// The shell sends DSH token values built from the dsh-work theme. Only --dsw-*
+// names and dsh-work's own decoration values cross the frame, each checked
+// against the CSS property it feeds.
+const MAX_THEME_TOKENS = 256;
+const DECOR_SHADOWS = ['--dsh-work-stroke', '--dsh-work-raised', '--dsh-work-floating', '--dsh-work-button'];
+function tokenProperty(name) {
+  if (name === '--dsh-work-backdrop') return 'background-image';
+  if (name === '--dsh-work-blur' || name === '--dsw-menu-backdrop-filter') return 'backdrop-filter';
+  if (DECOR_SHADOWS.includes(name)) return 'box-shadow';
+  if (name.startsWith('--dsh-work-')) {
+    // dsh-work control values, by suffix (frontend/src/dsh-controls.ts)
+    if (/-(border|divider)$/.test(name)) return 'border';
+    if (/-radius$/.test(name)) return 'border-radius';
+    if (/-image$/.test(name)) return 'background-image';
+    if (/-shadow$/.test(name)) return 'box-shadow';
+    if (/-weight$/.test(name)) return 'font-weight';
+    if (/-(w|h|left|top|size)$/.test(name)) return 'width';
+    return 'color';
+  }
+  if (name.startsWith('--dsw-radius-')) return 'border-radius';
+  if (name.startsWith('--dsw-shadow-')) return 'box-shadow';
+  if (name.startsWith('--dsw-font-family') || name === '--dsw-font-mono') return 'font-family';
+  return 'color';
+}
+// DSH's conversation text reads its family from --dsw-font-family; it keeps
+// DSH's own font when the interface font changes.
+const CONTENT_FONT_TOKENS = ['h1', 'h2', 'h3', 'h4', 'base', 'base-strong', 'base-italic', 'base-strong-italic',
+  'table', 'table-head', 'small', 'small-strong', 'small-italic', 'small-strong-italic']
+  .map(name => `--dsw-font-markdown-${name}-font-family`);
+// No CSS-module class hooks: controls are found by role and structure, and
+// buttons and fields by how DSH drew them (classifyControls).
+const D = 'body[data-dsh-work-decor]';
+// A surface from the measured dsh-work control `name` (frontend/src/dsh-controls.ts).
+const skin = name => `border: var(--dsh-work-${name}-border) !important; border-radius: var(--dsh-work-${name}-radius) !important;
+  background-color: var(--dsh-work-${name}-bg) !important; background-image: var(--dsh-work-${name}-image) !important;
+  box-shadow: var(--dsh-work-${name}-shadow) !important;`;
+// DSH switches: the button is the track with one leaf thumb, or the button wraps a
+// track that holds the thumb. Only those two structures are restyled.
+const TRACK = `${D} [role="switch"]:has(> :only-child):not(:has(> :only-child > *))`;
+const WRAPPED = `${D} [role="switch"]:has(> :last-child > :only-child)`;
+const switchRules = (track, thumb) => ['off', 'on'].map(state => {
+  const checked = state === 'on' ? '[aria-checked="true"]' : '';
+  const t = track.replace('[role="switch"]', `[role="switch"]${checked}`);
+  const h = thumb.replace('[role="switch"]', `[role="switch"]${checked}`);
+  return `${t} { box-sizing: border-box; position: relative; flex: none; width: var(--dsh-work-switch-w) !important; height: var(--dsh-work-switch-h) !important;
+  padding: 0 !important; ${skin(`switch-${state}-track`)} transition: background-color 120ms, border-color 120ms !important; }
+${h} { box-sizing: border-box; position: absolute !important; margin: 0 !important; transform: none !important;
+  width: var(--dsh-work-switch-thumb-size) !important; height: var(--dsh-work-switch-thumb-size) !important;
+  top: var(--dsh-work-switch-${state}-thumb-top) !important; left: var(--dsh-work-switch-${state}-thumb-left) !important;
+  ${skin(`switch-${state}-thumb`)} transition: left 120ms !important; }`;
+}).join('\n');
+const CONTROL_STYLE = `
+${D} { accent-color: var(--dsh-work-check); }
+${switchRules(TRACK, `${TRACK} > :only-child`)}
+${WRAPPED} { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+${switchRules(`${WRAPPED} > :last-child`, `${WRAPPED} > :last-child > :only-child`)}
+${D} [data-dsh-work-control="button"] { ${skin('button')} color: var(--dsh-work-button-fg) !important; }
+${D} [data-dsh-work-control="button"]:hover:not(:disabled) { background-color: var(--dsh-work-button-hover-bg) !important; }
+${D} [data-dsh-work-control="primary"] { ${skin('primary')} color: var(--dsh-work-primary-fg) !important; }
+${D} [data-dsh-work-control="primary"]:hover:not(:disabled) { background-color: var(--dsh-work-primary-hover-bg) !important; }
+${D} [data-dsh-work-control="field"] { ${skin('input')} }
+${D} [data-dsh-work-control="select"] { ${skin('select')} }
+`;
+// Mark the buttons and fields DSH draws as framed controls so the sheet can give
+// them the theme's control look; icon buttons, menu items and the composer keep
+// DSH's own. Each is read before it is marked, so the reading is DSH's styling.
+const CONTROL_CANDIDATES = ['button', 'input', 'select', 'textarea']
+  .map(tag => `${tag}:not([role="switch"]):not([data-dsh-work-control])`).join(', ');
+function visibleBorder(style) {
+  return style.borderTopStyle !== 'none' && parseFloat(style.borderTopWidth) > 0
+    && !/transparent|rgba\([^)]*,\s*0\)/.test(style.borderTopColor);
+}
+function classifyControls(primaryFill) {
+  for (const element of document.querySelectorAll(CONTROL_CANDIDATES)) {
+    if (typeof element.closest !== 'function' || !element.getClientRects().length) continue;
+    let kind = '';
+    if (!element.closest('[data-composer-card], [role="menu"], [role="listbox"], [role="tablist"]')) {
+      const style = getComputedStyle(element);
+      if (element.tagName === 'BUTTON') {
+        const text = (element.textContent || '').trim();
+        const box = element.getBoundingClientRect();
+        // DSH draws secondary buttons with a quiet fill instead of a frame. Navigation
+        // rows and selected list rows are filled too, so size and state rule them out.
+        const filled = !/transparent|rgba\([^)]*,\s*0\)/.test(style.backgroundColor) && box.width <= 260 && box.height <= 44
+          && !element.matches('[aria-current], [aria-selected], [aria-pressed]') && !element.closest('[data-slot="sidebar"], nav, [role="tree"]');
+        if (primaryFill && style.backgroundColor === primaryFill) kind = 'primary';
+        else if (text && (visibleBorder(style) || filled)) kind = 'button';
+      } else if (element.tagName === 'SELECT') {
+        if (visibleBorder(style)) kind = 'select';
+      } else if (!['checkbox', 'radio', 'range', 'hidden', 'file', 'color'].includes(element.type)
+        && (visibleBorder(style) || !/transparent|rgba\([^)]*,\s*0\)/.test(style.backgroundColor))) {
+        kind = 'field';
+      }
+    }
+    element.setAttribute('data-dsh-work-control', kind);
+  }
+}
+// DSH declares its elevation shadows on every element (`body, body *`), so a
+// value on body alone never reaches them; this sheet redeclares them from the
+// dsh-work decoration values. The rest uses DSH's semantic hooks.
+const DECOR_STYLE = `
+body[data-dsh-work-decor], body[data-dsh-work-decor] * {
+  --dsw-elevation-stroke: var(--dsh-work-stroke);
+  --dsw-elevation-panel: var(--dsh-work-raised);
+  --dsw-elevation-soft: var(--dsh-work-raised);
+  --dsw-elevation-prominent: var(--dsh-work-floating);
+}
+body[data-dsh-work-decor] :is([data-slot="main"], [data-slot="main.conversation"]) > :not([data-slot]) { background-image: var(--dsh-work-backdrop); background-attachment: fixed; }
+body[data-dsh-work-decor] [data-composer-card] { box-shadow: var(--dsh-work-raised); backdrop-filter: var(--dsh-work-blur); }
+/* Lists DSH marks as plugin groups and the task manager list take the theme's group: one
+   card with the group border, shadow and radius, rows split by the theme's row divider. */
+body[data-dsh-work-decor] [data-plugin-group] > ul,
+body[data-dsh-work-decor] [data-testid="task-manager-page"] ul[aria-label] {
+  overflow: hidden; padding: 0; gap: 0;
+  border: var(--dsh-work-group-border); border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsh-work-group-shadow);
+  backdrop-filter: var(--dsh-work-blur);
+}
+body[data-dsh-work-decor] [data-plugin-group] > ul > li,
+body[data-dsh-work-decor] [data-testid="task-manager-page"] ul[aria-label] > li { border-radius: 0; margin: 0; }
+/* plugin rows (data-plugin-item) and bundle rows (data-plugin-package) */
+body[data-dsh-work-decor] [data-plugin-group] > ul > li { padding: 6px 12px; }
+body[data-dsh-work-decor] [data-plugin-group] > ul > li + li,
+body[data-dsh-work-decor] [data-testid="task-manager-page"] ul[aria-label] > li + li { border-top: var(--dsh-work-row-divider); }
+${CONTROL_STYLE}
+`;
 function parseHostAppearance(value) {
   if (!value || typeof value !== 'object' || !['light', 'dark'].includes(value.mode) || !value.tokens || typeof value.tokens !== 'object') return null;
+  const entries = Object.entries(value.tokens);
+  if (entries.length > MAX_THEME_TOKENS) return null;
   const tokens = {};
-  for (const key of hostAppearanceColors) {
-    const token = value.tokens[key];
-    if (typeof token !== 'string' || !CSS.supports('color', token)) return null;
-    tokens[key] = token;
+  for (const [name, token] of entries) {
+    if (!/^--(dsw|dsh-work)-[a-z0-9-]+$/.test(name) || typeof token !== 'string' || token.length > 512 || !CSS.supports(tokenProperty(name), token)) return null;
+    tokens[name] = token;
   }
   return {mode: value.mode, tokens};
 }
@@ -114,68 +211,73 @@ function connectShell(ctx) {
   let pendingAppearance;
   let applyHostAppearance = () => {};
 
+  // dsh-work's appearance is a registered DSH theme selected for this page only:
+  // a non-built-in theme id is never written to DSH's stored preference.
   ctx.inject(['theme'], themeContext => {
     const theme = themeContext.theme;
-    const body = document.body;
-    const originalDark = body.hasAttribute('data-ds-dark-theme');
-    const originalBodyScheme = body.style.getPropertyValue('color-scheme');
-    const originalRootScheme = document.documentElement.style.getPropertyValue('color-scheme');
-    let activeMode;
-    let disposeOverride;
-    const enforceMode = () => {
-      if (!activeMode) return;
-      const isDark = body.hasAttribute('data-ds-dark-theme');
-      if (activeMode === 'dark' && !isDark) body.setAttribute('data-ds-dark-theme', '');
-      else if (activeMode === 'light' && isDark) body.removeAttribute('data-ds-dark-theme');
-      body.style.setProperty('color-scheme', activeMode);
-      document.documentElement.style.setProperty('color-scheme', activeMode);
-    };
-    applyHostAppearance = value => {
-      const appearance = parseHostAppearance(value);
-      if (!appearance) return;
-      pendingAppearance = appearance;
-      activeMode = appearance.mode;
-      enforceMode();
-      if (typeof theme.overrideTokens !== 'function') return;
-      disposeOverride?.();
-      disposeOverride = undefined;
-      const overrides = Object.fromEntries(Object.entries(dshThemeAliases).map(([name, key]) => [name, {
-        light: appearance.tokens[key], dark: appearance.tokens[key],
-      }]));
+    let active;
+    let revision = 0;
+    let contentFont;
+    let decorStyle;
+    applyHostAppearance = appearance => {
+      const id = `dsh-work-${++revision}`;
+      const previous = active;
+      const tokens = {...appearance.tokens};
+      if (tokens['--dsw-font-family']) {
+        // Read DSH's own family before the first dsh-work theme covers it.
+        contentFont ??= getComputedStyle(document.body).getPropertyValue('--dsw-font-family').trim();
+        if (contentFont) for (const name of CONTENT_FONT_TOKENS) tokens[name] = contentFont;
+      }
+      if (tokens['--dsh-work-raised']) {
+        if (!decorStyle) {
+          decorStyle = document.createElement('style');
+          decorStyle.dataset.dshWork = 'decor';
+          decorStyle.textContent = DECOR_STYLE;
+          document.head.append(decorStyle);
+        }
+        document.body.setAttribute('data-dsh-work-decor', '');
+      }
       try {
-        // The official token layer composes with DSH and is removed on plugin cleanup.
-        disposeOverride = theme.overrideTokens('@dsh-work/shell', overrides);
+        active = {id, dispose: theme.register({id, colorScheme: appearance.mode, tokens})};
+        theme.setTheme(id);
       } catch (error) {
         console.warn('Could not apply the dsh-work appearance to DSH', error);
       }
+      if (previous && previous !== active) previous.dispose();
     };
-    themeContext.effect(() => {
-      const observer = new MutationObserver(enforceMode);
-      observer.observe(body, {attributes: true, attributeFilter: ['data-ds-dark-theme']});
-      return () => observer.disconnect();
+    // DSH re-adopts its stored preference when its settings change; keep ours.
+    themeContext.on('theme/change', snapshot => {
+      if (active && snapshot.preference !== active.id && snapshot.themes.some(item => item.id === active.id)) theme.setTheme(active.id);
     });
     if (pendingAppearance) applyHostAppearance(pendingAppearance);
     themeContext.effect(() => () => {
-      disposeOverride?.();
       applyHostAppearance = () => {};
-      if (originalDark) body.setAttribute('data-ds-dark-theme', '');
-      else body.removeAttribute('data-ds-dark-theme');
-      if (originalBodyScheme) body.style.setProperty('color-scheme', originalBodyScheme);
-      else body.style.removeProperty('color-scheme');
-      if (originalRootScheme) document.documentElement.style.setProperty('color-scheme', originalRootScheme);
-      else document.documentElement.style.removeProperty('color-scheme');
+      const current = active;
+      active = undefined;
+      current?.dispose();
+      document.body.removeAttribute('data-dsh-work-decor');
+      decorStyle?.remove();
+      for (const element of document.querySelectorAll('[data-dsh-work-control]')) element.removeAttribute?.('data-dsh-work-control');
     });
   });
+  // DSH's own Appearance row would fight dsh-work's theme; an empty row shadows it.
+  ctx.inject(['slots'], slotsContext => {
+    slotsContext.slots.inject('settings.general.item', () => slotsContext.slots.register({name: 'settings.general.item', id: 'appearance', priority: -1}, () => null));
+  });
 
+  // DSH's primary button fill, resolved the way the browser computes a background.
+  let fillProbe;
+  const resolvedPrimaryFill = () => {
+    fillProbe ??= document.createElement('span');
+    fillProbe.style.cssText = 'position:absolute;visibility:hidden;background-color:var(--dsw-alias-button-primary-fill)';
+    if (!fillProbe.isConnected) document.body.append(fillProbe);
+    return getComputedStyle(fillProbe).backgroundColor;
+  };
   let modalFrame = 0;
   let lastModalState = '';
   const reportModal = () => {
     const modal = visibleModal();
-    const style = modal ? modalMaskStyle(modal) : {
-      background: getComputedStyle(document.body).getPropertyValue('--dsw-alias-bg-mask-1').trim() || 'rgba(0, 0, 0, 0.24)',
-      blur: getComputedStyle(document.body).getPropertyValue('--dsw-mask-blur').trim() || 'none',
-    };
-    const state = {active: !!modal, background: style.background, blur: style.blur};
+    const state = modal ? {active: true, ...modalMaskStyle(modal)} : {active: false, background: '', blur: ''};
     const key = JSON.stringify(state);
     if (key === lastModalState) return;
     lastModalState = key;
@@ -184,13 +286,19 @@ function connectShell(ctx) {
   ctx.effect(() => {
     const schedule = () => {
       if (modalFrame) return;
-      modalFrame = requestAnimationFrame(() => { modalFrame = 0; reportModal(); });
+      modalFrame = requestAnimationFrame(() => {
+        modalFrame = 0;
+        reportModal();
+        if (document.body.hasAttribute?.('data-dsh-work-decor')) {
+          try { classifyControls(resolvedPrimaryFill()); } catch (error) { console.warn('dsh-work control styling skipped', error); }
+        }
+      });
     };
+    // DSH mounts and unmounts its modals; attribute changes cover dialogs that stay mounted.
     const observer = new MutationObserver(schedule);
-    observer.observe(document.documentElement, {
-      attributes: true, subtree: true,
-      attributeFilter: ['aria-hidden', 'aria-modal', 'class', 'data-shortcut-modal', 'hidden', 'role', 'style'],
-      childList: true,
+    observer.observe(document.body, {
+      attributes: true, subtree: true, childList: true,
+      attributeFilter: ['aria-modal', 'data-shortcut-modal', 'hidden', 'open', 'role'],
     });
     schedule();
     return () => {

@@ -91,11 +91,18 @@
   and the search field's clear button uses the muted text colour.
 - Selection, focus, warning and failure must remain distinguishable without
   relying on color alone.
-- dsh-work owns the appearance of its trusted surfaces (`settings.Appearance`:
-  theme id and system/light/dark mode). SettingsService is the only writer and
-  publishes each saved change to every window as the `appearance` event. DSH
-  content keeps DSH's `ui-theme.preference`. Native window frames take the
-  mode when the window is created; Wails 3 beta has no runtime frame-theme
+- dsh-work owns the appearance of the whole workbench, DSH included
+  (`settings.Appearance`: theme id and system/light/dark mode). SettingsService
+  is the only writer and publishes each saved change as the `appearance`
+  event. DSH takes the theme's colours, mode, radii, shadows and interface font
+  through `@dsh-work/shell` (`frontend/src/dsh-theme.ts` maps the tokens),
+  and its cards, menus, dialogs and composer take the theme's borders, shadows,
+  backdrop and `--surface-blur`;
+  DSH's conversation text keeps its own font, and DSH's stored
+  `ui-theme.preference` is left unchanged. Theme checks
+  include the DSH frame: surfaces, text, the send button and other accent
+  fills, and the dialog mask over the top bar. The native window frame takes
+  the mode when the window is created; Wails 3 beta has no runtime frame-theme
   switch.
 - Use one maintained icon family, `lucide` (ISC, tree-shaken ES modules,
   stroke icons whose weight and caps follow tokens); only imported icons ship.

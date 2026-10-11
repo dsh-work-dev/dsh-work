@@ -55,6 +55,8 @@
   --group-bg: var(--canvas);
   --group-border: 1px solid var(--line);
   --group-shadow: none;
+  /* backdrop-filter behind translucent surfaces (glass) */
+  --surface-blur: none;
   --group-foot-bg: var(--wash);
   --row-divider: 1px solid var(--line);
   --row-min-h: 56px;

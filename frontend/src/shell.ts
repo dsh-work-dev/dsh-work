@@ -1,6 +1,8 @@
 import {Browser, Clipboard, Events, Window} from "@wailsio/runtime";
 import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {diagnosticsReport} from "./diagnostics";
+import {controlTokenProperty, measureControls} from "./dsh-controls";
+import {dshDecorTokens, dshThemeTokens, dshTokenProperty, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
@@ -145,7 +147,8 @@ export function mountShell() {
       case "refresh": reloadFrame(); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
-      case "dsh": sendCommand(action.id); break;
+      // A DSH command shows its result in DSH, so Settings steps aside.
+      case "dsh": closeSettingsPanel(); sendCommand(action.id); break;
     }
   };
   const menuBar = createMenuBar(t, run, id => {
@@ -164,28 +167,49 @@ export function mountShell() {
     if (!src) return;
     frame.contentWindow?.postMessage({version: 1, ...message}, new URL(src).origin);
   };
+  // Any CSS colour (color-mix, transparent, nested var()) resolved to RGBA by painting one pixel.
+  const pixel = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
+  const resolveColor = (value: string): Rgba | undefined => {
+    if (!pixel || !CSS.supports("color", value)) return undefined;
+    pixel.clearRect(0, 0, 1, 1);
+    pixel.fillStyle = value;
+    pixel.fillRect(0, 0, 1, 1);
+    const data = pixel.getImageData(0, 0, 1, 1).data;
+    return [data[0], data[1], data[2], data[3] / 255];
+  };
+  // The top bar takes the colour DSH paints its sidebar with, so the two read as one frame.
   const sendAppearance = () => {
-    const src = frame.getAttribute("src");
-    if (!src) return;
     const root = document.documentElement;
+    root.style.removeProperty("--shell-bar-bg");
+    root.style.removeProperty("--shell-bar-fg");
     const style = getComputedStyle(root);
     const read = (name: string) => style.getPropertyValue(name).trim();
-    const tokens = {
-      canvas: read("--canvas"), surface: read("--group-bg"), nav: read("--nav-bg"), wash: read("--wash"),
-      text: read("--text"), muted: read("--muted"), line: read("--line"), accent: read("--accent"),
-      accentHover: read("--primary-hover-bg"), hover: read("--hover"), selection: read("--selection"),
-      onAccent: read("--on-accent"), failed: read("--failed"), backdrop: read("--backdrop"),
+    const supports = (property: string, value: string) => CSS.supports(property, value);
+    const tokens = dshThemeTokens(read, supports, resolveColor);
+    // A probe resolves theme borders (shorthands, nested var()) to a width and colour.
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+    document.body.append(probe);
+    const border = (name: string) => {
+      probe.style.border = `var(${name})`;
+      const computed = getComputedStyle(probe);
+      const width = computed.borderTopWidth;
+      return computed.borderTopStyle === "none" || parseFloat(width) === 0 ? undefined : {width, color: computed.borderTopColor};
     };
-    if (Object.values(tokens).some(value => !value || !CSS.supports("color", value))) return;
-    frame.contentWindow?.postMessage({
-      version: 1, type: "dsh-work/appearance", theme: root.dataset.themeId ?? "monochrome",
-      mode: root.dataset.theme === "dark" ? "dark" : "light", tokens,
-    }, new URL(src).origin);
+    for (const [name, value] of Object.entries(dshDecorTokens(read, border))) if (supports(dshTokenProperty(name), value)) tokens[name] = value;
+    probe.remove();
+    for (const [name, value] of Object.entries(measureControls(document, read))) if (supports(controlTokenProperty(name), value)) tokens[name] = value;
+    const sidebar = tokens["--dsw-specific-sidebar-fill"];
+    if (sidebar) {
+      root.style.setProperty("--shell-bar-bg", sidebar);
+      // Navigation text belongs to the navigation fill; any other surface takes body text.
+      if (sidebar !== read("--nav-bg")) root.style.setProperty("--shell-bar-fg", read("--text"));
+    }
+    sendFrameMessage({type: "dsh-work/appearance", mode: root.dataset.theme === "dark" ? "dark" : "light", tokens});
   };
   const updateModalMask = () => {
     const visible = dshModal.active && !settingsOpen;
     modalMask.hidden = !visible;
-    controls.hidden = menuState.window.fullscreen && !visible;
     if (visible) {
       modalMask.style.removeProperty("--shell-modal-mask");
       modalMask.style.removeProperty("--shell-modal-blur");
@@ -208,7 +232,7 @@ export function mountShell() {
     frame.setAttribute("aria-hidden", "true");
     menuBar.close();
     updateModalMask();
-    requestAnimationFrame(() => document.getElementById("manager-title")?.focus());
+    requestAnimationFrame(() => document.getElementById("manager-title")?.focus({focusVisible: false} as FocusOptions));
   };
   const closeSettingsPanel = () => {
     if (!settingsOpen) return;
@@ -234,8 +258,8 @@ export function mountShell() {
   });
   document.getElementById("manager-close")?.addEventListener("click", closeSettingsPanel);
   window.addEventListener("dsh-work:settings-open", openSettingsPanel);
-  window.addEventListener("dsh-work:settings-close", closeSettingsPanel);
   window.addEventListener("dsh-work:appearance", sendAppearance);
+  sendAppearance();
   Events.On("settings-close", closeSettingsPanel);
   if (new URLSearchParams(window.location.search).has("section")) openSettingsPanel();
 
@@ -373,8 +397,8 @@ export function mountShell() {
   // Full screen hides the window buttons; 视图 → 全屏 leaves it.
   const syncWindow = async () => {
     const [fullscreen, zoom] = await Promise.all([Window.IsFullscreen(), Window.GetZoom()]);
+    controls.hidden = fullscreen;
     setMenu({window: {fullscreen, zoom}});
-    controls.hidden = fullscreen && !(dshModal.active && !settingsOpen);
   };
   const syncMaximised = async () => {
     void syncWindow().catch(() => {});

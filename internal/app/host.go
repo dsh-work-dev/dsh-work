@@ -2099,7 +2099,7 @@ func defaultRemediation(code lifecycle.ErrorCode) string {
 	case lifecycle.ErrorPlatformUnsupported:
 		return "Run the Windows-first dsh-work build on a supported native platform."
 	case lifecycle.ErrorTrustedSurfaceRequired:
-		return "Use the trusted dsh-work shell or Settings window for this control."
+		return "Use dsh-work Settings for this control."
 	default:
 		return "Retry after checking the current dsh-work configuration."
 	}
@@ -2317,10 +2317,10 @@ func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
 }
 
 // GetWorkspaceStatus projects the current per-generation Workspace context to
-// the trusted Settings window. It is read-only and does not expose Host
+// dsh-work Settings in the trusted workbench shell. It is read-only and does not expose Host
 // controls from that surface.
 func (s *HostService) GetWorkspaceStatus(ctx context.Context) lifecycle.Status {
-	if s == nil || s.host == nil || !isTrustedWindow(ctx, "settings") {
+	if s == nil || s.host == nil || !isTrustedWindow(ctx, "workspace") {
 		return trustedSurfaceStatus()
 	}
 	return s.host.Status()

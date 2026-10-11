@@ -10,7 +10,7 @@ import (
 
 // SettingsService is the trusted top-level Settings surface. It exposes only
 // real persisted preferences; unsupported future toggles are not represented
-// as fake frontend controls. DSH manager controls share this Settings window
+// as fake frontend controls. DSH manager controls share this Settings surface
 // but remain a separate service boundary.
 type SettingsService struct {
 	manager *settings.Manager
@@ -46,8 +46,8 @@ func (s *SettingsService) SetAutomaticRuntimeRollback(ctx context.Context, enabl
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -65,8 +65,8 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -77,8 +77,8 @@ func (s *SettingsService) SetLocale(ctx context.Context, locale string) (setting
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -96,8 +96,8 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -117,8 +117,8 @@ func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode 
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()

@@ -7,9 +7,8 @@ User
   |
   v
 Desktop UI client (Go + Wails)
-  |-- workbench window: trusted shell (top bar, menus, startup)
+  |-- workbench window: trusted shell (top bar, menus, startup, Settings panel)
   |     `-- DSH frame on its own origin --> Wails HTTP handler or bounded byte streams
-  |-- trusted Settings window
   `-- current-user local IPC --------------------+
 Manager CLI --> current-user local IPC ----------|
                                                 v
@@ -130,7 +129,7 @@ checks the generation. Revisit the dedicated carriers when the Wails HTTP
 handler can stream and upgrade.
 
 The workbench window (`workspace`) hosts the trusted shell document at
-`http://wails.localhost`; Settings has its own trusted window. DSH runs in an
+`http://wails.localhost`; startup and the Settings panel belong to that document. DSH runs in an
 iframe inside the shell on the fixed authority `http://wails.localhost:48217`.
 That port is an origin label only: WebView2 requests to any `wails.localhost`
 authority are intercepted by the Wails asset server, so nothing listens on it.
@@ -192,7 +191,7 @@ frame loading) or Not loaded, and offers no switches.
 
 | Plugin | Host half | Client half |
 |---|---|---|
-| `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, surface colours |
+| `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, dsh-work theme, modal mask reports |
 | `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
 | `@dsh-work/pet` | Publishes the session activity snapshot and navigation routes the desktop pet uses, for one generation | Synchronizes session activity and opens the conversations the pet asks for |
 
@@ -205,6 +204,70 @@ The link policy sends links and `window.open` calls to other origins to the
 system browser and drops same-origin new-window requests, so DSH never runs as
 an unmanaged top-level page outside the shell. Revisit this if DSH starts
 relying on same-origin pop-ups.
+
+dsh-work's appearance reaches DSH through DSH's public theme service. The
+shell turns its computed theme tokens into DSH `--dsw-*` tokens
+(`frontend/src/dsh-theme.ts`): colours, radii, shadows and the interface font,
+and posts them with the resolved light or dark mode. `@dsh-work/shell` accepts
+only `--dsw-*` names, each with a value valid for the CSS property it feeds,
+registers them as a DSH theme with that mode (`ctx.theme.register`) and
+selects it (`setTheme`). DSH stores only its built-in preferences, so this
+page-only theme never reaches DSH's `ui-theme.preference`; when DSH re-adopts
+its stored preference, the plugin selects its theme again. Each change
+registers a new theme id before releasing the previous one, so DSH never falls
+back in between. An empty row shadows DSH's own Appearance row in
+`settings.general.item`. DSH's conversation text reads its font from the
+interface font token, so the plugin pins the markdown font tokens to DSH's own
+family and only the interface changes font. Tokens without a mapping keep DSH's
+values. Every DSH surface is made opaque (a translucent theme fill is composited
+over the canvas), because DSH draws dialogs and menus over live content and
+inverts surface and text colours in places such as solid tags. Surfaces are
+chosen so the theme's text reads on them (Classic's canvas is a desktop colour,
+so DSH uses its window grey). Colours DSH also uses as text (links, active tabs,
+status labels, kind tags) are moved toward the theme's text colour until they
+reach 5:1 on DSH's base and 4.5:1 on its cards, badge fills and their own tints,
+since a theme accent is often a fill colour; success and warning keep DSH's
+hues under the same rule. Badge text is chosen for the badge fill DSH actually
+receives, and raised buttons take the theme's button fill. The shell resolves theme colours in the browser, so
+`color-mix()` and `transparent` values take part.
+
+Decoration follows the same values. The shell derives raised, floating and
+button shadows from the theme's group, dialog and button borders and shadows
+(a border becomes a box-shadow ring of the same width, since DSH border widths
+have no token), plus the theme's backdrop (`--aurora`) and surface blur
+(`--surface-blur`). DSH declares its `--dsw-elevation-*` shadows on every
+element (`body, body *`), so `@dsh-work/shell` injects one stylesheet, active
+while `body[data-dsh-work-decor]` is set, that redeclares them from those
+values and decorates DSH's semantic hooks (`data-slot`, `data-composer-card`,
+and the plugin list's `data-plugin-group` and the task manager's
+`data-testid="task-manager-page"` list, which take the theme's group border,
+shadow, radius and row divider). DSH reads `--dsw-font-mono` without defining
+it; the shell sets it to the theme's monospace stack followed by the interface
+font, so CJK in package rows does not fall back to a serif face.
+DSH controls take the look of dsh-work's own controls. The shell renders hidden
+samples of its switch (off and on), button, primary button, text field, select
+and tag, and sends what the theme resolved them to: border, radius, fill,
+background image, shadow, text colour, and the switch's track size and thumb
+position (`frontend/src/dsh-controls.ts`). Theme ornaments such as Classic's
+bevels and Neo-brutalism's hard shadows come along without per-theme DSH rules.
+The plugin restyles a `role="switch"` only in DSH's two known structures (the
+button as track with one leaf thumb, or the button wrapping a track and thumb),
+and marks buttons and fields by how DSH drew them: a labelled button with a
+visible frame or a quiet fill, a button with DSH's primary fill, a framed or
+filled text field or select. Icon buttons, navigation and selected rows, menu
+items and the composer keep DSH's look. Native checkboxes and radios take the
+theme accent through `accent-color`. No CSS-module class is used as a hook;
+a test pins that. Themes differ only in token values; no theme has its own DSH
+stylesheet. DSH draws fixed white
+glyphs on some accent fills, so a light accent is darkened there until the
+glyph reaches 4.5:1. Rejected: toggling `data-ds-dark-theme` directly (it
+fights DSH's presenter), `overrideTokens` alone (it cannot choose the light or
+dark base palette), writing DSH's stored preference (it would change DSH outside
+dsh-work), and stylesheet injection through `webserver/index-inject` (it
+bypasses DSH's theme composition). Until the plugin loads, DSH paints its stored
+preference, so the first paint of a DSH load can differ from dsh-work's mode.
+Revisit the map when DSH renames `--dsw-*` tokens; `exportInspectTokens()`
+lists the current names.
 
 Each concern has one named, testable owner. Adapting routes by exact path
 leaves every other plugin's `fetch`, `WebSocket`, `window.open` and link clicks
@@ -391,7 +454,7 @@ the Windows runtime installer and DSH plugin CLI perform package installation.
 The Host does not remove or move `node_modules`. See
 [Version recovery](version-recovery.md) for capture, retention and retry rules.
 
-`internal/settings` stores independent Workspace and Settings window geometry.
+`internal/settings` stores the workbench window geometry.
 `internal/nativeui/window_geometry.go` restores options before window creation,
 observes native resize/maximise events and debounces persistence by 300 ms.
 Close hooks and UI shutdown flush captured state through the daemon settings API. Only normal-window
@@ -467,15 +530,28 @@ maximise button and edge resizing work even where the DSH frame covers the
 window. Plain HWND hosting is not used: there Wails detects window edges from
 mouse moves in the top document, which never sees moves over the frame.
 
-The top bar takes DSH's `--dsw-specific-sidebar-fill` (the colour DSH's own
-Windows caption uses) and text colour, reported by the injected bridge, so the
-chrome continues DSH's surface in light and dark. Before DSH is ready it uses
-dsh-work's own tokens.
+The top bar takes the colour DSH paints its sidebar with, composited over the
+canvas as DSH composites it, so the bar and the sidebar frame DSH's content as
+one surface; DSH follows dsh-work's theme (see
+[Page bootstrap and host plugins](#page-bootstrap-and-host-plugins)). Its text,
+menu buttons, menus and status line use the theme's navigation and dialog
+tokens (font, radius, hover and active fills, border and shadow). While DSH
+shows a modal dialog (`role="dialog"` with `aria-modal` or
+`data-shortcut-modal`), `@dsh-work/shell` reports the colour and blur of its
+mask, and the shell draws the same mask over the top bar so the window reads
+as one modal layer. The mask covers the menus, and Alt or F10 return focus to
+DSH. A click on it is passed to DSH's mask, so it closes the dialog when DSH's
+own mask does. The window buttons sit above the mask, and Windows hit-tests the
+caption area before the page, so dragging, Snap layouts and the window buttons
+keep working. Upstream's Electron build leaves its caption unmasked; dsh-work
+masks the bar so its menus cannot act behind a DSH dialog. The plugin watches
+dialogs being mounted and the attributes above, not every style change, to stay
+cheap while DSH streams output.
 
 The shell owns every host command (restart, quit, update, Settings), so none is
 reachable from DSH plugins, and the chrome and recovery entry stay usable when
-DSH hangs or fails. A later same-window Settings panel reuses the same
-origin-based trust. DSH loses its Electron caption layout and runs as a plain
+DSH hangs or fails. Settings is a panel in the same document and shares that
+trust. DSH loses its Electron caption layout and runs as a plain
 web page under the bar. Rejected: drawing the bar inside the DSH document (host
 commands reachable from DSH plugins, chrome dies with DSH); two native WebViews
 in one window (no Wails API, and shell menus could not overlay DSH); a coloured
@@ -498,7 +574,7 @@ window, command palette, focus mode, always on top and recent workspaces.
 
 Host items call trusted bindings. `ShellService` runs in the UI process: it
 opens Settings at a section, and reads or sets Pet visibility on behalf of the
-Settings surface, which is the only surface the daemon grants Pet controls.
+workbench shell, the only surface the daemon grants Pet controls.
 Restart and quit keep the availability rules of the tray. 刷新 reloads only the DSH frame; the Worker keeps running. Zoom, full
 screen and close use the Wails window API (close hides the window). Zoom
 scales the whole window, shell bar included, and cannot go below actual size
@@ -538,8 +614,13 @@ Electron desktop runtime, so dispatching bindings is the available route. It
 depends on DSH accepting script keyboard events; revisit it if DSH publishes a
 plugin command invoke.
 
-Settings is a separate window with its own locale-aware title and no menu. The
-tray belongs to the daemon and can open Settings or the workbench, restart DSH,
+Settings is a panel in the workbench, below the top bar and over the DSH frame,
+which stays loaded and inert while the panel is open. The tray, the CLI
+(`--ui <section>`) and the 设置 menu open it at a section; opening the
+workbench without a section closes it, as do 返回工作台 at the top of its navigation, Esc and running
+a DSH command from the menu. The daemon accepts management calls only from the
+workbench window, and the DSH frame cannot reach them (see
+[Desktop communication](#desktop-communication)). The tray belongs to the daemon and can open Settings or the workbench, restart DSH,
 and explicitly stop the background. Pet and native notification adapters remain
 in the daemon, so closing the UI preserves them.
 

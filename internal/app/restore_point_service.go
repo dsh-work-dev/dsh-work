@@ -31,7 +31,7 @@ func (h *Host) RestoreVersionPoint(ctx context.Context, id string) (dshmanager.S
 }
 
 func (s *ManagerService) SaveRestorePoint(ctx context.Context, label string) (dshmanager.Snapshot, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("Snapshots can be saved in Settings.")
 	}
 	if s == nil || s.manager == nil {
@@ -40,7 +40,7 @@ func (s *ManagerService) SaveRestorePoint(ctx context.Context, label string) (ds
 	return s.manager.SaveRestorePoint(ctx, label)
 }
 func (s *ManagerService) RenameRestorePoint(ctx context.Context, id, label string) (dshmanager.Snapshot, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("Snapshots can be edited in Settings.")
 	}
 	if s == nil || s.manager == nil {
@@ -49,7 +49,7 @@ func (s *ManagerService) RenameRestorePoint(ctx context.Context, id, label strin
 	return s.manager.EditRestorePoint(ctx, id, label, false)
 }
 func (s *ManagerService) DeleteRestorePoint(ctx context.Context, id string) (dshmanager.Snapshot, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("Snapshots can be edited in Settings.")
 	}
 	if s == nil || s.manager == nil {
