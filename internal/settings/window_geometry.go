@@ -50,12 +50,10 @@ func (m *Manager) SetWindowGeometry(ctx context.Context, name string, geometry W
 	switch name {
 	case "workspace":
 		next.WorkspaceWindow = geometry
-	case "settings":
-		next.SettingsWindow = geometry
 	default:
 		return errors.New("unknown window")
 	}
-	if next.WorkspaceWindow == m.values.WorkspaceWindow && next.SettingsWindow == m.values.SettingsWindow {
+	if next.WorkspaceWindow == m.values.WorkspaceWindow {
 		return nil
 	}
 	if err := m.store.Save(ctx, m.path, next); err != nil {

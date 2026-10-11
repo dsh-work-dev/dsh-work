@@ -71,8 +71,8 @@ silently mutate DSH-owned data.
   focusing or opening the Workspace. The installer takes over the `dsh://`
   scheme and restores the previous handler on uninstall.
 - Settings persist locale, recovery, Pet and notification preferences.
-- Workspace and Settings windows separately remember normal dimensions and
-  maximised state. Minimisation does not replace the saved normal dimensions;
+- The workbench window remembers its normal dimensions and maximised state;
+  Settings opens as a panel inside it. Minimisation does not replace the saved normal dimensions;
   a missing or invalid size uses the window's defaults.
 - A per-user daemon owns the Worker, tray, Pet and notifications independently
   of the desktop UI process. The tray can open or reconnect the UI.

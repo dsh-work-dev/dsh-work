@@ -21,7 +21,7 @@
     <link rel="stylesheet" href="/src/ui/app.css" />
   </head>
   <body>
-    <main id="host-surface" class="startup" aria-labelledby="app-title">
+    <main id="host-surface" class="startup" tabindex="-1" aria-labelledby="app-title">
       <div class="startup-backdrop" aria-hidden="true"></div>
       <div class="startup-shell">
         <header class="startup-head">
@@ -70,9 +70,10 @@
       </div>
     </main>
 
-    <main id="manager-surface" class="shell" aria-labelledby="manager-title" hidden>
+    <main id="manager-surface" class="shell" role="dialog" aria-modal="true" aria-labelledby="manager-title" hidden>
       <a class="skip-link" href="#manager-content" data-i18n="manager.skipToContent">Skip to settings</a>
       <aside class="shell-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
+        <button id="manager-close" class="nav-item manager-back" type="button"><span data-icon="chevron-left"></span><span data-i18n="manager.close">Back to workbench</span></button>
         <select id="manager-section-select" class="nav-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
           <option value="overview" data-i18n="manager.overview">Overview</option>
           <optgroup label="Application" data-i18n-label="manager.groupApplication">
@@ -115,7 +116,7 @@
       <div class="shell-content" id="manager-content" tabindex="-1">
         <div class="page">
           <header class="page-head">
-            <h1 id="manager-title" data-i18n="manager.overview">Overview</h1>
+            <h1 id="manager-title" tabindex="-1" data-i18n="manager.overview">Overview</h1>
           </header>
 
           <!--

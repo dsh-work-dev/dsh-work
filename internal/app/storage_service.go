@@ -10,7 +10,7 @@ import (
 
 // DefaultUserDataPath keeps OS path semantics out of presentation code.
 func (s *StorageService) DefaultUserDataPath(ctx context.Context, root string) (string, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return "", trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	if !filepath.IsAbs(root) {
@@ -30,7 +30,7 @@ func NewStorageService(manager *storagepaths.Manager, open func(string) error, c
 	return &StorageService{manager: manager, open: open, choose: choose}
 }
 func (s *StorageService) OpenLocation(ctx context.Context, userData bool) error {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	current := s.manager.Snapshot().Current
@@ -41,25 +41,25 @@ func (s *StorageService) OpenLocation(ctx context.Context, userData bool) error 
 	return s.open(path)
 }
 func (s *StorageService) ChooseDirectory(ctx context.Context, currentPath string) (string, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return "", trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	return s.choose(currentPath)
 }
 func (s *StorageService) GetLocations(ctx context.Context) (storagepaths.State, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return storagepaths.State{}, trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	return s.manager.Snapshot(), nil
 }
 func (s *StorageService) SaveLocations(ctx context.Context, locations storagepaths.Locations) (storagepaths.State, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return storagepaths.State{}, trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	return s.manager.Save(locations)
 }
 func (s *StorageService) CancelMigration(ctx context.Context) (storagepaths.State, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return storagepaths.State{}, trustedSurfaceRequired("Storage locations are available in Settings.")
 	}
 	return s.manager.Cancel()

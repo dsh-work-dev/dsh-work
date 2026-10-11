@@ -39,7 +39,6 @@
 .page { max-width: var(--page-width); margin-inline: auto; padding: var(--space-6) var(--page-pad) var(--space-8); }
 .page-wide { max-width: calc(var(--page-width) + 240px); }
 
-html[data-surface="settings"], html[data-surface="settings"] body { height: 100%; overflow: hidden; }
 .skip-link { position: fixed; top: var(--space-2); left: var(--space-2); z-index: 10; padding: var(--space-3) var(--space-4); transform: translateY(-200%); background: var(--accent); color: var(--on-accent); }
 .skip-link:focus { transform: none; }
 

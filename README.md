@@ -16,7 +16,7 @@ while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 - a per-user background daemon shared by the desktop UI and online manager CLI;
 - background tasks that survive desktop window closure and UI process crashes;
 - persistent locale, recovery, Pet and desktop-notification preferences;
-- remembered Workspace and Settings window sizes and maximised state;
+- a remembered workbench window size and maximised state, with Settings as a panel inside it;
 - Windows Job Object ownership for the Worker process tree.
 
 Closing a desktop window hides it and keeps its WebView in the UI client, so

@@ -25,7 +25,7 @@ func callJSON(ctx context.Context, client *daemon.Client, path string, input, ou
 
 func trustedWindow(ctx context.Context) (application.Window, error) {
 	window, ok := ctx.Value(application.WindowKey).(application.Window)
-	if !ok || window == nil || (window.Name() != "workspace" && window.Name() != "settings") {
+	if !ok || window == nil || window.Name() != "workspace" {
 		return nil, errors.New("trusted desktop window required")
 	}
 	return window, nil

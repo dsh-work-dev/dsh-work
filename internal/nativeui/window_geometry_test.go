@@ -28,7 +28,7 @@ func (w *geometryWindow) RegisterHook(event events.WindowEventType, callback fun
 	return w.OnWindowEvent(event, callback)
 }
 
-func TestWindowSizeSurvivesCloseAndSettingsReload(t *testing.T) {
+func TestWindowSizeSurvivesCloseAndReload(t *testing.T) {
 	config := settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")}
 	manager, err := settings.New(config)
 	if err != nil {
@@ -52,10 +52,5 @@ func TestWindowSizeSurvivesCloseAndSettingsReload(t *testing.T) {
 	restored := RestoreWindowGeometry(options, reloaded)
 	if restored.Width != 1360 || restored.Height != 920 || restored.StartState != application.WindowStateMaximised {
 		t.Fatalf("restored window: %+v", restored)
-	}
-	options.Name = "settings"
-	other := RestoreWindowGeometry(options, reloaded)
-	if other.Width != 1180 || other.Height != 760 || other.StartState != application.WindowStateNormal {
-		t.Fatal("window sizes leaked between windows")
 	}
 }

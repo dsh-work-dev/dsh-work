@@ -30,7 +30,7 @@ type ManagerService struct {
 }
 
 func (s *ManagerService) RegisterRuntime(ctx context.Context, runtime dshmanager.RuntimeInfo) (dshmanager.Snapshot, error) {
-	if !isTrustedWindow(ctx, "settings") {
+	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.Snapshot{}, trustedSurfaceRequired("Runtime registration requires Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
@@ -63,7 +63,7 @@ func (s *ManagerService) GetSnapshot(ctx context.Context) (dshmanager.Snapshot, 
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -75,7 +75,7 @@ func (s *ManagerService) SetRunContext(ctx context.Context, target dshmanager.Ru
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
@@ -90,8 +90,8 @@ func (s *ManagerService) RetryLastSwitch(ctx context.Context) (dshmanager.Snapsh
 	if s == nil || s.host == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Run context recovery is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Run context recovery is available only in dsh-work Settings.")
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
@@ -102,8 +102,8 @@ func (s *ManagerService) RestoreKnownGood(ctx context.Context) (dshmanager.Snaps
 	if s == nil || s.host == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Run context recovery is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Run context recovery is available only in dsh-work Settings.")
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
@@ -115,7 +115,7 @@ func (s *ManagerService) InstallRuntime(ctx context.Context, version string) (ds
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, finish, err := s.beginRuntimeOperation(ctx, "A DSH runtime preparation is already in progress.")
 	if err != nil {
@@ -137,8 +137,8 @@ func (s *ManagerService) RefreshLatestNode(ctx context.Context) (dshmanager.Snap
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node release refresh is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node release refresh is available only in dsh-work Settings.")
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
@@ -150,7 +150,7 @@ func (s *ManagerService) RefreshDSHReleases(ctx context.Context) (dshmanager.Sna
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH release refresh is available only in the Settings window.")
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH release refresh is available only in dsh-work Settings.")
 	}
 	ctx, finish, err := s.beginRuntimeOperation(ctx, "An acquisition is already in progress.")
 	if err != nil {
@@ -165,7 +165,7 @@ func (s *ManagerService) InstallLatestNode(ctx context.Context) (dshmanager.Snap
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node installation is available only in the Settings window.")
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node installation is available only in dsh-work Settings.")
 	}
 	ctx, finish, err := s.beginRuntimeOperation(ctx, "An acquisition is already in progress.")
 	if err != nil {
@@ -327,8 +327,8 @@ func (s *ManagerService) RemoveNode(ctx context.Context, id string) (dshmanager.
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node removal is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Node removal is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -343,7 +343,7 @@ func (s *ManagerService) CancelRuntime(ctx context.Context) error {
 		return managerUnavailable()
 	}
 	if !s.runtimeSurfaceAuthorized(ctx) {
-		return trustedSurfaceRequired("DSH runtime cancellation is available only in the Settings window.")
+		return trustedSurfaceRequired("DSH runtime cancellation is available only in dsh-work Settings.")
 	}
 	s.runtimeMu.Lock()
 	cancel := s.runtimeCancel
@@ -362,8 +362,8 @@ func (s *ManagerService) RemoveRuntime(ctx context.Context, id string) (dshmanag
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -374,8 +374,8 @@ func (s *ManagerService) RegisterDataDirectory(ctx context.Context, dataDirector
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -386,8 +386,8 @@ func (s *ManagerService) RemoveDataDirectory(ctx context.Context, id string) (ds
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -398,8 +398,8 @@ func (s *ManagerService) ResolveLaunch(ctx context.Context, request dshmanager.L
 	if s == nil || s.manager == nil {
 		return dshmanager.ResolvedLaunch{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.ResolvedLaunch{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.ResolvedLaunch{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -410,8 +410,8 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	if s == nil || s.manager == nil {
 		return nil, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return nil, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return nil, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -425,8 +425,8 @@ func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -447,8 +447,8 @@ func (s *ManagerService) RemovePlugin(ctx context.Context, request dshmanager.Pl
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -470,8 +470,8 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -486,8 +486,8 @@ func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanag
 	if s == nil || s.manager == nil {
 		return nil, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return nil, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return nil, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -502,8 +502,8 @@ func (s *ManagerService) SetLoaderEntryDisabled(ctx context.Context, request dsh
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -517,8 +517,8 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -540,8 +540,8 @@ func (s *ManagerService) UpgradePlugins(ctx context.Context, request dshmanager.
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -562,8 +562,8 @@ func (s *ManagerService) RenameProfile(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -574,8 +574,8 @@ func (s *ManagerService) CloneProfile(ctx context.Context, request dshmanager.Pr
 	if s == nil || s.manager == nil {
 		return dshmanager.ProfileCloneResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.ProfileCloneResult{}, trustedSurfaceRequired("Profile cloning is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.ProfileCloneResult{}, trustedSurfaceRequired("Profile cloning is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -586,8 +586,8 @@ func (s *ManagerService) DeleteProfile(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.Snapshot{}, trustedSurfaceRequired("Profile deletion is available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.Snapshot{}, trustedSurfaceRequired("Profile deletion is available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -598,8 +598,8 @@ func (s *ManagerService) BackupProfile(ctx context.Context, request dshmanager.P
 	if s == nil || s.manager == nil {
 		return dshmanager.ProfileBackupResult{}, managerUnavailable()
 	}
-	if !isTrustedWindow(ctx, "settings") {
-		return dshmanager.ProfileBackupResult{}, trustedSurfaceRequired("Profile backups are available only in the Settings window.")
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.ProfileBackupResult{}, trustedSurfaceRequired("Profile backups are available only in dsh-work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -655,8 +655,7 @@ func (s *ManagerService) commandLogContext(ctx context.Context, operationID stri
 	})
 }
 
-// Only the local startup shell and Settings may acquire or select runtimes.
-// The workspace window keeps its name after navigation, so origin trust is required.
+// Only the trusted workbench shell (startup and Settings) may acquire or select runtimes.
 func (s *ManagerService) runtimeSurfaceAuthorized(ctx context.Context) bool {
-	return isTrustedWindow(ctx, "settings") || isTrustedWindow(ctx, "workspace")
+	return isTrustedWindow(ctx, "workspace")
 }

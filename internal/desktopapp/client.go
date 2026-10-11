@@ -72,7 +72,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	defer client.Close()
 	manager := remoteManagerSnapshot{client: client}
 	var desktop *application.App
-	var workspace, settingsWindow application.Window
+	var workspace application.Window
 	var windowMu sync.Mutex
 	var mu sync.Mutex
 	var protocolMu sync.Mutex
@@ -114,9 +114,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
 		var panel app.PetPanel
 		if visible == nil {
-			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel)
+			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel)
 		}
-		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "settings", []any{*visible}, &panel)
+		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "workspace", []any{*visible}, &panel)
 	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
 		return client.JSON(ctx, "/zoom", zoom, nil)
 	}, OnBuiltinComponentsChanged: func(statuses []desktopclient.BuiltinComponentStatus) {
@@ -139,7 +139,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	})
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
-	ledger := lifecycle.NewWindowLedger("workspace", "settings")
+	ledger := lifecycle.NewWindowLedger("workspace")
 	remember := func(window application.Window, options application.WebviewWindowOptions) {
 		store := remoteGeometry{client: client, values: state.Preferences}
 		flush := nativeui.RememberWindowGeometry(window, options, store)
@@ -148,10 +148,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		defer windowMu.Unlock()
-		if name == "workspace" && (workspace == nil || window.ID() != workspace.ID()) {
-			return
-		}
-		if name == "settings" && (settingsWindow == nil || window.ID() != settingsWindow.ID()) {
+		if workspace == nil || window.ID() != workspace.ID() {
 			return
 		}
 		if !applicationShuttingDown.Load() {
@@ -170,22 +167,15 @@ func runDesktopClient(identity string, resources Resources) error {
 		mu.Lock()
 		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)
 		mu.Unlock()
-		if name == "settings" {
-			options.Width, options.Height = 980, 720
-			options.MinWidth = 680
-			mu.Lock()
-			options.Title = nativeui.LabelsFor(current.Preferences.Locale).Settings
-			mu.Unlock()
-		}
 		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences})
 	}
-	createWorkspace := func() {
+	createWorkspace := func(section string) {
 		if workspace != nil {
 			return
 		}
 		workOptions := newOptions("workspace")
 		workOptions.Frameless = true
-		workOptions.URL = "/?shell=1"
+		workOptions.URL = workspaceURL(manager, section)
 		// Composition hosting moves hit-testing to the native window: edge
 		// resizing and the caption/caption-button regions (Snap layouts) no
 		// longer depend on which document is under the pointer. Without it,
@@ -216,31 +206,22 @@ func runDesktopClient(identity string, resources Resources) error {
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
 			return
 		}
-		if section != "" {
-			if settingsWindow == nil {
-				options := newOptions("settings")
-				options.URL = settingsURL(manager, section)
-				newWindow := desktop.Window.NewWithOptions(options)
-				settingsWindow = newWindow
-				window := settingsWindow
-				remember(window, options)
-				window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("settings", window, event) })
-			} else {
-				desktop.Event.Emit("settings-section", section)
-			}
-			if !ledger.TryShow("settings") {
-				return
-			}
-			settingsWindow.Show().Focus()
-			return
-		}
-		if workspace == nil {
-			createWorkspace()
+		created := workspace == nil
+		if created {
+			createWorkspace(section)
 		}
 		if !ledger.TryShow("workspace") {
 			return
 		}
 		workspace.Show().Focus()
+		// A new workbench reads its section from the URL; a live one switches panels.
+		if !created {
+			if section == "" {
+				desktop.Event.Emit("settings-close", struct{}{})
+			} else {
+				desktop.Event.Emit("settings-section", section)
+			}
+		}
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if !isWorkspaceOpenURL(event.Context().URL()) {
@@ -257,11 +238,12 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 	})
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
+		if section == "settings" {
+			desktop.Event.Emit("settings-close", struct{}{})
+			return
+		}
 		windowMu.Lock()
 		window := workspace
-		if section == "settings" {
-			window = settingsWindow
-		}
 		windowMu.Unlock()
 		if window != nil {
 			window.Close()
@@ -281,9 +263,14 @@ func runDesktopClient(identity string, resources Resources) error {
 		openRequestedByProtocol := protocolOpenPending
 		protocolOpenPending = false
 		protocolMu.Unlock()
-		// Settings-only launches also need the hidden workbench, whose DSH frame completes boot.
+		// Every launch creates the workbench, hidden until opened: its DSH frame
+		// completes boot, and a Settings launch starts with that panel open.
+		launchSection := section
+		if launchSection == "__boot" {
+			launchSection = ""
+		}
 		windowMu.Lock()
-		createWorkspace()
+		createWorkspace(launchSection)
 		windowMu.Unlock()
 		open(section)
 		if openRequestedByProtocol {
@@ -325,14 +312,8 @@ func runDesktopClient(identity string, resources Resources) error {
 						return
 					}
 					mu.Lock()
-					localeChanged := current.Preferences.Locale != next.Preferences.Locale
 					current = next
 					mu.Unlock()
-					windowMu.Lock()
-					if localeChanged && settingsWindow != nil {
-						settingsWindow.SetTitle(nativeui.LabelsFor(next.Preferences.Locale).Settings)
-					}
-					windowMu.Unlock()
 					cursor = next.Cursor
 					for _, event := range next.Events {
 						if err := replayEvent(event, func(e *application.CustomEvent) error {
@@ -454,7 +435,7 @@ type remoteManagerSnapshot struct{ client *daemon.Client }
 func (s remoteManagerSnapshot) Snapshot(ctx context.Context) (value dshmanager.Snapshot, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	err = s.client.Call(ctx, "ManagerService", "GetSnapshot", "settings", nil, &value)
+	err = s.client.Call(ctx, "ManagerService", "GetSnapshot", "workspace", nil, &value)
 	return
 }
 

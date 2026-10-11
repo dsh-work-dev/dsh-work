@@ -5,7 +5,7 @@ import test from 'node:test';
 const SHELL = 'http://wails.localhost';
 
 // Load the DSH client plugin framed by a fake shell, with a fake shortcut catalog.
-async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false, servicesPresent = true} = {}) {
+async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false, servicesPresent = true, modals = []} = {}) {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const listeners = {};
@@ -13,6 +13,7 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
   const dispatched = [];
   const publicCalls = [];
   const observers = [];
+  const appended = [];
   let collapsed = sidebarCollapsed;
   const layoutFrame = {
     style: {gridTemplateColumns: '280px minmax(400px, 1fr) minmax(0px, 0px)'},
@@ -25,6 +26,10 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
     disconnect() {}
   };
   const parent = {postMessage: (message, origin) => posted.push({message, origin})};
+  globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
+  globalThis.cancelAnimationFrame = id => clearTimeout(id);
+  globalThis.CSS = {supports: (property, value) => property === 'color' ? /^(#[0-9a-f]{3,8}|rgba?\(.*\))$/i.test(value) : !/url\(/.test(value)};
+  globalThis.getComputedStyle = element => element.computed ?? {getPropertyValue: () => ''};
   globalThis.KeyboardEvent = class { constructor(type, init) { Object.assign(this, init, {type}); } };
   globalThis.window = {
     parent,
@@ -37,12 +42,15 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
   globalThis.document = {
     visibilityState: 'visible',
     hasFocus: () => true,
-    body: {dispatchEvent: event => {
+    head: {append: element => { appended.push(element); }},
+    createElement: tag => ({tagName: tag, dataset: {}, remove() { appended.splice(appended.indexOf(this), 1); }}),
+    body: {attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; }, dispatchEvent: event => {
       dispatched.push(event);
       if (handles(event)) event.defaultPrevented = true;
       return !event.defaultPrevented;
     }},
     documentElement: {},
+    querySelectorAll: () => modals,
     getElementById: id => id === 'root' ? root : null,
     querySelector: selector => root.querySelector(selector),
   };
@@ -55,7 +63,24 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
     collapsed = !collapsed;
     observers.forEach(observer => observer.callback());
   }} : {};
+  const theme = {
+    themes: [{id: 'light', colorScheme: 'light', tokens: {}}, {id: 'dark', colorScheme: 'dark', tokens: {}}],
+    preference: 'system',
+    register(definition) {
+      this.themes.push(definition);
+      return () => {
+        this.themes = this.themes.filter(item => item !== definition);
+        if (this.preference === definition.id) this.preference = 'system';
+      };
+    },
+    setTheme(id) { this.preference = id; themeListeners.forEach(fn => fn({preference: id, themes: this.themes})); },
+  };
+  const themeListeners = [];
+  const slotEntries = [];
   const ctx = {
+    theme,
+    on: (name, fn) => { if (name === 'theme/change') themeListeners.push(fn); },
+    slots: {inject: (_, fn) => fn(), register: (options, component) => { slotEntries.push({options, component}); return () => {}; }},
     sessions: {list: {getSnapshot: () => ({byId: {}})}},
     effect: fn => { fn(); },
     // Like Cordis, a callback runs only once every dependency is available.
@@ -69,8 +94,9 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
     layout: servicesPresent ? layout : undefined,
   };
   definition.factory(() => undefined).apply(ctx);
+  await new Promise(resolve => setTimeout(resolve, 0));
   const emit = (type, event) => (listeners[type] ?? []).forEach(fn => fn(event));
-  return {posted, dispatched, publicCalls, emit, parent, update(next) { snapshot = next; notify(); }};
+  return {posted, dispatched, publicCalls, emit, parent, theme, themeListeners, slotEntries, appended, update(next) { snapshot = next; notify(); }};
 }
 const entry = (id, binding, keys = [], extra = {}) => ({id, label: id, keys, binding, conflicts: [], issue: null, ...extra});
 const messages = (posted, type) => posted.filter(p => p.message.type === type).map(p => p.message);
@@ -215,4 +241,89 @@ test('keeps the menu bridge when a profile lacks the workspace or layout service
   assert.equal(commands.get('session.new'), 'unavailable');
   assert.equal(commands.get('sidebar.left.toggle'), 'unavailable');
   assert.deepEqual(messages(shell.posted, 'dsh-work/component-ready').map(message => message.id), ['shell']);
+});
+
+const appearance = (mode, tokens) => ({source: undefined, origin: SHELL, data: {version: 1, type: 'dsh-work/appearance', mode, tokens}});
+
+test('paints DSH with the dsh-work appearance as a page-only theme', async () => {
+  const shell = await framed([]);
+  const send = (mode, tokens) => shell.emit('message', {...appearance(mode, tokens), source: shell.parent});
+  send('dark', {'--dsw-alias-bg-base': '#101010', '--dsw-alias-brand-primary': 'rgb(1, 2, 3)'});
+  const first = shell.theme.preference;
+  assert.match(first, /^dsh-work-/);
+  assert.deepEqual(shell.theme.themes.find(item => item.id === first), {id: first, colorScheme: 'dark', tokens: {'--dsw-alias-bg-base': '#101010', '--dsw-alias-brand-primary': 'rgb(1, 2, 3)'}});
+  send('light', {'--dsw-alias-bg-base': '#ffffff'});
+  assert.notEqual(shell.theme.preference, first);
+  assert.equal(shell.theme.themes.some(item => item.id === first), false, 'the replaced theme stays registered');
+  // DSH re-adopting its stored preference does not undo the dsh-work theme.
+  const current = shell.theme.preference;
+  shell.theme.setTheme('dark');
+  assert.equal(shell.theme.preference, current);
+});
+
+test('ignores appearance values that are not DSH colour tokens', async () => {
+  const shell = await framed([]);
+  const send = tokens => shell.emit('message', {...appearance('dark', tokens), source: shell.parent});
+  send({'--other-token': '#000000'});
+  send({'--dsw-alias-bg-base': 'url(https://example.com/x.png)'});
+  shell.emit('message', {...appearance('sepia', {'--dsw-alias-bg-base': '#000000'}), source: shell.parent});
+  shell.emit('message', {...appearance('dark', {'--dsw-alias-bg-base': '#000000'}), source: {}});
+  assert.equal(shell.theme.preference, 'system');
+});
+
+test('shadows the DSH Appearance row', async () => {
+  const shell = await framed([]);
+  assert.deepEqual(shell.slotEntries.map(entry => entry.options), [{name: 'settings.general.item', id: 'appearance', priority: -1}]);
+  assert.equal(shell.slotEntries[0].component(), null);
+});
+
+test('reports a visible DSH modal and its mask colour', async () => {
+  const mask = {getAttribute: name => name === 'aria-hidden' ? 'true' : null, className: 'x_mask', computed: {backgroundColor: 'rgba(0, 0, 0, 0.24)', backdropFilter: 'blur(4px)'}};
+  const parent = {children: []};
+  const modal = {parentElement: parent, getClientRects: () => [{}], computed: {display: 'block', visibility: 'visible'}};
+  parent.children = [mask, modal];
+  parent.parentElement = globalThis.document?.body;
+  const shell = await framed([], {modals: [modal]});
+  assert.deepEqual(messages(shell.posted, 'dsh-work/modal-mask'), [{version: 1, type: 'dsh-work/modal-mask', active: true, background: 'rgba(0, 0, 0, 0.24)', blur: 'blur(4px)'}]);
+});
+
+test('changes the interface font but keeps the DSH conversation font', async () => {
+  const shell = await framed([]);
+  globalThis.document.body.computed = {getPropertyValue: name => name === '--dsw-font-family' ? 'DSH Sans' : ''};
+  shell.emit('message', {...appearance('light', {'--dsw-font-family': 'Tahoma, sans-serif', '--dsw-radius-sm': '0'}), source: shell.parent});
+  const tokens = shell.theme.themes.find(item => item.id === shell.theme.preference).tokens;
+  assert.equal(tokens['--dsw-font-family'], 'Tahoma, sans-serif');
+  assert.equal(tokens['--dsw-radius-sm'], '0');
+  assert.equal(tokens['--dsw-font-markdown-base-font-family'], 'DSH Sans');
+  assert.equal(tokens['--dsw-font-markdown-h1-font-family'], 'DSH Sans');
+});
+
+test('redeclares DSH elevation from the dsh-work decoration values', async () => {
+  const shell = await framed([]);
+  shell.emit('message', {...appearance('light', {'--dsh-work-raised': '0 0 0 3px #111111, 6px 6px 0 #111111', '--dsh-work-floating': 'none', '--dsh-work-stroke': '0 0 0 3px #111111'}), source: shell.parent});
+  assert.equal(shell.appended.length, 1);
+  assert.ok(shell.appended[0].textContent.includes('--dsw-elevation-panel: var(--dsh-work-raised)'));
+  assert.ok('data-dsh-work-decor' in globalThis.document.body.attributes);
+  shell.emit('message', {...appearance('light', {'--dsh-work-raised': 'url(https://example.com/x)'}), source: shell.parent});
+  assert.equal(shell.theme.themes.find(item => item.id === shell.theme.preference).tokens['--dsh-work-raised'], '0 0 0 3px #111111, 6px 6px 0 #111111');
+});
+
+// Every CSS-module class hook is a DSH-version risk; this list changes only on purpose.
+test('lists the DSH class hooks the decoration depends on', async () => {
+  const shell = await framed([]);
+  shell.emit('message', {...appearance('light', {'--dsh-work-raised': 'none'}), source: shell.parent});
+  const hooks = [...shell.appended[0].textContent.matchAll(/\[class\$="([^"]+)"\]/g)].map(match => match[1]);
+  assert.deepEqual(hooks, [], 'controls are found by role and structure, not CSS-module classes');
+});
+
+test('styles DSH switches by structure with the measured dsh-work switch', async () => {
+  const shell = await framed([]);
+  shell.emit('message', {...appearance('light', {'--dsh-work-raised': 'none', '--dsh-work-switch-w': '38px', '--dsh-work-switch-on-track-bg': '#111111', '--dsh-work-switch-off-thumb-radius': '999px', '--dsh-work-button-border': '3px solid #111111'}), source: shell.parent});
+  const tokens = shell.theme.themes.find(item => item.id === shell.theme.preference).tokens;
+  assert.equal(tokens['--dsh-work-switch-w'], '38px');
+  assert.equal(tokens['--dsh-work-button-border'], '3px solid #111111');
+  const css = shell.appended[0].textContent;
+  assert.ok(css.includes('[role="switch"][aria-checked="true"]:has(> :only-child):not(:has(> :only-child > *))'));
+  assert.ok(css.includes('[data-dsh-work-control="button"]'));
+  assert.ok(!/class[$*^]?=/.test(css), 'no CSS-module class selectors');
 });

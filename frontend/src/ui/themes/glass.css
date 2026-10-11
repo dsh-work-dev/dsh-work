@@ -126,13 +126,14 @@
   --tag-bg: rgb(255 255 255 / 8%);
   --switch-off-bg: rgb(255 255 255 / 22%);
   --brand-filter: invert(1);
+  --surface-blur: blur(22px) saturate(150%);
 }
 
 :root[data-theme-id="glass"] body { background: var(--aurora) fixed; }
 :root[data-theme-id="glass"] :is(.shell-content, .startup-backdrop) { background: var(--aurora); background-attachment: fixed; }
 :root[data-theme-id="glass"] :is(.shell-nav, .group, .notice, dialog, .startup-diagnostics) {
-  -webkit-backdrop-filter: blur(22px) saturate(150%);
-  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: var(--surface-blur);
+  backdrop-filter: var(--surface-blur);
 }
 :root[data-theme-id="glass"] .nav-item[aria-current] { box-shadow: 0 4px 14px rgb(60 50 120 / 12%); }
 :root[data-theme-id="glass"] .button-primary { font-weight: 600; }

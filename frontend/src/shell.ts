@@ -1,6 +1,8 @@
 import {Browser, Clipboard, Events, Window} from "@wailsio/runtime";
 import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {diagnosticsReport} from "./diagnostics";
+import {controlTokenProperty, measureControls} from "./dsh-controls";
+import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrameText, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
@@ -39,6 +41,10 @@ export function mountShell() {
   drag.className = "shell-drag";
   const controls = document.createElement("div");
   controls.className = "shell-controls";
+  const modalMask = document.createElement("div");
+  modalMask.className = "shell-modal-mask";
+  modalMask.setAttribute("aria-hidden", "true");
+  modalMask.hidden = true;
   const control = (labelKey: string, name: IconName, action: () => unknown) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -59,6 +65,8 @@ export function mountShell() {
   frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals");
   frame.setAttribute("allow", "microphone; clipboard-read; clipboard-write; fullscreen");
   frame.hidden = true;
+  const managerSurface = document.getElementById("manager-surface");
+  const hostSurface = document.getElementById("host-surface");
 
   let menuState: MenuState = {lifecycle: "Starting", busy: false, pet: {ready: false, visible: false}, updatePhase: "idle", window: {fullscreen: false, zoom: 1}, framed: false, dsh: null};
   let sendCommand: (id: string) => void = () => {};
@@ -139,17 +147,123 @@ export function mountShell() {
       case "refresh": reloadFrame(); break;
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
-      case "dsh": sendCommand(action.id); break;
+      // A DSH command shows its result in DSH, so Settings steps aside.
+      case "dsh": closeSettingsPanel(); sendCommand(action.id); break;
     }
   };
   const menuBar = createMenuBar(t, run, id => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
   }, () => frame.contentWindow?.focus());
   menuBar.render(menuState);
-  bar.append(brand, menuBar.element, drag, controls);
+  bar.append(brand, menuBar.element, drag, modalMask, controls);
   document.body.prepend(bar);
   document.body.append(toast.element);
   document.body.append(frame);
+
+  let settingsOpen = false;
+  let dshModal = {active: false, background: "", blur: ""};
+  const sendFrameMessage = (message: Record<string, unknown>) => {
+    const src = frame.getAttribute("src");
+    if (!src) return;
+    frame.contentWindow?.postMessage({version: 1, ...message}, new URL(src).origin);
+  };
+  // Any CSS colour (color-mix, transparent, nested var()) resolved to RGBA by painting one pixel.
+  const pixel = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
+  const resolveColor = (value: string): Rgba | undefined => {
+    if (!pixel || !CSS.supports("color", value)) return undefined;
+    pixel.clearRect(0, 0, 1, 1);
+    pixel.fillStyle = value;
+    pixel.fillRect(0, 0, 1, 1);
+    const data = pixel.getImageData(0, 0, 1, 1).data;
+    return [data[0], data[1], data[2], data[3] / 255];
+  };
+  // dsh-work decides the window frame (title bar and DSH sidebar) from its own
+  // theme, paints its title bar with it and sends DSH the same frame and tokens.
+  const sendAppearance = () => {
+    const root = document.documentElement;
+    const style = getComputedStyle(root);
+    const read = (name: string) => style.getPropertyValue(name).trim();
+    root.style.setProperty("--shell-page-fg", pageFrameText(read, resolveColor));
+    const chrome = windowFrame(read, resolveColor);
+    if (chrome) {
+      root.style.setProperty("--shell-frame-bg", chrome.fill);
+      root.style.setProperty("--shell-frame-fg", chrome.text);
+    } else {
+      root.style.removeProperty("--shell-frame-bg");
+      root.style.removeProperty("--shell-frame-fg");
+    }
+    const supports = (property: string, value: string) => CSS.supports(property, value);
+    const tokens = dshThemeTokens(read, supports, resolveColor);
+    // A probe resolves theme borders (shorthands, nested var()) to a width and colour.
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+    document.body.append(probe);
+    const border = (name: string) => {
+      probe.style.border = `var(${name})`;
+      const computed = getComputedStyle(probe);
+      const width = computed.borderTopWidth;
+      return computed.borderTopStyle === "none" || parseFloat(width) === 0 ? undefined : {width, color: computed.borderTopColor};
+    };
+    for (const [name, value] of Object.entries(dshDecorTokens(read, border))) if (supports(dshTokenProperty(name), value)) tokens[name] = value;
+    probe.remove();
+    for (const [name, value] of Object.entries(measureControls(document, read))) if (supports(controlTokenProperty(name), value)) tokens[name] = value;
+    sendFrameMessage({type: "dsh-work/appearance", mode: root.dataset.theme === "dark" ? "dark" : "light", tokens});
+  };
+  const updateModalMask = () => {
+    const visible = dshModal.active && !settingsOpen;
+    modalMask.hidden = !visible;
+    if (visible) {
+      modalMask.style.removeProperty("--shell-modal-mask");
+      modalMask.style.removeProperty("--shell-modal-blur");
+      if (CSS.supports("color", dshModal.background)) modalMask.style.setProperty("--shell-modal-mask", dshModal.background);
+      if (CSS.supports("backdrop-filter", dshModal.blur)) modalMask.style.setProperty("--shell-modal-blur", dshModal.blur);
+      menuBar.close();
+    } else {
+      modalMask.style.removeProperty("--shell-modal-mask");
+      modalMask.style.removeProperty("--shell-modal-blur");
+    }
+  };
+  const openSettingsPanel = () => {
+    settingsOpen = true;
+    managerSurface?.removeAttribute("hidden");
+    if (hostSurface) {
+      hostSurface.inert = true;
+      hostSurface.setAttribute("aria-hidden", "true");
+    }
+    frame.inert = true;
+    frame.setAttribute("aria-hidden", "true");
+    menuBar.close();
+    updateModalMask();
+    requestAnimationFrame(() => document.getElementById("manager-title")?.focus({focusVisible: false} as FocusOptions));
+  };
+  const closeSettingsPanel = () => {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    managerSurface?.setAttribute("hidden", "");
+    if (hostSurface) {
+      hostSurface.inert = false;
+      hostSurface.removeAttribute("aria-hidden");
+    }
+    frame.inert = false;
+    frame.removeAttribute("aria-hidden");
+    updateModalMask();
+    if (frame.hidden) hostSurface?.focus();
+    else frame.contentWindow?.focus();
+  };
+  const clearDshModal = () => {
+    dshModal = {active: false, background: "", blur: ""};
+    updateModalMask();
+  };
+  modalMask.addEventListener("click", () => {
+    sendFrameMessage({type: "dsh-work/modal-mask-click"});
+    frame.contentWindow?.focus();
+  });
+  document.getElementById("manager-close")?.addEventListener("click", closeSettingsPanel);
+  window.addEventListener("dsh-work:settings-open", openSettingsPanel);
+  window.addEventListener("dsh-work:appearance", sendAppearance);
+  sendAppearance();
+  Events.On("settings-close", closeSettingsPanel);
+  if (new URLSearchParams(window.location.search).has("section")) openSettingsPanel();
 
   subscribeLocale(() => {
     menuBar.render(menuState);
@@ -166,23 +280,23 @@ export function mountShell() {
   void HostService.GetUpdateState().then(update => setMenu({updatePhase: update.phase})).catch(() => {});
   void refreshPet();
 
-  const host = document.getElementById("host-surface");
   let frameRevision = 0;
   let eventSeen = false;
   const show = (url: string) => {
     if (!url) {
       frameRevision++;
+      clearDshModal();
       void ShellService.ResetBuiltinComponents().catch(report("reset built-in components"));
       setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
+      document.documentElement.removeAttribute("data-shell-framed");
       frame.hidden = true;
       frame.removeAttribute("src");
-      host?.removeAttribute("hidden");
-      document.documentElement.style.removeProperty("--shell-surface");
-      document.documentElement.style.removeProperty("--shell-text");
+      hostSurface?.removeAttribute("hidden");
       return;
     }
     if (frame.getAttribute("src") !== url) {
       // Begin the status snapshot before the new DSH Clients can report their handshakes.
+      clearDshModal();
       const revision = ++frameRevision;
       setMenu({dsh: null, sidebarLeftOpen: undefined});
       void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
@@ -190,13 +304,15 @@ export function mountShell() {
       });
     }
     setMenu({framed: true});
+    document.documentElement.setAttribute("data-shell-framed", "");
     frame.hidden = false;
-    host?.setAttribute("hidden", "true");
+    hostSurface?.setAttribute("hidden", "true");
   };
   // Reloads the DSH document only; the Worker keeps running.
   const reloadFrame = () => {
     const src = frame.getAttribute("src");
     if (!src) return;
+    clearDshModal();
     const revision = ++frameRevision;
     setMenu({dsh: null, sidebarLeftOpen: undefined});
     void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
@@ -218,8 +334,16 @@ export function mountShell() {
     const message = parseFrameMessage(event.data);
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
-    else if (message.type === "component-ready") void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
+    else if (message.type === "component-ready") {
+      void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
+      if (message.id === "shell") sendAppearance();
+    }
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
+    else if (message.type === "modal-mask") {
+      dshModal = {active: message.active, background: message.background, blur: message.blur};
+      updateModalMask();
+      if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
+    }
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
     // A cancelled save dialog was the user's own choice and needs no message.
     else if (message.type === "account-signout") {
@@ -232,11 +356,6 @@ export function mountShell() {
       if (!message.handled) toast.show(t("shell.toast.commandFailed", {command: t(`shell.command.${message.id}`)}));
     }
     else if (message.type === "menu-key") menuBar.focus();
-    else {
-      const root = document.documentElement.style;
-      if (CSS.supports("color", message.background)) root.setProperty("--shell-surface", message.background);
-      if (CSS.supports("color", message.color)) root.setProperty("--shell-text", message.color);
-    }
   });
   sendCommand = id => {
     const src = frame.getAttribute("src");
@@ -246,6 +365,16 @@ export function mountShell() {
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.
   let altAlone = false;
   window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && settingsOpen && !document.querySelector("#manager-surface dialog[open]")) {
+      event.preventDefault();
+      closeSettingsPanel();
+      return;
+    }
+    if (dshModal.active && !settingsOpen && (event.key === "F10" || event.key === "Alt")) {
+      event.preventDefault();
+      frame.contentWindow?.focus();
+      return;
+    }
     const windowAction = windowKeyAction(event);
     if (windowAction && !event.defaultPrevented) {
       event.preventDefault();
@@ -263,7 +392,8 @@ export function mountShell() {
   window.addEventListener("keyup", event => {
     if (event.key === "Alt" && altAlone) {
       event.preventDefault();
-      menuBar.focus();
+      if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
+      else menuBar.focus();
     }
     altAlone = false;
   }, true);

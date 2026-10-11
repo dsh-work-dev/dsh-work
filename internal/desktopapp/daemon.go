@@ -202,7 +202,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	var activeLocale atomic.Value
 	activeLocale.Store(string(localePreference))
-	windowLedger := lifecycle.NewWindowLedger("workspace", "settings")
+	windowLedger := lifecycle.NewWindowLedger("workspace")
 	var petWindow application.Window
 	var petWindowMu sync.Mutex
 	var petMenuUpdateMu sync.Mutex
@@ -974,7 +974,7 @@ func updateMenuLabel(labels nativeui.Labels, state daemon.UpdateSnapshot) string
 }
 
 // hostWindowTheme maps dsh-work's own appearance to the native frame of the
-// workbench and Settings windows.
+// workbench window.
 func hostWindowTheme(mode dshworksettings.AppearanceMode) application.Theme {
 	switch mode {
 	case dshworksettings.AppearanceLight:
@@ -1010,9 +1010,9 @@ func (r managerCommandRunner) Run(ctx context.Context, executable string, args [
 	return dshmanager.CommandResult{Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-func settingsURL(manager managerSnapshotReader, section string) string {
+func workspaceURL(manager managerSnapshotReader, section string) string {
 	values := url.Values{}
-	values.Set("surface", "settings")
+	values.Set("shell", "1")
 	if section != "" {
 		values.Set("section", section)
 	}

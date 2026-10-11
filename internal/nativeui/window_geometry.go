@@ -25,9 +25,6 @@ func RestoreWindowGeometry(options application.WebviewWindowOptions, manager Geo
 		return options
 	}
 	g := values.WorkspaceWindow
-	if options.Name == "settings" {
-		g = values.SettingsWindow
-	}
 	if g.Width >= options.MinWidth && g.Width <= 16384 && g.Height >= options.MinHeight && g.Height <= 16384 {
 		options.Width, options.Height = g.Width, g.Height
 		if g.Maximised {

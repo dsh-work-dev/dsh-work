@@ -10,7 +10,7 @@ export type FrameMessage =
   | {type: "export-result"; result: ExportResult}
   | {type: "account-signout"; state: SignOutState}
   | {type: "menu-key"}
-  | {type: "surface"; background: string; color: string};
+  | {type: "modal-mask"; active: boolean; background: string; blur: string};
 
 export type ExportResult = "saved" | "cancelled" | "error";
 export type SignOutState = "pending" | "success" | "error";
@@ -46,8 +46,8 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     return {type: "account-signout", state: message.state as SignOutState};
   }
   if (message.type === "dsh-work/menu-key" && (message.key === "Alt" || message.key === "F10")) return {type: "menu-key"};
-  if (message.type === "dsh-work/surface" && typeof message.background === "string" && typeof message.color === "string") {
-    return {type: "surface", background: message.background, color: message.color};
+  if (message.type === "dsh-work/modal-mask" && typeof message.active === "boolean" && typeof message.background === "string" && typeof message.blur === "string") {
+    return {type: "modal-mask", active: message.active, background: message.background, blur: message.blur};
   }
   return null;
 }

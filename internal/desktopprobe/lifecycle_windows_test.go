@@ -140,7 +140,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	}
 	t.Logf("daemon=%d Worker=%d generation=%s root=%s", baseline.PID, baseline.Diagnostics.PID, baseline.Status.GenerationID, root)
 	var panel app.PetPanel
-	if err := client.Call(context.Background(), "PetSettingsService", "RefreshPetCatalog", "settings", nil, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "RefreshPetCatalog", "workspace", nil, &panel); err != nil {
 		t.Fatal(err)
 	}
 	var petKey string
@@ -152,13 +152,13 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if petKey == "" {
 		t.Fatal("lifecycle Pet fixture not discovered")
 	}
-	if err := client.Call(context.Background(), "PetSettingsService", "SelectPet", "settings", []any{petKey}, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "SelectPet", "workspace", []any{petKey}, &panel); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Call(context.Background(), "PetSettingsService", "SetPetVisibility", "settings", []any{true}, &panel); err != nil {
+	if err := client.Call(context.Background(), "PetSettingsService", "SetPetVisibility", "workspace", []any{true}, &panel); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "settings", []any{"completed", false}, nil); err != nil {
+	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "workspace", []any{"completed", false}, nil); err != nil {
 		t.Fatal(err)
 	}
 	waitUntil(t, 10*time.Second, func() bool { return nativeWindowVisible(baseline.PID, "dsh-work Pet") })
@@ -209,7 +209,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
 			t.Fatal("UI lifecycle hid background Pet")
 		}
-		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "settings", nil, &panel); err != nil {
+		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel); err != nil {
 			t.Fatal(err)
 		}
 		if panel.Runtime.EffectiveVisibility != pet.VisibilityVisible || state.Preferences.Notifications.Completed {
@@ -300,8 +300,8 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if uiPIDs[0] != uiPIDs[1] {
 		t.Fatalf("reopen replaced hidden UI client: %v", uiPIDs)
 	}
-	// Reuse the hidden UI for a multi-window close. The UI singleton keeps this
-	// process alive, so a second --ui invocation is not expected to replace it.
+	// Reuse the hidden UI for the in-workbench Settings panel. The UI singleton
+	// keeps this process alive, so a second --ui invocation is not expected to replace it.
 	uiPID := uiPIDs[0]
 	if err := uiClient.JSON(context.Background(), "/open", "", nil); err != nil {
 		t.Fatal(err)
@@ -310,21 +310,21 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUntil(t, 5*time.Second, func() bool {
-		return workbenchVisible(uiPID) && nativeWindowVisible(uiPID, "设置")
+		return workbenchVisible(uiPID) && !nativeWindowVisible(uiPID, "设置")
 	})
-	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	waitUntil(t, 5*time.Second, func() bool { return nativeWindowVisible(uiPID, "设置") })
-	if !processAlive(uiPID) {
-		t.Fatal("closing workbench also closed Settings")
-	}
 	if err := uiClient.JSON(context.Background(), "/close", "settings", nil); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, 5*time.Second, func() bool { return !nativeWindowVisible(uiPID, "设置") })
+	waitUntil(t, 5*time.Second, func() bool { return workbenchVisible(uiPID) })
 	if !processAlive(uiPID) {
-		t.Fatal("closing Settings exited the hidden UI client")
+		t.Fatal("closing Settings exited the visible workbench")
+	}
+	if err := uiClient.JSON(context.Background(), "/close", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, 5*time.Second, func() bool { return !workbenchVisible(uiPID) })
+	if !processAlive(uiPID) {
+		t.Fatal("closing the workbench exited the hidden UI client")
 	}
 	if err := uiClient.JSON(context.Background(), "/stop", nil, nil); err != nil {
 		t.Fatal(err)

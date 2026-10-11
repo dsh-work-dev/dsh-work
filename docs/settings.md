@@ -12,13 +12,17 @@ There is no close-behavior setting. Legacy persisted `closeToTray` values are
 ignored and are omitted when preferences are saved. Locale, appearance,
 automatic recovery, Pet and notification preferences remain persisted.
 Settings saved before dsh-work owned its appearance adopt DSH's light/dark
-preference once; later DSH changes do not affect dsh-work windows.
+preference once.
 
 The workbench has no system title bar. Its top bar shows the app icon, the menus
-文件/视图/运行/设置/帮助 in Chinese, and the window buttons; it takes DSH's surface
-colour once DSH is ready. Settings is a separate window with the localized
-Settings title and no menu. Both windows restore their saved normal size and
-maximised state independently. Menu copy names the action only: no ellipsis
+文件/视图/设置/帮助 in Chinese, and the window buttons. It shares the DSH sidebar's
+colour and uses the theme's navigation and menu styles. While
+DSH shows a dialog, the top bar takes the same dimmed mask. Settings opens as a
+panel inside the workbench, below the top bar and over DSH, which stays loaded.
+The tray, the CLI and the 设置 menu open the same panel at a section. 返回工作台 at
+the top of the Settings navigation, or Esc, closes it; opening the workbench without a section or running a
+DSH command from the menu also closes it. The workbench restores its saved
+normal size and maximised state. Menu copy names the action only: no ellipsis
 after an item that opens another view, and 退出 rather than a description of
 what quitting stops.
 
@@ -35,7 +39,9 @@ type; monospace is limited to versions, paths and logs. Other themes may
 restyle the content area boldly but never change page structure, order or
 copy. General lists Theme and
 Appearance (match system, light, dark); modes a theme does not support are
-disabled. The Theme list starts with Monochrome, then the product styles
+disabled. DSH follows the theme's colours, mode, corner shapes, shadows and
+interface font without a restart; its conversation text keeps DSH's font, and
+its own Appearance setting is hidden. The Theme list starts with Monochrome, then the product styles
 (ChatGPT, Claude, GitHub, LobeHub, each named after the product alone), then
 everyday themes (Soft, Swiss, Paper, Aurora glass), then retro and expressive
 ones (Ink, Classic OS, Terminal, Neon, Neo-brutalism, Bauhaus, Art deco). Technical details belong beside the relevant operation or inside

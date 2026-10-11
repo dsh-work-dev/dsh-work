@@ -96,11 +96,10 @@ func TestShellServiceSavesZoomFromTrustedWindows(t *testing.T) {
 func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	s := &ShellService{}
 	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
-	settings := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "settings"}))
 	worker := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "worker"}))
 	ids := []string{"shell", "account", "pet"}
 
-	initial, err := s.GetBuiltinComponents(settings)
+	initial, err := s.GetBuiltinComponents(workspace)
 	if err != nil || len(initial) != len(ids) {
 		t.Fatalf("initial = %+v, %v", initial, err)
 	}
@@ -112,14 +111,14 @@ func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	if err := s.BeginBuiltinComponents(worker); err == nil {
 		t.Fatal("began a component load from the Worker window")
 	}
-	if err := s.ReportBuiltinComponent(settings, "shell"); err == nil {
-		t.Fatal("accepted a handshake from Settings")
+	if err := s.ReportBuiltinComponent(worker, "shell"); err == nil {
+		t.Fatal("accepted a handshake from the Worker window")
 	}
 	if err := s.BeginBuiltinComponents(workspace); err != nil {
 		t.Fatal(err)
 	}
 
-	loading, err := s.GetBuiltinComponents(settings)
+	loading, err := s.GetBuiltinComponents(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	if err := s.ReportBuiltinComponent(workspace, "account"); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := s.GetBuiltinComponents(settings)
+	loaded, err := s.GetBuiltinComponents(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +142,14 @@ func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	}
 
 	loaded[1].State = "inactive"
-	again, err := s.GetBuiltinComponents(settings)
+	again, err := s.GetBuiltinComponents(workspace)
 	if err != nil || again[1].State != "loaded" {
 		t.Fatalf("caller mutated shared state: %+v, %v", again, err)
 	}
 	if err := s.ResetBuiltinComponents(workspace); err != nil {
 		t.Fatal(err)
 	}
-	reset, err := s.GetBuiltinComponents(settings)
+	reset, err := s.GetBuiltinComponents(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
