@@ -38,6 +38,8 @@ function tokenProperty(name) {
     if (/-image$/.test(name)) return 'background-image';
     if (/-shadow$/.test(name)) return 'box-shadow';
     if (/-weight$/.test(name)) return 'font-weight';
+    if (/-font$/.test(name)) return 'font-family';
+    if (/-tracking$/.test(name)) return 'letter-spacing';
     if (/-(w|h|left|top|size)$/.test(name)) return 'width';
     return 'color';
   }
@@ -84,6 +86,21 @@ ${D} [data-dsh-work-control="primary"] { ${skin('primary')} color: var(--dsh-wor
 ${D} [data-dsh-work-control="primary"]:hover:not(:disabled) { background-color: var(--dsh-work-primary-hover-bg) !important; }
 ${D} [data-dsh-work-control="field"] { ${skin('input')} }
 ${D} [data-dsh-work-control="select"] { ${skin('select')} }
+${D} option { background-color: var(--dsh-work-option-bg); color: var(--dsh-work-option-fg); }
+/* Page titles and section headings outside the conversation take the theme's heading type;
+   conversation markdown keeps DSH's content font. */
+${D} h1:not([data-conversation-content] *) { font-family: var(--dsh-work-title-font) !important;
+  font-weight: var(--dsh-work-title-weight) !important; letter-spacing: var(--dsh-work-title-tracking) !important; }
+${D} :is(h2, h3):not([data-conversation-content] *) { font-family: var(--dsh-work-section-font) !important;
+  font-weight: var(--dsh-work-section-weight) !important; letter-spacing: var(--dsh-work-section-tracking) !important; }
+/* Question answers: a chosen row takes the theme's selected fill; its number marker
+   inverts like dsh-work's done marker. Found by data-question-key and ARIA roles. */
+${D} [data-question-key] :is([role="radio"], [role="checkbox"])[aria-checked="true"] {
+  background-color: var(--dsh-work-selected-bg) !important; color: var(--dsh-work-selected-fg) !important; }
+${D} [data-question-key] :is([role="radio"], [role="checkbox"])[aria-checked="true"] > :not(:first-child),
+${D} [data-question-key] :is([role="radio"], [role="checkbox"])[aria-checked="true"] > :not(:first-child) * { color: inherit !important; }
+${D} [data-question-key] :is([role="radio"], [role="checkbox"])[aria-checked="true"] > :first-child {
+  background-color: var(--dsh-work-marker-bg) !important; color: var(--dsh-work-marker-fg) !important; }
 `;
 // Mark the buttons and fields DSH draws as framed controls so the sheet can give
 // them the theme's control look; icon buttons, menu items and the composer keep
@@ -98,8 +115,11 @@ function classifyControls(primaryFill) {
   for (const element of document.querySelectorAll(CONTROL_CANDIDATES)) {
     if (typeof element.closest !== 'function' || !element.getClientRects().length) continue;
     let kind = '';
-    if (!element.closest('[data-composer-card], [role="menu"], [role="listbox"], [role="tablist"]')) {
-      const style = getComputedStyle(element);
+    const style = getComputedStyle(element);
+    // DSH's primary fill, or its info fill (the composer's send button), anywhere but menus.
+    if (element.tagName === 'BUTTON' && primaryFill.includes(style.backgroundColor) && !element.closest('[role="menu"], [role="listbox"]')) {
+      kind = 'primary';
+    } else if (!element.closest('[data-composer-card], [role="menu"], [role="listbox"], [role="tablist"]')) {
       if (element.tagName === 'BUTTON') {
         const text = (element.textContent || '').trim();
         const box = element.getBoundingClientRect();
@@ -107,8 +127,7 @@ function classifyControls(primaryFill) {
         // rows and selected list rows are filled too, so size and state rule them out.
         const filled = !/transparent|rgba\([^)]*,\s*0\)/.test(style.backgroundColor) && box.width <= 260 && box.height <= 44
           && !element.matches('[aria-current], [aria-selected], [aria-pressed]') && !element.closest('[data-slot="sidebar"], nav, [role="tree"]');
-        if (primaryFill && style.backgroundColor === primaryFill) kind = 'primary';
-        else if (text && (visibleBorder(style) || filled)) kind = 'button';
+        if (text && (visibleBorder(style) || filled)) kind = 'button';
       } else if (element.tagName === 'SELECT') {
         if (visibleBorder(style)) kind = 'select';
       } else if (!['checkbox', 'radio', 'range', 'hidden', 'file', 'color'].includes(element.type)
@@ -269,9 +288,11 @@ function connectShell(ctx) {
   let fillProbe;
   const resolvedPrimaryFill = () => {
     fillProbe ??= document.createElement('span');
-    fillProbe.style.cssText = 'position:absolute;visibility:hidden;background-color:var(--dsw-alias-button-primary-fill)';
     if (!fillProbe.isConnected) document.body.append(fillProbe);
-    return getComputedStyle(fillProbe).backgroundColor;
+    return ['--dsw-alias-button-primary-fill', '--dsw-alias-button-info-fill'].map(token => {
+      fillProbe.style.cssText = `position:absolute;visibility:hidden;background-color:var(${token})`;
+      return getComputedStyle(fillProbe).backgroundColor;
+    }).filter(fill => fill && !/rgba\([^)]*,\s*0\)/.test(fill));
   };
   let modalFrame = 0;
   let lastModalState = '';

@@ -253,10 +253,16 @@ bevels and Neo-brutalism's hard shadows come along without per-theme DSH rules.
 The plugin restyles a `role="switch"` only in DSH's two known structures (the
 button as track with one leaf thumb, or the button wrapping a track and thumb),
 and marks buttons and fields by how DSH drew them: a labelled button with a
-visible frame or a quiet fill, a button with DSH's primary fill, a framed or
-filled text field or select. Icon buttons, navigation and selected rows, menu
-items and the composer keep DSH's look. Native checkboxes and radios take the
-theme accent through `accent-color`. No CSS-module class is used as a hook;
+visible frame or a quiet fill, a button with DSH's primary or info fill
+(including the composer's send button), a framed or filled text field or
+select. Icon buttons, navigation and selected rows, menu items and the
+composer's text buttons keep DSH's look. Native checkboxes and radios take the
+theme accent through `accent-color`, and native select option lists the theme
+surface. A chosen answer in a question card (`data-question-key`, ARIA radio or
+checkbox) takes the theme's selected fill, and its number marker the theme's
+done marker. Page titles and section headings outside the conversation take
+the theme's heading font, weight and tracking, measured from dsh-work's own
+page title and section heading. No CSS-module class is used as a hook;
 a test pins that. Themes differ only in token values; no theme has its own DSH
 stylesheet. DSH draws fixed white
 glyphs on some accent fills, so a light accent is darkened there until the
@@ -530,10 +536,15 @@ maximise button and edge resizing work even where the DSH frame covers the
 window. Plain HWND hosting is not used: there Wails detects window edges from
 mouse moves in the top document, which never sees moves over the frame.
 
-The top bar takes the colour DSH paints its sidebar with, composited over the
-canvas as DSH composites it, so the bar and the sidebar frame DSH's content as
-one surface; DSH follows dsh-work's theme (see
-[Page bootstrap and host plugins](#page-bootstrap-and-host-plugins)). Its text,
+dsh-work decides the window frame: the title bar and the DSH sidebar beneath it
+are one surface, so the bar and the sidebar frame DSH's content together. The
+frame is the theme's navigation fill, or the first quieter fill the theme's text
+reads on, made opaque (`windowFrame` in `frontend/src/dsh-theme.ts`); the shell
+paints its bar with it and sends the same fill to DSH as its sidebar colour (see
+[Page bootstrap and host plugins](#page-bootstrap-and-host-plugins)). DSH never
+decides the bar. On the startup page there is no sidebar, so the bar is
+transparent over the page's own background and its text takes the first theme
+colour that reads on the canvas. Its text,
 menu buttons, menus and status line use the theme's navigation and dialog
 tokens (font, radius, hover and active fills, border and shadow). While DSH
 shows a modal dialog (`role="dialog"` with `aria-modal` or

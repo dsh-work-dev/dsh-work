@@ -2,7 +2,7 @@ import {Browser, Clipboard, Events, Window} from "@wailsio/runtime";
 import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {diagnosticsReport} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
-import {dshDecorTokens, dshThemeTokens, dshTokenProperty, type Rgba} from "./dsh-theme";
+import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrameText, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
@@ -177,13 +177,21 @@ export function mountShell() {
     const data = pixel.getImageData(0, 0, 1, 1).data;
     return [data[0], data[1], data[2], data[3] / 255];
   };
-  // The top bar takes the colour DSH paints its sidebar with, so the two read as one frame.
+  // dsh-work decides the window frame (title bar and DSH sidebar) from its own
+  // theme, paints its title bar with it and sends DSH the same frame and tokens.
   const sendAppearance = () => {
     const root = document.documentElement;
-    root.style.removeProperty("--shell-bar-bg");
-    root.style.removeProperty("--shell-bar-fg");
     const style = getComputedStyle(root);
     const read = (name: string) => style.getPropertyValue(name).trim();
+    root.style.setProperty("--shell-page-fg", pageFrameText(read, resolveColor));
+    const chrome = windowFrame(read, resolveColor);
+    if (chrome) {
+      root.style.setProperty("--shell-frame-bg", chrome.fill);
+      root.style.setProperty("--shell-frame-fg", chrome.text);
+    } else {
+      root.style.removeProperty("--shell-frame-bg");
+      root.style.removeProperty("--shell-frame-fg");
+    }
     const supports = (property: string, value: string) => CSS.supports(property, value);
     const tokens = dshThemeTokens(read, supports, resolveColor);
     // A probe resolves theme borders (shorthands, nested var()) to a width and colour.
@@ -199,12 +207,6 @@ export function mountShell() {
     for (const [name, value] of Object.entries(dshDecorTokens(read, border))) if (supports(dshTokenProperty(name), value)) tokens[name] = value;
     probe.remove();
     for (const [name, value] of Object.entries(measureControls(document, read))) if (supports(controlTokenProperty(name), value)) tokens[name] = value;
-    const sidebar = tokens["--dsw-specific-sidebar-fill"];
-    if (sidebar) {
-      root.style.setProperty("--shell-bar-bg", sidebar);
-      // Navigation text belongs to the navigation fill; any other surface takes body text.
-      if (sidebar !== read("--nav-bg")) root.style.setProperty("--shell-bar-fg", read("--text"));
-    }
     sendFrameMessage({type: "dsh-work/appearance", mode: root.dataset.theme === "dark" ? "dark" : "light", tokens});
   };
   const updateModalMask = () => {
@@ -286,6 +288,7 @@ export function mountShell() {
       clearDshModal();
       void ShellService.ResetBuiltinComponents().catch(report("reset built-in components"));
       setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
+      document.documentElement.removeAttribute("data-shell-framed");
       frame.hidden = true;
       frame.removeAttribute("src");
       hostSurface?.removeAttribute("hidden");
@@ -301,6 +304,7 @@ export function mountShell() {
       });
     }
     setMenu({framed: true});
+    document.documentElement.setAttribute("data-shell-framed", "");
     frame.hidden = false;
     hostSurface?.setAttribute("hidden", "true");
   };

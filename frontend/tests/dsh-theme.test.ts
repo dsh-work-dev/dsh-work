@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {controlTokenProperty} from "../src/dsh-controls";
-import {dshDecorTokens, dshThemeTokens, parseColor, type Border} from "../src/dsh-theme";
+import {dshDecorTokens, dshThemeTokens, pageFrameText, parseColor, windowFrame, type Border} from "../src/dsh-theme";
 
 const isColor = (property: string, value: string) => property !== "color" || !/gradient|url\(/.test(value);
 
@@ -92,4 +92,21 @@ test("control values are checked against the property they feed", () => {
   assert.equal(controlTokenProperty("--dsh-work-switch-off-thumb-left"), "width");
   assert.equal(controlTokenProperty("--dsh-work-button-image"), "background-image");
   assert.equal(controlTokenProperty("--dsh-work-primary-fg"), "color");
+});
+
+test("dsh-work chooses the window frame and gives DSH's sidebar the same fill", () => {
+  const theme: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111", "--nav-bg": "#ffd23f", "--nav-fg": "#111111"};
+  const read = (name: string) => theme[name] ?? "";
+  const chrome = windowFrame(read);
+  assert.deepEqual(chrome, {fill: "rgb(255, 210, 63)", text: "#111111"});
+  assert.equal(dshThemeTokens(read, isColor)["--dsw-specific-sidebar-fill"], chrome!.fill);
+  const bauhaus: Record<string, string> = {"--canvas": "#f4efe6", "--text": "#111111", "--nav-bg": "#111111", "--nav-fg": "#ffffff", "--wash": "#ebe4d6"};
+  assert.deepEqual(windowFrame(name => bauhaus[name] ?? ""), {fill: "rgb(235, 228, 214)", text: "#111111"}, "a fill body text cannot read on falls to a quieter one");
+});
+
+test("startup title bar text reads on the page canvas", () => {
+  const classic: Record<string, string> = {"--canvas": "#008080", "--text": "#000000", "--on-ink": "#ffffff"};
+  assert.equal(pageFrameText(name => classic[name] ?? ""), "#ffffff");
+  const brutal: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111"};
+  assert.equal(pageFrameText(name => brutal[name] ?? ""), "#111111");
 });

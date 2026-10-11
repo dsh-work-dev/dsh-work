@@ -27,13 +27,17 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
 .shell-controls button:hover { background: var(--nav-hover-bg); }
 .shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
 .shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
-/* The bar continues the sidebar: the shell sets --shell-bar-bg to the colour DSH paints it with. */
+/* The bar is the window frame dsh-work chooses (--shell-frame-*); DSH's sidebar takes the same fill. */
 .shell-bar {
-  --bar-fill: var(--shell-bar-bg, var(--nav-bg));
+  --bar-fill: var(--shell-frame-bg, var(--nav-bg));
   /* Composited over the canvas, as DSH composites its sidebar over its base. */
   background: linear-gradient(var(--bar-fill), var(--bar-fill)), var(--canvas);
-  color: var(--shell-bar-fg, var(--nav-fg)); font-family: var(--font-body);
+  color: var(--shell-frame-fg, var(--nav-fg)); font-family: var(--font-body);
 }
+/* The startup page has no sidebar, so there the frame is the page itself: the bar
+   lets the page's background (canvas or a theme backdrop) run under it. */
+html[data-shell]:not([data-shell-framed]) .shell-bar { background: transparent; color: var(--shell-page-fg, var(--text)); }
+html[data-shell]:not([data-shell-framed]) body { background: var(--canvas); }
 .shell-modal-mask {
   position: absolute; z-index: 5; inset: 0;
   background: var(--shell-modal-mask, transparent);

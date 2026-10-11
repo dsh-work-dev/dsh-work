@@ -72,6 +72,41 @@ function base(palette: Palette): Rgba {
 
 const baseColor: Source = palette => css(base(palette));
 
+// The window frame: dsh-work's title bar and the DSH sidebar beneath it are one
+// surface, and dsh-work decides it. It is the theme's navigation fill, or the
+// first quieter fill the theme's text reads on, made opaque.
+const FRAME_CANDIDATES = ["--nav-bg", "--wash", "--group-bg"];
+function frame(palette: Palette): {fill: string; source: string} | undefined {
+  const under = base(palette);
+  for (const name of FRAME_CANDIDATES) {
+    const value = palette.color(name);
+    if (!value) continue;
+    const solid = over(value, under);
+    if (readable(palette.color("--text"), solid)) return {fill: css(solid), source: name};
+  }
+  return undefined;
+}
+
+/** The window frame colours dsh-work paints its title bar with and gives DSH's sidebar. */
+export function windowFrame(read: Read, resolve: Resolve = parseColor): {fill: string; text: string} | undefined {
+  const palette: Palette = {read, color: name => { const value = read(name); return value ? resolve(value) : undefined; }};
+  const chosen = frame(palette);
+  if (!chosen) return undefined;
+  // Navigation text belongs to the navigation fill; a quieter fill takes body text.
+  return {fill: chosen.fill, text: read(chosen.source === "--nav-bg" ? "--nav-fg" : "--text") || read("--text")};
+}
+
+/** Title bar text on the startup page, where the bar is the page's own canvas. */
+export function pageFrameText(read: Read, resolve: Resolve = parseColor): string {
+  const canvas = resolve(read("--canvas"));
+  if (!canvas) return read("--text");
+  const ground = over(canvas, WHITE);
+  return ["--text", "--on-ink", "--canvas"].map(read).find(value => {
+    const ink = value ? resolve(value) : undefined;
+    return ink && contrastRatio(over(ink, ground), ground) >= 4.5;
+  }) ?? read("--text");
+}
+
 // A surface DSH draws over its base: the first candidate the theme's text reads
 // on, made opaque. A translucent theme fill would let the page show through
 // DSH's dialogs and menus, and text would vanish where DSH inverts colours.
@@ -174,7 +209,7 @@ const dshTokenSources: Record<string, Source[]> = {
   "--dsw-alias-bg-module-platform": [surface("--wash", "--hover"), baseColor],
   "--dsw-alias-bg-multi-select": [surface("--wash", "--hover"), baseColor],
   "--dsw-alias-bg-mask-1": ["--backdrop"],
-  "--dsw-specific-sidebar-fill": [surface("--nav-bg", "--wash", "--group-bg")],
+  "--dsw-specific-sidebar-fill": [palette => frame(palette)?.fill ?? ""],
   "--dsw-specific-sidebar-nav-item-hover": [surface("--nav-hover-bg", "--hover")],
   "--dsw-specific-sidebar-nav-item-active": [surface("--nav-active-bg", "--selection")],
   "--dsw-specific-sidebar-nav-item-active-accent": [surface("--selection")],
