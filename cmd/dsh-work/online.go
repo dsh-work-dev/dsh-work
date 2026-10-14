@@ -269,9 +269,11 @@ func waitForDaemonStop(identity, root string, timeout time.Duration) error {
 }
 
 func resolveStorageRoot() (string, error) {
-	defaultRoot := filepath.Dir(app.DefaultConfig("").SettingsPath)
-	locator := filepath.Join(filepath.Dir(defaultRoot), "dsh-work-location", "locations.json")
-	locations, err := storagepaths.Open(locator, defaultRoot)
+	paths, err := storagepaths.DefaultDirectories()
+	if err != nil {
+		return "", err
+	}
+	locations, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
 	if err != nil {
 		return "", err
 	}

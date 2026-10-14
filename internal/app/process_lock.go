@@ -34,12 +34,20 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 		return nil, nil
 	}
 	lockPath := filepath.Join(filepath.Dir(settingsPath), "manager.lock")
+	return acquireProcessFileLock(lockPath)
+}
+
+func acquireProcessFileLock(lockPath string) (*ProcessLock, error) {
+	if strings.TrimSpace(lockPath) == "" {
+		return nil, nil
+	}
+	lockPath = filepath.Clean(lockPath)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
-		return nil, fmt.Errorf("create dsh-work manager lock directory: %w", err)
+		return nil, fmt.Errorf("create process lock directory %q: %w", filepath.Dir(lockPath), err)
 	}
 	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open dsh-work manager process lock: %w", err)
+		return nil, fmt.Errorf("open process lock %q: %w", lockPath, err)
 	}
 	unlock, err := lockProcessFile(file)
 	if err != nil {
@@ -53,7 +61,7 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 				Detail:        "Use dsh-work Settings in the running app for Run context and profile plugin changes.",
 			}
 		}
-		return nil, fmt.Errorf("lock dsh-work manager process boundary: %w", err)
+		return nil, fmt.Errorf("lock process boundary %q: %w", lockPath, err)
 	}
 	return &ProcessLock{file: file, unlock: unlock}, nil
 }

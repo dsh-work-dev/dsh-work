@@ -3,6 +3,7 @@ package desktopapp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -25,6 +26,7 @@ import (
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -69,6 +71,15 @@ func runDesktopClient(identity string, resources Resources) error {
 	if err != nil {
 		return err
 	}
+	paths, err := storagepaths.DefaultDirectories()
+	if err != nil {
+		return fmt.Errorf("resolve dsh-work cache directory: %w", err)
+	}
+	webviewRoot := paths.CacheRoot
+	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		webviewRoot = filepath.Join(root, "cache")
+	}
+	webviewDataPath := filepath.Join(webviewRoot, "webview")
 	defer client.Close()
 	manager := remoteManagerSnapshot{client: client}
 	var desktop *application.App
@@ -125,7 +136,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 	}}
 	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
-		Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(state.Root, "webview"), DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
+		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),

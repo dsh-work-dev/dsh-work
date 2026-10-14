@@ -22,6 +22,42 @@ Var DshWorkUserSID
 Var DshWorkStagingDir
 Var DshWorkBackupDir
 Var DshWorkHadOld
+Var DshWorkLogPath
+Var DshWorkFailureStage
+
+Function dshwork.log
+    Exch $0
+    Push $1
+    DetailPrint "$0"
+    StrCmp $DshWorkLogPath "" dshworkLogDone
+    ClearErrors
+    FileOpen $1 "$DshWorkLogPath" a
+    IfErrors dshworkLogDone
+    FileSeek $1 0 END
+    FileWrite $1 "$0$\r$\n"
+    FileClose $1
+dshworkLogDone:
+    ClearErrors
+    Pop $1
+    Pop $0
+FunctionEnd
+
+Function dshwork.initLog
+    ExpandEnvStrings $DshWorkLogPath "%USERPROFILE%\dsh-work-installer-debug.log"
+    ClearErrors
+    FileOpen $0 "$DshWorkLogPath" w
+    IfErrors dshworkLogFileFailed
+    FileWrite $0 "dsh-work installer diagnostic log$\r$\n"
+    FileWrite $0 "Log path: $DshWorkLogPath$\r$\n"
+    FileClose $0
+    ClearErrors
+    Return
+dshworkLogFileFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    DetailPrint "Could not create installer log file: $DshWorkLogPath (Win32 error $0)"
+    StrCpy $DshWorkLogPath ""
+    ClearErrors
+FunctionEnd
 
 ; Preserve existing protocol handlers once, then keep both registrations owned
 ; by this install through upgrades. The unique return scheme remains reliable
@@ -199,6 +235,7 @@ ShowInstDetails show
 
 !macro dshwork.stageCliForStop
     InitPluginsDir
+    DetailPrint "Maintenance CLI staging directory: $PLUGINSDIR\dsh-work-stop"
     SetOutPath "$PLUGINSDIR\dsh-work-stop"
     !insertmacro dshwork.cli
 !macroend
@@ -242,6 +279,7 @@ ${prefix}SIDFailed:
     IfFileExists "$INSTDIR\uninstall.exe" stopExistingRequired
     Goto stopExistingDone
 stopExistingRequired:
+    DetailPrint "Existing installation detected at: $INSTDIR"
     ; Stage the new CLI before replacing the old install. This keeps upgrades
     ; safe when the previous CLI predates the --wait coordination flag.
     IfSilent stopExistingContinue
@@ -251,6 +289,7 @@ stopExistingContinue:
     DetailPrint "Stopping the existing dsh-work background"
     !insertmacro dshwork.stageCliForStop
     ExecWait '"$PLUGINSDIR\dsh-work-stop\${CLI_EXECUTABLE}" stop --wait' $0
+    DetailPrint "Maintenance CLI exit code: $0"
     ${If} $0 != 0
         MessageBox MB_OK|MB_ICONSTOP "dsh-work could not stop its background process. Installation was cancelled."
         Abort
@@ -305,6 +344,8 @@ Function dshwork.recoverPreviousInstall
     ; recovery copy. A complete current install means the directory swap
     ; succeeded and only cleanup was interrupted; an incomplete current
     ; install is discarded before restoring the known-good copy.
+    Push "Checking recovery directory: ${DSH_WORK_RECOVERY_DIR}"
+    Call dshwork.log
     IfFileExists "${DSH_WORK_RECOVERY_DIR}\*" 0 recoveryDone
     IfFileExists "$INSTDIR\*" 0 restoreRecovery
     IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 discardPartialInstall
@@ -318,18 +359,31 @@ discardPartialInstall:
     IfErrors partialCleanupFailed
     Goto restoreRecovery
 restoreRecovery:
+    Push "Restoring previous installation from ${DSH_WORK_RECOVERY_DIR} to $INSTDIR"
+    Call dshwork.log
     CreateDirectory "$LOCALAPPDATA\Programs"
     ClearErrors
     Rename "${DSH_WORK_RECOVERY_DIR}" "$INSTDIR"
     IfErrors recoveryFailed
+    Push "Previous installation restored successfully."
+    Call dshwork.log
     Return
 recoveryCleanupFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Could not remove completed recovery directory. Win32 error $0; path=${DSH_WORK_RECOVERY_DIR}"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work finished a previous update but could not remove its recovery copy. Close dsh-work and run the installer again."
     Abort
 partialCleanupFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Could not remove incomplete installation. Win32 error $0; path=$INSTDIR"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work found an incomplete installation but could not remove it. Close dsh-work and run the installer again."
     Abort
 recoveryFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Could not restore previous installation. Win32 error $0; source=${DSH_WORK_RECOVERY_DIR}; target=$INSTDIR"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not restore the previous installation. Close dsh-work and run the installer again."
     Abort
 recoveryDone:
@@ -357,6 +411,8 @@ FunctionEnd
     StrCpy $DshWorkStagingDir "$PLUGINSDIR\dsh-work-new"
     StrCpy $DshWorkBackupDir "${DSH_WORK_RECOVERY_DIR}"
     StrCpy $DshWorkHadOld "0"
+    Push "Install replacement paths: temp=$PLUGINSDIR; staging=$DshWorkStagingDir; target=$INSTDIR; recovery=$DshWorkBackupDir"
+    Call dshwork.log
     IfFileExists "$DshWorkBackupDir\*" backupConflict
     IfFileExists "$INSTDIR\*" 0 noOldInstall
     CreateDirectory "$LOCALAPPDATA\dsh-work"
@@ -364,11 +420,15 @@ FunctionEnd
     Rename "$INSTDIR" "$DshWorkBackupDir"
     IfErrors oldInstallMoveFailed
     StrCpy $DshWorkHadOld "1"
+    Push "Moved existing installation to recovery directory: $DshWorkBackupDir"
+    Call dshwork.log
 noOldInstall:
     CreateDirectory "$LOCALAPPDATA\Programs"
     ClearErrors
     Rename "$DshWorkStagingDir" "$INSTDIR"
     IfErrors newInstallMoveFailed
+    Push "Moved staged installation into target directory: $INSTDIR"
+    Call dshwork.log
     ${If} $DshWorkHadOld == "1"
         ClearErrors
         RMDir /r "$DshWorkBackupDir"
@@ -376,18 +436,29 @@ noOldInstall:
     ${EndIf}
     Goto replaceInstallDone
 oldInstallMoveFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Could not move existing installation. Win32 error $0; source=$INSTDIR; target=$DshWorkBackupDir"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not move the existing installation. Installation was cancelled."
     Abort
 backupConflict:
+    Push "Recovery directory already contains files: $DshWorkBackupDir"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "A previous dsh-work installation needs repair. The existing installation and recovery copy were kept."
     Abort
 newInstallMoveFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Could not move staged installation. Win32 error $0; source=$DshWorkStagingDir; target=$INSTDIR"
+    Call dshwork.log
     ${If} $DshWorkHadOld == "1"
         Rename "$DshWorkBackupDir" "$INSTDIR"
         IfErrors rollbackFailed
     ${EndIf}
     Goto replaceFailed
 rollbackFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Installation rollback failed. Win32 error $0; source=$DshWorkBackupDir; target=$INSTDIR"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not restore the previous installation. Use repair or reinstall from the original package."
     Abort
 replaceFailed:
@@ -400,6 +471,27 @@ replaceInstallDone:
 !macroend
 
 Function .onInit
+    Call dshwork.initLog
+    ExpandEnvStrings $0 "%TEMP%"
+    Push "Environment TEMP: $0"
+    Call dshwork.log
+    ExpandEnvStrings $0 "%TMP%"
+    Push "Environment TMP: $0"
+    Call dshwork.log
+    ExpandEnvStrings $0 "%LOCALAPPDATA%"
+    Push "Environment LOCALAPPDATA: $0"
+    Call dshwork.log
+    InitPluginsDir
+    IfErrors initPluginsDirFailed
+    Push "NSIS plugin temp directory: $PLUGINSDIR"
+    Call dshwork.log
+    Goto initPluginsDirLogged
+initPluginsDirFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "InitPluginsDir reported an error. Win32 error $0; TEMP=$TEMP; PLUGINSDIR=$PLUGINSDIR"
+    Call dshwork.log
+initPluginsDirLogged:
+    ClearErrors
     !insertmacro wails.checkArchitecture
     ; InstallDirRegKey is evaluated before .onInit and would use NSIS's
     ; default registry view. Read the user-owned path explicitly after
@@ -410,6 +502,8 @@ Function .onInit
         StrCpy $INSTDIR $0
     ${EndIf}
     Call dshwork.acquireInstallerMutex
+    Push "Resolved initial install directory: $INSTDIR"
+    Call dshwork.log
 FunctionEnd
 
 Function dshwork.launch
@@ -439,16 +533,33 @@ FunctionEnd
 
 Section
     !insertmacro wails.setShellContext
+    Push "Installer section started. Selected install directory: $INSTDIR"
+    Call dshwork.log
     !insertmacro dshwork.stopExisting
     Call dshwork.recoverPreviousInstall
+    Push "Checking WebView2 runtime/bootstrapper. NSIS plugin temp directory: $PLUGINSDIR"
+    Call dshwork.log
     !insertmacro wails.webview2runtime
+    Push "WebView2 runtime/bootstrapper step completed."
+    Call dshwork.log
     InitPluginsDir
     StrCpy $DshWorkStagingDir "$PLUGINSDIR\dsh-work-new"
+    StrCpy $DshWorkFailureStage "create staging directory $DshWorkStagingDir"
+    Push "Extracting application package to: $DshWorkStagingDir"
+    Call dshwork.log
+    ClearErrors
     SetOutPath "$DshWorkStagingDir"
+    IfErrors packageStageFailed
+    StrCpy $DshWorkFailureStage "extract GUI and CLI package into $DshWorkStagingDir"
+    ClearErrors
     !insertmacro wails.files
     !insertmacro dshwork.cli
+    IfErrors packageStageFailed
+    StrCpy $DshWorkFailureStage "verify GUI executable $DshWorkStagingDir\${PRODUCT_EXECUTABLE}"
     IfFileExists "$DshWorkStagingDir\${PRODUCT_EXECUTABLE}" 0 packageStageFailed
+    StrCpy $DshWorkFailureStage "verify CLI executable $DshWorkStagingDir\${CLI_EXECUTABLE}"
     IfFileExists "$DshWorkStagingDir\${CLI_EXECUTABLE}" 0 packageStageFailed
+    StrCpy $DshWorkFailureStage "move staged install into $INSTDIR"
     !insertmacro dshwork.replaceInstall
     Call dshwork.registerProtocol
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
@@ -459,9 +570,14 @@ Section
     !insertmacro wails.writeUninstaller
     Goto installDone
 packageStageFailed:
+    System::Call 'kernel32::GetLastError() i.r0'
+    Push "Application package failed during: $DshWorkFailureStage; Win32 last-error $0; TEMP=$TEMP; PLUGINSDIR=$PLUGINSDIR; staging=$DshWorkStagingDir; GUI=$DshWorkStagingDir\${PRODUCT_EXECUTABLE}; CLI=$DshWorkStagingDir\${CLI_EXECUTABLE}"
+    Call dshwork.log
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not stage the complete application package. Installation was cancelled."
     Abort
 installDone:
+    Push "Installation completed successfully at: $INSTDIR"
+    Call dshwork.log
 SectionEnd
 
 Section "uninstall"

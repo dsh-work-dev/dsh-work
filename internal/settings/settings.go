@@ -13,6 +13,7 @@ import (
 
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/notifications"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 const stateVersion = 2
@@ -491,15 +492,16 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 
 func normalizePath(path string) (string, error) {
 	if path == "" {
-		root, err := os.UserConfigDir()
-		if err != nil || root == "" {
+		paths, err := storagepaths.DefaultDirectories()
+		var root string
+		if err != nil || paths.Root == "" {
 			root, err = os.Getwd()
 			if err != nil {
 				return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is unavailable", "the settings directory could not be determined")
 			}
 			root = filepath.Join(root, ".dsh-work")
 		} else {
-			root = filepath.Join(root, "dsh-work")
+			root = paths.Root
 		}
 		path = filepath.Join(root, "settings.json")
 	}

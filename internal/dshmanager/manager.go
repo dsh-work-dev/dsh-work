@@ -16,6 +16,7 @@ import (
 
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 const (
@@ -1809,11 +1810,11 @@ func normalizeConfig(config Config) (Config, error) {
 		}
 	}
 	if config.StatePath == "" {
-		configRoot, err := os.UserConfigDir()
-		if err != nil || configRoot == "" {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "the operating system did not provide a user application-data directory")
+		paths, err := storagepaths.DefaultDirectories()
+		if err != nil || paths.Root == "" {
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "dsh-work could not resolve its per-user application data directory")
 		}
-		config.StatePath = filepath.Join(configRoot, "dsh-work", "manager.json")
+		config.StatePath = filepath.Join(paths.Root, "manager.json")
 	}
 	statePath, err := filepath.Abs(config.StatePath)
 	if err != nil {

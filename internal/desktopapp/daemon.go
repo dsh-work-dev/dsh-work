@@ -40,23 +40,21 @@ import (
 
 func runDaemon(identity string, resources Resources) {
 	dependencies := platform.New()
+	paths, pathErr := storagepaths.DefaultDirectories()
+	if pathErr != nil {
+		log.Fatalf("resolve dsh-work storage directories: %v", pathErr)
+	}
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
 	config.RequireWebBoot = true
-	defaultRoot := filepath.Dir(config.SettingsPath)
+	defaultRoot := paths.Root
+	defaultUserData := paths.UserDataRoot
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		defaultRoot = root
+		defaultUserData = ""
+		config.CacheDirectory = filepath.Join(root, "cache")
+		paths.LocationsFile = filepath.Join(defaultRoot, "location", "locations.json")
 	}
-
-	locatorPath := filepath.Join(filepath.Dir(defaultRoot), "dsh-work-location", "locations.json")
-	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
-		locatorPath = filepath.Join(defaultRoot, "location", "locations.json")
-	}
-	locationLock, err := dshworkapp.AcquireManagerProcessLock(locatorPath)
-	if err != nil {
-		log.Fatalf("lock storage locations: %v", err)
-	}
-	defer locationLock.Close()
-	locations, err := storagepaths.Open(locatorPath, defaultRoot)
+	locations, err := storagepaths.Open(paths.LocationsFile, defaultRoot, defaultUserData)
 	if err != nil {
 		log.Fatalf("read storage locations: %v", err)
 	}
@@ -66,28 +64,46 @@ func runDaemon(identity string, resources Resources) {
 	if err != nil {
 		log.Fatalf("lock current storage: %v", err)
 	}
-	if err := locations.ApplyPending(); err != nil {
+	var nextRootLock *dshworkapp.ProcessLock
+	if err := locations.ApplyPendingWith(func(next storagepaths.Locations) error {
+		if filepath.Clean(next.Root) == filepath.Clean(previousRoot) {
+			return nil
+		}
+		nextRootLock, err = dshworkapp.AcquireManagerProcessLock(filepath.Join(next.Root, "settings.json"))
+		return err
+	}); err != nil {
 		log.Printf("storage migration failed; using original location: %v", err)
+		if nextRootLock != nil {
+			_ = nextRootLock.Close()
+			nextRootLock = nil
+		}
 	}
-	_ = previousLock.Close()
-	if previousRoot != locations.Snapshot().Current.Root {
+	storage := locations.Snapshot().Current
+	var managerLock *dshworkapp.ProcessLock
+	if previousRoot != storage.Root {
+		// The destination lock was acquired before the location record commit,
+		// so readers cannot start a CLI manager in the handoff window.
+		managerLock = nextRootLock
+		if managerLock == nil {
+			_ = previousLock.Close()
+			log.Fatalf("storage location changed without acquiring its manager process lock")
+		}
+		_ = previousLock.Close()
 		if entries, e := os.ReadDir(previousRoot); e == nil && len(entries) == 1 && entries[0].Name() == "manager.lock" {
 			_ = os.Remove(filepath.Join(previousRoot, "manager.lock"))
 			_ = os.Remove(previousRoot)
 		}
+	} else {
+		if nextRootLock != nil {
+			_ = nextRootLock.Close()
+		}
+		managerLock = previousLock
 	}
-	storage := locations.Snapshot().Current
 	config.SettingsPath = filepath.Join(storage.Root, "settings.json")
 	config.DSHDataDirectory = filepath.Join(storage.Root, "environment")
 	config.BootstrapDirectory = filepath.Join(storage.Root, "bootstrap")
-	managerLock, lockErr := dshworkapp.AcquireManagerProcessLock(config.SettingsPath)
-	if lockErr != nil {
-		var failure lifecycle.Failure
-		if errors.As(lockErr, &failure) && failure.Code == lifecycle.ErrorManagerOperationBusy {
-			log.Printf("dsh-work is already running: %v", lockErr)
-			os.Exit(1)
-		}
-		log.Fatalf("dsh-work could not acquire its manager process lock: %v", lockErr)
+	if managerLock == nil {
+		log.Fatalf("dsh-work could not acquire its manager process lock")
 	}
 	defer func() {
 		if err := managerLock.Close(); err != nil {
@@ -128,6 +144,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	managerConfig := dshmanager.Config{
+		StatePath:        filepath.Join(storage.Root, "manager.json"),
 		CommandRunner:    managerRunner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
@@ -185,7 +202,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	var petCatalog dshworkpet.PetCatalog
-	petCatalogRoot := filepath.Join(filepath.Dir(config.SettingsPath), "pet-cache")
+	petCatalogRoot := filepath.Join(config.CacheDirectory, "pets")
 	petCatalogConfig := dshworkpet.CatalogConfig{CacheRoot: petCatalogRoot, CommunityHome: dshworkpet.CommunityHome()}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		petCatalogConfig.CodexHome = filepath.Join(storage.Root, "probe-pets")
@@ -333,7 +350,7 @@ func runDaemon(identity string, resources Resources) {
 		Description: "A local desktop shell for DSH workspaces.",
 		Icon:        resources.AppIcon,
 		Windows: application.WindowsOptions{
-			WebviewUserDataPath:           filepath.Join(filepath.Dir(config.SettingsPath), "webview-background"),
+			WebviewUserDataPath:           filepath.Join(config.CacheDirectory, "webview-background"),
 			DisableQuitOnLastWindowClosed: true,
 		},
 		Services: []application.Service{

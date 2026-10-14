@@ -78,13 +78,11 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		return nil, nil, fmt.Errorf("resolve DSH discovery root: %w", err)
 	}
 	config := dshworkapp.DefaultConfig(discoveryRoot)
-	locator := filepath.Join(filepath.Dir(filepath.Dir(config.SettingsPath)), "dsh-work-location", "locations.json")
-	locationLock, err := dshworkapp.AcquireManagerProcessLock(locator)
+	paths, err := storagepaths.DefaultDirectories()
 	if err != nil {
 		return nil, nil, err
 	}
-	defer locationLock.Close()
-	locations, err := storagepaths.Open(locator, filepath.Dir(config.SettingsPath))
+	locations, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -97,6 +95,24 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// The daemon may have completed a move after we read the location record
+	// but before we acquired the old root lock. Recheck while holding that lock
+	// so this CLI never writes through a stale root.
+	latest, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
+	if err != nil {
+		_ = managerLock.Close()
+		return nil, nil, err
+	}
+	if latest.Snapshot().Current.Root != current.Root {
+		_ = managerLock.Close()
+		return nil, nil, lifecycle.Failure{
+			Code:          lifecycle.ErrorManagerOperationBusy,
+			Summary:       "dsh-work storage is changing.",
+			Retryable:     true,
+			CorrelationID: lifecycle.NewCorrelationID(),
+			Detail:        "Retry the command after the desktop finishes moving its storage location.",
+		}
+	}
 	dependencies := platform.New()
 	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
@@ -107,6 +123,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, err := dshmanager.New(dshmanager.Config{
+		StatePath:        filepath.Join(current.Root, "manager.json"),
 		CommandRunner:    runner,
 		PluginCommands:   dshadapter.NewPluginCommands(),
 		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),

@@ -16,7 +16,7 @@ func (s *StorageService) DefaultUserDataPath(ctx context.Context, root string) (
 	if !filepath.IsAbs(root) {
 		return "", errors.New("invalid storage root")
 	}
-	return (storagepaths.Locations{Root: root}).UserDataPath(), nil
+	return s.manager.DefaultUserDataPath(root), nil
 }
 
 // StorageService exposes only the two desktop-owned location choices.
