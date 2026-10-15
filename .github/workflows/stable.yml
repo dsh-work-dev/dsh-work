@@ -1,0 +1,36 @@
+# Stable channel entry point.
+#
+# A stable release is published by pushing the release tag, and only by
+# pushing the release tag: `vX.Y.Z`. The annotated tag's commit is the source
+# commit, and the preflight refuses a tag whose version does not belong to the
+# base in build/config.yml, so a mistyped tag produces a red run instead of a
+# mislabelled release.
+#
+# This workflow only chooses the trigger and the channel. The pipeline itself
+# lives in release.yml.
+
+name: Release (stable)
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+
+permissions:
+  contents: read
+
+# A channel is never released twice at once. Releases queue instead of
+# cancelling each other, because a cancelled run can already hold a draft
+# release or a promotion lock.
+concurrency:
+  group: release-stable
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      channel: stable
+      source_sha: ${{ github.sha }}

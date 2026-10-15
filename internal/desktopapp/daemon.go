@@ -362,7 +362,13 @@ func runDaemon(identity string, resources Resources) {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
-	updates := newUpdateRunner(desktop, launcher.Stop, func(state daemon.UpdateSnapshot) {
+	updateChannel := dshworksettings.DefaultUpdateChannel
+	if settingsManager != nil {
+		if values, err := settingsManager.Snapshot(context.Background()); err == nil {
+			updateChannel = values.UpdateChannel
+		}
+	}
+	updates := newUpdateRunner(filepath.Join(storage.Root, "update"), updateChannel, launcher.Stop, func(state daemon.UpdateSnapshot) {
 		server.Publish("update-state", state)
 		updateMenuStateMu.Lock()
 		updateMenuState = state
@@ -387,6 +393,11 @@ func runDaemon(identity string, resources Resources) {
 	})
 	server.UpdateState = updates.Snapshot
 	server.UpdateCommand = updates.Action
+	// The running updater switches before the choice is saved, so a channel the
+	// updater refuses is never persisted.
+	dshworkapp.SetUpdateChannelChanged(settingsService, func(ctx context.Context, channel dshworksettings.UpdateChannel) error {
+		return updates.SetChannel(ctx, channel)
+	})
 	var repositionPetWindow func()
 	var persistPetWindowPosition func()
 	if petOverlayCapabilities.Level != dshworkpet.OverlayFallback {

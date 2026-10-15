@@ -1,22 +1,43 @@
 [CmdletBinding()]
 param(
     [ValidateSet('amd64', 'arm64')]
-    [string]$Arch = 'amd64'
+    [string]$Arch = 'amd64',
+    # Full release version this package ships, for example 0.3.0-nightly.20261013.123456789.
+    # When it is not passed, the plain base version from build/config.yml is used.
+    [string]$ReleaseVersion,
+    # Update channel the packaged binaries follow: stable, beta or nightly.
+    # Releases default to the stage of their own version.
+    [string]$Channel,
+    # Update feed root the packaged binaries follow.
+    [string]$FeedRoot,
+    # Ed25519 public key the packaged binaries trust. Required for a release,
+    # and the binaries are checked against it before they are wrapped.
+    [string]$PublicKeyFile
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'resolve-nsis.ps1')
+. (Join-Path $PSScriptRoot 'release-version.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $nsisDir = Join-Path $root 'build/windows/nsis'
 $appPath = Join-Path $root 'bin/dsh-work.exe'
 $cliPath = Join-Path $root 'bin/dsh-work-cli.exe'
-$versionText = Get-Content -LiteralPath (Join-Path $root 'build/config.yml') -Raw
-$versionMatch = [regex]::Match($versionText, '(?m)^\s+version:\s*["'']([^"'']+)["'']\s*$')
-if (-not $versionMatch.Success) { throw 'build/config.yml must contain info.version' }
-$version = $versionMatch.Groups[1].Value
-if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Windows packaging requires a numeric release version, got $version" }
+$release = Resolve-ReleaseVersion -ReleaseVersion $ReleaseVersion
+$version = $release.Version
 if (-not (Test-Path -LiteralPath $appPath)) { throw "missing application binary: $appPath" }
 if (-not (Test-Path -LiteralPath $cliPath)) { throw "missing CLI binary: $cliPath" }
+
+$identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -PublicKeyFile $PublicKeyFile
+if ($identity.Release) {
+    # The installer wraps the binaries built by scripts/build-windows.ps1. A
+    # binary that follows another channel, another feed or another key would
+    # produce an installer that updates from a source this release does not
+    # trust, so packaging refuses it instead of wrapping it.
+    $identityProblem = Test-BinariesCarryIdentity -AppPath $appPath -CliPath $cliPath -Version $version -Channel $identity.Channel -Feed $identity.Feed -PublicKeyBase64 $identity.PublicKeyBase64
+    if ($identityProblem) {
+        throw "$identityProblem Rebuild the binaries with scripts/build-windows.ps1 passing the same -ReleaseVersion, -Channel, -FeedRoot and -PublicKeyFile before packaging."
+    }
+}
 $toolchain = Get-Content -LiteralPath (Join-Path $root 'toolchain.lock.json') -Raw | ConvertFrom-Json
 $expectedNsis = [string]$toolchain.nsis.version
 if ($expectedNsis -notmatch '^\d+\.\d+\.\d+$') { throw "toolchain.lock.json must contain a numeric nsis.version" }
@@ -54,9 +75,14 @@ try {
 
     $mainDefine = if ($Arch -eq 'amd64') { 'ARG_WAILS_AMD64_BINARY' } else { 'ARG_WAILS_ARM64_BINARY' }
     $cliDefine = if ($Arch -eq 'amd64') { 'ARG_DSH_WORK_CLI_AMD64_BINARY' } else { 'ARG_DSH_WORK_CLI_ARM64_BINARY' }
+    # NSIS needs four numeric components for the PE version resource, so the
+    # installer carries the numeric mapping while the display metadata and the
+    # installer file name keep the full release version.
     $arguments = @(
         '-DWAILS_INSTALL_SCOPE=user',
         '-DREQUEST_EXECUTION_LEVEL=user',
+        "-DINFO_FILE_VERSION=$($release.FileVersion)",
+        "-DINFO_RELEASE_VERSION=$version",
         "-D$mainDefine=$appPath",
         "-D$cliDefine=$cliPath",
         'project.nsi'
@@ -83,7 +109,11 @@ try {
     }
     finally { $sha256.Dispose() }
     "$hash  $([System.IO.Path]::GetFileName($installerPath))" | Set-Content -LiteralPath "$installerPath.sha256" -Encoding ascii
-    Write-Host "created Windows per-user installer for $Arch"
+    $summary = "created Windows per-user installer for $Arch (version $version, file version $($release.FileVersion))"
+    if ($identity.Release) {
+        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), key $($identity.Fingerprint)"
+    }
+    Write-Host $summary
 }
 finally {
     Pop-Location

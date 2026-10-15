@@ -3,12 +3,13 @@ import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
-import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {HostService, ManagerService, SettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {buildBuiltinComponentViews} from "./builtin-components";
 import {diagnosticsReport} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
+import {beginControlUpdate} from "./ui/pending-control";
 import {mountOperationLog} from "./operation-log";
 import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
@@ -20,6 +21,7 @@ import {icon} from "./ui/icons";
 import type {RuntimePreparation} from "./lifecycle";
 import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/dsh-work/internal/lifecycle/models";
 import {UpdateInstallMode, UpdatePhase, type UpdateSnapshot} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
+import {UpdateChannel} from "../bindings/github.com/local/dsh-work/internal/settings";
 
 export type ManagerProfileRef = ProfileRef;
 export type ManagerRunContext = RunContext;
@@ -210,6 +212,8 @@ export function mountManager() {
   const aboutUpdateProgressMeta = document.getElementById("about-update-progress-meta") as HTMLParagraphElement;
   const aboutUpdateAction = document.getElementById("about-update-action") as HTMLButtonElement;
   const aboutUpdateLastChecked = document.getElementById("about-update-last-checked") as HTMLSpanElement;
+  const aboutUpdateChannel = document.getElementById("about-update-channel") as HTMLSelectElement;
+  const aboutUpdateChannelDetail = document.getElementById("about-update-channel-detail") as HTMLParagraphElement;
   const currentRuntime = document.getElementById("manager-current-runtime") as HTMLElement;
   const currentDataDirectory = document.getElementById("manager-current-data-directory") as HTMLElement;
   const currentProfile = document.getElementById("manager-current-profile") as HTMLElement;
@@ -284,6 +288,11 @@ export function mountManager() {
   let snapshot: ManagerSnapshot | undefined;
   let hostStatus: HostLifecycleStatus | undefined;
   let updateState: DesktopUpdateState = {phase: UpdatePhase.UpdateUnconfigured, currentVersion: __APP_VERSION__, installMode: UpdateInstallMode.UpdateInstallNone};
+  // The channel the running updater follows, kept for the render before the first
+  // update snapshot and for putting the selector back when a switch is refused.
+  let selectedUpdateChannel: string = UpdateChannel.UpdateChannelStable;
+  let updateChannelSwitchInFlight = false;
+  let updateChannelFailed = false;
   let pluginObservation: {profile: string; plugins?: PluginInfo[]; layers?: LoaderLayer[]} | undefined;
   let pluginObservationGeneration = 0;
   let pluginObservationInFlight: string | undefined;
@@ -450,12 +459,32 @@ export function mountManager() {
     }
   }
 
+  function updateChannelLabel(channel: string): string {
+    switch (channel) {
+      case UpdateChannel.UpdateChannelBeta: return t("about.update.channelBeta");
+      case UpdateChannel.UpdateChannelNightly: return t("about.update.channelNightly");
+      case UpdateChannel.UpdateChannelStable: return t("about.update.channelStable");
+      default: return channel;
+    }
+  }
+
   function renderUpdate() {
     const state = updateState;
     const action = updateActionForState();
     const target = state.targetVersion || "";
     aboutUpdateStatus.textContent = updateMessage(state);
     aboutUpdateTarget.textContent = target ? `v${target}` : "";
+    selectedUpdateChannel = state.selectedChannel || selectedUpdateChannel;
+    aboutUpdateChannel.value = selectedUpdateChannel;
+    aboutUpdateChannel.disabled = updateChannelSwitchInFlight
+      || state.phase === UpdatePhase.UpdateUnconfigured
+      || state.phase === UpdatePhase.UpdateInstalling;
+    const installedVersion = state.currentVersion || __APP_VERSION__;
+    aboutUpdateChannelDetail.textContent = updateChannelFailed
+      ? t("about.update.channelError")
+      : state.buildChannel
+        ? t("about.update.channelDetail", {version: installedVersion, channel: updateChannelLabel(state.buildChannel)})
+        : t("about.update.channelInstalled", {version: installedVersion});
     aboutUpdateBadge.hidden = state.phase !== UpdatePhase.UpdateReady;
     aboutUpdateProgress.hidden = state.phase !== UpdatePhase.UpdateDownloading && state.phase !== UpdatePhase.UpdateVerifying;
     aboutUpdateProgressMeta.hidden = aboutUpdateProgress.hidden;
@@ -498,6 +527,34 @@ export function mountManager() {
       aboutUpdateAction.disabled = false;
     }
   }
+
+  async function switchUpdateChannel(next: string) {
+    if (updateChannelSwitchInFlight || next === selectedUpdateChannel) return;
+    const previous = selectedUpdateChannel;
+    const finishUpdate = beginControlUpdate(aboutUpdateChannel);
+    updateChannelSwitchInFlight = true;
+    updateChannelFailed = false;
+    renderUpdate();
+    try {
+      const values = await SettingsService.SetUpdateChannel(next);
+      selectedUpdateChannel = values.updateChannel;
+      updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
+    } catch (error) {
+      console.error("Could not change the update channel", error);
+      selectedUpdateChannel = previous;
+      updateChannelFailed = true;
+      try {
+        updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
+      } catch (snapshotError) {
+        console.error("Could not read application update state", snapshotError);
+      }
+    } finally {
+      updateChannelSwitchInFlight = false;
+      finishUpdate();
+      renderUpdate();
+    }
+  }
+  aboutUpdateChannel.addEventListener("change", () => void switchUpdateChannel(aboutUpdateChannel.value));
 
   const environmentEditor = document.getElementById("environment-editor")!;
   const environmentApply = document.getElementById("environment-apply") as HTMLButtonElement;

@@ -3,8 +3,8 @@
 
 /**
  * UpdateInstallMode tells the UI which explicit install action is available.
- * The first desktop slice uses staged-restart; installer is reserved for a
- * future package-backed release source.
+ * This release unit is replaced by running the signed installer, which keeps the
+ * graphical and command-line executables on one version.
  */
 export enum UpdateInstallMode {
     /**
@@ -13,7 +13,6 @@ export enum UpdateInstallMode {
     $zero = "",
 
     UpdateInstallNone = "",
-    UpdateInstallStagedRestart = "staged-restart",
     UpdateInstallInstaller = "installer",
 };
 
@@ -47,6 +46,8 @@ export enum UpdatePhase {
 export interface UpdateSnapshot {
     "phase": UpdatePhase;
     "currentVersion": string;
+    "buildChannel"?: string;
+    "selectedChannel"?: string;
     "targetVersion"?: string;
     "receivedBytes"?: number;
     "totalBytes"?: number;

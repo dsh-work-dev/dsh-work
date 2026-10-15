@@ -477,6 +477,16 @@
               <div class="section-head"><h2 id="about-update-title" data-i18n="about.updateTitle">Application update</h2><span id="about-update-target" class="note mono"></span></div>
               <div class="group">
                 <div class="row">
+                  <div class="row-main"><label for="about-update-channel" data-i18n="about.update.channel">Update channel</label><p id="about-update-channel-detail" role="status" aria-live="polite"></p></div>
+                  <div class="row-trail">
+                    <select id="about-update-channel">
+                      <option value="stable" data-i18n="about.update.channelStable">Stable</option>
+                      <option value="beta" data-i18n="about.update.channelBeta">Beta</option>
+                      <option value="nightly" data-i18n="about.update.channelNightly">Nightly</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row">
                   <div class="row-main">
                     <p id="about-update-status" role="status" aria-live="polite"></p>
                     <progress id="about-update-progress" max="100" value="0" hidden data-i18n-aria-label="about.updateProgress"></progress>

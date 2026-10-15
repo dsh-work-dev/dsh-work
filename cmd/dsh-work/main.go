@@ -17,6 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/platform"
+	"github.com/local/dsh-work/internal/selfupdate"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/version"
 )
@@ -30,7 +31,7 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) (runErr error) {
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
-		fmt.Fprintln(stdout, version.String())
+		printVersion(stdout)
 		return nil
 	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -473,4 +474,21 @@ func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")
 	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME ...")
 	fmt.Fprintln(stdout, "  dsh-work update status|check|download|install")
+}
+
+// printVersion reports the release identity this executable carries, so an
+// operator can tell which channel and feed an installation follows, and which
+// trust root it verifies releases against, without opening the application. The
+// values are compiled in; a development build carries none of them.
+func printVersion(stdout io.Writer) {
+	fmt.Fprintln(stdout, version.String())
+	if channel := version.Channel(); channel != "" {
+		fmt.Fprintf(stdout, "channel: %s\n", channel)
+	}
+	if feed := version.Feed(); feed != "" {
+		fmt.Fprintf(stdout, "feed: %s\n", feed)
+	}
+	if key := version.PublicKey(); len(key) > 0 {
+		fmt.Fprintf(stdout, "update key: %s\n", selfupdate.PublicKeyFingerprint(key))
+	}
 }

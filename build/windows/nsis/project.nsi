@@ -179,14 +179,22 @@ unDshWorkRestoreReturnProtocolOwned:
 unDshWorkRestoreProtocolDone:
 FunctionEnd
 
-; Wails requires four numeric components for PE metadata. The first E-21
-; release line uses the numeric three-component source version and appends 0.
-VIProductVersion "${INFO_PRODUCTVERSION}.0"
-VIFileVersion    "${INFO_PRODUCTVERSION}.0"
+; Windows needs four numeric components for the PE version resource, and only
+; numeric values are accepted there. INFO_FILE_VERSION is that mapping
+; (X.Y.Z.0); INFO_RELEASE_VERSION is the full release version, which carries a
+; -beta.N or -nightly.YYYYMMDD.<run id> pre-release part on pre-release builds.
+!ifndef INFO_FILE_VERSION
+    !define INFO_FILE_VERSION "${INFO_PRODUCTVERSION}.0"
+!endif
+!ifndef INFO_RELEASE_VERSION
+    !define INFO_RELEASE_VERSION "${INFO_PRODUCTVERSION}"
+!endif
+VIProductVersion "${INFO_FILE_VERSION}"
+VIFileVersion    "${INFO_FILE_VERSION}"
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
 VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
-VIAddVersionKey "ProductVersion"  "${INFO_PRODUCTVERSION}"
-VIAddVersionKey "FileVersion"     "${INFO_PRODUCTVERSION}"
+VIAddVersionKey "ProductVersion"  "${INFO_RELEASE_VERSION}"
+VIAddVersionKey "FileVersion"     "${INFO_RELEASE_VERSION}"
 VIAddVersionKey "LegalCopyright"  "${INFO_COPYRIGHT}"
 VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
 
@@ -207,7 +215,7 @@ ManifestDPIAware true
 !insertmacro MUI_LANGUAGE "English"
 
 Name "${INFO_PRODUCTNAME}"
-OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${INFO_PRODUCTVERSION}-windows-${ARCH}-installer.exe"
+OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${INFO_RELEASE_VERSION}-windows-${ARCH}-installer.exe"
 !if "${WAILS_INSTALL_SCOPE}" != "user"
     !error "dsh-work requires a per-user installer"
 !endif
@@ -513,6 +521,14 @@ Function dshwork.launch
     ExecShell "open" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 FunctionEnd
 
+Function dshwork.launchAfterSilentInstall
+    ; A silent install is an in-app update: finish it the same way, but start
+    ; the workbench with Exec so it inherits the environment the update came
+    ; from instead of the desktop shell's.
+    Call dshwork.releaseInstallerMutex
+    Exec '"$INSTDIR\${PRODUCT_EXECUTABLE}"'
+FunctionEnd
+
 Function dshwork.releaseInstallerMutex
     StrCmp $DshWorkInstallerMutex 0 releaseInstallerMutexDone
     System::Call 'kernel32::CloseHandle(p $DshWorkInstallerMutex)'
@@ -578,6 +594,13 @@ packageStageFailed:
 installDone:
     Push "Installation completed successfully at: $INSTDIR"
     Call dshwork.log
+    ; A silent install - the form an in-app update uses - never shows the finish
+    ; page, so its launch callback would not run. Start the updated workbench
+    ; here instead, after the maintenance boundary is released: starting it
+    ; earlier would only make it report that maintenance is in progress.
+    IfSilent 0 dshworkSectionEnd
+    Call dshwork.launchAfterSilentInstall
+dshworkSectionEnd:
 SectionEnd
 
 Section "uninstall"

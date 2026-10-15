@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/selfupdate"
+	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/version"
-	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 )
@@ -24,45 +29,185 @@ const (
 	updatePublicKeyEnv            = "DSH_WORK_UPDATE_PUBLIC_KEY"
 	updatePublicKeyFile           = "DSH_WORK_UPDATE_PUBLIC_KEY_FILE"
 	updateProgressPublishInterval = 250 * time.Millisecond
+	// updateManifestName is the feed file each channel publishes.
+	updateManifestName    = "%s.json"
+	updateDownloadTimeout = 30 * time.Minute
+	// A channel switch waits for the running operation, which is bounded by the
+	// download it is already doing.
+	updateSwitchTimeout = 30 * time.Second
+	updateSwitchPoll    = 25 * time.Millisecond
 )
+
+// manifestURL is the feed file of one channel. Each channel is served from its
+// own document, so the client never has to filter a shared feed.
+func manifestURL(feedRoot, channel string) string {
+	return strings.TrimSuffix(feedRoot, "/") + "/" + fmt.Sprintf(updateManifestName, channel)
+}
 
 var (
 	errUpdateUnavailable = errors.New("update controls unavailable")
 	errUpdateNoRelease   = errors.New("no update is available")
 )
 
-// updateBackend is the small part of the official Wails updater used by the
-// daemon-owned flow. UI state is maintained by updateRunner so it can be
-// projected over IPC without exposing provider or staging details.
+// updateBackend is the release source and installer handoff the daemon owns.
+// The provider only offers a release; every authenticity decision is made by
+// this package through internal/selfupdate, because the vendored updater
+// accepts a release that carries no verification block.
 type updateBackend interface {
-	Check(context.Context) (*wailsupdater.Release, error)
-	DownloadAndInstall(context.Context) error
-	Restart(context.Context) error
+	Check(context.Context) (*pendingRelease, error)
+	Stage(context.Context, *pendingRelease, func(written, total int64)) error
+	Recheck() error
+	Install(context.Context) error
+	// WithChannel returns a backend that follows another feed, and Discard drops
+	// everything the previous channel produced.
+	WithChannel(channel string) (updateBackend, error)
+	Discard() error
 }
 
-type wailsUpdateBackend struct{ updater *wailsupdater.Updater }
+// pendingRelease pairs the provider record, needed to fetch the artifact, with
+// the identity the feed claims, needed to authenticate it.
+type pendingRelease struct {
+	provider *wailsupdater.Release
+	feed     *selfupdate.FeedRelease
+}
 
-func (b wailsUpdateBackend) Check(ctx context.Context) (*wailsupdater.Release, error) {
-	return b.updater.Check(ctx)
+// installerBackend downloads the advertised installer, authenticates it, keeps
+// a durable verified copy, and hands that copy to the operating system.
+type installerBackend struct {
+	provider  wailsupdater.Provider
+	feedRoot  string
+	channel   string
+	publicKey []byte
+	staging   *selfupdate.Staging
+
+	pending *pendingRelease
+	staged  *selfupdate.Installer
 }
-func (b wailsUpdateBackend) DownloadAndInstall(ctx context.Context) error {
-	return b.updater.DownloadAndInstall(ctx)
+
+// WithChannel returns a backend that reads another channel's manifest. Each
+// channel has its own feed file, so a switch cannot keep following the previous
+// channel's releases.
+func (b *installerBackend) WithChannel(channel string) (updateBackend, error) {
+	provider, err := endpoint.New(endpoint.Config{
+		URL:        manifestURL(b.feedRoot, channel),
+		Channel:    channel,
+		HTTPClient: &http.Client{Timeout: updateDownloadTimeout},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &installerBackend{
+		provider:  provider,
+		feedRoot:  b.feedRoot,
+		channel:   channel,
+		publicKey: b.publicKey,
+		staging:   b.staging,
+	}, nil
 }
-func (b wailsUpdateBackend) Restart(ctx context.Context) error { return b.updater.Restart(ctx) }
+
+// Discard removes the staged candidate and the release it came from, so a
+// download from the previous channel cannot become an installation.
+func (b *installerBackend) Discard() error {
+	b.pending = nil
+	b.staged = nil
+	if b.staging == nil {
+		return nil
+	}
+	return b.staging.Clear()
+}
+
+func (b *installerBackend) Check(ctx context.Context) (*pendingRelease, error) {
+	release, err := b.provider.Check(ctx, wailsupdater.CheckRequest{
+		CurrentVersion: version.String(),
+		Platform:       "windows",
+		Arch:           runtime.GOARCH,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if release == nil {
+		return nil, nil
+	}
+	if !strings.EqualFold(strings.TrimSpace(release.Channel), b.channel) {
+		return nil, fmt.Errorf("update feed advertised release channel %q, this installation follows %q", release.Channel, b.channel)
+	}
+	feed := selfupdate.ReleaseFrom(release)
+	if err := selfupdate.ValidateRelease(feed); err != nil {
+		return nil, err
+	}
+	return &pendingRelease{provider: release, feed: feed}, nil
+}
+
+// Stage writes the offered artifact into a private temporary file, lets the
+// provider stream and digest it, and stages the authenticated copy. The
+// provider's own staging directory is temporary by design, so the verified
+// bytes are copied before they can be discarded.
+func (b *installerBackend) Stage(ctx context.Context, pending *pendingRelease, progress func(written, total int64)) error {
+	if pending == nil || pending.provider == nil {
+		return errUpdateNoRelease
+	}
+	dir, err := os.MkdirTemp("", "dsh-work-update-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	download := filepath.Join(dir, "installer.exe")
+	file, err := os.OpenFile(download, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	streamErr := b.provider.Download(ctx, pending.provider, file, progress)
+	closeErr := file.Close()
+	if streamErr != nil {
+		return streamErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	installer, err := b.staging.Stage(download, pending.feed, b.publicKey)
+	if err != nil {
+		return err
+	}
+	b.pending = pending
+	b.staged = installer
+	return nil
+}
+
+// Recheck re-authenticates the staged bytes immediately before the installer
+// runs, so a payload swapped on disk after staging cannot be executed.
+func (b *installerBackend) Recheck() error {
+	if b.staged == nil || b.pending == nil {
+		return errUpdateNoRelease
+	}
+	return b.staging.Recheck(b.staged, b.pending.feed, b.publicKey)
+}
+
+// Install runs the authenticated installer detached from this process. The
+// installer takes the maintenance boundary, stops the running workbench,
+// replaces the whole release unit, releases the boundary and starts the new
+// workbench; this process is expected to be stopped by that handshake.
+func (b *installerBackend) Install(ctx context.Context) error {
+	if b.staged == nil {
+		return errUpdateNoRelease
+	}
+	outcome := b.staged.RunInstaller(ctx)
+	return outcome.Err
+}
 
 // updateRunner is the daemon's single-flight update coordinator. Automatic
 // checks download silently; only an explicit install action stops the UI and
-// asks the Wails helper to restart into the staged executable.
+// hands the authenticated installer to the operating system.
 type updateRunner struct {
-	backend updateBackend
-	current string
-	stopUI  func() error
-	publish func(daemon.UpdateSnapshot)
+	backend  updateBackend
+	current  string
+	selected string
+	stopUI   func() error
+	publish  func(daemon.UpdateSnapshot)
 
 	busy        atomic.Bool
 	mu          sync.RWMutex
 	state       daemon.UpdateSnapshot
-	release     *wailsupdater.Release
+	pending     *pendingRelease
 	lastPublish time.Time
 
 	activeCancel context.CancelFunc
@@ -231,7 +376,7 @@ func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
 		state.TotalBytes = 0
 		state.InstallMode = daemon.UpdateInstallNone
 	})
-	release, err := r.backend.Check(ctx)
+	pending, err := r.backend.Check(ctx)
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.LastCheckedAt = time.Now().UTC().Format(time.RFC3339)
 	})
@@ -240,7 +385,7 @@ func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
 		r.setError("check")
 		return
 	}
-	if release == nil {
+	if pending == nil {
 		r.updateState(func(state *daemon.UpdateSnapshot) {
 			state.Phase = daemon.UpdateUpToDate
 			state.TargetVersion = ""
@@ -250,12 +395,12 @@ func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
 		return
 	}
 	r.mu.Lock()
-	r.release = release
+	r.pending = pending
 	r.mu.Unlock()
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.Phase = daemon.UpdateAvailable
-		state.TargetVersion = release.Version
-		state.TotalBytes = release.Artifact.Size
+		state.TargetVersion = pending.feed.Version
+		state.TotalBytes = pending.feed.Artifact.Size
 		state.ReceivedBytes = 0
 		state.ErrorCode = ""
 		state.InstallMode = daemon.UpdateInstallNone
@@ -269,7 +414,7 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 	downloadCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.activeCancel = cancel
-	release := r.release
+	pending := r.pending
 	r.mu.Unlock()
 	defer func() {
 		cancel()
@@ -277,17 +422,33 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 		r.activeCancel = nil
 		r.mu.Unlock()
 	}()
-	if release == nil {
+	if pending == nil {
 		r.setError("download")
 		return
 	}
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.Phase = daemon.UpdateDownloading
-		state.TargetVersion = release.Version
+		state.TargetVersion = pending.feed.Version
 		state.ErrorCode = ""
 		state.InstallMode = daemon.UpdateInstallNone
 	})
-	if err := r.backend.DownloadAndInstall(downloadCtx); err != nil {
+	// The artifact streams first; anything after the last byte is the
+	// authentication of the copy that was written, so the phase reported to the
+	// user follows the same order.
+	progress := func(written, total int64) {
+		r.updateState(func(state *daemon.UpdateSnapshot) {
+			if total > 0 && written >= total {
+				state.Phase = daemon.UpdateVerifying
+			} else {
+				state.Phase = daemon.UpdateDownloading
+			}
+			state.ReceivedBytes = written
+			if total > 0 {
+				state.TotalBytes = total
+			}
+		})
+	}
+	if err := r.backend.Stage(downloadCtx, pending, progress); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 			return
 		}
@@ -295,19 +456,23 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 		r.setError("download")
 		return
 	}
-	// The Wails updater normally emits EventUpdateReady after verification. A
-	// backend that completes without that event still receives a truthful ready
-	// projection here.
-	if r.Snapshot().Phase != daemon.UpdateReady {
-		r.updateState(func(state *daemon.UpdateSnapshot) {
-			state.Phase = daemon.UpdateReady
-			state.ReceivedBytes = state.TotalBytes
-			state.InstallMode = daemon.UpdateInstallStagedRestart
-		})
-	}
+	r.updateState(func(state *daemon.UpdateSnapshot) {
+		state.Phase = daemon.UpdateReady
+		state.ReceivedBytes = state.TotalBytes
+		state.ErrorCode = ""
+		state.InstallMode = daemon.UpdateInstallInstaller
+	})
 }
 
 func (r *updateRunner) runInstall(ctx context.Context) {
+	// The staged bytes are authenticated again here, before anything is stopped:
+	// a payload that changed on disk after staging is refused while the running
+	// workbench can still be kept.
+	if err := r.backend.Recheck(); err != nil {
+		log.Printf("staged installer recheck: %v", err)
+		r.setError("install")
+		return
+	}
 	if r.stopUI != nil {
 		if err := r.stopUI(); err != nil {
 			log.Printf("stop UI before update: %v", err)
@@ -315,15 +480,17 @@ func (r *updateRunner) runInstall(ctx context.Context) {
 			return
 		}
 	}
-	// The UI stop is the daemon's update boundary. Only after that handshake
-	// succeeds do we expose installing and let the Wails helper replace the
-	// staged executable.
+	// The UI stop is the daemon's handover. The installer then takes the
+	// maintenance boundary, stops the remaining workbench processes itself,
+	// replaces the whole release unit, releases the boundary and starts the new
+	// workbench, so nothing here has to survive this process.
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.Phase = daemon.UpdateInstalling
+		state.InstallMode = daemon.UpdateInstallInstaller
 		state.ErrorCode = ""
 	})
-	if err := r.backend.Restart(ctx); err != nil {
-		log.Printf("restart after update: %v", err)
+	if err := r.backend.Install(ctx); err != nil {
+		log.Printf("install update: %v", err)
 		r.setError("install")
 	}
 }
@@ -383,24 +550,31 @@ func (r *updateRunner) Start() {
 	}()
 }
 
-// newUpdateRunner configures the official Wails endpoint provider when a
-// feed URL is supplied. Release signing remains optional for local/testing
-// feeds; production feeds should provide both a digest and a pinned key.
-func newUpdateRunner(desktop *application.App, stopUI func() error, publish func(daemon.UpdateSnapshot)) *updateRunner {
+// newUpdateRunner wires the release feed this installation follows.
+//
+// The feed root and the release public key are compiled into a released build,
+// so an installed copy can only be updated from its own feed and only with a
+// payload signed by the publisher. A development build may point at another
+// feed through the environment, but only when it has no compiled-in identity at
+// all. A build with no feed or no key stays unconfigured instead of silently
+// accepting unauthenticated updates.
+func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI func() error, publish func(daemon.UpdateSnapshot)) *updateRunner {
+	channel := resolveUpdateChannel(selected)
 	runner := &updateRunner{
-		current: version.String(),
-		stopUI:  stopUI,
-		publish: publish,
-		state:   daemon.UpdateSnapshot{Phase: daemon.UpdateUnconfigured, CurrentVersion: version.String()},
+		current:  version.String(),
+		selected: string(channel),
+		stopUI:   stopUI,
+		publish:  publish,
+		state: daemon.UpdateSnapshot{
+			Phase:           daemon.UpdateUnconfigured,
+			CurrentVersion:  version.String(),
+			BuildChannel:    version.Channel(),
+			SelectedChannel: string(channel),
+		},
 	}
-	feed := strings.TrimSpace(os.Getenv(updateFeedEnv))
-	if feed == "" {
-		return runner
-	}
-	channel := strings.TrimSpace(os.Getenv(updateChannelEnv))
-	provider, err := endpoint.New(endpoint.Config{URL: feed, Channel: channel})
-	if err != nil {
-		log.Printf("update feed unavailable: %v", err)
+	feedRoot := resolveUpdateFeed()
+	if feedRoot == "" {
+		log.Printf("no update feed is configured for this build; updates stay unavailable")
 		return runner
 	}
 	publicKey, err := updatePublicKey()
@@ -408,152 +582,155 @@ func newUpdateRunner(desktop *application.App, stopUI func() error, publish func
 		log.Printf("update public key unavailable: %v", err)
 		return runner
 	}
-	if err := desktop.Updater.Init(wailsupdater.Config{
-		CurrentVersion: version.String(),
-		Providers:      []wailsupdater.Provider{provider},
-		PublicKey:      publicKey,
-		Window:         wailsupdater.WindowNone,
-	}); err != nil {
-		log.Printf("update initializer unavailable: %v", err)
+	if len(publicKey) == 0 {
+		log.Printf("no release public key is configured for this build; updates stay unavailable")
 		return runner
 	}
-	runner.backend = wailsUpdateBackend{updater: desktop.Updater}
+	staging, err := selfupdate.NewStaging(stagingBase)
+	if err != nil {
+		log.Printf("update staging unavailable: %v", err)
+		return runner
+	}
+	manifest := manifestURL(feedRoot, string(channel))
+	provider, err := endpoint.New(endpoint.Config{
+		URL:        manifest,
+		Channel:    string(channel),
+		HTTPClient: &http.Client{Timeout: updateDownloadTimeout},
+	})
+	if err != nil {
+		log.Printf("update feed unavailable: %v", err)
+		return runner
+	}
+	runner.backend = &installerBackend{
+		provider:  provider,
+		feedRoot:  feedRoot,
+		channel:   string(channel),
+		publicKey: publicKey,
+		staging:   staging,
+	}
 	runner.state.Phase = daemon.UpdateIdle
-	registerUpdaterEvents(desktop, runner)
 	return runner
 }
 
-func registerUpdaterEvents(desktop *application.App, runner *updateRunner) {
-	desktop.Event.On(wailsupdater.EventCheckStarted, func(*application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateChecking })
+// SetChannel applies the channel the user selected.
+//
+// The running operation is cancelled and awaited, the staged candidate and the
+// remembered release are dropped, and the new channel is checked. Switching is
+// refused while an update is installing, because the installer is already
+// replacing this installation.
+func (r *updateRunner) SetChannel(ctx context.Context, channel settings.UpdateChannel) error {
+	if r == nil {
+		return errUpdateUnavailable
+	}
+	if !channel.Valid() {
+		return fmt.Errorf("unsupported update channel %q", channel)
+	}
+	r.mu.RLock()
+	backend := r.backend
+	selected := r.selected
+	r.mu.RUnlock()
+	if backend == nil {
+		return errUpdateUnavailable
+	}
+	if phase := r.Snapshot().Phase; phase == daemon.UpdateInstalling {
+		return errors.New("the update channel cannot change while an update is installing")
+	}
+	if string(channel) == selected {
+		return nil
+	}
+	r.Stop()
+	if !r.waitIdle(updateSwitchTimeout) {
+		return errors.New("the previous update operation did not stop in time")
+	}
+	next, err := backend.WithChannel(string(channel))
+	if err != nil {
+		return err
+	}
+	if err := backend.Discard(); err != nil {
+		log.Printf("discard staged update: %v", err)
+	}
+	r.mu.Lock()
+	r.backend = next
+	r.pending = nil
+	r.selected = string(channel)
+	r.mu.Unlock()
+	r.setState(daemon.UpdateSnapshot{
+		Phase:           daemon.UpdateIdle,
+		CurrentVersion:  r.current,
+		BuildChannel:    version.Channel(),
+		SelectedChannel: string(channel),
 	})
-	desktop.Event.On(wailsupdater.EventUpdateAvailable, func(event *application.CustomEvent) {
-		if release, ok := updaterRelease(event); ok {
-			runner.mu.Lock()
-			runner.release = release
-			runner.mu.Unlock()
-			runner.updateState(func(state *daemon.UpdateSnapshot) {
-				state.Phase = daemon.UpdateAvailable
-				state.TargetVersion = release.Version
-				state.TotalBytes = release.Artifact.Size
-			})
-		}
-	})
-	desktop.Event.On(wailsupdater.EventNoUpdate, func(*application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) {
-			state.Phase = daemon.UpdateUpToDate
-			state.TargetVersion = ""
-			state.ErrorCode = ""
-		})
-	})
-	desktop.Event.On(wailsupdater.EventDownloadStarted, func(event *application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) {
-			state.Phase = daemon.UpdateDownloading
-			state.ReceivedBytes = 0
-			if release, ok := updaterRelease(event); ok {
-				state.TargetVersion = release.Version
-				state.TotalBytes = release.Artifact.Size
-			}
-		})
-	})
-	desktop.Event.On(wailsupdater.EventDownloadProgress, func(event *application.CustomEvent) {
-		if progress, ok := updaterProgress(event); ok {
-			runner.updateState(func(state *daemon.UpdateSnapshot) {
-				state.Phase = daemon.UpdateDownloading
-				state.ReceivedBytes = progress.Written
-				if progress.Total > 0 {
-					state.TotalBytes = progress.Total
-				}
-			})
-		}
-	})
-	desktop.Event.On(wailsupdater.EventDownloadComplete, func(*application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
-	})
-	desktop.Event.On(wailsupdater.EventVerifying, func(*application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
-	})
-	desktop.Event.On(wailsupdater.EventInstalling, func(*application.CustomEvent) {
-		if runner.Snapshot().Phase == daemon.UpdateInstalling {
-			return
-		}
-		runner.updateState(func(state *daemon.UpdateSnapshot) { state.Phase = daemon.UpdateVerifying })
-	})
-	desktop.Event.On(wailsupdater.EventUpdateReady, func(event *application.CustomEvent) {
-		runner.updateState(func(state *daemon.UpdateSnapshot) {
-			state.Phase = daemon.UpdateReady
-			state.InstallMode = daemon.UpdateInstallStagedRestart
-			state.ErrorCode = ""
-			if release, ok := updaterRelease(event); ok {
-				state.TargetVersion = release.Version
-				state.TotalBytes = release.Artifact.Size
-				state.ReceivedBytes = state.TotalBytes
-			}
-		})
-	})
-	desktop.Event.On(wailsupdater.EventError, func(event *application.CustomEvent) {
-		code := "update"
-		if info, ok := updaterErrorInfo(event); ok && info.Stage != "" {
-			code = string(info.Stage)
-		}
-		runner.setError(code)
-	})
+	// The new channel is checked at once, but the result waits for the user:
+	// switching channels must never install anything on its own.
+	r.Trigger(ctx, false)
+	return nil
 }
 
-func updaterRelease(event *application.CustomEvent) (*wailsupdater.Release, bool) {
-	if event == nil {
-		return nil, false
+// waitIdle reports whether the single-flight operation finished in time.
+func (r *updateRunner) waitIdle(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !r.busy.Load() {
+			return true
+		}
+		time.Sleep(updateSwitchPoll)
 	}
-	switch value := event.Data.(type) {
-	case *wailsupdater.Release:
-		return value, value != nil
-	case wailsupdater.Release:
-		copy := value
-		return &copy, true
-	default:
-		return nil, false
-	}
+	return !r.busy.Load()
 }
 
-func updaterProgress(event *application.CustomEvent) (wailsupdater.Progress, bool) {
-	if event == nil {
-		return wailsupdater.Progress{}, false
+// resolveUpdateChannel reports the channel this installation follows. The
+// selected channel is the user's choice and is the only source for a released
+// build; a development build without a compiled-in channel may take the
+// environment override so a local feed can be exercised.
+func resolveUpdateChannel(selected settings.UpdateChannel) settings.UpdateChannel {
+	if !version.IsDevelopment() || version.Channel() != "" {
+		if !selected.Valid() {
+			return settings.DefaultUpdateChannel
+		}
+		return selected
 	}
-	switch value := event.Data.(type) {
-	case wailsupdater.Progress:
-		return value, true
-	case *wailsupdater.Progress:
-		return *value, value != nil
-	default:
-		return wailsupdater.Progress{}, false
+	override := settings.UpdateChannel(strings.ToLower(strings.TrimSpace(os.Getenv(updateChannelEnv))))
+	if override.Valid() {
+		return override
 	}
+	if !selected.Valid() {
+		return settings.DefaultUpdateChannel
+	}
+	return selected
 }
 
-func updaterErrorInfo(event *application.CustomEvent) (wailsupdater.ErrorInfo, bool) {
-	if event == nil {
-		return wailsupdater.ErrorInfo{}, false
+// resolveUpdateFeed resolves the feed this installation follows. A released
+// build follows only the feed compiled into it; a development build may point
+// at a local feed instead, which is how the update path is exercised without a
+// published release.
+func resolveUpdateFeed() string {
+	if feed := strings.TrimSpace(version.Feed()); feed != "" {
+		return feed
 	}
-	switch value := event.Data.(type) {
-	case wailsupdater.ErrorInfo:
-		return value, true
-	case *wailsupdater.ErrorInfo:
-		return *value, value != nil
-	default:
-		return wailsupdater.ErrorInfo{}, false
+	if !version.IsDevelopment() {
+		return ""
 	}
+	return strings.TrimSpace(os.Getenv(updateFeedEnv))
 }
 
+// updatePublicKey resolves the release signing key. A released build trusts only
+// the key compiled into it; the environment override is a development aid and is
+// ignored once the build carries its own trust root.
 func updatePublicKey() ([]byte, error) {
-	if path := strings.TrimSpace(os.Getenv(updatePublicKeyFile)); path != "" {
+	compiled := version.PublicKey()
+	if len(compiled) > 0 && !version.IsDevelopment() {
+		return compiled, nil
+	}
+	if path := strings.TrimSpace(os.Getenv(updatePublicKeyFile)); path != "" && version.IsDevelopment() {
 		return os.ReadFile(path)
 	}
 	raw := strings.TrimSpace(os.Getenv(updatePublicKeyEnv))
-	if raw == "" {
-		return nil, nil
+	if raw != "" && version.IsDevelopment() {
+		decoded, err := base64.StdEncoding.DecodeString(raw)
+		if err == nil && len(decoded) > 0 {
+			return decoded, nil
+		}
+		return []byte(raw), nil
 	}
-	decoded, err := base64.StdEncoding.DecodeString(raw)
-	if err == nil && len(decoded) > 0 {
-		return decoded, nil
-	}
-	return []byte(raw), nil
+	return compiled, nil
 }

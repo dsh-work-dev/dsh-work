@@ -28,3 +28,7 @@ export function SetLocale(locale: string): $CancellablePromise<settings$0.Values
 export function SetNotificationPreference(key: string, enabled: boolean): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(2103107557, key, enabled);
 }
+
+export function SetUpdateChannel(channel: string): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(1670588961, channel);
+}

@@ -113,6 +113,23 @@ export enum ThemeID {
 };
 
 /**
+ * UpdateChannel is the release channel this installation follows. It is
+ * explicit metadata, never inferred from the installed version, because one
+ * base version exists as a nightly, a beta and a stable build at the same time.
+ */
+export enum UpdateChannel {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    UpdateChannelStable = "stable",
+    UpdateChannelBeta = "beta",
+    UpdateChannelNightly = "nightly",
+    DefaultUpdateChannel = "stable",
+};
+
+/**
  * Values is the versioned, platform-neutral dsh-work preference contract.
  */
 export interface Values {
@@ -128,6 +145,7 @@ export interface Values {
     "notifications": notifications$0.Preferences;
     "pet": PetPreference;
     "appearance": Appearance;
+    "updateChannel": UpdateChannel;
 }
 
 /**

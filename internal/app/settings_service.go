@@ -19,6 +19,7 @@ type SettingsService struct {
 	onNotificationsChanged   func(notifications.Preferences)
 	onRuntimeRollbackChanged func(bool)
 	onAppearanceChanged      func(settings.Appearance)
+	onUpdateChannelChanged   func(context.Context, settings.UpdateChannel) error
 }
 
 // SetAppearanceChanged installs the publisher that pushes a saved appearance
@@ -26,6 +27,16 @@ type SettingsService struct {
 func SetAppearanceChanged(service *SettingsService, changed func(settings.Appearance)) {
 	if service != nil {
 		service.onAppearanceChanged = changed
+	}
+}
+
+// SetUpdateChannelChanged installs the switch that moves the running updater to
+// the requested channel. It runs before the choice is persisted, so a switch
+// the updater refuses (for example while an update is installing) leaves the
+// saved channel untouched.
+func SetUpdateChannelChanged(service *SettingsService, changed func(context.Context, settings.UpdateChannel) error) {
+	if service != nil {
+		service.onUpdateChannelChanged = changed
 	}
 }
 
@@ -128,6 +139,51 @@ func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode 
 	}
 	if s.onAppearanceChanged != nil {
 		s.onAppearanceChanged(values.Appearance)
+	}
+	return values, nil
+}
+
+// SetUpdateChannel saves the release channel dsh-work updates from. The running
+// updater switches first, so the choice of a channel that cannot be used yet is
+// never saved.
+func (s *SettingsService) SetUpdateChannel(ctx context.Context, channel string) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	saved, err := s.manager.Snapshot(ctx)
+	if err != nil {
+		return settings.Values{}, err
+	}
+	requested := settings.UpdateChannel(channel)
+	if !requested.Valid() {
+		return settings.Values{}, lifecycle.Failure{
+			Code:          lifecycle.ErrorSettingsStateInvalid,
+			Summary:       "Update channel is not supported",
+			Detail:        "choose stable, beta or nightly",
+			CorrelationID: lifecycle.NewCorrelationID(),
+		}
+	}
+	if requested == saved.UpdateChannel {
+		return saved, nil
+	}
+	if s.onUpdateChannelChanged != nil {
+		if err := s.onUpdateChannelChanged(ctx, requested); err != nil {
+			return settings.Values{}, err
+		}
+	}
+	values, err := s.manager.SetUpdateChannel(ctx, requested)
+	if err != nil {
+		if s.onUpdateChannelChanged != nil {
+			// The updater already moved; put it back on the channel that is
+			// still saved.
+			_ = s.onUpdateChannelChanged(ctx, saved.UpdateChannel)
+		}
+		return settings.Values{}, err
 	}
 	return values, nil
 }
