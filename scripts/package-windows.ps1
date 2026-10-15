@@ -10,9 +10,9 @@ param(
     [string]$Channel,
     # Update feed root the packaged binaries follow.
     [string]$FeedRoot,
-    # Subject CN of the code-signing certificate the packaged binaries trust.
-    # Required for a release, and the binaries are checked against it before
-    # they are wrapped.
+    # Subject CN of the code-signing certificate the packaged binaries trust,
+    # for a signed release. The binaries are checked against it before they are
+    # wrapped.
     [string]$Publisher,
     # Require both binaries to be signed by -Publisher and Authenticode-sign
     # the installer before its checksum is written. The certificate is read
@@ -34,8 +34,8 @@ if (-not (Test-Path -LiteralPath $appPath)) { throw "missing application binary:
 if (-not (Test-Path -LiteralPath $cliPath)) { throw "missing CLI binary: $cliPath" }
 
 $identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -Publisher $Publisher
-if ($Sign -and -not $identity.Release) {
-    throw 'signing needs a release build: pass -ReleaseVersion and -Publisher with -Sign'
+if ($Sign -and -not $identity.Publisher) {
+    throw 'signing needs a release build with a publisher: pass -ReleaseVersion and -Publisher with -Sign'
 }
 if ($identity.Release) {
     # The installer wraps the binaries built by scripts/build-windows.ps1. A
@@ -131,7 +131,8 @@ try {
     "$hash  $([System.IO.Path]::GetFileName($installerPath))" | Set-Content -LiteralPath "$installerPath.sha256" -Encoding ascii
     $summary = "created Windows per-user installer for $Arch (version $version, file version $($release.FileVersion))"
     if ($identity.Release) {
-        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), publisher $($identity.Publisher)"
+        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed)"
+        if ($identity.Publisher) { $summary = "$summary, publisher $($identity.Publisher)" }
     }
     if ($Sign) { $summary = "$summary, signed" }
     Write-Host $summary

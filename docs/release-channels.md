@@ -53,56 +53,60 @@ A released Windows binary also carries three linker-injected values from
 | `Value` | the full release version |
 | `BuildChannel` | the channel the build follows |
 | `DistributionFeed` | the feed root |
-| `DistributionPublisher` | the Authenticode publisher an update installer must be signed by |
+| `DistributionPublisher` | for a signed release, the Authenticode publisher an update installer must be signed by; empty for an unsigned release |
 
-`scripts/build-windows.ps1` refuses a release build that does not name a
-channel and a publisher (`-Publisher`, the subject CN of the code-signing
-certificate), and verifies after linking that the binary really carries the
-identity (the linker silently ignores `-X` for a symbol it cannot find). A local
+`scripts/build-windows.ps1` refuses a release build that does not resolve a
+channel, takes the publisher from `-Publisher` (the subject CN of the
+code-signing certificate) when the release is signed, and verifies after
+linking that the binary really carries the identity (the linker silently ignores `-X` for a symbol it cannot find). A local
 build passes no identity at all and stays non-updatable on purpose.
 
 ## Update trust
 
-An installation trusts an update because the installer is Authenticode-signed
-by the dsh-work publisher, and for no other reason. Before the installer runs,
-`internal/selfupdate` requires:
+dsh-work is distributed through GitHub without a code-signing certificate. An
+unsigned release trusts an update because it came from the feed compiled into
+the build, over HTTPS, from the project's GitHub Pages site and GitHub Releases.
+Before the installer runs, `internal/selfupdate` requires:
 
 - the downloaded bytes match the feed's SHA-512 digest and size, so a truncated
-  or corrupted download is refused before anything else is read;
-- the installer's embedded signature chains to a root Windows trusts
-  (`WinVerifyTrust`, revocation from cache only, so an offline machine cannot
-  hang the check);
-- the signer certificate's simple display name (normally its subject CN) equals
-  `DistributionPublisher` exactly, so an installer another organisation signed
-  with its own trusted certificate is refused;
-- the version strings inside the signed installer name the release the feed
-  advertised, so a feed cannot relabel an older signed installer as a newer
-  release.
+  or corrupted download is refused;
+- the version strings inside the installer name the release the feed
+  advertised, so a feed cannot relabel an older installer as a newer release;
+- when the build names a publisher (`DistributionPublisher`), the installer's
+  embedded Authenticode signature chains to a root Windows trusts
+  (`WinVerifyTrust`, revocation from cache only) and its signer's simple
+  display name (normally the subject CN) equals that publisher exactly.
 
-A released build with no publisher compiled in keeps updates unavailable. A
-development build skips the signature and publisher checks so a locally built,
-unsigned installer can exercise the handoff from a local feed.
+The publisher check switches on by configuration alone: once
+`WINDOWS_SIGNING_CERTIFICATE` and `WINDOWS_PUBLISHER` are set, the next release
+is signed and compiled with the publisher, and every installation of it then
+refuses unsigned updates and updates from any other signer. Nothing at runtime
+can turn that off. A development build skips the signature check so a locally
+built installer can exercise the handoff from a local feed.
 
-The same certificate is what removes the "unknown publisher" warning when a user
-runs a downloaded installer for the first time, so one credential serves both
-purposes. A new certificate can still show a SmartScreen reputation prompt until
-enough installs have been seen; signing does not skip that, and an EV
-certificate no longer does either.
+What this costs: an unsigned release can be updated by anyone who can push to
+the repository's Releases and `gh-pages` branch, so the GitHub account is the
+trust root. That is the same account that serves the installer to new users, so
+the update path adds no weaker link. A first install from the browser shows
+SmartScreen's "unknown publisher" prompt; updates do not, because the
+application downloads the installer itself and installs it per user without
+elevation.
 
-Rejected: a separate Ed25519 update-signing key over the manifest (the Wails
-updater's own scheme). It added a second key to generate, store, rotate and
-inject into every build, while the installer must carry an Authenticode
-signature anyway; the extra key only matters if the code-signing certificate
-itself is compromised, and an attacker holding that certificate can already ship
-a trusted installer to new users. Also rejected: trusting any valid Authenticode
-signature without the publisher check, because every signed installer on the
-internet would pass.
+Rejected: buying a code-signing certificate now, because the only gain is the
+first-install prompt and the project has no distribution need that requires it;
+free signing for open-source projects (SignPath Foundation) remains an option.
+Also rejected: a separate Ed25519 update-signing key over the manifest (the
+Wails updater's scheme), which would keep the GitHub account from being enough
+to push an update but adds a key to create, store and rotate that the project
+decided not to operate. Trusting any valid Authenticode signature without the
+publisher check is rejected for signed releases, because every signed
+installer on the internet would pass.
 
-Revisit when: the code-signing certificate is renewed under a different subject
-name (the next release must be built with the new `-Publisher`, and installations
-on the old name can only move to it through a release signed with the old
-certificate); a platform other than Windows gets an updater; or the feed starts
-serving payloads that are not Authenticode-signed installers.
+Revisit when: the project gets a code-signing certificate (configure it, no code
+change); the GitHub account or repository is shared with people who should not
+be able to ship updates; a platform other than Windows gets an updater; or the
+certificate is renewed under a different subject name (installations on the old
+name can only move to it through a release signed with the old certificate).
 
 ## Feeds
 
@@ -197,13 +201,12 @@ Every run goes through the same stages in the same order:
    what this run may publish. The decision is reported in the job summary
    either way.
 2. **build** (`windows-latest`) — sync the identity into the build metadata,
-   build the GUI and CLI binaries with the release identity linked in and sign
-   them, build the installer with the pinned NSIS and sign it, check all three
-   files are signed by the release publisher, verify the installer bytes
-   against the sidecar, verify the installer's own
-   `ProductVersion`/`FileVersion`, then upload the candidate package as a CI
-   artifact. Without the certificate the same steps run unsigned and the
-   package is only kept for diagnosis.
+   build the GUI and CLI binaries with the release identity linked in, build
+   the installer with the pinned NSIS, verify the installer bytes against the
+   sidecar, verify the installer's own `ProductVersion`/`FileVersion`, then
+   upload the candidate package as a CI artifact. When signing is configured
+   the binaries and the installer are signed and all three are checked against
+   the publisher.
 3. **publish** (`ubuntu-latest`, `contents: write`) — only when the plan allows
    publication. Re-verify the downloaded bytes, inspect the published/draft
    state of the version, create the GitHub Release, re-download the asset and
@@ -215,7 +218,7 @@ Every run goes through the same stages in the same order:
    published installer over HTTPS, check the channel, the digest against the
    bytes, and report the state of the in-place update check.
 
-Signing happens inside `scripts/build-windows.ps1 -Sign` (both binaries) and
+Signing, when configured, happens inside `scripts/build-windows.ps1 -Sign` (both binaries) and
 `scripts/package-windows.ps1 -Sign` (the installer, before its checksum is
 written), through `scripts/windows-signing.ps1`. The packager refuses to wrap
 binaries that are not signed by the publisher. The NSIS uninstaller inside the
@@ -273,7 +276,11 @@ retention is a report only: the pipeline never deletes a release, and no
 retention job exists yet, so old nightly releases accumulate until a retention
 policy is decided.
 
-## Required secrets and variables
+## Optional signing secrets and variables
+
+No secret is required to publish. These four turn on signing; the certificate
+and the publisher must be set together, and a run with only one of them
+refuses to publish.
 
 | Name | Kind | Used by |
 | --- | --- | --- |
@@ -306,7 +313,8 @@ test certificate has to be trusted there first.
 A run publishes nothing unless every prerequisite is present, and the reason is
 reported rather than guessed. Publication is blocked when:
 
-- the code-signing certificate or the publisher name is not configured;
+- only one of the code-signing certificate and the publisher name is
+  configured;
 - `scripts/build-windows.ps1` cannot embed the channel, the feed root and the
   publisher, or cannot sign, because a package built without them can never
   update;
@@ -315,9 +323,7 @@ reported rather than guessed. Publication is blocked when:
 
 In every one of those cases the run still builds, verifies and uploads the
 candidate package as a CI artifact for diagnosis, and stops before any release
-or feed is touched. Without a publisher the diagnostic build names
-`dsh-work unsigned diagnostic build`, which no certificate carries, so it can
-never update. An unsigned package is never promoted to a feed.
+or feed is touched.
 
 An already published release is never rewritten. A rerun inspects the version's
 published and draft state: a published release fails the run, and only a draft
@@ -332,7 +338,7 @@ rather than bugs in the pipeline:
 | Prerequisite | State |
 | --- | --- |
 | GitHub Pages site | **not enabled** (`has_pages: false`, no `gh-pages` branch) |
-| code-signing certificate and publisher | **not configured** (`gh secret list` and `gh variable list` are empty) |
+| code-signing certificate and publisher | not configured; releases are published unsigned |
 | release tags | none exist |
 | GitHub Releases | none exist |
 
@@ -344,7 +350,7 @@ scripts — the preflight invocations, the version shapes, and the promotion
 decision (see *Verification*). The Windows build, the installer packaging, the
 GitHub Release creation, the Pages publication and the in-place update check
 cannot be exercised on this machine and remain unproven until they run on a
-runner with the certificate and a Pages site.
+runner with a Pages site.
 
 ## Verification
 
@@ -382,7 +388,8 @@ the feed can be repaired by hand, with the same rules:
 1. download the published `dsh-work-<version>-windows-amd64-manifest.json`
    release asset;
 2. `wails3 updater verify -manifest <manifest> -dir <dir>` with the installer
-   next to it, and check the installer's signer is the publisher
+   next to it, and, for a signed release, check the installer's signer is the
+   publisher
    (`. scripts/windows-signing.ps1; Assert-AuthenticodePublisher -Path <installer> -Publisher <publisher>`);
 3. run `bash .github/workflows/promote-feed.sh <manifest> <current feed> <version> <channel> <installer>`
    and act on its decision: `promote` replaces the feed, `idempotent` changes
@@ -398,7 +405,7 @@ rejects.
 - macOS and Linux release legs are out of scope. Only the Windows installer is
   published, and only `amd64` is built.
 - The N-1 → N in-place update is reported, not performed: the pipeline proves
-  the feed, the publisher signature and the published bytes, and a machine that already
+  the feed and the published bytes, and a machine that already
   runs the previous release performs the actual update.
 - Nightly retention is not implemented; nothing deletes old nightlies.
 - The feed site is served by GitHub Pages from the `gh-pages` branch; the

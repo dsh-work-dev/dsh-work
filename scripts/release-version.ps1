@@ -13,8 +13,9 @@
 # windows/info.json receives the X.Y.Z.0 numeric mapping from sync-version.mjs.
 #
 # The same file also resolves the release identity a released binary carries:
-# the channel that produced it, the update feed root it follows and the
-# Authenticode publisher an update installer must be signed by. Those are
+# the channel that produced it, the update feed root it follows and, for a
+# signed release, the Authenticode publisher an update installer must be
+# signed by. Those are
 # compile-time values, so they are validated here, before any build or
 # packaging work starts.
 
@@ -93,8 +94,8 @@ function Resolve-ReleaseVersion {
 # --- release identity -------------------------------------------------------
 #
 # A released binary carries the channel that produced it, the update feed root
-# it follows and the Authenticode publisher it trusts. The scripts substitute
-# those three through -ldflags, and they are validated here first so that a
+# it follows and, when the release is signed, the Authenticode publisher it
+# trusts. The scripts substitute those through -ldflags, and they are validated here first so that a
 # malformed or accidental identity never reaches an artifact.
 
 $script:ReleaseChannels = @('stable', 'beta', 'nightly')
@@ -259,8 +260,10 @@ function Test-BinariesCarryIdentity {
 function Resolve-ReleaseIdentity {
     # Resolves the identity a released binary carries.
     #
-    # A release build (-ReleaseVersion) must also name the publisher its update
-    # installers are signed by through -Publisher. A local build passes no identity parameter at all: it gets
+    # A release build (-ReleaseVersion) may name the publisher its update
+    # installers are signed by through -Publisher; without one the release is
+    # distributed unsigned and its updates are trusted by their feed. A local
+    # build passes no identity parameter at all: it gets
     # no identity, and a local build that passes one by accident is refused
     # instead of silently producing a binary that looks like a release.
     #
@@ -292,10 +295,6 @@ function Resolve-ReleaseIdentity {
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($Publisher)) {
-        throw "release $ReleaseVersion must name its installer publisher: pass -Publisher <subject CN of the code-signing certificate>"
-    }
-
     $expectedChannel = 'stable'
     if ($Prerelease -like 'beta.*') { $expectedChannel = 'beta' }
     elseif ($Prerelease -like 'nightly.*') { $expectedChannel = 'nightly' }
@@ -321,7 +320,10 @@ function Resolve-ReleaseIdentity {
         throw "feed root '$resolvedFeed' must not carry a query string or a fragment"
     }
 
-    $resolvedPublisher = Resolve-Publisher -Publisher $Publisher
+    $resolvedPublisher = ''
+    if (-not [string]::IsNullOrWhiteSpace($Publisher)) {
+        $resolvedPublisher = Resolve-Publisher -Publisher $Publisher
+    }
 
     return [pscustomobject]@{
         Release   = $true

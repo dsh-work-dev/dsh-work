@@ -6,12 +6,13 @@
 // (dsh-work.exe and dsh-work-cli.exe) through the existing maintenance
 // boundary and installer, so GUI and CLI can never drift apart.
 //
-// Trust comes from the installer's Authenticode signature, which must chain to
-// a trusted root and name the publisher compiled into this build. The feed only
-// tells the client where the bytes are: its SHA-512 digest is checked so a
-// truncated or corrupted download is refused before the signature is read, and
-// the version identity embedded in the signed payload must match the release
-// the feed advertised before any installer is started. The upstream Wails
+// A build that names a publisher trusts an installer by its Authenticode
+// signature, which must chain to a trusted root and name that publisher. A
+// build without one (released unsigned through GitHub) trusts the HTTPS feed
+// compiled into it. Either way the feed's SHA-512 digest is checked so a
+// truncated or corrupted download is refused, and the version identity embedded
+// in the payload must match the release the feed advertised before any
+// installer is started. The upstream Wails
 // verifier accepts a release with no digest at all, so the digest requirement
 // is enforced here.
 package selfupdate

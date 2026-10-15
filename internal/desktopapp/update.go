@@ -547,13 +547,12 @@ func (r *updateRunner) Start() {
 
 // newUpdateRunner wires the release feed this installation follows.
 //
-// The feed root and the installer publisher are compiled into a released build,
-// so an installed copy can only be updated from its own feed and only with an
-// installer Authenticode-signed by that publisher. A development build may
-// point at another feed through the environment, but only when it has no
-// compiled-in identity at all, and it installs unsigned local packages. A
-// released build with no feed or no publisher stays unconfigured instead of
-// accepting installers it cannot attribute.
+// The feed root, and the installer publisher when there is one, are compiled
+// into a released build, so an installed copy can only be updated from its own
+// feed, and only with an installer Authenticode-signed by that publisher once a
+// publisher is named. A development build may point at another feed through the
+// environment, but only when it has no compiled-in identity at all. A build
+// with no feed stays unconfigured.
 func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI func() error, publish func(daemon.UpdateSnapshot)) *updateRunner {
 	channel := resolveUpdateChannel(selected)
 	runner := &updateRunner{
@@ -571,10 +570,6 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 	feedRoot := resolveUpdateFeed()
 	if feedRoot == "" {
 		log.Printf("no update feed is configured for this build; updates stay unavailable")
-		return runner
-	}
-	if !version.IsDevelopment() && version.Publisher() == "" {
-		log.Printf("no installer publisher is configured for this build; updates stay unavailable")
 		return runner
 	}
 	staging, err := selfupdate.NewStaging(stagingBase)

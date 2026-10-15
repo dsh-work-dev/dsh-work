@@ -70,9 +70,11 @@ var buildPublisher = version.Publisher
 // Options controls the checks a caller insists on.
 type Options struct {
 	// RequireOSSignature insists that the payload carries a trusted Windows
-	// signature from Publisher. A released build always insists on it; only a
-	// development build may skip it, because it has no code-signing identity
-	// and its feeds are local test material.
+	// signature from Publisher. A released build that names a publisher always
+	// insists on it. A released build without a publisher is distributed
+	// unsigned and trusts the payload by its compiled-in HTTPS feed, the feed
+	// digest and the payload's embedded version; a development build installs
+	// local test packages.
 	RequireOSSignature bool
 	// Publisher is the name the Authenticode signer certificate must carry
 	// (its simple display name, normally the subject CN).
@@ -80,13 +82,15 @@ type Options struct {
 }
 
 // ProductionOptions returns the checks a released build must apply at the
-// minimum, whatever the caller asked for. A development build is allowed to
-// skip the operating-system signature check so the installer handoff can be
-// exercised locally with self-built packages; a released build cannot skip it,
-// because the version and the publisher are only ever substituted by the
-// release pipeline.
+// minimum, whatever the caller asked for. The signature check follows the
+// compiled-in publisher: once the release pipeline names one, every update must
+// be signed by it, and nothing at runtime can turn that off.
 func ProductionOptions() Options {
-	return Options{RequireOSSignature: !isDevelopmentBuild(), Publisher: buildPublisher()}
+	publisher := buildPublisher()
+	return Options{
+		RequireOSSignature: !isDevelopmentBuild() && strings.TrimSpace(publisher) != "",
+		Publisher:          publisher,
+	}
 }
 
 // isDevelopmentBuild reports whether this binary was built by the release
@@ -100,14 +104,14 @@ func isDevelopmentBuild() bool {
 //
 // Every check runs before the caller is allowed to stop the UI, the daemon or
 // the Worker: the feed identity, the payload digest, the payload's own embedded
-// release version, the target machine architecture and the payload's
-// Authenticode publisher.
+// release version, the target machine architecture and, when the build names a
+// publisher, the payload's Authenticode publisher.
 func Prepare(payloadPath string, feed *FeedRelease, options Options) (*Installer, error) {
 	if feed == nil {
 		return nil, fmt.Errorf("%w: no release", ErrUnverifiableRelease)
 	}
-	if !isDevelopmentBuild() && !options.RequireOSSignature {
-		return nil, fmt.Errorf("%w: a released build must require a signature on the installer", ErrUnverifiedPayload)
+	if !isDevelopmentBuild() && strings.TrimSpace(buildPublisher()) != "" && !options.RequireOSSignature {
+		return nil, fmt.Errorf("%w: a build with a publisher must require a signature on the installer", ErrUnverifiedPayload)
 	}
 	if options.RequireOSSignature && strings.TrimSpace(options.Publisher) == "" {
 		return nil, fmt.Errorf("%w: no installer publisher is configured for this build", ErrUnverifiedPayload)

@@ -14,13 +14,14 @@
 #
 # Publication is fail-closed. One release identity is computed by the
 # preflight (`scripts/release-version.mjs`) and every later step consumes that
-# one value. A channel feed is published only after the binaries and the
-# installer were built from that identity, Authenticode-signed by the release
-# publisher, checked against that publisher, and uploaded. With no Pages site,
-# no code-signing certificate, no publisher name, or a build script that cannot
-# embed the release identity, this pipeline builds unsigned packages and keeps
-# them as CI artifacts for diagnosis, and refuses to publish instead of
-# promoting an unsigned package to a feed.
+# one value. A channel feed is published only after the installer was built
+# from that identity, its digest was checked against the uploaded bytes, and,
+# when a code-signing certificate and publisher are configured, the binaries
+# and the installer were signed and checked against that publisher. Without a
+# certificate the release is published unsigned. With no Pages site, half of
+# the signing configuration, or a build script that cannot embed the release
+# identity, this pipeline builds and keeps CI artifacts for diagnosis and
+# refuses to publish.
 #
 # See docs/release-channels.md for the channel, feed and promotion contract.
 
@@ -188,16 +189,22 @@ jobs:
           fi
 
           missing=()
-          can_sign=true
-          if [ "${HAS_CERTIFICATE:-false}" != "true" ]; then missing+=("WINDOWS_SIGNING_CERTIFICATE"); can_sign=false; fi
+          # Signing is optional, but all or nothing: a build that compiles a
+          # publisher in refuses every later update that publisher did not
+          # sign, so a publisher without a certificate, or a certificate
+          # without a publisher, blocks publication instead of shipping a
+          # release that cannot be updated or is signed by an unnamed key.
           publisher=$(printf '%s' "${PUBLISHER:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-          if [ -z "$publisher" ]; then
+          can_sign=false
+          if [ "${HAS_CERTIFICATE:-false}" = "true" ] && [ -n "$publisher" ]; then
+            can_sign=true
+          elif [ "${HAS_CERTIFICATE:-false}" = "true" ]; then
             missing+=("WINDOWS_PUBLISHER")
-            can_sign=false
-            # A release build must name a publisher, so a diagnostic build
-            # names one that no certificate carries: it can never be signed,
-            # published or updated, and is only kept as a CI artifact.
-            publisher="dsh-work unsigned diagnostic build"
+          elif [ -n "$publisher" ]; then
+            missing+=("WINDOWS_SIGNING_CERTIFICATE")
+          fi
+          if [ "$can_sign" != "true" ]; then
+            publisher=""
           fi
 
           # The feed root is a GitHub Pages site. Publishing a feed that Pages
@@ -207,10 +214,10 @@ jobs:
             missing+=("github-pages")
           fi
 
-          # A released build embeds the channel, the feed root and the
-          # installer publisher through -ldflags and signs its binaries. A
-          # build script that cannot do that produces a package that no
-          # installation can update, so no feed may be published from it.
+          # A released build embeds the channel, the feed root and, when it is
+          # signed, the installer publisher through -ldflags. A build script
+          # that cannot do that produces a package that no installation can
+          # update, so no feed may be published from it.
           missing_script=()
           script_params=$(sed -n '1,40p' scripts/build-windows.ps1)
           for parameter in Channel FeedRoot Publisher Sign; do
@@ -247,6 +254,7 @@ jobs:
             echo "- version: $(node -e "process.stdout.write(require('./release-identity.json').version)")"
             echo "- source commit: \`${{ inputs.source_sha }}\`"
             echo "- publishable: $publishable"
+            echo "- signed: $can_sign"
             if [ -n "$reason" ]; then
               echo "- blocked because: $reason"
             fi
@@ -336,6 +344,7 @@ jobs:
           WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: |
           $sign = $env:CAN_SIGN -eq 'true'
+          # An unsigned release passes an empty publisher, which compiles none.
           ./scripts/build-windows.ps1 `
             -ReleaseVersion "$env:RELEASE_VERSION" `
             -Arch amd64 `

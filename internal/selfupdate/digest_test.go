@@ -117,23 +117,39 @@ func TestStagingDiscardsUnverifiablePayload(t *testing.T) {
 	}
 }
 
-// TestPrepareRefusesReleasedBuildWithoutPublisher proves a released build that
-// carries no publisher can never install anything, rather than accepting any
-// trusted signature.
-func TestPrepareRefusesReleasedBuildWithoutPublisher(t *testing.T) {
+// TestProductionOptionsFollowThePublisher proves the signature requirement is
+// decided by the compiled-in publisher: an unsigned release skips it, a release
+// that names a publisher cannot be talked out of it, and a development build
+// never requires it.
+func TestProductionOptionsFollowThePublisher(t *testing.T) {
 	previousVersion, previousPublisher := buildVersion, buildPublisher
-	buildVersion = func() string { return "0.2.0-beta.1" }
-	buildPublisher = func() string { return "" }
 	t.Cleanup(func() { buildVersion, buildPublisher = previousVersion, previousPublisher })
 
-	payload := []byte("an installer")
-	_, err := Prepare(writePayload(t, payload), digestFeed(t, payload, nil), ProductionOptions())
-	if !errors.Is(err, ErrUnverifiedPayload) {
-		t.Fatalf("Prepare(no publisher) = %v, want %v", err, ErrUnverifiedPayload)
+	cases := []struct {
+		name, version, publisher string
+		require                  bool
+	}{
+		{name: "unsigned release", version: "0.2.0-beta.1", publisher: "", require: false},
+		{name: "signed release", version: "0.2.0-beta.1", publisher: "Example Software Ltd", require: true},
+		{name: "development build", version: "development", publisher: "Example Software Ltd", require: false},
 	}
-	_, err = Prepare(writePayload(t, payload), digestFeed(t, payload, nil), Options{Publisher: "dsh-work"})
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			buildVersion = func() string { return testCase.version }
+			buildPublisher = func() string { return testCase.publisher }
+			options := ProductionOptions()
+			if options.RequireOSSignature != testCase.require || options.Publisher != testCase.publisher {
+				t.Fatalf("ProductionOptions = %+v, want RequireOSSignature=%v Publisher=%q", options, testCase.require, testCase.publisher)
+			}
+		})
+	}
+
+	buildVersion = func() string { return "0.2.0-beta.1" }
+	buildPublisher = func() string { return "Example Software Ltd" }
+	payload := []byte("an installer")
+	_, err := Prepare(writePayload(t, payload), digestFeed(t, payload, nil), Options{Publisher: "Example Software Ltd"})
 	if !errors.Is(err, ErrUnverifiedPayload) {
-		t.Fatalf("Prepare(signature not required) = %v, want %v", err, ErrUnverifiedPayload)
+		t.Fatalf("Prepare(signature not required by a signed release) = %v, want %v", err, ErrUnverifiedPayload)
 	}
 }
 

@@ -13,8 +13,9 @@ param(
     [string]$Channel,
     # Update feed root this release follows.
     [string]$FeedRoot,
-    # Subject CN of the code-signing certificate. An update installer must be
-    # signed by this publisher. Required for a release build.
+    # Subject CN of the code-signing certificate. When it is passed, every
+    # update installer must be signed by this publisher; without it the
+    # release is distributed unsigned.
     [string]$Publisher,
     # Authenticode-sign both binaries as -Publisher. The certificate is read
     # from the environment (scripts/windows-signing.ps1).
@@ -47,16 +48,18 @@ if ($infoProductVersion -ne $version -or $infoFileVersion -ne $release.FileVersi
 }
 
 $identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -Publisher $Publisher
-if ($Sign -and -not $identity.Release) {
-    throw 'signing needs a release build: pass -ReleaseVersion and -Publisher with -Sign'
+if ($Sign -and -not $identity.Publisher) {
+    throw 'signing needs a release build with a publisher: pass -ReleaseVersion and -Publisher with -Sign'
 }
 $identityFlags = ''
 if ($identity.Release) {
+    $identityFlags = " -X github.com/local/dsh-work/internal/version.BuildChannel=$($identity.Channel)" +
+    " -X github.com/local/dsh-work/internal/version.DistributionFeed=$($identity.Feed)"
+}
+if ($identity.Publisher) {
     # The publisher may contain spaces, so its -X is quoted; Resolve-Publisher
     # has already refused quotes inside it.
-    $identityFlags = " -X github.com/local/dsh-work/internal/version.BuildChannel=$($identity.Channel)" +
-    " -X github.com/local/dsh-work/internal/version.DistributionFeed=$($identity.Feed)" +
-    " '-X=github.com/local/dsh-work/internal/version.DistributionPublisher=$($identity.Publisher)'"
+    $identityFlags += " '-X=github.com/local/dsh-work/internal/version.DistributionPublisher=$($identity.Publisher)'"
 }
 
 $previousGOOS = $env:GOOS
@@ -96,7 +99,8 @@ try {
 
     $summary = "version $version, file version $($release.FileVersion)"
     if ($identity.Release) {
-        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), publisher $($identity.Publisher)"
+        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed)"
+        if ($identity.Publisher) { $summary = "$summary, publisher $($identity.Publisher)" }
     }
     if ($Sign) { $summary = "$summary, signed" }
     Write-Host "built Windows $Arch binaries at $AppOutput and $CliOutput ($summary)"

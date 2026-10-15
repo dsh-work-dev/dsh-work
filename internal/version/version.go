@@ -16,7 +16,8 @@ var BuildChannel = ""
 
 // DistributionFeed is the update feed root this build subscribes to, and
 // DistributionPublisher is the Authenticode publisher name an update installer
-// must be signed by. Both are substituted by the release pipeline.
+// must be signed by. Both are substituted by the release pipeline; an empty
+// publisher means the release is distributed unsigned.
 //
 // They are compile-time values on purpose. A released build must not be
 // redirectable to another feed or another publisher by an environment

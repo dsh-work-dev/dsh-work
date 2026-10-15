@@ -86,6 +86,11 @@ try {
     $wideIdentity = Resolve-ReleaseIdentity -ReleaseVersion '0.1.0' -Prerelease '' -Publisher $widePublisher
     Assert-Equal $widePublisher $wideIdentity.Publisher 'a publisher outside ASCII is accepted'
 
+    $unsigned = Resolve-ReleaseIdentity -ReleaseVersion $nightly -Prerelease $nightlyPrerelease -Channel 'nightly'
+    Assert-True $unsigned.Release 'a release without a publisher is an unsigned release'
+    Assert-Equal '' $unsigned.Publisher 'an unsigned release carries no publisher'
+    Assert-Equal 'nightly' $unsigned.Channel 'an unsigned release still carries its channel'
+
     $local = Resolve-ReleaseIdentity -ReleaseVersion '' -Prerelease ''
     Assert-True (-not $local.Release) 'a local build has no release identity'
     Assert-Equal '' $local.Channel 'a local build carries no channel'
@@ -96,8 +101,6 @@ try {
     Assert-Refused 'needs an explicit release build' { Resolve-ReleaseIdentity -ReleaseVersion '' -Prerelease '' -Publisher $publisher } 'a local build must not carry a publisher'
     Assert-Refused 'needs an explicit release build' { Resolve-ReleaseIdentity -ReleaseVersion '' -Prerelease '' -Channel 'beta' } 'a local build must not carry a release channel'
     Assert-Refused 'needs an explicit release build' { Resolve-ReleaseIdentity -ReleaseVersion '' -Prerelease '' -FeedRoot 'https://example.test/updates' } 'a local build must not carry a release feed'
-    Assert-Refused 'must name its installer publisher' { Resolve-ReleaseIdentity -ReleaseVersion $nightly -Prerelease $nightlyPrerelease } 'a release without a publisher is refused'
-    Assert-Refused 'must name its installer publisher' { Resolve-ReleaseIdentity -ReleaseVersion $nightly -Prerelease $nightlyPrerelease -Channel 'nightly' } 'a release with only a channel is still refused'
     Assert-Refused "channel 'stable' does not match release version" { Resolve-ReleaseIdentity -ReleaseVersion $nightly -Prerelease $nightlyPrerelease -Channel 'stable' -Publisher $publisher } 'a nightly release must not be built for the stable channel'
     Assert-Refused "channel 'stable' does not match release version" { Resolve-ReleaseIdentity -ReleaseVersion $beta -Prerelease 'beta.2' -Channel 'stable' -Publisher $publisher } 'a beta release must not be built for the stable channel'
     Assert-Refused "channel 'beta' does not match release version" { Resolve-ReleaseIdentity -ReleaseVersion $nightly -Prerelease $nightlyPrerelease -Channel 'Beta' -Publisher $publisher } 'a channel that agrees only in case still has to match the version stage'
@@ -151,6 +154,9 @@ try {
 
     $missingCliVersion = Test-BinariesCarryIdentity -AppPath $fullFile -CliPath (Write-Text 'cli-empty.bin' 'nothing here') -Version $nightly -Channel 'beta' -Feed $script:DefaultFeedRoot -Publisher $publisher
     Assert-True ($missingCliVersion -like 'bin/dsh-work-cli.exe does not carry the release identity: missing version*') ("a CLI without its version is reported (got '$missingCliVersion')")
+
+    $unsignedFile = Write-Text 'unsigned.bin' ('cli ' + $nightly + ' channel=beta feed=' + $script:DefaultFeedRoot)
+    Assert-Equal '' (Test-BinaryCarriesIdentity -Path $unsignedFile -Version $nightly -Channel 'beta' -Feed $script:DefaultFeedRoot -Publisher '') 'an unsigned release binary is not asked for a publisher'
 
     $wideFile = Join-Path $work 'wide.bin'
     [System.IO.File]::WriteAllBytes($wideFile, [System.Text.Encoding]::UTF8.GetBytes('cli ' + $nightly + ' channel=beta feed=' + $script:DefaultFeedRoot + ' publisher=' + $widePublisher))
