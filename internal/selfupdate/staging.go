@@ -11,7 +11,7 @@ import (
 
 var (
 	// ErrStagedPayloadChanged reports a staged installer whose bytes no longer
-	// authenticate. The copy is discarded rather than run.
+	// verify. The copy is discarded rather than run.
 	ErrStagedPayloadChanged = errors.New("staged installer changed after verification")
 	// ErrStagingUnavailable reports a staging directory this process cannot use.
 	ErrStagingUnavailable = errors.New("update staging directory is unavailable")
@@ -36,7 +36,7 @@ const (
 // The upstream updater stages its artifact in a temporary directory it deletes
 // on the next download, so its copy cannot be the durable, verified copy the
 // install step re-checks. The verified bytes are therefore copied here, and
-// every install re-authenticates the bytes on disk before any process is
+// every install re-verifies the bytes on disk before any process is
 // stopped.
 type Staging struct {
 	dir string
@@ -74,16 +74,18 @@ func (s *Staging) Dir() string {
 }
 
 // Stage verifies a downloaded payload and keeps a durable copy of exactly the
-// bytes that authenticated.
+// bytes that verified.
 //
-// The payload is authenticated before it is copied, the copy is authenticated
-// again after it is written, and the write only becomes visible under the final
-// name once both checks pass. A failure leaves no runnable payload behind.
-func (s *Staging) Stage(sourcePath string, feed *FeedRelease, publicKey []byte) (*Installer, error) {
+// The payload digest is checked before it is copied and again after the copy
+// is written, the write only becomes visible under the final name once both
+// checks pass, and the staged copy then passes the full installer checks,
+// including its Authenticode publisher. A failure leaves no runnable payload
+// behind.
+func (s *Staging) Stage(sourcePath string, feed *FeedRelease) (*Installer, error) {
 	if s == nil {
 		return nil, fmt.Errorf("%w: no staging directory", ErrUnverifiedPayload)
 	}
-	if err := ArmorFile(sourcePath, feed, publicKey); err != nil {
+	if err := VerifyDigestFile(sourcePath, feed); err != nil {
 		return nil, err
 	}
 	source, err := os.Open(sourcePath)
@@ -119,7 +121,7 @@ func (s *Staging) Stage(sourcePath string, feed *FeedRelease, publicKey []byte) 
 		os.Remove(temporary)
 		return nil, fmt.Errorf("%w: %v", ErrStagingUnavailable, err)
 	}
-	if err := ArmorFile(temporary, feed, publicKey); err != nil {
+	if err := VerifyDigestFile(temporary, feed); err != nil {
 		os.Remove(temporary)
 		return nil, err
 	}
@@ -128,14 +130,14 @@ func (s *Staging) Stage(sourcePath string, feed *FeedRelease, publicKey []byte) 
 		os.Remove(temporary)
 		return nil, fmt.Errorf("%w: %v", ErrStagingUnavailable, err)
 	}
-	return Prepare(final, feed, publicKey, ProductionOptions())
+	return Prepare(final, feed, ProductionOptions())
 }
 
-// Recheck re-authenticates the staged installer immediately before it is
+// Recheck re-verifies the staged installer immediately before it is
 // started. The bytes on disk are compared with the release the feed
 // advertised, so a payload that was replaced after it was staged is refused
 // while the old installation is still running.
-func (s *Staging) Recheck(installer *Installer, feed *FeedRelease, publicKey []byte) error {
+func (s *Staging) Recheck(installer *Installer, feed *FeedRelease) error {
 	if s == nil || installer == nil {
 		return fmt.Errorf("%w: no staged installer", ErrInstallerUnavailable)
 	}
@@ -150,10 +152,10 @@ func (s *Staging) Recheck(installer *Installer, feed *FeedRelease, publicKey []b
 	if actual != expected {
 		return fmt.Errorf("%w: %s is not the staged installer", ErrInstallerUnavailable, installer.Path)
 	}
-	if err := ArmorFile(actual, feed, publicKey); err != nil {
+	if err := VerifyDigestFile(actual, feed); err != nil {
 		return fmt.Errorf("%w: %v", ErrStagedPayloadChanged, err)
 	}
-	if _, err := Prepare(actual, feed, publicKey, ProductionOptions()); err != nil {
+	if _, err := Prepare(actual, feed, ProductionOptions()); err != nil {
 		return fmt.Errorf("%w: %v", ErrStagedPayloadChanged, err)
 	}
 	return nil

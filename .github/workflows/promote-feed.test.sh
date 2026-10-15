@@ -118,9 +118,7 @@ manifest() { # version channel artifact -> path (stdout)
       "filetype": "exe",
       "size": $(wc -c < "$file" | tr -d ' '),
       "digestAlgo": "sha512",
-      "digest": "$digest",
-      "signatureAlgo": "ed25519ph",
-      "signature": "c2lnbmF0dXJl"
+      "digest": "$digest"
     }
   ]
 }

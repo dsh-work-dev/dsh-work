@@ -33,3 +33,6 @@ jobs:
     with:
       channel: beta
       source_sha: ${{ github.sha }}
+    secrets:
+      WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}

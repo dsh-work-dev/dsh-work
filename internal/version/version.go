@@ -2,10 +2,7 @@
 // release pipeline substitutes into a build.
 package version
 
-import (
-	"encoding/base64"
-	"strings"
-)
+import "strings"
 
 // Value is replaced by the Windows release task through -ldflags. Development
 // builds keep the explicit fallback so the CLI remains useful without a
@@ -18,16 +15,16 @@ var Value = "development"
 var BuildChannel = ""
 
 // DistributionFeed is the update feed root this build subscribes to, and
-// DistributionPublicKey is the raw Ed25519 public key the build trusts. Both
-// are substituted by the release pipeline.
+// DistributionPublisher is the Authenticode publisher name an update installer
+// must be signed by. Both are substituted by the release pipeline.
 //
 // They are compile-time values on purpose. A released build must not be
-// redirectable to another feed or another trust root by an environment
-// variable, so the development overrides are resolved in the desktop updater
-// and are honoured only while Value is the development marker.
+// redirectable to another feed or another publisher by an environment
+// variable, so the development feed override is resolved in the desktop
+// updater and is honoured only while Value is the development marker.
 var (
 	DistributionFeed      = ""
-	DistributionPublicKey = ""
+	DistributionPublisher = ""
 )
 
 // ReleaseVersion reports the semantic version this executable was built as, or
@@ -56,26 +53,14 @@ func Feed() string {
 	return strings.TrimSpace(DistributionFeed)
 }
 
-// PublicKey returns the raw Ed25519 public key compiled into this build. The
-// pipeline substitutes it as base64 text, so it is decoded here; a build whose
-// key cannot be decoded has no usable trust root and reports none.
-func PublicKey() []byte {
-	encoded := strings.TrimSpace(DistributionPublicKey)
-	if encoded == "" {
-		return nil
-	}
-	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
-		return decoded
-	}
-	if decoded, err := base64.RawStdEncoding.DecodeString(encoded); err == nil {
-		return decoded
-	}
-	return nil
+// Publisher returns the Authenticode publisher name compiled into this build.
+func Publisher() string {
+	return strings.TrimSpace(DistributionPublisher)
 }
 
 // IsDevelopment reports whether this executable was produced by the release
 // pipeline. Only a development build may weaken a production check or accept
-// an override of the feed or the trust root.
+// an override of the feed.
 func IsDevelopment() bool {
 	return String() == "development"
 }

@@ -53,13 +53,56 @@ A released Windows binary also carries three linker-injected values from
 | `Value` | the full release version |
 | `BuildChannel` | the channel the build follows |
 | `DistributionFeed` | the feed root |
-| `DistributionPublicKey` | the base64 Ed25519 public key the build trusts |
+| `DistributionPublisher` | the Authenticode publisher an update installer must be signed by |
 
-`scripts/build-windows.ps1` refuses a release build that does not pin a channel
-and a valid 32-byte Ed25519 public key, and verifies after linking that the
-binary really carries the identity (the linker silently ignores `-X` for a
-symbol it cannot find). A local build passes no identity at all and stays
-non-updatable on purpose.
+`scripts/build-windows.ps1` refuses a release build that does not name a
+channel and a publisher (`-Publisher`, the subject CN of the code-signing
+certificate), and verifies after linking that the binary really carries the
+identity (the linker silently ignores `-X` for a symbol it cannot find). A local
+build passes no identity at all and stays non-updatable on purpose.
+
+## Update trust
+
+An installation trusts an update because the installer is Authenticode-signed
+by the dsh-work publisher, and for no other reason. Before the installer runs,
+`internal/selfupdate` requires:
+
+- the downloaded bytes match the feed's SHA-512 digest and size, so a truncated
+  or corrupted download is refused before anything else is read;
+- the installer's embedded signature chains to a root Windows trusts
+  (`WinVerifyTrust`, revocation from cache only, so an offline machine cannot
+  hang the check);
+- the signer certificate's simple display name (normally its subject CN) equals
+  `DistributionPublisher` exactly, so an installer another organisation signed
+  with its own trusted certificate is refused;
+- the version strings inside the signed installer name the release the feed
+  advertised, so a feed cannot relabel an older signed installer as a newer
+  release.
+
+A released build with no publisher compiled in keeps updates unavailable. A
+development build skips the signature and publisher checks so a locally built,
+unsigned installer can exercise the handoff from a local feed.
+
+The same certificate is what removes the "unknown publisher" warning when a user
+runs a downloaded installer for the first time, so one credential serves both
+purposes. A new certificate can still show a SmartScreen reputation prompt until
+enough installs have been seen; signing does not skip that, and an EV
+certificate no longer does either.
+
+Rejected: a separate Ed25519 update-signing key over the manifest (the Wails
+updater's own scheme). It added a second key to generate, store, rotate and
+inject into every build, while the installer must carry an Authenticode
+signature anyway; the extra key only matters if the code-signing certificate
+itself is compromised, and an attacker holding that certificate can already ship
+a trusted installer to new users. Also rejected: trusting any valid Authenticode
+signature without the publisher check, because every signed installer on the
+internet would pass.
+
+Revisit when: the code-signing certificate is renewed under a different subject
+name (the next release must be built with the new `-Publisher`, and installations
+on the old name can only move to it through a release signed with the old
+certificate); a platform other than Windows gets an updater; or the feed starts
+serving payloads that are not Authenticode-signed installers.
 
 ## Feeds
 
@@ -93,9 +136,7 @@ The document is a Wails update manifest, schema version 1:
       "filetype": "exe",
       "size": 12345678,
       "digestAlgo": "sha512",
-      "digest": "base64 sha-512 of the installer",
-      "signatureAlgo": "ed25519ph",
-      "signature": "base64 ed25519ph signature over that digest"
+      "digest": "base64 sha-512 of the signed installer"
     }
   ]
 }
@@ -106,10 +147,10 @@ Rules the pipeline enforces on that document before it can reach a feed:
 - `version` is the identity this run computed and `channel` is the channel the
   feed belongs to. An installation refuses a feed that advertises another
   channel.
-- Every artifact carries a `sha512` digest and an `ed25519ph` signature over
-  that digest. The signature is produced by `wails3 updater manifest -key` and
-  is re-verified against the compiled-in public key before publication, so an
-  unsigned or wrong-key manifest stops the run.
+- Every artifact carries the `sha512` digest of the signed installer, written by
+  `wails3 updater manifest` and re-checked against the uploaded bytes with
+  `wails3 updater verify` before publication. The manifest itself is not
+  signed; see *Update trust*.
 - The single `windows`/`amd64` artifact is the installer, `filename` and
   `filetype` are set explicitly, and `url` is the absolute GitHub Release asset
   URL. The URL is not cosmetic: the update provider resolves the artifact URL
@@ -141,8 +182,8 @@ wrong channel cannot publish: the version shape, the channel, and the ref the
 run may publish from are all checked against each other.
 
 Nothing in this pipeline runs on a pull request. `pc.yml` keeps running the
-frontend and Go suites for pull requests and never receives secrets, a signing
-key, or the right to publish.
+frontend and Go suites for pull requests and never receives secrets, the
+code-signing certificate, or the right to publish.
 
 `cancel-in-progress` is `false` everywhere. A cancelled run can already hold a
 draft release or the promotion lock, so releases queue instead of cancelling
@@ -156,25 +197,29 @@ Every run goes through the same stages in the same order:
    what this run may publish. The decision is reported in the job summary
    either way.
 2. **build** (`windows-latest`) — sync the identity into the build metadata,
-   build the GUI and CLI binaries with the release identity linked in, build
-   the installer with the pinned NSIS, verify the installer bytes against the
-   sidecar, verify the installer's own `ProductVersion`/`FileVersion`, then
-   upload the candidate package as a CI artifact.
+   build the GUI and CLI binaries with the release identity linked in and sign
+   them, build the installer with the pinned NSIS and sign it, check all three
+   files are signed by the release publisher, verify the installer bytes
+   against the sidecar, verify the installer's own
+   `ProductVersion`/`FileVersion`, then upload the candidate package as a CI
+   artifact. Without the certificate the same steps run unsigned and the
+   package is only kept for diagnosis.
 3. **publish** (`ubuntu-latest`, `contents: write`) — only when the plan allows
    publication. Re-verify the downloaded bytes, inspect the published/draft
    state of the version, create the GitHub Release, re-download the asset and
-   compare digests, build and sign the channel manifest with the Ed25519 key,
-   verify it against the public key, and upload the manifest as a release
-   asset.
+   compare digests, build the channel manifest, verify its digest against the
+   installer, and upload the manifest as a release asset.
 4. **promote** (`ubuntu-latest`, `contents: write`) — the single serialized
    section that writes the channel feed.
 5. **verify-feed** (`windows-latest`) — fetch the published feed and the
    published installer over HTTPS, check the channel, the digest against the
    bytes, and report the state of the in-place update check.
 
-The OS signing stage between build and package is where an Authenticode
-certificate would sign the binaries and the installer. No certificate exists
-for this project today, so no OS signing step is present; see *Blocked*.
+Signing happens inside `scripts/build-windows.ps1 -Sign` (both binaries) and
+`scripts/package-windows.ps1 -Sign` (the installer, before its checksum is
+written), through `scripts/windows-signing.ps1`. The packager refuses to wrap
+binaries that are not signed by the publisher. The NSIS uninstaller inside the
+installer is not signed separately.
 
 ## Feed promotion
 
@@ -230,49 +275,49 @@ policy is decided.
 
 ## Required secrets and variables
 
-The pipeline reads one key pair. It is configured per channel family, so a
-nightly can never sign with the stable key:
-
 | Name | Kind | Used by |
 | --- | --- | --- |
-| `RELEASE_UPDATER_KEY` | secret | stable and beta signing |
-| `RELEASE_UPDATER_PUBLIC_KEY` | secret or variable | stable and beta verification and build identity |
-| `NIGHTLY_UPDATER_KEY` | secret | nightly signing |
-| `NIGHTLY_UPDATER_PUBLIC_KEY` | secret or variable | nightly verification and build identity |
+| `WINDOWS_SIGNING_CERTIFICATE` | secret | base64 of the PFX holding the code-signing certificate and its private key |
+| `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` | secret | the PFX password |
+| `WINDOWS_PUBLISHER` | variable | the certificate's subject CN, compiled into every build and compared with each signature |
+| `WINDOWS_SIGNING_TIMESTAMP_URL` | variable, optional | RFC 3161 timestamp server; defaults to `http://timestamp.digicert.com` |
 
-The public key may be a `.pub` PEM file, or the base64 (padded or not) or hex
-text of the 32 raw key bytes. It is passed to the build as a file, never as a
-command line argument, so key material never appears in a process list. The
-private key is written to a runner-temporary file with mode `600`, used for one
-`wails3 updater manifest` call, and deleted in the same step.
+The channel workflows pass the two secrets to `release.yml` explicitly. The PFX
+is decoded into the runner's temporary directory, imported into the runner
+user's certificate store only while `signtool` runs, so the password never
+appears on a command line, and deleted at the end of the build job whatever its
+outcome. All channels share one certificate and one publisher.
 
-Create the pair once:
+Configure once, with the CN exactly as the certificate shows it:
 
 ```bash
-wails3 updater genkey -out release-updater.key
-gh secret set RELEASE_UPDATER_KEY < release-updater.key
-gh secret set RELEASE_UPDATER_PUBLIC_KEY < release-updater.key.pub
+base64 -w0 codesign.pfx | gh secret set WINDOWS_SIGNING_CERTIFICATE
+gh secret set WINDOWS_SIGNING_CERTIFICATE_PASSWORD
+gh variable set WINDOWS_PUBLISHER --body "<subject CN of the certificate>"
 ```
 
-Losing the private key means the published builds keep trusting a key nobody
-can sign with. There is no rotation procedure yet; rotating the key requires a
-release that carries the new public key.
+To sign locally, set `WINDOWS_SIGNING_CERTIFICATE_FILE` and
+`WINDOWS_SIGNING_CERTIFICATE_PASSWORD` and pass `-Publisher` and `-Sign` to both
+scripts. The signature must be valid on the signing machine, so a self-signed
+test certificate has to be trusted there first.
 
 ## Fail-closed behaviour
 
 A run publishes nothing unless every prerequisite is present, and the reason is
 reported rather than guessed. Publication is blocked when:
 
-- the updater private key or the public key is not configured for the channel;
+- the code-signing certificate or the publisher name is not configured;
 - `scripts/build-windows.ps1` cannot embed the channel, the feed root and the
-  public key, because a package built without them can never update;
+  publisher, or cannot sign, because a package built without them can never
+  update;
 - GitHub Pages is not enabled for the repository, because a feed that Pages
   does not serve is a release that updates nobody.
 
 In every one of those cases the run still builds, verifies and uploads the
 candidate package as a CI artifact for diagnosis, and stops before any release
-or feed is touched. An unsigned or unverifiable package is never promoted to a
-feed.
+or feed is touched. Without a publisher the diagnostic build names
+`dsh-work unsigned diagnostic build`, which no certificate carries, so it can
+never update. An unsigned package is never promoted to a feed.
 
 An already published release is never rewritten. A rerun inspects the version's
 published and draft state: a published release fails the run, and only a draft
@@ -287,10 +332,9 @@ rather than bugs in the pipeline:
 | Prerequisite | State |
 | --- | --- |
 | GitHub Pages site | **not enabled** (`has_pages: false`, no `gh-pages` branch) |
-| updater key pair | **not configured** (`gh secret list` and `gh variable list` are empty) |
+| code-signing certificate and publisher | **not configured** (`gh secret list` and `gh variable list` are empty) |
 | release tags | none exist |
 | GitHub Releases | none exist |
-| Authenticode certificate | none; no OS signing step exists |
 
 The pipeline's behaviour in this state is the intended one: it builds and keeps
 CI artifacts, and it refuses to publish or promote a feed.
@@ -300,7 +344,7 @@ scripts — the preflight invocations, the version shapes, and the promotion
 decision (see *Verification*). The Windows build, the installer packaging, the
 GitHub Release creation, the Pages publication and the in-place update check
 cannot be exercised on this machine and remain unproven until they run on a
-runner with the secrets and a Pages site.
+runner with the certificate and a Pages site.
 
 ## Verification
 
@@ -337,8 +381,9 @@ the feed can be repaired by hand, with the same rules:
 
 1. download the published `dsh-work-<version>-windows-amd64-manifest.json`
    release asset;
-2. `wails3 updater verify -manifest <manifest> -publickey <public key> -dir <dir>`
-   with the installer next to it;
+2. `wails3 updater verify -manifest <manifest> -dir <dir>` with the installer
+   next to it, and check the installer's signer is the publisher
+   (`. scripts/windows-signing.ps1; Assert-AuthenticodePublisher -Path <installer> -Publisher <publisher>`);
 3. run `bash .github/workflows/promote-feed.sh <manifest> <current feed> <version> <channel> <installer>`
    and act on its decision: `promote` replaces the feed, `idempotent` changes
    nothing, and a non-zero exit with a reason on stderr means the feed must not
@@ -353,7 +398,7 @@ rejects.
 - macOS and Linux release legs are out of scope. Only the Windows installer is
   published, and only `amd64` is built.
 - The N-1 → N in-place update is reported, not performed: the pipeline proves
-  the feed, the signature and the published bytes, and a machine that already
+  the feed, the publisher signature and the published bytes, and a machine that already
   runs the previous release performs the actual update.
 - Nightly retention is not implemented; nothing deletes old nightlies.
 - The feed site is served by GitHub Pages from the `gh-pages` branch; the

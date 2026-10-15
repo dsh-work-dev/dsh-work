@@ -55,8 +55,34 @@ func TestAuthenticodeTrustedAcceptsEmbeddedSignature(t *testing.T) {
 		if !trusted {
 			t.Errorf("authenticodeTrusted(%s) = false, want true for an embedded-signed binary", path)
 		}
-		if err := verifyAuthenticode(path); err != nil {
-			t.Errorf("verifyAuthenticode(%s) = %v, want nil", path, err)
+	}
+}
+
+// TestVerifyAuthenticodeRequiresThePinnedPublisher proves the signer name is
+// read from the signature Windows validated and that only the pinned publisher
+// is accepted: another organisation's trusted signature is refused.
+func TestVerifyAuthenticodeRequiresThePinnedPublisher(t *testing.T) {
+	candidates := embeddedSignedCandidates()
+	if len(candidates) == 0 {
+		t.Skip("no embedded-signed binary available on this machine")
+	}
+	for _, path := range candidates {
+		signer, err := authenticodeSigner(path)
+		if err != nil {
+			t.Fatalf("authenticodeSigner(%s): %v", path, err)
+		}
+		if signer == "" {
+			t.Fatalf("authenticodeSigner(%s) returned an empty name", path)
+		}
+		t.Logf("%s is signed by %q", path, signer)
+		if err := verifyAuthenticode(path, signer); err != nil {
+			t.Errorf("verifyAuthenticode(%s, %q) = %v, want nil", path, signer, err)
+		}
+		if err := verifyAuthenticode(path, signer+" Ltd"); err == nil {
+			t.Errorf("verifyAuthenticode(%s) accepted a signer other than the pinned publisher", path)
+		}
+		if err := verifyAuthenticode(path, ""); err == nil {
+			t.Errorf("verifyAuthenticode(%s) accepted a build with no pinned publisher", path)
 		}
 	}
 }
@@ -102,11 +128,14 @@ func TestAuthenticodeTrustedRejectsUnsignedBytes(t *testing.T) {
 	if trusted {
 		t.Error("authenticodeTrusted(unsigned) = true, want false")
 	}
-	if err := verifyAuthenticode(unsigned); err == nil {
+	if err := verifyAuthenticode(unsigned, "dsh-work"); err == nil {
 		t.Error("verifyAuthenticode accepted an unsigned file")
 	}
 	if trusted, err := authenticodeTrusted(filepath.Join(t.TempDir(), "missing.exe")); err == nil && trusted {
 		t.Error("authenticodeTrusted(missing) = true, want false")
+	}
+	if _, err := authenticodeSigner(unsigned); err == nil {
+		t.Error("authenticodeSigner(unsigned) returned a signer")
 	}
 }
 

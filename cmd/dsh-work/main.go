@@ -17,7 +17,6 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/platform"
-	"github.com/local/dsh-work/internal/selfupdate"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/version"
 )
@@ -478,8 +477,9 @@ func printUsage(stdout io.Writer) {
 
 // printVersion reports the release identity this executable carries, so an
 // operator can tell which channel and feed an installation follows, and which
-// trust root it verifies releases against, without opening the application. The
-// values are compiled in; a development build carries none of them.
+// publisher an update installer must be signed by, without opening the
+// application. The values are compiled in; a development build carries none of
+// them.
 func printVersion(stdout io.Writer) {
 	fmt.Fprintln(stdout, version.String())
 	if channel := version.Channel(); channel != "" {
@@ -488,7 +488,7 @@ func printVersion(stdout io.Writer) {
 	if feed := version.Feed(); feed != "" {
 		fmt.Fprintf(stdout, "feed: %s\n", feed)
 	}
-	if key := version.PublicKey(); len(key) > 0 {
-		fmt.Fprintf(stdout, "update key: %s\n", selfupdate.PublicKeyFingerprint(key))
+	if publisher := version.Publisher(); publisher != "" {
+		fmt.Fprintf(stdout, "publisher: %s\n", publisher)
 	}
 }

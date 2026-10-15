@@ -54,7 +54,7 @@ command -v sha512sum > /dev/null 2>&1 || refuse "sha512sum is required to compar
 [ -f "$candidate" ] || refuse "candidate manifest $candidate does not exist"
 [ -f "$artifact" ] || refuse "candidate artifact $artifact does not exist"
 
-# The candidate must be the manifest of the release this run built and signed.
+# The candidate must be the manifest of the release this run built.
 candidate_version=$(jq -r '.version // ""' "$candidate")
 candidate_channel=$(jq -r '.channel // ""' "$candidate")
 [ "$candidate_version" = "$version" ] || refuse "the candidate manifest offers '$candidate_version', this run publishes '$version'"

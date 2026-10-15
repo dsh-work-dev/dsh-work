@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// TestStagingRecheckDetectsReplacedBytes proves the second authentication the
+// TestStagingRecheckDetectsReplacedBytes proves the second verification the
 // install handshake performs: the staged copy is a durable file of this
 // process's own, and a payload swapped after staging is refused. It needs a
 // payload that satisfies the Windows installer identity checks, so it runs on
@@ -23,21 +23,21 @@ func TestStagingRecheckDetectsReplacedBytes(t *testing.T) {
 		t.Fatalf("staging directory is not a directory: %v", info)
 	}
 	payload := fakeInstallerPayload(t, "0.2.0.0", "0.2.0-beta.1")
-	feed, public := signedFeed(t, payload, nil)
-	installer, err := staging.Stage(writePayload(t, payload), feed, public)
+	feed := digestFeed(t, payload, nil)
+	installer, err := staging.Stage(writePayload(t, payload), feed)
 	if err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
 	if installer.Path == "" {
 		t.Fatal("Stage returned an empty path")
 	}
-	if err := staging.Recheck(installer, feed, public); err != nil {
+	if err := staging.Recheck(installer, feed); err != nil {
 		t.Fatalf("Recheck = %v, want nil", err)
 	}
 	if err := os.WriteFile(installer.Path, []byte("swapped bytes"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := staging.Recheck(installer, feed, public); !errors.Is(err, ErrStagedPayloadChanged) {
+	if err := staging.Recheck(installer, feed); !errors.Is(err, ErrStagedPayloadChanged) {
 		t.Fatalf("Recheck(replaced) = %v, want %v", err, ErrStagedPayloadChanged)
 	}
 }
@@ -50,8 +50,8 @@ func TestStagingClearsStagedInstaller(t *testing.T) {
 		t.Fatalf("NewStaging: %v", err)
 	}
 	payload := fakeInstallerPayload(t, "0.2.0.0", "0.2.0-beta.1")
-	feed, public := signedFeed(t, payload, nil)
-	installer, err := staging.Stage(writePayload(t, payload), feed, public)
+	feed := digestFeed(t, payload, nil)
+	installer, err := staging.Stage(writePayload(t, payload), feed)
 	if err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStagingClearsStagedInstaller(t *testing.T) {
 	if _, err := os.Stat(installer.Path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staged installer still present: %v", err)
 	}
-	if err := staging.Recheck(installer, feed, public); !errors.Is(err, ErrStagedPayloadChanged) {
+	if err := staging.Recheck(installer, feed); !errors.Is(err, ErrStagedPayloadChanged) {
 		t.Fatalf("Recheck(cleared) = %v, want %v", err, ErrStagedPayloadChanged)
 	}
 }

@@ -123,11 +123,10 @@ See [Settings and startup](settings.md) for the accepted interaction layout.
   acceptance remain open.
 - The Windows per-user installer is available through the local Wails/NSIS
   packaging task and the CI artifact workflow. About can check for, download
-  and install a signed update through the daemon, but the flow stays inactive
-  until an update feed and public key are configured
-  (`DSH_WORK_UPDATE_FEED_URL`, `DSH_WORK_UPDATE_PUBLIC_KEY` or
-  `DSH_WORK_UPDATE_PUBLIC_KEY_FILE`). No release feed, signing identity or
-  public key is configured yet.
+  and install a signed update through the daemon. A released build needs its
+  compiled-in feed and installer publisher; a development build only needs
+  `DSH_WORK_UPDATE_FEED_URL` and installs unsigned local packages. No release
+  feed or code-signing certificate is configured yet.
 - Mobile clients and remote access are deferred. The daemon and desktop UI run
   as separate invocations of the same executable; the local IPC endpoint is not
   a remote access service. Login startup and suspend/logoff behavior still need

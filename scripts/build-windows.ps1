@@ -13,13 +13,17 @@ param(
     [string]$Channel,
     # Update feed root this release follows.
     [string]$FeedRoot,
-    # Ed25519 public key the release trusts for update payloads. Required for a
-    # release build, so a release can never ship without a trust root.
-    [string]$PublicKeyFile
+    # Subject CN of the code-signing certificate. An update installer must be
+    # signed by this publisher. Required for a release build.
+    [string]$Publisher,
+    # Authenticode-sign both binaries as -Publisher. The certificate is read
+    # from the environment (scripts/windows-signing.ps1).
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-version.ps1')
+. (Join-Path $PSScriptRoot 'windows-signing.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $syso = Join-Path $root "wails_windows_$Arch.syso"
 $hadSyso = Test-Path -LiteralPath $syso
@@ -42,12 +46,17 @@ if ($infoProductVersion -ne $version -or $infoFileVersion -ne $release.FileVersi
     throw "build/windows/info.json carries ProductVersion $infoProductVersion and file version $infoFileVersion, but this build is $version ($($release.FileVersion)). Run: node scripts/sync-version.mjs --release-version $version"
 }
 
-$identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -PublicKeyFile $PublicKeyFile
+$identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -Publisher $Publisher
+if ($Sign -and -not $identity.Release) {
+    throw 'signing needs a release build: pass -ReleaseVersion and -Publisher with -Sign'
+}
 $identityFlags = ''
 if ($identity.Release) {
+    # The publisher may contain spaces, so its -X is quoted; Resolve-Publisher
+    # has already refused quotes inside it.
     $identityFlags = " -X github.com/local/dsh-work/internal/version.BuildChannel=$($identity.Channel)" +
     " -X github.com/local/dsh-work/internal/version.DistributionFeed=$($identity.Feed)" +
-    " -X github.com/local/dsh-work/internal/version.DistributionPublicKey=$($identity.PublicKeyBase64)"
+    " '-X=github.com/local/dsh-work/internal/version.DistributionPublisher=$($identity.Publisher)'"
 }
 
 $previousGOOS = $env:GOOS
@@ -77,14 +86,19 @@ try {
         # The linker silently ignores -X for a symbol it cannot find, so a
         # binary can look fine while carrying no identity at all. This checks
         # the bytes that were actually written.
-        $identityProblem = Test-BinariesCarryIdentity -AppPath $appPath -CliPath $cliPath -Version $version -Channel $identity.Channel -Feed $identity.Feed -PublicKeyBase64 $identity.PublicKeyBase64
+        $identityProblem = Test-BinariesCarryIdentity -AppPath $appPath -CliPath $cliPath -Version $version -Channel $identity.Channel -Feed $identity.Feed -Publisher $identity.Publisher
         if ($identityProblem) { throw $identityProblem }
+    }
+
+    if ($Sign) {
+        Invoke-AuthenticodeSign -Path @($appPath, $cliPath) -Publisher $identity.Publisher
     }
 
     $summary = "version $version, file version $($release.FileVersion)"
     if ($identity.Release) {
-        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), key $($identity.Fingerprint)"
+        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), publisher $($identity.Publisher)"
     }
+    if ($Sign) { $summary = "$summary, signed" }
     Write-Host "built Windows $Arch binaries at $AppOutput and $CliOutput ($summary)"
 }
 finally {

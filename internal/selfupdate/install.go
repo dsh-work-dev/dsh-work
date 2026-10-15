@@ -60,25 +60,33 @@ const (
 
 // buildVersion reports the version this binary was built as. A released build
 // substitutes a semantic version; anything else is a development build, which
-// has no signing identity and may therefore verify its own local test feeds.
+// has no signing identity and may therefore install its own local test
+// packages.
 var buildVersion = version.String
+
+// buildPublisher reports the code-signing publisher compiled into this build.
+var buildPublisher = version.Publisher
 
 // Options controls the checks a caller insists on.
 type Options struct {
 	// RequireOSSignature insists that the payload carries a trusted Windows
-	// signature. A released build always insists on it; only a development
-	// build may skip it, because it has no code-signing identity and its feeds
-	// and keys are local test material.
+	// signature from Publisher. A released build always insists on it; only a
+	// development build may skip it, because it has no code-signing identity
+	// and its feeds are local test material.
 	RequireOSSignature bool
+	// Publisher is the name the Authenticode signer certificate must carry
+	// (its simple display name, normally the subject CN).
+	Publisher string
 }
 
 // ProductionOptions returns the checks a released build must apply at the
 // minimum, whatever the caller asked for. A development build is allowed to
 // skip the operating-system signature check so the installer handoff can be
 // exercised locally with self-built packages; a released build cannot skip it,
-// because the setting is only ever substituted by the release pipeline.
+// because the version and the publisher are only ever substituted by the
+// release pipeline.
 func ProductionOptions() Options {
-	return Options{RequireOSSignature: !isDevelopmentBuild()}
+	return Options{RequireOSSignature: !isDevelopmentBuild(), Publisher: buildPublisher()}
 }
 
 // isDevelopmentBuild reports whether this binary was built by the release
@@ -91,14 +99,18 @@ func isDevelopmentBuild() bool {
 // Prepare validates a staged payload and returns the verified installer.
 //
 // Every check runs before the caller is allowed to stop the UI, the daemon or
-// the Worker: the feed identity, the payload signature, the payload's own
-// embedded release version, and the target machine architecture.
-func Prepare(payloadPath string, feed *FeedRelease, publicKey []byte, options Options) (*Installer, error) {
+// the Worker: the feed identity, the payload digest, the payload's own embedded
+// release version, the target machine architecture and the payload's
+// Authenticode publisher.
+func Prepare(payloadPath string, feed *FeedRelease, options Options) (*Installer, error) {
 	if feed == nil {
 		return nil, fmt.Errorf("%w: no release", ErrUnverifiableRelease)
 	}
 	if !isDevelopmentBuild() && !options.RequireOSSignature {
 		return nil, fmt.Errorf("%w: a released build must require a signature on the installer", ErrUnverifiedPayload)
+	}
+	if options.RequireOSSignature && strings.TrimSpace(options.Publisher) == "" {
+		return nil, fmt.Errorf("%w: no installer publisher is configured for this build", ErrUnverifiedPayload)
 	}
 	if err := release.ValidateBuildVersion(buildVersion()); err != nil {
 		return nil, fmt.Errorf("%w: build version: %v", ErrUnverifiableRelease, err)
@@ -132,7 +144,7 @@ func Prepare(payloadPath string, feed *FeedRelease, publicKey []byte, options Op
 		return nil, fmt.Errorf("%w: staged size %d does not match the advertised size %d", ErrUnverifiedPayload, info.Size(), feed.Artifact.Size)
 	}
 
-	if err := ArmorFile(absolute, feed, publicKey); err != nil {
+	if err := VerifyDigestFile(absolute, feed); err != nil {
 		return nil, err
 	}
 	if err := verifyInstallerIdentity(absolute, version, options); err != nil {
@@ -149,14 +161,14 @@ func Prepare(payloadPath string, feed *FeedRelease, publicKey []byte, options Op
 
 // ValidateRelease refuses a feed record before any bytes are downloaded. It is
 // the check the update flow runs on every offered release, so a feed entry that
-// carries no signature, claims a version this build cannot reason about, or
+// carries no digest, claims a version this build cannot reason about, or
 // advertises an artifact that is not a Windows installer for this host never
 // reaches the download step.
 func ValidateRelease(feed *FeedRelease) error {
 	if feed == nil {
 		return fmt.Errorf("%w: no release", ErrUnverifiableRelease)
 	}
-	if err := RequireVerifiable(feed); err != nil {
+	if err := RequireDigest(feed); err != nil {
 		return err
 	}
 	if err := release.ValidateBuildVersion(feed.Version); err != nil {

@@ -73,7 +73,7 @@ func verifyInstallerIdentity(path string, version release.Version, options Optio
 		return err
 	}
 	if options.RequireOSSignature {
-		if err := verifyAuthenticode(path); err != nil {
+		if err := verifyAuthenticode(path, options.Publisher); err != nil {
 			return err
 		}
 	}
@@ -123,16 +123,30 @@ func matchPayloadVersion(identity payloadIdentity, version release.Version) erro
 	return nil
 }
 
-// verifyAuthenticode requires a signature that chains to a trusted publisher.
-// The payload is handled by the operating system's own installer, so the same
-// policy a user's machine applies to a downloaded installer is applied here.
-func verifyAuthenticode(path string) error {
+// verifyAuthenticode requires a signature that chains to a trusted root and
+// whose signer is the publisher this build was released by. The payload is
+// handled by the operating system's own installer, so the same chain policy a
+// user's machine applies to a downloaded installer is applied here; the
+// publisher check then refuses an installer that another organisation signed
+// with its own, equally trusted certificate.
+func verifyAuthenticode(path, publisher string) error {
+	expected := strings.TrimSpace(publisher)
+	if expected == "" {
+		return fmt.Errorf("%w: no installer publisher is configured for this build", ErrUnverifiedPayload)
+	}
 	trusted, err := authenticodeTrusted(path)
 	if err != nil {
 		return fmt.Errorf("%w: could not read the installer signature: %v", ErrUnverifiedPayload, err)
 	}
 	if !trusted {
 		return fmt.Errorf("%w: installer is not signed by a trusted publisher", ErrUnverifiedPayload)
+	}
+	signer, err := authenticodeSigner(path)
+	if err != nil {
+		return fmt.Errorf("%w: could not read the installer publisher: %v", ErrUnverifiedPayload, err)
+	}
+	if signer != expected {
+		return fmt.Errorf("%w: installer is signed by %q, this build trusts %q", ErrUnverifiedPayload, signer, expected)
 	}
 	return nil
 }
@@ -301,4 +315,77 @@ func authenticodeStatus(path string) (uintptr, error) {
 		uintptr(unsafe.Pointer(&data)),
 	)
 	return 0, nil
+}
+
+// --- signer certificate ---
+
+var (
+	crypt32              = windows.NewLazySystemDLL("crypt32.dll")
+	procCryptMsgGetParam = crypt32.NewProc("CryptMsgGetParam")
+	procCryptMsgClose    = crypt32.NewProc("CryptMsgClose")
+)
+
+// cmsgSignerInfoParam selects CMSG_SIGNER_INFO from a signed message.
+const cmsgSignerInfoParam = 6
+
+// cmsgSignerInfoHead mirrors the leading fields of CMSG_SIGNER_INFO, which are
+// the only ones read: the issuer and serial number identify the signer
+// certificate inside the message's certificate store.
+type cmsgSignerInfoHead struct {
+	Version      uint32
+	Issuer       windows.CertNameBlob
+	SerialNumber windows.CryptIntegerBlob
+}
+
+// authenticodeSigner returns the simple display name (normally the subject CN)
+// of the certificate that produced the file's primary embedded Authenticode
+// signature. It reads the same signer WinVerifyTrust validated: the first
+// signer of the embedded PKCS #7 message, located in that message's own
+// certificate store by issuer and serial number.
+func authenticodeSigner(path string) (string, error) {
+	filePath, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	var encoding, contentType, formatType uint32
+	var store, msg windows.Handle
+	if err := windows.CryptQueryObject(
+		windows.CERT_QUERY_OBJECT_FILE, unsafe.Pointer(filePath),
+		windows.CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, windows.CERT_QUERY_FORMAT_FLAG_BINARY, 0,
+		&encoding, &contentType, &formatType, &store, &msg, nil,
+	); err != nil {
+		return "", fmt.Errorf("read embedded signature: %w", err)
+	}
+	defer windows.CertCloseStore(store, 0)
+	defer procCryptMsgClose.Call(uintptr(msg))
+
+	var size uint32
+	if ok, _, callErr := procCryptMsgGetParam.Call(uintptr(msg), cmsgSignerInfoParam, 0, 0, uintptr(unsafe.Pointer(&size))); ok == 0 {
+		return "", fmt.Errorf("read signer info size: %w", callErr)
+	}
+	if uintptr(size) < unsafe.Sizeof(cmsgSignerInfoHead{}) {
+		return "", fmt.Errorf("signer info is %d bytes", size)
+	}
+	// The blob holds pointers into itself, so it is kept in 8-byte aligned
+	// memory and alive until the certificate lookup has finished.
+	buffer := make([]uint64, (size+7)/8)
+	if ok, _, callErr := procCryptMsgGetParam.Call(uintptr(msg), cmsgSignerInfoParam, 0, uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size))); ok == 0 {
+		return "", fmt.Errorf("read signer info: %w", callErr)
+	}
+	signer := (*cmsgSignerInfoHead)(unsafe.Pointer(&buffer[0]))
+	query := windows.CertInfo{Issuer: signer.Issuer, SerialNumber: signer.SerialNumber}
+	cert, err := windows.CertFindCertificateInStore(store, windows.X509_ASN_ENCODING|windows.PKCS_7_ASN_ENCODING, 0, windows.CERT_FIND_SUBJECT_CERT, unsafe.Pointer(&query), nil)
+	runtime.KeepAlive(buffer)
+	if err != nil {
+		return "", fmt.Errorf("find signer certificate: %w", err)
+	}
+	defer windows.CertFreeCertificateContext(cert)
+
+	length := windows.CertGetNameString(cert, windows.CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nil, nil, 0)
+	if length <= 1 {
+		return "", errors.New("signer certificate has no display name")
+	}
+	name := make([]uint16, length)
+	windows.CertGetNameString(cert, windows.CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nil, &name[0], length)
+	return strings.TrimSpace(windows.UTF16ToString(name)), nil
 }

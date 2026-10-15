@@ -11,9 +11,9 @@
 #
 # Nightly publishing needs no per-run approval: the manual trigger is a
 # dispatch, and the scheduled run publishes on its own. Every publication is
-# still gated on the signing key, the public key and a build script that can
-# embed the release identity, and a run that lacks any of them builds and
-# keeps its artifacts instead of publishing.
+# still gated on the code-signing certificate, the publisher name and a build
+# script that can embed the release identity, and a run that lacks any of them
+# builds and keeps its artifacts instead of publishing.
 
 name: Release (nightly)
 
@@ -50,3 +50,6 @@ jobs:
       channel: nightly
       source_sha: ${{ github.sha }}
       run_id: ${{ github.run_id }}
+    secrets:
+      WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}

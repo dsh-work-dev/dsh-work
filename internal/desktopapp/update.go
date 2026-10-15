@@ -2,7 +2,6 @@ package desktopapp
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -26,8 +25,6 @@ import (
 const (
 	updateFeedEnv                 = "DSH_WORK_UPDATE_FEED_URL"
 	updateChannelEnv              = "DSH_WORK_UPDATE_CHANNEL"
-	updatePublicKeyEnv            = "DSH_WORK_UPDATE_PUBLIC_KEY"
-	updatePublicKeyFile           = "DSH_WORK_UPDATE_PUBLIC_KEY_FILE"
 	updateProgressPublishInterval = 250 * time.Millisecond
 	// updateManifestName is the feed file each channel publishes.
 	updateManifestName    = "%s.json"
@@ -74,11 +71,10 @@ type pendingRelease struct {
 // installerBackend downloads the advertised installer, authenticates it, keeps
 // a durable verified copy, and hands that copy to the operating system.
 type installerBackend struct {
-	provider  wailsupdater.Provider
-	feedRoot  string
-	channel   string
-	publicKey []byte
-	staging   *selfupdate.Staging
+	provider wailsupdater.Provider
+	feedRoot string
+	channel  string
+	staging  *selfupdate.Staging
 
 	pending *pendingRelease
 	staged  *selfupdate.Installer
@@ -97,11 +93,10 @@ func (b *installerBackend) WithChannel(channel string) (updateBackend, error) {
 		return nil, err
 	}
 	return &installerBackend{
-		provider:  provider,
-		feedRoot:  b.feedRoot,
-		channel:   channel,
-		publicKey: b.publicKey,
-		staging:   b.staging,
+		provider: provider,
+		feedRoot: b.feedRoot,
+		channel:  channel,
+		staging:  b.staging,
 	}, nil
 }
 
@@ -164,7 +159,7 @@ func (b *installerBackend) Stage(ctx context.Context, pending *pendingRelease, p
 	if closeErr != nil {
 		return closeErr
 	}
-	installer, err := b.staging.Stage(download, pending.feed, b.publicKey)
+	installer, err := b.staging.Stage(download, pending.feed)
 	if err != nil {
 		return err
 	}
@@ -179,7 +174,7 @@ func (b *installerBackend) Recheck() error {
 	if b.staged == nil || b.pending == nil {
 		return errUpdateNoRelease
 	}
-	return b.staging.Recheck(b.staged, b.pending.feed, b.publicKey)
+	return b.staging.Recheck(b.staged, b.pending.feed)
 }
 
 // Install runs the authenticated installer detached from this process. The
@@ -552,12 +547,13 @@ func (r *updateRunner) Start() {
 
 // newUpdateRunner wires the release feed this installation follows.
 //
-// The feed root and the release public key are compiled into a released build,
-// so an installed copy can only be updated from its own feed and only with a
-// payload signed by the publisher. A development build may point at another
-// feed through the environment, but only when it has no compiled-in identity at
-// all. A build with no feed or no key stays unconfigured instead of silently
-// accepting unauthenticated updates.
+// The feed root and the installer publisher are compiled into a released build,
+// so an installed copy can only be updated from its own feed and only with an
+// installer Authenticode-signed by that publisher. A development build may
+// point at another feed through the environment, but only when it has no
+// compiled-in identity at all, and it installs unsigned local packages. A
+// released build with no feed or no publisher stays unconfigured instead of
+// accepting installers it cannot attribute.
 func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI func() error, publish func(daemon.UpdateSnapshot)) *updateRunner {
 	channel := resolveUpdateChannel(selected)
 	runner := &updateRunner{
@@ -577,13 +573,8 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 		log.Printf("no update feed is configured for this build; updates stay unavailable")
 		return runner
 	}
-	publicKey, err := updatePublicKey()
-	if err != nil {
-		log.Printf("update public key unavailable: %v", err)
-		return runner
-	}
-	if len(publicKey) == 0 {
-		log.Printf("no release public key is configured for this build; updates stay unavailable")
+	if !version.IsDevelopment() && version.Publisher() == "" {
+		log.Printf("no installer publisher is configured for this build; updates stay unavailable")
 		return runner
 	}
 	staging, err := selfupdate.NewStaging(stagingBase)
@@ -602,11 +593,10 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 		return runner
 	}
 	runner.backend = &installerBackend{
-		provider:  provider,
-		feedRoot:  feedRoot,
-		channel:   string(channel),
-		publicKey: publicKey,
-		staging:   staging,
+		provider: provider,
+		feedRoot: feedRoot,
+		channel:  string(channel),
+		staging:  staging,
 	}
 	runner.state.Phase = daemon.UpdateIdle
 	return runner
@@ -711,26 +701,4 @@ func resolveUpdateFeed() string {
 		return ""
 	}
 	return strings.TrimSpace(os.Getenv(updateFeedEnv))
-}
-
-// updatePublicKey resolves the release signing key. A released build trusts only
-// the key compiled into it; the environment override is a development aid and is
-// ignored once the build carries its own trust root.
-func updatePublicKey() ([]byte, error) {
-	compiled := version.PublicKey()
-	if len(compiled) > 0 && !version.IsDevelopment() {
-		return compiled, nil
-	}
-	if path := strings.TrimSpace(os.Getenv(updatePublicKeyFile)); path != "" && version.IsDevelopment() {
-		return os.ReadFile(path)
-	}
-	raw := strings.TrimSpace(os.Getenv(updatePublicKeyEnv))
-	if raw != "" && version.IsDevelopment() {
-		decoded, err := base64.StdEncoding.DecodeString(raw)
-		if err == nil && len(decoded) > 0 {
-			return decoded, nil
-		}
-		return []byte(raw), nil
-	}
-	return compiled, nil
 }

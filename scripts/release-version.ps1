@@ -13,9 +13,10 @@
 # windows/info.json receives the X.Y.Z.0 numeric mapping from sync-version.mjs.
 #
 # The same file also resolves the release identity a released binary carries:
-# the channel that produced it, the update feed root it follows and the Ed25519
-# public key it trusts. Those are compile-time values, so they are validated
-# here, before any build or packaging work starts.
+# the channel that produced it, the update feed root it follows and the
+# Authenticode publisher an update installer must be signed by. Those are
+# compile-time values, so they are validated here, before any build or
+# packaging work starts.
 
 # Strict semantic version without build metadata: numeric identifiers carry no
 # leading zeros, and a pre-release must be a single beta.N or
@@ -92,103 +93,31 @@ function Resolve-ReleaseVersion {
 # --- release identity -------------------------------------------------------
 #
 # A released binary carries the channel that produced it, the update feed root
-# it follows and the Ed25519 public key it trusts. The scripts substitute those
-# three through -ldflags, and they are validated here first so that a malformed
-# or accidental identity never reaches an artifact.
+# it follows and the Authenticode publisher it trusts. The scripts substitute
+# those three through -ldflags, and they are validated here first so that a
+# malformed or accidental identity never reaches an artifact.
 
 $script:ReleaseChannels = @('stable', 'beta', 'nightly')
 $script:DefaultFeedRoot = 'https://dsh-work-dev.github.io/dsh-work/updates'
-$script:Ed25519PublicKeySize = 32
-# PKIX SubjectPublicKeyInfo of an Ed25519 key: the algorithm identifier followed
-# by a BIT STRING that holds the 32 raw key bytes.
-$script:Ed25519SpkiHeader = [byte[]](0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
+$script:MaxPublisherLength = 128
 
-function Get-Ed25519KeyBlob {
-    # Reduces a decoded key blob to the 32 raw Ed25519 public key bytes.
+function Resolve-Publisher {
+    # Validates the publisher name, which must be the simple display name (the
+    # subject CN) of the code-signing certificate. It is passed to the linker
+    # inside single quotes, so it may not contain quotes, backslashes or
+    # control characters.
     [CmdletBinding()]
-    param([byte[]]$Blob)
+    param([string]$Publisher)
 
-    if ($null -eq $Blob -or $Blob.Length -eq 0) { throw 'the public key is empty' }
-    if ($Blob.Length -eq $script:Ed25519PublicKeySize) { return , $Blob }
-
-    $spkiLength = $script:Ed25519SpkiHeader.Length + $script:Ed25519PublicKeySize
-    if ($Blob.Length -eq $spkiLength) {
-        $headerMatches = $true
-        for ($index = 0; $index -lt $script:Ed25519SpkiHeader.Length; $index++) {
-            if ($Blob[$index] -ne $script:Ed25519SpkiHeader[$index]) { $headerMatches = $false; break }
-        }
-        if ($headerMatches) {
-            $key = New-Object byte[] $script:Ed25519PublicKeySize
-            [Array]::Copy($Blob, $script:Ed25519SpkiHeader.Length, $key, 0, $script:Ed25519PublicKeySize)
-            return , $key
-        }
+    $value = $Publisher.Trim()
+    if ($value.Length -eq 0) { throw 'publisher is empty' }
+    if ($value.Length -gt $script:MaxPublisherLength) {
+        throw "publisher '$value' is longer than $($script:MaxPublisherLength) characters"
     }
-    throw "the public key is $($Blob.Length) bytes, which is neither 32 raw Ed25519 key bytes nor a $spkiLength-byte PKIX Ed25519 public key"
-}
-
-function Get-Ed25519PublicKey {
-    # Reads one public key file and returns the 32 raw key bytes. Accepted
-    # encodings are the raw key, base64 (padded or not), hex, a PEM public key
-    # block and a PKIX SubjectPublicKeyInfo blob, which is what openssl writes.
-    [CmdletBinding()]
-    param([string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) { throw "release public key file not found: $Path" }
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "release public key path is not a file: $Path" }
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -eq 0) { throw "release public key file is empty: $Path" }
-    if ($bytes.Length -eq $script:Ed25519PublicKeySize) { return , $bytes }
-
-    $text = ''
-    try { $text = [System.Text.Encoding]::UTF8.GetString($bytes).Trim() } catch { $text = '' }
-
-    if ($text.Contains('-----BEGIN')) {
-        $block = [regex]::Match($text, '(?s)-----BEGIN [A-Z ]+-----(?<body>.+?)-----END [A-Z ]+-----')
-        if (-not $block.Success) { throw "release public key file $Path has an unreadable PEM block; expected a complete -----BEGIN/-----END pair" }
-        $der = $null
-        try { $der = [Convert]::FromBase64String(($block.Groups['body'].Value -replace '\s', '')) } catch { $der = $null }
-        if ($null -eq $der) { throw "release public key file $Path has a PEM block whose body is not valid base64" }
-        $pemKey = Get-Ed25519KeyBlob -Blob $der
-        return , $pemKey
+    if ($value -match '["''\\`]' -or $value -match '[\x00-\x1f\x7f]') {
+        throw "publisher '$value' must not contain quotes, backslashes or control characters"
     }
-
-    $compact = if ($text) { $text -replace '\s', '' } else { '' }
-    if ($compact -match '^(0[xX])?(?<hex>[0-9a-fA-F]{64})$') {
-        $hex = $Matches['hex']
-        $hexKey = New-Object byte[] $script:Ed25519PublicKeySize
-        for ($index = 0; $index -lt $script:Ed25519PublicKeySize; $index++) {
-            $hexKey[$index] = [Convert]::ToByte($hex.Substring($index * 2, 2), 16)
-        }
-        return , $hexKey
-    }
-    if ($compact) {
-        $decoded = $null
-        try { $decoded = [Convert]::FromBase64String($compact) } catch { $decoded = $null }
-        if ($null -eq $decoded) {
-            $padding = (4 - ($compact.Length % 4)) % 4
-            try { $decoded = [Convert]::FromBase64String($compact + ('=' * $padding)) } catch { $decoded = $null }
-        }
-        if ($null -ne $decoded) {
-            $base64Key = Get-Ed25519KeyBlob -Blob $decoded
-            return , $base64Key
-        }
-    }
-
-    $blobKey = Get-Ed25519KeyBlob -Blob $bytes
-    return , $blobKey
-}
-
-function Get-PublicKeyFingerprint {
-    # Short stable identifier for a key, in the same shape the application
-    # reports it (internal/selfupdate.PublicKeyFingerprint): the first eight
-    # bytes of the SHA-256 of the raw key, hex encoded after a sha256: label.
-    [CmdletBinding()]
-    param([byte[]]$Key)
-
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { $hash = $sha.ComputeHash($Key) } finally { $sha.Dispose() }
-    $head = ($hash[0..7] | ForEach-Object { $_.ToString('x2') }) -join ''
-    return 'sha256:' + $head
+    return $value
 }
 
 function Get-BinaryText {
@@ -199,6 +128,16 @@ function Get-BinaryText {
     param([byte[]]$Bytes)
 
     return [System.Text.Encoding]::GetEncoding(28591).GetString($Bytes)
+}
+
+function ConvertTo-BinaryNeedle {
+    # The byte view of a value as Go stores it: UTF-8 bytes, seen through the
+    # same one-byte-per-character mapping as Get-BinaryText, so a publisher
+    # name outside ASCII is still found.
+    [CmdletBinding()]
+    param([string]$Value)
+
+    return Get-BinaryText -Bytes ([System.Text.Encoding]::UTF8.GetBytes($Value))
 }
 
 function Get-TextHit {
@@ -236,7 +175,7 @@ function Test-BinaryCarriesIdentity {
         [string]$Version,
         [string]$Channel,
         [string]$Feed,
-        [string]$PublicKeyBase64
+        [string]$Publisher
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "missing binary: $Path" }
@@ -250,7 +189,7 @@ function Test-BinaryCarriesIdentity {
             @{ Name = 'version'; Value = $Version },
             @{ Name = 'channel'; Value = $Channel },
             @{ Name = 'feed'; Value = $Feed },
-            @{ Name = 'public key'; Value = $PublicKeyBase64 })) {
+            @{ Name = 'publisher'; Value = $Publisher })) {
         if ([string]::IsNullOrEmpty($needle.Value)) { continue }
         if ($needle.Name -eq 'version') {
             if ($versionOffset -lt 0) { $missing += $needle.Name }
@@ -259,7 +198,7 @@ function Test-BinaryCarriesIdentity {
         $avoidOffset = $versionOffset
         $avoidLength = 0
         if ($versionOffset -ge 0) { $avoidLength = $Version.Length }
-        if ((Get-TextHit -Text $text -Needle $needle.Value -AvoidOffset $avoidOffset -AvoidLength $avoidLength) -lt 0) {
+        if ((Get-TextHit -Text $text -Needle (ConvertTo-BinaryNeedle -Value $needle.Value) -AvoidOffset $avoidOffset -AvoidLength $avoidLength) -lt 0) {
             $missing += $needle.Name
         }
     }
@@ -297,19 +236,19 @@ function Test-BinariesCarryIdentity {
         [string]$Version,
         [string]$Channel,
         [string]$Feed,
-        [string]$PublicKeyBase64
+        [string]$Publisher
     )
 
     foreach ($binary in (Get-BinaryIdentityRequirement -AppPath $AppPath -CliPath $CliPath)) {
         $binaryChannel = ''
         $binaryFeed = ''
-        $binaryKey = ''
+        $binaryPublisher = ''
         if ($binary.Identity) {
             $binaryChannel = $Channel
             $binaryFeed = $Feed
-            $binaryKey = $PublicKeyBase64
+            $binaryPublisher = $Publisher
         }
-        $missing = Test-BinaryCarriesIdentity -Path $binary.Path -Version $Version -Channel $binaryChannel -Feed $binaryFeed -PublicKeyBase64 $binaryKey
+        $missing = Test-BinaryCarriesIdentity -Path $binary.Path -Version $Version -Channel $binaryChannel -Feed $binaryFeed -Publisher $binaryPublisher
         if ($missing) {
             return "$($binary.Label) does not carry the release identity: missing $missing. The linker ignores -X for a symbol it cannot find, so check the internal/version variable names."
         }
@@ -320,8 +259,8 @@ function Test-BinariesCarryIdentity {
 function Resolve-ReleaseIdentity {
     # Resolves the identity a released binary carries.
     #
-    # A release build (-ReleaseVersion) must also pin its trust root through
-    # -PublicKeyFile. A local build passes no identity parameter at all: it gets
+    # A release build (-ReleaseVersion) must also name the publisher its update
+    # installers are signed by through -Publisher. A local build passes no identity parameter at all: it gets
     # no identity, and a local build that passes one by accident is refused
     # instead of silently producing a binary that looks like a release.
     #
@@ -334,28 +273,27 @@ function Resolve-ReleaseIdentity {
         [string]$Prerelease,
         [string]$Channel,
         [string]$FeedRoot,
-        [string]$PublicKeyFile
+        [string]$Publisher
     )
 
     $isRelease = -not [string]::IsNullOrWhiteSpace($ReleaseVersion)
     $identityGiven = (-not [string]::IsNullOrWhiteSpace($Channel)) -or
         (-not [string]::IsNullOrWhiteSpace($FeedRoot)) -or
-        (-not [string]::IsNullOrWhiteSpace($PublicKeyFile))
+        (-not [string]::IsNullOrWhiteSpace($Publisher))
     if (-not $isRelease) {
         if ($identityGiven) {
-            throw 'release identity needs an explicit release build: pass -ReleaseVersion <version>, or drop -Channel, -FeedRoot and -PublicKeyFile for a local build'
+            throw 'release identity needs an explicit release build: pass -ReleaseVersion <version>, or drop -Channel, -FeedRoot and -Publisher for a local build'
         }
         return [pscustomobject]@{
-            Release         = $false
-            Channel         = ''
-            Feed            = ''
-            PublicKeyBase64 = ''
-            Fingerprint     = ''
+            Release   = $false
+            Channel   = ''
+            Feed      = ''
+            Publisher = ''
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($PublicKeyFile)) {
-        throw "release $ReleaseVersion must pin the update trust root: pass -PublicKeyFile <path to the release Ed25519 public key>"
+    if ([string]::IsNullOrWhiteSpace($Publisher)) {
+        throw "release $ReleaseVersion must name its installer publisher: pass -Publisher <subject CN of the code-signing certificate>"
     }
 
     $expectedChannel = 'stable'
@@ -383,15 +321,12 @@ function Resolve-ReleaseIdentity {
         throw "feed root '$resolvedFeed' must not carry a query string or a fragment"
     }
 
-    $keyBytes = Get-Ed25519PublicKey -Path $PublicKeyFile
-    $keyBase64 = [Convert]::ToBase64String($keyBytes).TrimEnd('=')
-    $fingerprint = Get-PublicKeyFingerprint -Key $keyBytes
+    $resolvedPublisher = Resolve-Publisher -Publisher $Publisher
 
     return [pscustomobject]@{
-        Release         = $true
-        Channel         = $resolvedChannel
-        Feed            = $resolvedFeed
-        PublicKeyBase64 = $keyBase64
-        Fingerprint     = $fingerprint
+        Release   = $true
+        Channel   = $resolvedChannel
+        Feed      = $resolvedFeed
+        Publisher = $resolvedPublisher
     }
 }

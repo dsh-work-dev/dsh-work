@@ -14,12 +14,13 @@
 #
 # Publication is fail-closed. One release identity is computed by the
 # preflight (`scripts/release-version.mjs`) and every later step consumes that
-# one value. A channel feed is published only after the installer was built
-# from that identity, signed, verified against the public key, and uploaded.
-# With no Pages site, no signing key, or a build script that cannot embed the
-# release identity, this pipeline builds and keeps CI artifacts for diagnosis
-# and refuses to publish instead of promoting an unsigned or unverifiable
-# package to a feed.
+# one value. A channel feed is published only after the binaries and the
+# installer were built from that identity, Authenticode-signed by the release
+# publisher, checked against that publisher, and uploaded. With no Pages site,
+# no code-signing certificate, no publisher name, or a build script that cannot
+# embed the release identity, this pipeline builds unsigned packages and keeps
+# them as CI artifacts for diagnosis, and refuses to publish instead of
+# promoting an unsigned package to a feed.
 #
 # See docs/release-channels.md for the channel, feed and promotion contract.
 
@@ -41,6 +42,15 @@ on:
         required: false
         type: string
         default: ""
+    secrets:
+      # Base64 of the PFX that holds the Authenticode code-signing
+      # certificate and its private key, and the PFX password. Without the
+      # certificate a run builds unsigned diagnostic packages and publishes
+      # nothing.
+      WINDOWS_SIGNING_CERTIFICATE:
+        required: false
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -68,8 +78,8 @@ jobs:
       publishable: ${{ steps.gates.outputs.publishable }}
       block_reason: ${{ steps.gates.outputs.blockReason }}
       missing_script_parameters: ${{ steps.gates.outputs.missingScriptParameters }}
-      key_secret: ${{ steps.gates.outputs.keySecret }}
-      public_key: ${{ steps.gates.outputs.publicKey }}
+      publisher: ${{ steps.gates.outputs.publisher }}
+      can_sign: ${{ steps.gates.outputs.canSign }}
       build_channel: ${{ steps.gates.outputs.buildChannel }}
     steps:
       # The base version and the tag the run must build are read from this
@@ -104,6 +114,7 @@ jobs:
         env:
           CHANNEL: ${{ inputs.channel }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           case "$CHANNEL" in
@@ -154,22 +165,14 @@ jobs:
         id: gates
         env:
           INPUT_CHANNEL: ${{ inputs.channel }}
-          KEY_SECRET: ${{ inputs.channel == 'nightly' && secrets.NIGHTLY_UPDATER_KEY || secrets.RELEASE_UPDATER_KEY }}
-          PUBLIC_KEY_RAW: ${{ inputs.channel == 'nightly' && (secrets.NIGHTLY_UPDATER_PUBLIC_KEY || vars.NIGHTLY_UPDATER_PUBLIC_KEY) || (secrets.RELEASE_UPDATER_PUBLIC_KEY || vars.RELEASE_UPDATER_PUBLIC_KEY) }}
+          GH_TOKEN: ${{ github.token }}
+          # Only presence is checked here; the certificate itself is decoded in
+          # the build job, the only job that signs.
+          HAS_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE != '' }}
+          PUBLISHER: ${{ vars.WINDOWS_PUBLISHER }}
         run: |
           set -euo pipefail
           channel="$INPUT_CHANNEL"
-
-          case "$channel" in
-            nightly)
-              key_secret="NIGHTLY_UPDATER_KEY"
-              public_secret="NIGHTLY_UPDATER_PUBLIC_KEY"
-              ;;
-            *)
-              key_secret="RELEASE_UPDATER_KEY"
-              public_secret="RELEASE_UPDATER_PUBLIC_KEY"
-              ;;
-          esac
 
           # Which commit a channel may publish from, so a tag cannot publish a
           # build from another branch and a scheduled run cannot publish from
@@ -185,8 +188,17 @@ jobs:
           fi
 
           missing=()
-          if [ -z "${KEY_SECRET:-}" ]; then missing+=("$key_secret"); fi
-          if [ -z "${PUBLIC_KEY_RAW:-}" ]; then missing+=("$public_secret"); fi
+          can_sign=true
+          if [ "${HAS_CERTIFICATE:-false}" != "true" ]; then missing+=("WINDOWS_SIGNING_CERTIFICATE"); can_sign=false; fi
+          publisher=$(printf '%s' "${PUBLISHER:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+          if [ -z "$publisher" ]; then
+            missing+=("WINDOWS_PUBLISHER")
+            can_sign=false
+            # A release build must name a publisher, so a diagnostic build
+            # names one that no certificate carries: it can never be signed,
+            # published or updated, and is only kept as a CI artifact.
+            publisher="dsh-work unsigned diagnostic build"
+          fi
 
           # The feed root is a GitHub Pages site. Publishing a feed that Pages
           # will not serve would look like a release and update nobody, so the
@@ -196,12 +208,12 @@ jobs:
           fi
 
           # A released build embeds the channel, the feed root and the
-          # trusted Ed25519 public key through -ldflags. A build script that
-          # cannot do that produces a package that no installation can update,
-          # so no feed may be published from it.
+          # installer publisher through -ldflags and signs its binaries. A
+          # build script that cannot do that produces a package that no
+          # installation can update, so no feed may be published from it.
           missing_script=()
           script_params=$(sed -n '1,40p' scripts/build-windows.ps1)
-          for parameter in Channel FeedRoot PublicKeyFile; do
+          for parameter in Channel FeedRoot Publisher Sign; do
             if ! grep -q "\$$parameter" <<<"$script_params"; then
               missing_script+=("$parameter")
             fi
@@ -218,16 +230,9 @@ jobs:
             reason="${reason:+$reason; }scripts/build-windows.ps1 cannot embed -${missing_script[*]}"
           fi
 
-          public_key=""
-          if [ -n "${PUBLIC_KEY_RAW:-}" ]; then
-            # The manifest is verified against this exact key before it is
-            # published, and the same text is compiled into the build.
-            public_key=$(printf '%s' "$PUBLIC_KEY_RAW" | tr -d '[:space:]')
-          fi
-
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "keySecret=$key_secret" >> "$GITHUB_OUTPUT"
-          echo "publicKey=$public_key" >> "$GITHUB_OUTPUT"
+          echo "publisher=$publisher" >> "$GITHUB_OUTPUT"
+          echo "canSign=$can_sign" >> "$GITHUB_OUTPUT"
           # Nightly builds carry "nightly" as their compiled channel identity.
           # A nightly package is built from main, which is a prerelease line,
           # so its channel is the one it publishes to.
@@ -261,6 +266,8 @@ jobs:
     env:
       RELEASE_VERSION: ${{ needs.plan.outputs.version }}
       RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
+      RELEASE_PUBLISHER: ${{ needs.plan.outputs.publisher }}
+      CAN_SIGN: ${{ needs.plan.outputs.can_sign }}
     steps:
       - name: Check out the release commit
         uses: actions/checkout@v5
@@ -309,24 +316,67 @@ jobs:
       - name: Build frontend assets
         run: npm run --prefix frontend build
 
+      # The PFX is written to the runner's temporary directory for the two
+      # signing steps and removed afterwards, whatever their outcome. Its path
+      # and password reach the scripts through the environment only.
+      - name: Decode the code-signing certificate
+        if: env.CAN_SIGN == 'true'
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+        run: |
+          $certificate = Join-Path $env:RUNNER_TEMP 'windows-signing.pfx'
+          [System.IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String(($env:CERTIFICATE_BASE64 -replace '\s', '')))
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_SIGNING_CERTIFICATE_FILE=$certificate"
+
       - name: Build the release binaries
         shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
         run: |
-          # The public key is handed over as a file so no key material ever
-          # appears on a command line or in the process list.
-          $publicKeyFile = Join-Path $env:RUNNER_TEMP 'updater-public-key.txt'
-          Set-Content -LiteralPath $publicKeyFile -Value '${{ needs.plan.outputs.public_key }}' -NoNewline -Encoding ascii
+          $sign = $env:CAN_SIGN -eq 'true'
           ./scripts/build-windows.ps1 `
             -ReleaseVersion "$env:RELEASE_VERSION" `
             -Arch amd64 `
             -Channel "$env:RELEASE_CHANNEL" `
             -FeedRoot "$env:FEED_ROOT" `
-            -PublicKeyFile $publicKeyFile
-          Remove-Item -LiteralPath $publicKeyFile -Force
+            -Publisher "$env:RELEASE_PUBLISHER" `
+            -Sign:$sign
 
       - name: Package the installer
         shell: pwsh
-        run: ./scripts/package-windows.ps1 -ReleaseVersion "$env:RELEASE_VERSION" -Arch amd64
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $sign = $env:CAN_SIGN -eq 'true'
+          ./scripts/package-windows.ps1 `
+            -ReleaseVersion "$env:RELEASE_VERSION" `
+            -Arch amd64 `
+            -Channel "$env:RELEASE_CHANNEL" `
+            -FeedRoot "$env:FEED_ROOT" `
+            -Publisher "$env:RELEASE_PUBLISHER" `
+            -Sign:$sign
+
+      - name: Remove the code-signing certificate
+        if: always() && env.WINDOWS_SIGNING_CERTIFICATE_FILE != ''
+        shell: pwsh
+        run: Remove-Item -LiteralPath $env:WINDOWS_SIGNING_CERTIFICATE_FILE -Force -ErrorAction SilentlyContinue
+
+      # The installer an installation downloads must be signed by the
+      # publisher compiled into every released build, or that installation
+      # refuses it. This is the same check the update client makes.
+      - name: Verify the installer publisher
+        if: env.CAN_SIGN == 'true'
+        shell: pwsh
+        run: |
+          . ./scripts/windows-signing.ps1
+          $installer = "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe"
+          foreach ($file in @('bin/dsh-work.exe', 'bin/dsh-work-cli.exe', $installer)) {
+            Assert-AuthenticodePublisher -Path $file -Publisher $env:RELEASE_PUBLISHER
+            Write-Host "$file is signed by $env:RELEASE_PUBLISHER"
+          }
 
       - name: Verify the installer bytes against the release identity
         shell: pwsh
@@ -368,7 +418,7 @@ jobs:
           retention-days: 14
 
   publish:
-    name: Publish the release record and the signed manifest
+    name: Publish the release record and the channel manifest
     needs: [plan, build]
     if: needs.plan.outputs.publishable == 'true'
     runs-on: ubuntu-latest
@@ -485,27 +535,19 @@ jobs:
           echo "$remote_sum" > asset.sha256
 
       # The manifest is the artifact that carries the release identity onto
-      # the feed. It is signed with the Ed25519 private key and then verified
-      # against the public key the build compiled in, so a manifest that does
-      # not authenticate can never reach a feed.
-      - name: Build and sign the channel manifest
-        env:
-          UPDATER_KEY: ${{ inputs.channel == 'nightly' && secrets.NIGHTLY_UPDATER_KEY || secrets.RELEASE_UPDATER_KEY }}
+      # the feed. It records the SHA-512 digest of the signed installer; the
+      # installer's own Authenticode signature is what an installation trusts.
+      - name: Build the channel manifest
         run: |
           set -euo pipefail
-          key="$RUNNER_TEMP/updater-private-key.pem"
-          printf '%s' "$UPDATER_KEY" > "$key"
-          chmod 600 "$key"
           installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
           wails3 updater manifest \
             -version "$VERSION" \
             -channel "$CHANNEL" \
             -name "dsh-work $VERSION" \
             -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}" \
-            -key "$key" \
             -output feed/manifest.json \
             "$installer"
-          rm -f "$key"
 
           # The manifest on the feed must contain nothing about this runner.
           if grep -E '/home/runner|/tmp/|runneradmin|C:\\\\' feed/manifest.json; then
@@ -513,12 +555,11 @@ jobs:
             exit 1
           fi
 
-      # The CLI signs the artifact but writes the manifest with only the fields
-      # the updater needs to verify bytes: no filename, no filetype, and no
-      # metadata. The installation reads a filename and requires an installer
-      # payload, so the pipeline completes the document and then verifies the
-      # completed document with the same CLI, against the same key, before
-      # anything is published.
+      # The CLI writes the manifest with only the fields the updater needs to
+      # check bytes: no filename, no filetype, and no metadata. The
+      # installation reads a filename and requires an installer payload, so
+      # the pipeline completes the document and then verifies the completed
+      # document with the same CLI before anything is published.
       - name: Complete the manifest for the update client
         run: |
           set -euo pipefail
@@ -541,8 +582,8 @@ jobs:
               if (!filename.endsWith(".exe")) {
                 throw new Error(`${filename} is not an installer payload`);
               }
-              if (!artifact.digest || !artifact.signature) {
-                throw new Error("the artifact is not signed; the pipeline never publishes it");
+              if (!artifact.digest) {
+                throw new Error("the artifact carries no digest; the pipeline never publishes it");
               }
               artifact.filename = filename;
               artifact.filetype = filename.split(".").pop();
@@ -553,25 +594,21 @@ jobs:
             fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
           '
 
-      # Fail closed: an unsigned, altered or wrong-key manifest stops the run
-      # here, before any release or feed is promoted.
-      - name: Verify the signed manifest against the build key
-        env:
-          PUBLIC_KEY: ${{ needs.plan.outputs.public_key }}
+      # Fail closed: a manifest whose digest does not describe the uploaded
+      # installer stops the run here, before any release or feed is promoted.
+      - name: Verify the manifest against the installer bytes
         run: |
           set -euo pipefail
-          printf '%s' "$PUBLIC_KEY" > "$RUNNER_TEMP/updater-public-key.txt"
           wails3 updater verify \
             -manifest feed/manifest.json \
-            -publickey "$RUNNER_TEMP/updater-public-key.txt" \
             -dir release-assets
           jq -e '.schemaVersion == 1 and .version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' feed/manifest.json > /dev/null
           jq -e '.metadata.installMode == "installer"' feed/manifest.json > /dev/null
-          jq -e '[.artifacts[] | select((.signature // "") == "" or (.digest // "") == "")] | length == 0' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select((.digest // "") == "")] | length == 0' feed/manifest.json > /dev/null
           jq -e '[.artifacts[] | select(.platform != "windows" or .arch != "amd64")] | length == 0' feed/manifest.json > /dev/null
           jq -e '[.artifacts[] | select((.filename // "") | test("^dsh-work-.*-windows-amd64-installer\\.exe$"))] | length == 1' feed/manifest.json > /dev/null
 
-      - name: Upload the signed manifest as a build artifact
+      - name: Upload the manifest as a build artifact
         uses: actions/upload-artifact@v7
         with:
           name: dsh-work-${{ needs.plan.outputs.version }}-channel-manifest
@@ -615,7 +652,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Download the signed manifest
+      - name: Download the channel manifest
         uses: actions/download-artifact@v6
         with:
           name: dsh-work-${{ needs.plan.outputs.version }}-channel-manifest
@@ -769,4 +806,4 @@ jobs:
       - name: Report the in-place update check
         if: needs.plan.outputs.last_stable != ''
         run: |
-          echo "::notice title=N-1 to N install check::The ${{ needs.plan.outputs.channel }} feed now offers ${{ needs.plan.outputs.version }} after ${{ needs.plan.outputs.last_stable }}. A host running ${{ needs.plan.outputs.last_stable }} performs the in-place update check; this workflow proves the feed, the signature and the bytes, not the installer handoff on a user machine."
+          echo "::notice title=N-1 to N install check::The ${{ needs.plan.outputs.channel }} feed now offers ${{ needs.plan.outputs.version }} after ${{ needs.plan.outputs.last_stable }}. A host running ${{ needs.plan.outputs.last_stable }} performs the in-place update check; this workflow proves the feed, the publisher signature and the bytes, not the installer handoff on a user machine."

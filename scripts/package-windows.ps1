@@ -10,14 +10,20 @@ param(
     [string]$Channel,
     # Update feed root the packaged binaries follow.
     [string]$FeedRoot,
-    # Ed25519 public key the packaged binaries trust. Required for a release,
-    # and the binaries are checked against it before they are wrapped.
-    [string]$PublicKeyFile
+    # Subject CN of the code-signing certificate the packaged binaries trust.
+    # Required for a release, and the binaries are checked against it before
+    # they are wrapped.
+    [string]$Publisher,
+    # Require both binaries to be signed by -Publisher and Authenticode-sign
+    # the installer before its checksum is written. The certificate is read
+    # from the environment (scripts/windows-signing.ps1).
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'resolve-nsis.ps1')
 . (Join-Path $PSScriptRoot 'release-version.ps1')
+. (Join-Path $PSScriptRoot 'windows-signing.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $nsisDir = Join-Path $root 'build/windows/nsis'
 $appPath = Join-Path $root 'bin/dsh-work.exe'
@@ -27,15 +33,24 @@ $version = $release.Version
 if (-not (Test-Path -LiteralPath $appPath)) { throw "missing application binary: $appPath" }
 if (-not (Test-Path -LiteralPath $cliPath)) { throw "missing CLI binary: $cliPath" }
 
-$identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -PublicKeyFile $PublicKeyFile
+$identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -Publisher $Publisher
+if ($Sign -and -not $identity.Release) {
+    throw 'signing needs a release build: pass -ReleaseVersion and -Publisher with -Sign'
+}
 if ($identity.Release) {
     # The installer wraps the binaries built by scripts/build-windows.ps1. A
-    # binary that follows another channel, another feed or another key would
-    # produce an installer that updates from a source this release does not
-    # trust, so packaging refuses it instead of wrapping it.
-    $identityProblem = Test-BinariesCarryIdentity -AppPath $appPath -CliPath $cliPath -Version $version -Channel $identity.Channel -Feed $identity.Feed -PublicKeyBase64 $identity.PublicKeyBase64
+    # binary that follows another channel, another feed or another publisher
+    # would produce an installer that updates from a source this release does
+    # not trust, so packaging refuses it instead of wrapping it.
+    $identityProblem = Test-BinariesCarryIdentity -AppPath $appPath -CliPath $cliPath -Version $version -Channel $identity.Channel -Feed $identity.Feed -Publisher $identity.Publisher
     if ($identityProblem) {
-        throw "$identityProblem Rebuild the binaries with scripts/build-windows.ps1 passing the same -ReleaseVersion, -Channel, -FeedRoot and -PublicKeyFile before packaging."
+        throw "$identityProblem Rebuild the binaries with scripts/build-windows.ps1 passing the same -ReleaseVersion, -Channel, -FeedRoot and -Publisher before packaging."
+    }
+}
+if ($Sign) {
+    # A signed installer must not wrap unsigned binaries.
+    foreach ($binary in @($appPath, $cliPath)) {
+        Assert-AuthenticodePublisher -Path $binary -Publisher $identity.Publisher
     }
 }
 $toolchain = Get-Content -LiteralPath (Join-Path $root 'toolchain.lock.json') -Raw | ConvertFrom-Json
@@ -95,6 +110,11 @@ try {
     finally { Pop-Location }
     $installerPath = Join-Path $root "bin/dsh-work-$version-windows-$Arch-installer.exe"
     if (-not (Test-Path -LiteralPath $installerPath)) { throw "makensis reported success but did not create $installerPath" }
+    # The checksum below and the feed digest describe the signed bytes, so the
+    # installer is signed before either is computed.
+    if ($Sign) {
+        Invoke-AuthenticodeSign -Path @($installerPath) -Publisher $identity.Publisher
+    }
     # go-task can run PowerShell with module autoloading disabled, so the
     # Get-FileHash cmdlet is not guaranteed to be available even though the
     # same script works from an interactive shell. Use the BCL directly so
@@ -111,8 +131,9 @@ try {
     "$hash  $([System.IO.Path]::GetFileName($installerPath))" | Set-Content -LiteralPath "$installerPath.sha256" -Encoding ascii
     $summary = "created Windows per-user installer for $Arch (version $version, file version $($release.FileVersion))"
     if ($identity.Release) {
-        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), key $($identity.Fingerprint)"
+        $summary = "$summary, channel $($identity.Channel), feed $($identity.Feed), publisher $($identity.Publisher)"
     }
+    if ($Sign) { $summary = "$summary, signed" }
     Write-Host $summary
 }
 finally {
