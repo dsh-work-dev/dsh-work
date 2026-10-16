@@ -823,13 +823,17 @@ jobs:
         run: |
           $manifestUrl = "$env:FEED_ROOT/updater-$env:CHANNEL/update.json"
           Write-Host "fetching $manifestUrl"
-          $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing
-          $manifest = $response.Content | ConvertFrom-Json
+          # GitHub serves release assets as application/octet-stream, for which
+          # Invoke-WebRequest returns Content as bytes, so the manifest is saved
+          # and read back as UTF-8 text before it is parsed.
+          New-Item -ItemType Directory -Path feed-check -Force | Out-Null
+          $manifestPath = Join-Path 'feed-check' 'update.json'
+          Invoke-WebRequest -Uri $manifestUrl -OutFile $manifestPath -UseBasicParsing
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding utf8 | ConvertFrom-Json
           if ($manifest.version -ne $env:VERSION) { throw "the $env:CHANNEL feed offers $($manifest.version), expected $env:VERSION" }
           if ($manifest.channel -ne $env:CHANNEL) { throw "the feed advertises channel $($manifest.channel) from the $env:CHANNEL endpoint" }
           $artifact = $manifest.artifacts | Where-Object { $_.platform -eq 'windows' -and $_.arch -eq 'amd64' } | Select-Object -First 1
           if (-not $artifact) { throw "the feed entry carries no windows/amd64 artifact" }
-          New-Item -ItemType Directory -Path feed-check -Force | Out-Null
           $installerPath = Join-Path 'feed-check' ([System.IO.Path]::GetFileName($artifact.url))
           Invoke-WebRequest -Uri $artifact.url -OutFile $installerPath -UseBasicParsing
           $bytes = [System.IO.File]::ReadAllBytes($installerPath)
