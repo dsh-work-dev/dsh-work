@@ -99,7 +99,7 @@ function Resolve-ReleaseVersion {
 # malformed or accidental identity never reaches an artifact.
 
 $script:ReleaseChannels = @('stable', 'beta', 'nightly')
-$script:DefaultFeedRoot = 'https://dsh-work-dev.github.io/dsh-work/updates'
+$script:DefaultFeedRoot = 'https://github.com/dsh-work-dev/dsh-work/releases/download'
 $script:MaxPublisherLength = 128
 
 function Resolve-Publisher {

@@ -65,7 +65,7 @@ build passes no identity at all and stays non-updatable on purpose.
 
 dsh-work is distributed through GitHub without a code-signing certificate. An
 unsigned release trusts an update because it came from the feed compiled into
-the build, over HTTPS, from the project's GitHub Pages site and GitHub Releases.
+the build, over HTTPS, from the project's GitHub Releases.
 Before the installer runs, `internal/selfupdate` requires:
 
 - the downloaded bytes match the feed's SHA-512 digest and size, so a truncated
@@ -85,7 +85,7 @@ can turn that off. A development build skips the signature check so a locally
 built installer can exercise the handoff from a local feed.
 
 What this costs: an unsigned release can be updated by anyone who can push to
-the repository's Releases and `gh-pages` branch, so the GitHub account is the
+the repository's Releases, so the GitHub account is the
 trust root. That is the same account that serves the installer to new users, so
 the update path adds no weaker link. A first install from the browser shows
 SmartScreen's "unknown publisher" prompt; updates do not, because the
@@ -110,17 +110,35 @@ name can only move to it through a release signed with the old certificate).
 
 ## Feeds
 
-Every channel publishes exactly one JSON document at the feed root:
+Every channel publishes exactly one JSON document, the `update.json` asset of a
+fixed release tagged `updater-<channel>`:
 
 ```
-https://dsh-work-dev.github.io/dsh-work/updates/stable.json
-https://dsh-work-dev.github.io/dsh-work/updates/beta.json
-https://dsh-work-dev.github.io/dsh-work/updates/nightly.json
+https://github.com/dsh-work-dev/dsh-work/releases/download/updater-stable/update.json
+https://github.com/dsh-work-dev/dsh-work/releases/download/updater-beta/update.json
+https://github.com/dsh-work-dev/dsh-work/releases/download/updater-nightly/update.json
 ```
 
-The URL is not a convention that can drift: `internal/desktopapp/update.go`
-builds `<feed root>/<channel>.json`, and a build with no feed root logs that
-updates stay unavailable rather than falling back to a default.
+The feed root compiled into a build is
+`https://github.com/dsh-work-dev/dsh-work/releases/download`, and
+`internal/desktopapp/update.go` builds `<feed root>/updater-<channel>/update.json`.
+A build with no feed root logs that updates stay unavailable rather than
+falling back to a default. The `updater-*` releases are prereleases that are
+never marked latest, so they cannot become the repository's latest release or
+the stable gate a nightly is checked against.
+
+The feed is kept apart from any website on purpose: a website can be built and
+deployed in any way without being able to remove or roll back the feed, and the
+pipeline needs nothing but the repository's Releases. A download mirror can be
+placed in front of the same URLs later.
+
+Rejected: serving the feeds from GitHub Pages (`gh-pages` branch). It makes a
+release depend on Pages being enabled and makes any future website deployment
+that rewrites the branch a way to delete the feed. Also rejected: deriving the
+latest release per channel from the Releases API at check time, which needs
+API calls (rate-limited without a token) and release-listing logic in the
+client. Revisit when: a mirror or CDN in front of GitHub is needed for users
+who cannot reach it, or a website deployment should own the feed.
 
 The document is a Wails update manifest, schema version 1:
 
@@ -177,7 +195,6 @@ that contains a runner path.
 | `.github/workflows/release.yml` | the pipeline, `workflow_call` only |
 | `.github/workflows/promote-feed.sh` | the feed promotion decision |
 | `.github/workflows/promote-feed.test.sh` | local test harness for that decision |
-| `.github/workflows/feed-index.html` | the page published next to the feeds |
 | `.github/workflows/pc.yml` | package checks for pushes and pull requests |
 
 The entry points only choose a trigger and a channel. They call one reusable
@@ -226,20 +243,19 @@ installer is not signed separately.
 
 ## Feed promotion
 
-The three channels share one Pages site, so there is exactly one writer and one
-lock. The lock is the `gh-pages` branch ref, and the write is a push:
+The `promote` job is the only writer of the `updater-<channel>` releases:
 
-- the `promote` job runs in the repository-wide concurrency group
-  `feed-promotion` with `cancel-in-progress: false`, so only one promotion is
-  in flight and a queued run waits;
-- the job re-reads `gh-pages` at the start of every attempt, merges the
-  candidate document for its own channel into the feeds that are published, and
-  republishes the whole site;
-- the push is the compare-and-swap. A push that loses the race is rejected
-  because the branch moved; the run re-reads the branch and retries, at most
-  five times.
+- it runs in the repository-wide concurrency group `feed-promotion` with
+  `cancel-in-progress: false`, so only one promotion is in flight and a queued
+  run waits;
+- it creates `updater-<channel>` on the first publication of that channel,
+  downloads the live `update.json`, and replaces it with
+  `gh release upload --clobber` only when the decision below is `promote`;
+- it downloads the asset again and checks it offers the version just
+  published. The replacement is a delete followed by an upload, so a client
+  that checks in that instant sees a failed check and tries again later.
 
-Inside the lock, `promote-feed.sh` decides:
+Inside that job, `promote-feed.sh` decides:
 
 | Live feed | Candidate | Decision |
 | --- | --- | --- |
@@ -317,9 +333,7 @@ reported rather than guessed. Publication is blocked when:
   configured;
 - `scripts/build-windows.ps1` cannot embed the channel, the feed root and the
   publisher, or cannot sign, because a package built without them can never
-  update;
-- GitHub Pages is not enabled for the repository, because a feed that Pages
-  does not serve is a release that updates nobody.
+  update.
 
 In every one of those cases the run still builds, verifies and uploads the
 candidate package as a CI artifact for diagnosis, and stops before any release
@@ -337,20 +351,19 @@ rather than bugs in the pipeline:
 
 | Prerequisite | State |
 | --- | --- |
-| GitHub Pages site | **not enabled** (`has_pages: false`, no `gh-pages` branch) |
 | code-signing certificate and publisher | not configured; releases are published unsigned |
 | release tags | none exist |
 | GitHub Releases | none exist |
 
-The pipeline's behaviour in this state is the intended one: it builds and keeps
-CI artifacts, and it refuses to publish or promote a feed.
+Nothing blocks the first publication: the first tag or push to `main` creates
+the versioned release and the `updater-<channel>` release.
 
 Everything upstream of the feed has been verified locally against the real
 scripts — the preflight invocations, the version shapes, and the promotion
 decision (see *Verification*). The Windows build, the installer packaging, the
-GitHub Release creation, the Pages publication and the in-place update check
-cannot be exercised on this machine and remain unproven until they run on a
-runner with a Pages site.
+GitHub Release creation, the feed promotion and the in-place update check
+cannot be exercised on this machine and remain unproven until the pipeline runs
+on GitHub.
 
 ## Verification
 
@@ -391,11 +404,14 @@ the feed can be repaired by hand, with the same rules:
    next to it, and, for a signed release, check the installer's signer is the
    publisher
    (`. scripts/windows-signing.ps1; Assert-AuthenticodePublisher -Path <installer> -Publisher <publisher>`);
-3. run `bash .github/workflows/promote-feed.sh <manifest> <current feed> <version> <channel> <installer>`
+3. download the live feed with
+   `gh release download updater-<channel> --pattern update.json`, run
+   `bash .github/workflows/promote-feed.sh <manifest> <live update.json> <version> <channel> <installer>`
    and act on its decision: `promote` replaces the feed, `idempotent` changes
    nothing, and a non-zero exit with a reason on stderr means the feed must not
    be touched by hand either;
-4. commit the result to `gh-pages` and push.
+4. copy the manifest to `update.json` and
+   `gh release upload updater-<channel> update.json --clobber`.
 
 A hand promotion must never publish a feed document that `wails3 updater verify`
 rejects.
@@ -408,5 +424,5 @@ rejects.
   the feed and the published bytes, and a machine that already
   runs the previous release performs the actual update.
 - Nightly retention is not implemented; nothing deletes old nightlies.
-- The feed site is served by GitHub Pages from the `gh-pages` branch; the
-  pipeline does not use the Pages deployment API or an environment.
+- The feed is served only from GitHub; there is no mirror for users who cannot
+  reach `github.com`.

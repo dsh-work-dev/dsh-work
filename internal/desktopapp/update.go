@@ -26,8 +26,10 @@ const (
 	updateFeedEnv                 = "DSH_WORK_UPDATE_FEED_URL"
 	updateChannelEnv              = "DSH_WORK_UPDATE_CHANNEL"
 	updateProgressPublishInterval = 250 * time.Millisecond
-	// updateManifestName is the feed file each channel publishes.
-	updateManifestName    = "%s.json"
+	// updateManifestPath is where each channel's feed document lives below
+	// the feed root: one fixed release tag per channel, holding one asset that
+	// the pipeline replaces on every promotion.
+	updateManifestPath    = "updater-%s/update.json"
 	updateDownloadTimeout = 30 * time.Minute
 	// A channel switch waits for the running operation, which is bounded by the
 	// download it is already doing.
@@ -35,10 +37,10 @@ const (
 	updateSwitchPoll    = 25 * time.Millisecond
 )
 
-// manifestURL is the feed file of one channel. Each channel is served from its
-// own document, so the client never has to filter a shared feed.
+// manifestURL is the feed document of one channel. Each channel is served from
+// its own release tag, so the client never has to filter a shared feed.
 func manifestURL(feedRoot, channel string) string {
-	return strings.TrimSuffix(feedRoot, "/") + "/" + fmt.Sprintf(updateManifestName, channel)
+	return strings.TrimSuffix(feedRoot, "/") + "/" + fmt.Sprintf(updateManifestPath, channel)
 }
 
 var (

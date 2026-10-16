@@ -2,9 +2,10 @@
 #
 # Feed promotion decision: may this candidate replace the feed that is live?
 #
-# The three channel feeds are one Pages site, so a promotion is the only write
-# to that site and it must be safe even when two runs race for it. This script
-# only decides; the caller re-reads the branch, applies the decision and pushes.
+# Each channel feed is the update.json asset of its updater-<channel> release,
+# and a promotion is the only write to it. This script only decides; the caller
+# reads the live feed, applies the decision and uploads the replacement inside
+# one serialized job.
 #
 #   promote-feed.sh <candidate-manifest> <live-feed> <version> <channel> <artifact>
 #

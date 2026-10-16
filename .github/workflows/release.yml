@@ -18,10 +18,10 @@
 # from that identity, its digest was checked against the uploaded bytes, and,
 # when a code-signing certificate and publisher are configured, the binaries
 # and the installer were signed and checked against that publisher. Without a
-# certificate the release is published unsigned. With no Pages site, half of
-# the signing configuration, or a build script that cannot embed the release
-# identity, this pipeline builds and keeps CI artifacts for diagnosis and
-# refuses to publish.
+# certificate the release is published unsigned. With half of the signing
+# configuration, or a build script that cannot embed the release identity,
+# this pipeline builds and keeps CI artifacts for diagnosis and refuses to
+# publish.
 #
 # See docs/release-channels.md for the channel, feed and promotion contract.
 
@@ -58,9 +58,10 @@ permissions:
 
 env:
   # The feed root is compiled into every released Windows build, so it cannot
-  # be a per-run value: a published build only ever trusts this URL.
-  FEED_ROOT: https://dsh-work-dev.github.io/dsh-work/updates
-  FEED_BASE: https://dsh-work-dev.github.io/dsh-work
+  # be a per-run value: a published build only ever trusts this URL. Each
+  # channel's feed is the update.json asset of the release tagged
+  # updater-<channel> below it.
+  FEED_ROOT: https://github.com/dsh-work-dev/dsh-work/releases/download
   BASE_CONFIG: build/config.yml
 
 jobs:
@@ -205,13 +206,6 @@ jobs:
           fi
           if [ "$can_sign" != "true" ]; then
             publisher=""
-          fi
-
-          # The feed root is a GitHub Pages site. Publishing a feed that Pages
-          # will not serve would look like a release and update nobody, so the
-          # page has to exist before anything is promoted to it.
-          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_pages 2>/dev/null || echo false)" != "true" ]; then
-            missing+=("github-pages")
           fi
 
           # A released build embeds the channel, the feed root and, when it is
@@ -640,9 +634,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # One repository-wide critical section. The three channels share one Pages
-    # site, so the whole site is promoted by exactly one run at a time and a
-    # queued run waits instead of cancelling the run that holds the lock.
+    # One repository-wide critical section: this job is the only writer of the
+    # updater-<channel> releases, so one promotion runs at a time and a queued
+    # run waits instead of cancelling the run that holds the lock. The feed is
+    # read and replaced inside it, so no two runs decide on the same live feed.
     concurrency:
       group: feed-promotion
       cancel-in-progress: false
@@ -673,12 +668,11 @@ jobs:
           name: dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer
           path: release-assets
 
-      # Promotion is a compare-and-swap on the feed branch. The branch is
-      # re-read on every attempt, so a run always merges into the feeds that
-      # are actually published rather than into the ones it started from. The
-      # lock is the branch ref itself: the push is the only write, and it
-      # either lands on the ref this attempt read or is rejected and retried
-      # against the ref that won.
+      # The live feed is the update.json asset of the release tagged
+      # updater-<channel>. It is read, compared with the candidate by
+      # promote-feed.sh, and replaced only on a promote decision. The release
+      # is a prerelease that is never marked latest, so it cannot become the
+      # repository's latest release or the stable gate of a nightly.
       - name: Promote ${{ needs.plan.outputs.channel }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -686,73 +680,56 @@ jobs:
           set -euo pipefail
           candidate="feed/manifest.json"
           jq -e '.version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' "$candidate" > /dev/null
+          tag="updater-$CHANNEL"
 
-          if ! git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
-            echo "feed-promotion: gh-pages does not exist yet, this run creates it"
+          if ! gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "feed-promotion: $tag does not exist yet, this run creates it"
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" --prerelease --latest=false \
+              --title "Update feed ($CHANNEL)" \
+              --notes "The $CHANNEL update feed read by installed dsh-work builds. Download releases from the versioned releases, not from here."
           fi
 
-          for attempt in $(seq 1 5); do
-            if git ls-remote --exit-code --heads origin gh-pages > /dev/null 2>&1; then
-              git fetch --depth 1 origin gh-pages
-              git checkout -B gh-pages FETCH_HEAD
-            elif git rev-parse --verify --quiet gh-pages > /dev/null; then
-              git checkout gh-pages
-            else
-              # A fresh site starts empty: no source file belongs on it.
-              git checkout --orphan gh-pages
-              git rm -rf --cached . > /dev/null 2>&1 || true
-            fi
+          mkdir -p live
+          current="live/update.json"
+          rm -f "$current"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern update.json --dir live 2> /dev/null || true
 
-            current="updates/${CHANNEL}.json"
-            decision=""
-            if decision=$(bash .github/workflows/promote-feed.sh \
-              "$candidate" "$current" "$VERSION" "$CHANNEL" "$ARTIFACT" 2> feed-promotion.err); then
-              echo "feed-promotion: $decision"
-            else
-              echo "feed-promotion: the candidate is refused" >&2
-              cat feed-promotion.err >&2
+          decision=""
+          if decision=$(bash .github/workflows/promote-feed.sh \
+            "$candidate" "$current" "$VERSION" "$CHANNEL" "$ARTIFACT" 2> feed-promotion.err); then
+            echo "feed-promotion: $decision"
+          else
+            echo "feed-promotion: the candidate is refused" >&2
+            cat feed-promotion.err >&2
+            exit 1
+          fi
+          case "$decision" in
+            idempotent)
+              echo "feed-promotion: $CHANNEL already offers $VERSION with the same bytes"
+              exit 0
+              ;;
+            promote)
+              ;;
+            *)
+              echo "feed-promotion: unexpected decision '$decision'" >&2
               exit 1
-            fi
-            case "$decision" in
-              idempotent)
-                echo "feed-promotion: $CHANNEL already offers $VERSION with the same bytes"
-                exit 0
-                ;;
-              promote)
-                ;;
-              *)
-                echo "feed-promotion: unexpected decision '$decision'" >&2
-                exit 1
-                ;;
-            esac
+              ;;
+          esac
 
-            mkdir -p updates
-            cp "$candidate" "$current"
-            if [ ! -f index.html ]; then
-              cp .github/workflows/feed-index.html index.html
-            fi
-            git add --all
-            if git diff --cached --quiet; then
-              echo "feed-promotion: nothing to commit"
-              exit 0
-            fi
-            git -c user.name="dsh-work release" -c user.email="release@users.noreply.github.com" \
-              commit -m "feed($CHANNEL): $VERSION" \
-              -m "source: $SOURCE_SHA" -m "run: $GITHUB_RUN_ID"
-            if git push origin HEAD:gh-pages; then
-              echo "feed-promotion: published $CHANNEL $VERSION"
-              exit 0
-            fi
-            echo "feed-promotion: another run holds the promotion lock; retrying (attempt $attempt)"
-            sleep $((attempt * 5))
-          done
-          echo "feed-promotion: could not take the lock after 5 attempts" >&2
-          exit 1
+          mkdir -p next
+          cp "$candidate" next/update.json
+          gh release upload "$tag" next/update.json -R "$GITHUB_REPOSITORY" --clobber
+          echo "feed-promotion: published $CHANNEL $VERSION"
 
       - name: Confirm the promoted channel
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          jq -e --arg v "$VERSION" '.version == $v' "updates/${CHANNEL}.json" > /dev/null
+          rm -rf confirm && mkdir confirm
+          gh release download "updater-$CHANNEL" -R "$GITHUB_REPOSITORY" --pattern update.json --dir confirm
+          jq -e --arg v "$VERSION" '.version == $v' confirm/update.json > /dev/null
           echo "the $CHANNEL feed now offers $VERSION"
 
   verify-feed:
@@ -762,6 +739,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: read
+    env:
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - name: Check out the release commit
         uses: actions/checkout@v5
@@ -789,7 +769,7 @@ jobs:
       - name: Fetch the published channel feed and its installer
         shell: pwsh
         run: |
-          $manifestUrl = "$env:FEED_ROOT/$env:CHANNEL.json"
+          $manifestUrl = "$env:FEED_ROOT/updater-$env:CHANNEL/update.json"
           Write-Host "fetching $manifestUrl"
           $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing
           $manifest = $response.Content | ConvertFrom-Json

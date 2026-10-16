@@ -302,3 +302,16 @@ func waitForUpdate(t *testing.T, done func() bool) {
 	}
 	t.Fatal("update flow did not reach the expected state")
 }
+
+// TestManifestURLNamesTheChannelReleaseAsset pins the feed layout the release
+// pipeline publishes: one fixed release tag per channel holding update.json.
+func TestManifestURLNamesTheChannelReleaseAsset(t *testing.T) {
+	root := "https://github.com/dsh-work-dev/dsh-work/releases/download"
+	for _, root := range []string{root, root + "/"} {
+		got := manifestURL(root, "beta")
+		want := "https://github.com/dsh-work-dev/dsh-work/releases/download/updater-beta/update.json"
+		if got != want {
+			t.Fatalf("manifestURL(%q, beta) = %q, want %q", root, got, want)
+		}
+	}
+}
