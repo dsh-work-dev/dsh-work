@@ -15,6 +15,8 @@ on:
   push:
     tags:
       - "v[0-9]*"
+      # A pre-release tag (vX.Y.Z-beta.N) belongs to beta.yml.
+      - "!v*-*"
 
 permissions:
   contents: read

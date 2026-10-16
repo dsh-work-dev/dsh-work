@@ -83,10 +83,38 @@ jobs:
       publisher: ${{ steps.gates.outputs.publisher }}
       can_sign: ${{ steps.gates.outputs.canSign }}
       build_channel: ${{ steps.gates.outputs.buildChannel }}
+      skip: ${{ steps.unchanged.outputs.skip }}
     steps:
+      # A scheduled nightly only ships when main moved. The newest published
+      # nightly release records the commit it was built from; when that is
+      # this commit, the run ends here and nothing is built or published. A
+      # manual dispatch is an explicit request and always proceeds.
+      - name: Skip a scheduled nightly with no new commit
+        id: unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "${{ inputs.channel }}" = "nightly" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            latest=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 \
+              --json tagName,createdAt \
+              --jq '[.[] | select(.tagName | contains("-nightly."))] | sort_by(.createdAt) | last | .tagName // ""')
+            if [ -n "$latest" ]; then
+              built=$(gh api "repos/$GITHUB_REPOSITORY/commits/$latest" --jq .sha)
+              if [ "$built" = "$SOURCE_SHA" ]; then
+                skip=true
+                echo "::notice title=Nightly skipped::$latest was already built from $SOURCE_SHA; nothing new to publish."
+              fi
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
       # The base version and the tag the run must build are read from this
       # commit, and the preflight derives a nightly base from it as well.
       - name: Check out the release commit
+        if: steps.unchanged.outputs.skip != 'true'
         uses: actions/checkout@v5
         with:
           ref: ${{ inputs.source_sha }}
@@ -94,6 +122,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
+        if: steps.unchanged.outputs.skip != 'true'
         uses: actions/setup-node@v5
         with:
           node-version: ">=24"
@@ -103,15 +132,18 @@ jobs:
       # The preflight compiles and runs internal/release/cmd/release-version,
       # so this job needs the Go toolchain but never the Go cache.
       - name: Set up Go
+        if: steps.unchanged.outputs.skip != 'true'
         uses: actions/setup-go@v6
         with:
           go-version: 1.25.14
           cache: false
 
       - name: Verify the Node toolchain
+        if: steps.unchanged.outputs.skip != 'true'
         run: node scripts/verify-node.mjs
 
       - name: Compute the one release identity
+        if: steps.unchanged.outputs.skip != 'true'
         id: identity
         env:
           CHANNEL: ${{ inputs.channel }}
@@ -164,6 +196,7 @@ jobs:
       # Everything that can block a publication is decided here, once, before
       # any build starts, and every decision is reported rather than assumed.
       - name: Decide what this run is allowed to publish
+        if: steps.unchanged.outputs.skip != 'true'
         id: gates
         env:
           INPUT_CHANNEL: ${{ inputs.channel }}
@@ -255,13 +288,15 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report a blocked publication
-        if: steps.gates.outputs.publishable != 'true'
+        if: steps.unchanged.outputs.skip != 'true' && steps.gates.outputs.publishable != 'true'
         run: |
           echo "::warning title=Publication blocked::This run will build, verify and keep CI artifacts, but it will not publish a release or promote a feed: ${{ steps.gates.outputs.blockReason }}"
 
   build:
     name: Build and package the Windows installer
     needs: plan
+    # Every later job needs this one, so a skipped nightly stops here.
+    if: needs.plan.outputs.skip != 'true'
     runs-on: windows-latest
     permissions:
       contents: read

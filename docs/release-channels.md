@@ -14,7 +14,7 @@ and what a channel needs before it can publish.
 | --- | --- | --- | --- |
 | stable | `X.Y.Z` | the release tag's commit | push tag `vX.Y.Z` |
 | beta | `X.Y.Z-beta.N` | the release tag's commit | push tag `vX.Y.Z-beta.N` |
-| nightly | `X.Y.Z-nightly.YYYYMMDD.<run id>` | `main`, or the default branch | push to `main`, manual dispatch, daily schedule |
+| nightly | `X.Y.Z-nightly.YYYYMMDD.<run id>` | `main`, or the default branch | daily schedule when `main` moved, manual dispatch |
 
 `X.Y.Z` is the base version in `build/config.yml` (`info.version`). A release
 version never invents a base: `scripts/release-version.ps1` and
@@ -191,7 +191,7 @@ that contains a runner path.
 | --- | --- |
 | `.github/workflows/stable.yml` | stable entry point, tag `vX.Y.Z` |
 | `.github/workflows/beta.yml` | beta entry point, tag `vX.Y.Z-beta.N` |
-| `.github/workflows/nightly.yml` | nightly entry point: `main`, dispatch, `17 19 * * *` |
+| `.github/workflows/nightly.yml` | nightly entry point: `17 19 * * *` on `main`, dispatch |
 | `.github/workflows/release.yml` | the pipeline, `workflow_call` only |
 | `.github/workflows/promote-feed.sh` | the feed promotion decision |
 | `.github/workflows/promote-feed.test.sh` | local test harness for that decision |
@@ -286,8 +286,16 @@ in `build/config.yml`, and the ref the run may publish from is checked against
 the channel. A tag whose version cannot be resolved to the configured base
 fails the run instead of publishing a mislabelled release.
 
-Nightly publishes itself from `main` on every push, on a daily schedule at
-19:17 UTC, and on manual dispatch. It needs no per-run approval. Nightly
+Nightly publishes itself from `main` on a daily schedule at 19:17 UTC and on
+manual dispatch; a push or a merge to `main` publishes nothing. The scheduled
+run first looks up the newest published nightly release and resolves its tag to
+a commit; when that is the current `main`, the run ends without building, so an
+unchanged `main` never produces a nightly that offers installations the same
+code again. A manual dispatch always builds and publishes. Nightly needs no
+per-run approval.
+
+`stable.yml` triggers on `v[0-9]*` but excludes any tag containing `-`, so a
+beta tag runs only `beta.yml`. Nightly
 retention is a report only: the pipeline never deletes a release, and no
 retention job exists yet, so old nightly releases accumulate until a retention
 policy is decided.
@@ -346,8 +354,7 @@ is refused, not overwritten.
 
 ## Current status
 
-Publication is blocked today, for reasons that are facts about the repository
-rather than bugs in the pipeline:
+Nothing has been published yet:
 
 | Prerequisite | State |
 | --- | --- |
@@ -355,7 +362,8 @@ rather than bugs in the pipeline:
 | release tags | none exist |
 | GitHub Releases | none exist |
 
-Nothing blocks the first publication: the first tag or push to `main` creates
+Nothing blocks the first publication: the first tag, scheduled nightly or
+manual dispatch creates
 the versioned release and the `updater-<channel>` release.
 
 Everything upstream of the feed has been verified locally against the real
