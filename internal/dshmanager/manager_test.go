@@ -1501,6 +1501,12 @@ func (r *recordingRunner) Run(_ context.Context, path string, args []string, env
 	return CommandResult{}, nil
 }
 
+// serializedOperationWait bounds how long the serialization test waits for a
+// plugin operation to reach or leave the command runner. It only guards against
+// a hang; a loaded CI runner can take well over a second to finish the
+// operation after it is released.
+const serializedOperationWait = 10 * time.Second
+
 func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	root := t.TempDir()
 	homePath := filepath.Join(root, "dsh-home")
@@ -1534,7 +1540,7 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 	}()
 	select {
 	case <-runner.started:
-	case <-time.After(time.Second):
+	case <-time.After(serializedOperationWait):
 		t.Fatal("first plugin operation did not reach the command runner")
 	}
 	secondCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -1547,7 +1553,7 @@ func TestManagerSerializesExternalPluginOperations(t *testing.T) {
 		if firstErr != nil {
 			t.Fatalf("first plugin operation error = %v", firstErr)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(serializedOperationWait):
 		t.Fatal("first plugin operation did not release")
 	}
 }
