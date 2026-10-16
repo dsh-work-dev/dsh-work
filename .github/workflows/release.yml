@@ -434,15 +434,22 @@ jobs:
         run: |
           $installer = (Resolve-Path -LiteralPath "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe").Path
           $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installer)
+          # The version strings carry the full release version, which is what
+          # the update client compares; the four-field numeric file version
+          # carries the X.Y.Z.0 mapping, because Windows cannot hold a channel.
           $product = $version.ProductVersion
           $fileVersion = $version.FileVersion
-          Write-Host "installer ProductVersion=$product FileVersion=$fileVersion"
-          $expectedFile = '${{ needs.plan.outputs.file_version }}'
-          if ($product -notlike "*$env:RELEASE_VERSION*") {
-            throw "the installer reports ProductVersion '$product', which does not carry the release version '$env:RELEASE_VERSION'"
+          $fixed = '{0}.{1}.{2}.{3}' -f $version.FileMajorPart, $version.FileMinorPart, $version.FileBuildPart, $version.FilePrivatePart
+          Write-Host "installer ProductVersion=$product FileVersion=$fileVersion fixed=$fixed"
+          $expectedFixed = '${{ needs.plan.outputs.file_version }}'
+          if ($product -ne $env:RELEASE_VERSION) {
+            throw "the installer reports ProductVersion '$product', the release version is '$env:RELEASE_VERSION'"
           }
-          if ($fileVersion -ne $expectedFile) {
-            throw "the installer reports file version '$fileVersion', the release identity is '$expectedFile'"
+          if ($fileVersion -ne $env:RELEASE_VERSION) {
+            throw "the installer reports FileVersion '$fileVersion', the release version is '$env:RELEASE_VERSION'"
+          }
+          if ($fixed -ne $expectedFixed) {
+            throw "the installer reports numeric file version '$fixed', the release identity is '$expectedFixed'"
           }
 
       - name: Upload the candidate package for diagnosis
