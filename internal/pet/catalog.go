@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 // CatalogConfig supplies the narrow environment seams used by PetCatalog.
@@ -86,8 +88,8 @@ func NewPetCatalog(config CatalogConfig) (*Catalog, error) {
 	}
 	cacheRoot := strings.TrimSpace(config.CacheRoot)
 	if cacheRoot == "" {
-		root, err := os.UserCacheDir()
-		if err != nil || strings.TrimSpace(root) == "" {
+		paths, err := storagepaths.DefaultDirectories()
+		if err != nil || strings.TrimSpace(paths.CacheRoot) == "" {
 			return nil, &DiagnosticError{Issues: []Issue{{
 				Code:                IssuePackageReadFailed,
 				SourceKind:          SourceCodexHome,
@@ -96,7 +98,7 @@ func NewPetCatalog(config CatalogConfig) (*Catalog, error) {
 				SafeFallbackSummary: "the Pet cache location is unavailable",
 			}}}
 		}
-		cacheRoot = filepath.Join(root, "dsh-work", "pets")
+		cacheRoot = filepath.Join(paths.CacheRoot, "pets")
 	}
 	abs, err := filepath.Abs(filepath.Clean(cacheRoot))
 	if err != nil || strings.TrimSpace(abs) == "" {

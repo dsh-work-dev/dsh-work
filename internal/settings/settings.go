@@ -13,6 +13,7 @@ import (
 
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/notifications"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 const stateVersion = 2
@@ -31,6 +32,23 @@ const (
 
 func (l Locale) Valid() bool {
 	return l == LocaleEnglish || l == LocaleChinese || l == LocaleJapanese
+}
+
+// UpdateChannel is the release channel this installation follows. It is
+// explicit metadata, never inferred from the installed version, because one
+// base version exists as a nightly, a beta and a stable build at the same time.
+type UpdateChannel string
+
+const (
+	UpdateChannelStable  UpdateChannel = "stable"
+	UpdateChannelBeta    UpdateChannel = "beta"
+	UpdateChannelNightly UpdateChannel = "nightly"
+
+	DefaultUpdateChannel = UpdateChannelStable
+)
+
+func (c UpdateChannel) Valid() bool {
+	return c == UpdateChannelStable || c == UpdateChannelBeta || c == UpdateChannelNightly
 }
 
 // PetVisibilityIntent is the persisted user choice. It is intentionally
@@ -189,6 +207,7 @@ type Values struct {
 	Notifications            notifications.Preferences `json:"notifications"`
 	Pet                      PetPreference             `json:"pet"`
 	Appearance               Appearance                `json:"appearance"`
+	UpdateChannel            UpdateChannel             `json:"updateChannel"`
 }
 
 func DefaultValues() Values {
@@ -200,7 +219,27 @@ func DefaultValues() Values {
 		Notifications:            notifications.DefaultPreferences(),
 		Pet:                      DefaultPetPreference(),
 		Appearance:               DefaultAppearance(),
+		UpdateChannel:            DefaultUpdateChannel,
 	}
+}
+
+func (m *Manager) SetUpdateChannel(ctx context.Context, channel UpdateChannel) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	if !channel.Valid() {
+		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Update channel is not supported", "choose stable, beta or nightly")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := m.values
+	next.UpdateChannel = channel
+	next.Version = stateVersion
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		return Values{}, err
+	}
+	m.values = next
+	return cloneValues(next), nil
 }
 
 func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool) (Values, error) {
@@ -380,6 +419,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		Notifications            json.RawMessage `json:"notifications"`
 		Pet                      json.RawMessage `json:"pet"`
 		Appearance               *Appearance     `json:"appearance"`
+		UpdateChannel            *UpdateChannel  `json:"updateChannel"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
@@ -395,6 +435,11 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	}
 	if raw.Version >= 2 && raw.AutomaticRuntimeRollback != nil {
 		values.AutomaticRuntimeRollback = *raw.AutomaticRuntimeRollback
+	}
+	// An install that predates the channel field keeps the default channel; an
+	// existing but unsupported value is also replaced instead of failing the load.
+	if raw.UpdateChannel != nil && raw.UpdateChannel.Valid() {
+		values.UpdateChannel = *raw.UpdateChannel
 	}
 	if len(raw.Notifications) > 0 && string(raw.Notifications) != "null" {
 		var candidate struct {
@@ -491,15 +536,16 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 
 func normalizePath(path string) (string, error) {
 	if path == "" {
-		root, err := os.UserConfigDir()
-		if err != nil || root == "" {
+		paths, err := storagepaths.DefaultDirectories()
+		var root string
+		if err != nil || paths.Root == "" {
 			root, err = os.Getwd()
 			if err != nil {
 				return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is unavailable", "the settings directory could not be determined")
 			}
 			root = filepath.Join(root, ".dsh-work")
 		} else {
-			root = filepath.Join(root, "dsh-work")
+			root = paths.Root
 		}
 		path = filepath.Join(root, "settings.json")
 	}

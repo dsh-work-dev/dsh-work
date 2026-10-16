@@ -17,6 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workspacecontext"
@@ -94,6 +95,7 @@ type Config struct {
 	BootstrapDirectory  string
 	DSHDataDirectory    string
 	SettingsPath        string
+	CacheDirectory      string
 	ExpectedDSHVersion  string
 	ReadinessTimeout    time.Duration
 	ProbeTimeout        time.Duration
@@ -109,12 +111,12 @@ func DefaultConfig(discoveryRoot string) Config {
 		discoveryRoot, _ = os.Getwd()
 	}
 	discoveryRoot, _ = filepath.Abs(discoveryRoot)
-	configRoot, err := os.UserConfigDir()
-	if err != nil || configRoot == "" {
+	paths, err := storagepaths.DefaultDirectories()
+	if err != nil {
 		return Config{
 			DiscoveryRoot:       discoveryRoot,
 			ExpectedDSHVersion:  dshadapter.SupportedVersion,
-			configError:         errors.New("the operating system did not provide a per-user application-data directory"),
+			configError:         fmt.Errorf("dsh-work could not resolve its per-user data and cache directories: %w", err),
 			ReadinessTimeout:    60 * time.Second,
 			ProbeTimeout:        750 * time.Millisecond,
 			GracefulStopTimeout: 4 * time.Second,
@@ -125,9 +127,10 @@ func DefaultConfig(discoveryRoot string) Config {
 	}
 	return Config{
 		DiscoveryRoot:       discoveryRoot,
-		BootstrapDirectory:  filepath.Join(configRoot, "dsh-work", "bootstrap"),
-		DSHDataDirectory:    filepath.Join(configRoot, "dsh-work", "environment"),
-		SettingsPath:        filepath.Join(configRoot, "dsh-work", "settings.json"),
+		BootstrapDirectory:  filepath.Join(paths.Root, "bootstrap"),
+		DSHDataDirectory:    filepath.Join(paths.Root, "environment"),
+		SettingsPath:        filepath.Join(paths.Root, "settings.json"),
+		CacheDirectory:      paths.CacheRoot,
 		ExpectedDSHVersion:  dshadapter.SupportedVersion,
 		ReadinessTimeout:    60 * time.Second,
 		ProbeTimeout:        750 * time.Millisecond,
@@ -140,7 +143,7 @@ func DefaultConfig(discoveryRoot string) Config {
 
 func (c Config) withDefaults() Config {
 	defaults := DefaultConfig(c.DiscoveryRoot)
-	needsApplicationData := c.BootstrapDirectory == "" || c.DSHDataDirectory == "" || c.SettingsPath == ""
+	needsApplicationData := c.BootstrapDirectory == "" || c.DSHDataDirectory == "" || c.SettingsPath == "" || c.CacheDirectory == ""
 	if needsApplicationData && defaults.configError != nil {
 		c.configError = defaults.configError
 	}
@@ -155,6 +158,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.SettingsPath == "" {
 		c.SettingsPath = defaults.SettingsPath
+	}
+	if c.CacheDirectory == "" {
+		c.CacheDirectory = defaults.CacheDirectory
 	}
 	if c.ExpectedDSHVersion == "" {
 		c.ExpectedDSHVersion = defaults.ExpectedDSHVersion

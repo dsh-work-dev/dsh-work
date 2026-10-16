@@ -1,5 +1,5 @@
 // Package storagepaths owns the desktop's storage locations, independently of
-// DSH_HOME. A small locator stays at the OS configuration location so moving the
+// DSH_HOME. A small locations file stays at a fixed per-user path so moving the
 // application store does not make it undiscoverable on the next launch.
 package storagepaths
 
@@ -35,13 +35,18 @@ type State struct {
 	Error   string     `json:"error,omitempty"`
 }
 type Manager struct {
-	mu    sync.Mutex
-	path  string
-	state State
+	mu              sync.Mutex
+	path            string
+	defaultUserData string
+	state           State
 }
 
-func Open(path, defaultRoot string) (*Manager, error) {
+func Open(path, defaultRoot string, defaultUserData ...string) (*Manager, error) {
 	m := &Manager{path: path, state: State{Current: Locations{Root: defaultRoot}}}
+	if len(defaultUserData) > 0 {
+		m.defaultUserData = defaultUserData[0]
+		m.state.Current.UserData = m.defaultUserData
+	}
 	b, err := os.ReadFile(path)
 	if err == nil {
 		err = json.Unmarshal(b, &m.state)
@@ -52,8 +57,25 @@ func Open(path, defaultRoot string) (*Manager, error) {
 	if !filepath.IsAbs(m.state.Current.Root) {
 		return nil, errors.New("invalid storage root")
 	}
+	if m.state.Current.UserData == "" && m.defaultUserData != "" {
+		m.state.Current.UserData = m.defaultUserData
+	}
+	if m.state.Pending != nil && m.state.Pending.UserData == "" && m.defaultUserData != "" {
+		m.state.Pending.UserData = m.defaultUserData
+	}
 	return m, nil
 }
+
+// DefaultUserDataPath returns the platform's default user-data location for a
+// root. Windows and macOS keep default user-data under that root; Linux may
+// supply a separate XDG data directory when opening the manager.
+func (m *Manager) DefaultUserDataPath(root string) string {
+	if m.defaultUserData != "" {
+		return m.defaultUserData
+	}
+	return filepath.Join(root, "user-data")
+}
+
 func (m *Manager) Snapshot() State {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -67,6 +89,9 @@ func (m *Manager) Snapshot() State {
 func (m *Manager) Save(next Locations) (State, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if next.UserData == "" && m.defaultUserData != "" {
+		next.UserData = m.defaultUserData
+	}
 	var err error
 	next, err = validate(m.state.Current, next)
 	if err != nil {
@@ -233,9 +258,15 @@ type relocation struct{ source, target, stage string }
 
 // ApplyPending is called under the desktop process lock, before opening any
 // Worker, settings writer or WebView. Copies are committed only after all data
-// and dependency links are prepared. Existing copyfs handles file mechanics;
-// our small boundary adds path validation, link rebasing and locator commit.
+// and dependency links are prepared.
 func (m *Manager) ApplyPending() error {
+	return m.ApplyPendingWith(nil)
+}
+
+// ApplyPendingWith calls beforeCommit after publishing migrated directories but
+// before committing the location record. The desktop uses this point to lock
+// the destination root before readers can discover it.
+func (m *Manager) ApplyPendingWith(beforeCommit func(Locations) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.state.Pending == nil {
@@ -244,7 +275,7 @@ func (m *Manager) ApplyPending() error {
 	old := m.state.Current
 	next, err := validate(old, *m.state.Pending)
 	if err == nil {
-		err = m.migrate(old, next)
+		err = m.migrate(old, next, beforeCommit)
 	}
 	if err != nil {
 		s := m.state
@@ -257,7 +288,7 @@ func (m *Manager) ApplyPending() error {
 	}
 	return err
 }
-func (m *Manager) migrate(old, next Locations) error {
+func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) error) error {
 	var moves []relocation
 	if !same(old.Root, next.Root) {
 		moves = append(moves, relocation{source: old.Root, target: next.Root})
@@ -354,6 +385,11 @@ func (m *Manager) migrate(old, next Locations) error {
 			return err
 		}
 		published = append(published, mv.target)
+	}
+	if beforeCommit != nil {
+		if err := beforeCommit(next); err != nil {
+			return fmt.Errorf("prepare storage location commit: %w", err)
+		}
 	}
 	s := State{Current: next}
 	if err := m.write(s); err != nil {

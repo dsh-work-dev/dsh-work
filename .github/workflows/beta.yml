@@ -1,0 +1,38 @@
+# Beta channel entry point.
+#
+# A beta release is published by pushing the beta tag, and only by pushing the
+# beta tag: `vX.Y.Z-beta.N`. The preflight refuses a tag that is not exactly
+# one `beta.N` identifier, so a stable tag can never run this channel and a
+# malformed beta tag produces a red run instead of a beta release.
+#
+# This workflow only chooses the trigger and the channel. The pipeline itself
+# lives in release.yml.
+
+name: Release (beta)
+
+on:
+  push:
+    tags:
+      - "v[0-9]*-beta.*"
+
+permissions:
+  contents: read
+
+# The beta channel takes the same lock as the pipeline's promotion: releases
+# queue instead of cancelling each other, because a cancelled run can already
+# hold a draft release or a promotion lock.
+concurrency:
+  group: release-beta
+  cancel-in-progress: false
+
+jobs:
+  release:
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      channel: beta
+      source_sha: ${{ github.sha }}
+    secrets:
+      WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}

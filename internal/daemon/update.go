@@ -19,27 +19,28 @@ const (
 )
 
 // UpdateInstallMode tells the UI which explicit install action is available.
-// The first desktop slice uses staged-restart; installer is reserved for a
-// future package-backed release source.
+// This release unit is replaced by running the signed installer, which keeps the
+// graphical and command-line executables on one version.
 type UpdateInstallMode string
 
 const (
-	UpdateInstallNone          UpdateInstallMode = ""
-	UpdateInstallStagedRestart UpdateInstallMode = "staged-restart"
-	UpdateInstallInstaller     UpdateInstallMode = "installer"
+	UpdateInstallNone      UpdateInstallMode = ""
+	UpdateInstallInstaller UpdateInstallMode = "installer"
 )
 
 // UpdateSnapshot is safe to expose over the trusted local IPC boundary. It
 // deliberately omits provider internals, staging paths and raw errors.
 type UpdateSnapshot struct {
-	Phase          UpdatePhase       `json:"phase"`
-	CurrentVersion string            `json:"currentVersion"`
-	TargetVersion  string            `json:"targetVersion,omitempty"`
-	ReceivedBytes  int64             `json:"receivedBytes,omitempty"`
-	TotalBytes     int64             `json:"totalBytes,omitempty"`
-	LastCheckedAt  string            `json:"lastCheckedAt,omitempty"`
-	ErrorCode      string            `json:"errorCode,omitempty"`
-	InstallMode    UpdateInstallMode `json:"installMode"`
+	Phase           UpdatePhase       `json:"phase"`
+	CurrentVersion  string            `json:"currentVersion"`
+	BuildChannel    string            `json:"buildChannel,omitempty"`
+	SelectedChannel string            `json:"selectedChannel,omitempty"`
+	TargetVersion   string            `json:"targetVersion,omitempty"`
+	ReceivedBytes   int64             `json:"receivedBytes,omitempty"`
+	TotalBytes      int64             `json:"totalBytes,omitempty"`
+	LastCheckedAt   string            `json:"lastCheckedAt,omitempty"`
+	ErrorCode       string            `json:"errorCode,omitempty"`
+	InstallMode     UpdateInstallMode `json:"installMode"`
 }
 
 type UpdateAction string

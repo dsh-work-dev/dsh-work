@@ -44,3 +44,10 @@ func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode 
 	err := call(ctx, s.Client, "SettingsService", "SetAppearance", []any{theme, mode}, &value)
 	return value, err
 }
+
+func (s *SettingsService) SetUpdateChannel(ctx context.Context, channel string) (settings.Values, error) {
+	if s.Local != nil { return s.Local.SetUpdateChannel(ctx, channel) }
+	var value settings.Values
+	err := call(ctx, s.Client, "SettingsService", "SetUpdateChannel", []any{channel}, &value)
+	return value, err
+}

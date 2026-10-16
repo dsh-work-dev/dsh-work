@@ -40,9 +40,6 @@ export function mountStorage() {
     const current = state.current;
     const saved = state.pending ?? current;
     const nextUser = useDefault.checked ? "" : user;
-    dirty = root !== saved.root || nextUser !== saved.userData;
-    controls();
-    status.textContent = state.error ? `${t("storage.failed")} ${state.error}` : state.pending && !dirty ? t("storage.pending") : "";
     rootPicker.setPath(current.root);
     const rootTarget = document.getElementById("storage-root-target")!;
     const userTarget = document.getElementById("storage-user-target")!;
@@ -50,23 +47,35 @@ export function mountStorage() {
     rootTarget.textContent = t("storage.moveTo", {path: root});
     userTarget.hidden = true;
     try {
-      const [currentUser, targetUser] = await Promise.all([
+      const [currentUser, savedUser, targetUser] = await Promise.all([
         current.userData || StorageService.DefaultUserDataPath(current.root),
+        saved.userData || StorageService.DefaultUserDataPath(saved.root),
         nextUser || StorageService.DefaultUserDataPath(root),
       ]);
       if (token !== revision) return;
+      dirty = root !== saved.root || targetUser !== savedUser;
+      controls();
+      status.textContent = state.error ? `${t("storage.failed")} ${state.error}` : state.pending && !dirty ? t("storage.pending") : "";
       userPicker.setPath(currentUser);
       userTarget.hidden = currentUser === targetUser;
       userTarget.textContent = t("storage.moveTo", {path: targetUser});
     } catch (error) { if (token === revision) report(error); }
   }
 
-  function render(next: State) {
+  async function render(next: State) {
     state = next;
     const choice = next.pending ?? next.current;
     root = choice.root; user = choice.userData;
-    useDefault.checked = !user;
-    void sync();
+    try {
+      const defaultUser = await StorageService.DefaultUserDataPath(root);
+      if (state !== next) return;
+      useDefault.checked = !user || user === defaultUser;
+    } catch (error) {
+      if (state !== next) return;
+      report(error);
+      useDefault.checked = !user;
+    }
+    await sync();
   }
   function restoreActionFocus(source: HTMLElement | null) {
     if (source !== save && source !== cancel) return;
@@ -77,7 +86,7 @@ export function mountStorage() {
     if (busy) return;
     const source = document.activeElement as HTMLElement | null;
     busy = true; controls();
-    try { render(await work()); }
+    try { await render(await work()); }
     catch (error) { report(error); }
     finally { busy = false; controls(); restoreActionFocus(source); }
   }
@@ -91,7 +100,7 @@ export function mountStorage() {
   retry.type = "button"; retry.className = "button button-secondary"; retry.textContent = t("common.retry"); retry.hidden = true; status.after(retry);
   const refresh = async () => {
     retry.disabled = true;
-    try { render(await StorageService.GetLocations()); retry.hidden = true; }
+    try { await render(await StorageService.GetLocations()); retry.hidden = true; }
     catch { status.textContent = t("view.unavailable"); retry.hidden = false; }
     finally { retry.disabled = false; }
   };

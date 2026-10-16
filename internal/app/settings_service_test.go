@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/local/dsh-work/internal/settings"
@@ -29,6 +30,113 @@ func TestSetAppearanceRequiresTheWorkbenchAndPublishesAfterSave(t *testing.T) {
 	want := settings.Appearance{Theme: settings.ThemeMonochrome, Mode: settings.AppearanceDark}
 	if values.Appearance != want || len(published) != 1 || published[0] != want {
 		t.Fatalf("values = %#v, published = %#v", values.Appearance, published)
+	}
+}
+
+func TestSetUpdateChannelSwitchesTheUpdaterBeforeSaving(t *testing.T) {
+	values := settings.DefaultValues()
+	store := &petServiceStore{values: &values}
+	manager := newPetServiceManagerWithStore(t, store, values)
+	service := NewSettingsService(manager, nil, nil)
+	var switches []settings.UpdateChannel
+	var savesAtSwitch []int
+	SetUpdateChannelChanged(service, func(_ context.Context, channel settings.UpdateChannel) error {
+		switches = append(switches, channel)
+		savesAtSwitch = append(savesAtSwitch, store.saves)
+		return nil
+	})
+
+	if _, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "worker"), "nightly"); err == nil {
+		t.Fatal("an untrusted surface changed the update channel")
+	}
+	saved, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "workspace"), "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(switches) != 1 || switches[0] != settings.UpdateChannelNightly {
+		t.Fatalf("updater switches = %v, want [nightly]", switches)
+	}
+	if savesAtSwitch[0] != 0 {
+		t.Fatal("the channel was saved before the updater switched")
+	}
+	if saved.UpdateChannel != settings.UpdateChannelNightly || store.saves != 1 {
+		t.Fatalf("saved channel = %q with %d saves", saved.UpdateChannel, store.saves)
+	}
+	if got, err := manager.Snapshot(context.Background()); err != nil || got.UpdateChannel != settings.UpdateChannelNightly {
+		t.Fatalf("stored channel = %q (%v)", got.UpdateChannel, err)
+	}
+}
+
+func TestSetUpdateChannelRefusalKeepsTheSavedChannel(t *testing.T) {
+	values := settings.DefaultValues()
+	store := &petServiceStore{values: &values}
+	manager := newPetServiceManagerWithStore(t, store, values)
+	service := NewSettingsService(manager, nil, nil)
+	var switches []settings.UpdateChannel
+	SetUpdateChannelChanged(service, func(_ context.Context, channel settings.UpdateChannel) error {
+		switches = append(switches, channel)
+		return errors.New("the update channel cannot change while an update is installing")
+	})
+
+	if _, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "workspace"), "nightly"); err == nil {
+		t.Fatal("a channel switch the updater refused was accepted")
+	}
+	if len(switches) != 1 || switches[0] != settings.UpdateChannelNightly {
+		t.Fatalf("updater switches = %v, want [nightly]", switches)
+	}
+	if store.saves != 0 {
+		t.Fatalf("a refused switch saved settings %d times", store.saves)
+	}
+	if got := values.UpdateChannel; got != settings.UpdateChannelStable {
+		t.Fatalf("stored channel = %q after a refused switch, want stable", got)
+	}
+}
+
+func TestSetUpdateChannelRestoresTheUpdaterWhenTheSaveFails(t *testing.T) {
+	values := settings.DefaultValues()
+	store := &petServiceStore{values: &values, err: errors.New("settings file is not writable")}
+	manager := newPetServiceManagerWithStore(t, store, values)
+	service := NewSettingsService(manager, nil, nil)
+	var switches []settings.UpdateChannel
+	SetUpdateChannelChanged(service, func(_ context.Context, channel settings.UpdateChannel) error {
+		switches = append(switches, channel)
+		return nil
+	})
+
+	if _, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "workspace"), "beta"); err == nil {
+		t.Fatal("a channel that could not be saved was reported as saved")
+	}
+	if len(switches) != 2 || switches[0] != settings.UpdateChannelBeta || switches[1] != settings.UpdateChannelStable {
+		t.Fatalf("updater switches = %v, want [beta stable]", switches)
+	}
+	if got := values.UpdateChannel; got != settings.UpdateChannelStable {
+		t.Fatalf("stored channel = %q after a failed save, want stable", got)
+	}
+}
+
+func TestSetUpdateChannelRejectsUnknownChannelsAndRepeats(t *testing.T) {
+	values := settings.DefaultValues()
+	store := &petServiceStore{values: &values}
+	manager := newPetServiceManagerWithStore(t, store, values)
+	service := NewSettingsService(manager, nil, nil)
+	var switches []settings.UpdateChannel
+	SetUpdateChannelChanged(service, func(_ context.Context, channel settings.UpdateChannel) error {
+		switches = append(switches, channel)
+		return nil
+	})
+
+	if _, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "workspace"), "canary"); err == nil {
+		t.Fatal("an unknown update channel was accepted")
+	}
+	repeat, err := service.SetUpdateChannel(LocalClientContext(context.Background(), "workspace"), "stable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(switches) != 0 || store.saves != 0 {
+		t.Fatalf("switches = %v with %d saves, want no work", switches, store.saves)
+	}
+	if repeat.UpdateChannel != settings.UpdateChannelStable {
+		t.Fatalf("channel = %q, want stable", repeat.UpdateChannel)
 	}
 }
 

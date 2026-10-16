@@ -5,7 +5,8 @@ export {
     AppearanceMode,
     Locale,
     PetVisibilityIntent,
-    ThemeID
+    ThemeID,
+    UpdateChannel
 } from "./models.js";
 
 export type {

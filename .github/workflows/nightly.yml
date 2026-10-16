@@ -1,0 +1,54 @@
+# Nightly channel entry point.
+#
+# A nightly is published from main on a daily schedule and on demand, never on
+# a push, so merging to main does not ship a nightly by itself. A scheduled run
+# publishes nothing when main has not moved since the last nightly; a manual
+# dispatch always publishes. It is the only channel a person can publish without
+# creating a tag.
+#
+# The version is derived, never typed: base version (build/config.yml) plus
+# the UTC date plus the workflow run id. A retry of the same run therefore
+# reproduces the same version and cannot publish a second identity for the
+# same commit. The nightly base must be strictly higher than the highest
+# published stable version, so a nightly cannot race ahead of the stable line.
+#
+# Nightly publishing needs no per-run approval: the manual trigger is a
+# dispatch, and the scheduled run publishes on its own. Every publication is
+# still gated on a consistent signing configuration and a build script that
+# can embed the release identity, and a run that fails either builds and keeps
+# its artifacts instead of publishing.
+
+name: Release (nightly)
+
+on:
+  schedule:
+    # 19:17 UTC daily. The minute is deliberately not 0: the top of the hour is
+    # when GitHub's schedule queue is busiest, and a delayed nightly has no
+    # value.
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One fixed lock for the nightly channel. A queued nightly waits for the run
+# in progress instead of cancelling it, and GitHub keeps at most one run
+# pending per group, so repeated dispatches cannot build a queue of nightlies.
+concurrency:
+  group: release-nightly
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # A scheduled or dispatched run must publish from the default branch.
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      channel: nightly
+      source_sha: ${{ github.sha }}
+      run_id: ${{ github.run_id }}
+    secrets:
+      WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}

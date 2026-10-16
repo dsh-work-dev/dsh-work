@@ -1,0 +1,833 @@
+# Reusable Windows release pipeline for every release channel.
+#
+# This file is not a workflow entry point. It is called by exactly three
+# channel workflows, each of which owns one trigger:
+#
+#   .github/workflows/stable.yml   push tag vX.Y.Z
+#   .github/workflows/beta.yml     push tag vX.Y.Z-beta.N
+#   .github/workflows/nightly.yml  push to main, manual dispatch, daily schedule
+#
+# The channel is an input, never a branch name, so all three channels run the
+# same code and the same gates. Nothing here may be called with
+# `pull_request`, and no step of this pipeline runs on a pull request: package
+# checks stay in pc.yml, which never sees signing material.
+#
+# Publication is fail-closed. One release identity is computed by the
+# preflight (`scripts/release-version.mjs`) and every later step consumes that
+# one value. A channel feed is published only after the installer was built
+# from that identity, its digest was checked against the uploaded bytes, and,
+# when a code-signing certificate and publisher are configured, the binaries
+# and the installer were signed and checked against that publisher. Without a
+# certificate the release is published unsigned. With half of the signing
+# configuration, or a build script that cannot embed the release identity,
+# this pipeline builds and keeps CI artifacts for diagnosis and refuses to
+# publish.
+#
+# See docs/release-channels.md for the channel, feed and promotion contract.
+
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: Release channel this run publishes.
+        required: true
+        type: string
+      source_sha:
+        description: Commit the release is built from.
+        required: true
+        type: string
+      run_id:
+        description: Workflow run id, part of a nightly version.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      # Base64 of the PFX that holds the Authenticode code-signing
+      # certificate and its private key, and the PFX password. Without the
+      # certificate a run builds unsigned diagnostic packages and publishes
+      # nothing.
+      WINDOWS_SIGNING_CERTIFICATE:
+        required: false
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  # The feed root is compiled into every released Windows build, so it cannot
+  # be a per-run value: a published build only ever trusts this URL. Each
+  # channel's feed is the update.json asset of the release tagged
+  # updater-<channel> below it.
+  FEED_ROOT: https://github.com/dsh-work-dev/dsh-work/releases/download
+  BASE_CONFIG: build/config.yml
+
+jobs:
+  plan:
+    name: Release identity and gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      base: ${{ steps.identity.outputs.base }}
+      file_version: ${{ steps.identity.outputs.fileVersion }}
+      channel: ${{ steps.gates.outputs.channel }}
+      source_sha: ${{ steps.identity.outputs.sourceSha }}
+      last_stable: ${{ steps.identity.outputs.lastStableBase }}
+      publishable: ${{ steps.gates.outputs.publishable }}
+      block_reason: ${{ steps.gates.outputs.blockReason }}
+      missing_script_parameters: ${{ steps.gates.outputs.missingScriptParameters }}
+      publisher: ${{ steps.gates.outputs.publisher }}
+      can_sign: ${{ steps.gates.outputs.canSign }}
+      build_channel: ${{ steps.gates.outputs.buildChannel }}
+      skip: ${{ steps.unchanged.outputs.skip }}
+    steps:
+      # A scheduled nightly only ships when main moved. The newest published
+      # nightly release records the commit it was built from; when that is
+      # this commit, the run ends here and nothing is built or published. A
+      # manual dispatch is an explicit request and always proceeds.
+      - name: Skip a scheduled nightly with no new commit
+        id: unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "${{ inputs.channel }}" = "nightly" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            latest=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-drafts --limit 100 \
+              --json tagName,createdAt \
+              --jq '[.[] | select(.tagName | contains("-nightly."))] | sort_by(.createdAt) | last | .tagName // ""')
+            if [ -n "$latest" ]; then
+              built=$(gh api "repos/$GITHUB_REPOSITORY/commits/$latest" --jq .sha)
+              if [ "$built" = "$SOURCE_SHA" ]; then
+                skip=true
+                echo "::notice title=Nightly skipped::$latest was already built from $SOURCE_SHA; nothing new to publish."
+              fi
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+      # The base version and the tag the run must build are read from this
+      # commit, and the preflight derives a nightly base from it as well.
+      - name: Check out the release commit
+        if: steps.unchanged.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: steps.unchanged.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: ">=24"
+          check-latest: true
+          package-manager-cache: false
+
+      # The preflight compiles and runs internal/release/cmd/release-version,
+      # so this job needs the Go toolchain but never the Go cache.
+      - name: Set up Go
+        if: steps.unchanged.outputs.skip != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: false
+
+      - name: Verify the Node toolchain
+        if: steps.unchanged.outputs.skip != 'true'
+        run: node scripts/verify-node.mjs
+
+      - name: Compute the one release identity
+        if: steps.unchanged.outputs.skip != 'true'
+        id: identity
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "$CHANNEL" in
+            stable|beta|nightly) ;;
+            *) echo "release-plan: unknown channel '$CHANNEL'" >&2; exit 1 ;;
+          esac
+
+          if [ "$CHANNEL" = "nightly" ]; then
+            # A nightly version is derived from the base version, the UTC date
+            # and the workflow run id. run_attempt is deliberately not an
+            # input, so a retry of the same run reproduces the same version
+            # and cannot publish a second identity for the same commit.
+            base=$(node scripts/release-version.mjs --channel stable --config "$BASE_CONFIG" --field base)
+            # The highest published stable version gates the nightly base: a
+            # nightly may not race ahead of the stable line. No stable release
+            # yet means no gate.
+            last_stable=$(gh release list -R "$GITHUB_REPOSITORY" \
+              --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""' \
+              | sed 's/^v//')
+            args=(--channel nightly --config "$BASE_CONFIG" --date "$(date -u +%F)" \
+              --run-id "${{ inputs.run_id }}" --source-sha "$SOURCE_SHA")
+            if [ -n "$last_stable" ]; then
+              args+=(--last-stable "$last_stable")
+            fi
+            node scripts/release-version.mjs "${args[@]}" --json > release-identity.json
+          else
+            # A release tag goes in unchanged; the preflight refuses a tag that
+            # does not belong to the base in build/config.yml and refuses a
+            # nightly-shaped tag on these channels.
+            node scripts/release-version.mjs --channel "$CHANNEL" \
+              --version "$GITHUB_REF_NAME" --config "$BASE_CONFIG" \
+              --source-sha "$SOURCE_SHA" --json > release-identity.json
+          fi
+
+          cat release-identity.json
+          jq -e '.version and .channel and (.fileVersion | length > 0)' release-identity.json > /dev/null
+          {
+            echo "version=$(jq -r .version release-identity.json)"
+            echo "base=$(jq -r .base release-identity.json)"
+            echo "fileVersion=$(jq -r .fileVersion release-identity.json)"
+            echo "sourceSha=$(jq -r .sourceSha release-identity.json)"
+            echo "lastStableBase=$(jq -r '.lastStableBase // ""' release-identity.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Everything that can block a publication is decided here, once, before
+      # any build starts, and every decision is reported rather than assumed.
+      - name: Decide what this run is allowed to publish
+        if: steps.unchanged.outputs.skip != 'true'
+        id: gates
+        env:
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          GH_TOKEN: ${{ github.token }}
+          # Only presence is checked here; the certificate itself is decoded in
+          # the build job, the only job that signs.
+          HAS_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE != '' }}
+          PUBLISHER: ${{ vars.WINDOWS_PUBLISHER }}
+        run: |
+          set -euo pipefail
+          channel="$INPUT_CHANNEL"
+
+          # Which commit a channel may publish from, so a tag cannot publish a
+          # build from another branch and a scheduled run cannot publish from
+          # a branch other than the default one.
+          if [ "$channel" = "nightly" ]; then
+            expected_ref="refs/heads/${{ github.event.repository.default_branch || 'main' }}"
+          else
+            expected_ref="refs/tags/$GITHUB_REF_NAME"
+          fi
+          if [ "${GITHUB_REF:-}" != "$expected_ref" ]; then
+            echo "release-gate: the $channel channel publishes from $expected_ref, this run is ${GITHUB_REF:-unknown}" >&2
+            exit 1
+          fi
+
+          missing=()
+          # Signing is optional, but all or nothing: a build that compiles a
+          # publisher in refuses every later update that publisher did not
+          # sign, so a publisher without a certificate, or a certificate
+          # without a publisher, blocks publication instead of shipping a
+          # release that cannot be updated or is signed by an unnamed key.
+          publisher=$(printf '%s' "${PUBLISHER:-}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+          can_sign=false
+          if [ "${HAS_CERTIFICATE:-false}" = "true" ] && [ -n "$publisher" ]; then
+            can_sign=true
+          elif [ "${HAS_CERTIFICATE:-false}" = "true" ]; then
+            missing+=("WINDOWS_PUBLISHER")
+          elif [ -n "$publisher" ]; then
+            missing+=("WINDOWS_SIGNING_CERTIFICATE")
+          fi
+          if [ "$can_sign" != "true" ]; then
+            publisher=""
+          fi
+
+          # A released build embeds the channel, the feed root and, when it is
+          # signed, the installer publisher through -ldflags. A build script
+          # that cannot do that produces a package that no installation can
+          # update, so no feed may be published from it.
+          missing_script=()
+          script_params=$(sed -n '1,40p' scripts/build-windows.ps1)
+          for parameter in Channel FeedRoot Publisher Sign; do
+            if ! grep -q "\$$parameter" <<<"$script_params"; then
+              missing_script+=("$parameter")
+            fi
+          done
+
+          publishable=true
+          reason=""
+          if [ "${#missing[@]}" -gt 0 ]; then
+            publishable=false
+            reason="missing or unusable publication prerequisite: ${missing[*]}"
+          fi
+          if [ "${#missing_script[@]}" -gt 0 ]; then
+            publishable=false
+            reason="${reason:+$reason; }scripts/build-windows.ps1 cannot embed -${missing_script[*]}"
+          fi
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "publisher=$publisher" >> "$GITHUB_OUTPUT"
+          echo "canSign=$can_sign" >> "$GITHUB_OUTPUT"
+          # Nightly builds carry "nightly" as their compiled channel identity.
+          # A nightly package is built from main, which is a prerelease line,
+          # so its channel is the one it publishes to.
+          echo "buildChannel=$channel" >> "$GITHUB_OUTPUT"
+          echo "publishable=$publishable" >> "$GITHUB_OUTPUT"
+          echo "missingScriptParameters=$(IFS=,; echo "${missing_script[*]}")" >> "$GITHUB_OUTPUT"
+          echo "blockReason=$reason" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release plan ($channel)"
+            echo ""
+            echo "- version: $(node -e "process.stdout.write(require('./release-identity.json').version)")"
+            echo "- source commit: \`${{ inputs.source_sha }}\`"
+            echo "- publishable: $publishable"
+            echo "- signed: $can_sign"
+            if [ -n "$reason" ]; then
+              echo "- blocked because: $reason"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a blocked publication
+        if: steps.unchanged.outputs.skip != 'true' && steps.gates.outputs.publishable != 'true'
+        run: |
+          echo "::warning title=Publication blocked::This run will build, verify and keep CI artifacts, but it will not publish a release or promote a feed: ${{ steps.gates.outputs.blockReason }}"
+
+  build:
+    name: Build and package the Windows installer
+    needs: plan
+    # Every later job needs this one, so a skipped nightly stops here.
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
+      RELEASE_PUBLISHER: ${{ needs.plan.outputs.publisher }}
+      CAN_SIGN: ${{ needs.plan.outputs.can_sign }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ">=24"
+          check-latest: true
+          package-manager-cache: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: false
+
+      - name: Verify the Node toolchain
+        run: node scripts/verify-node.mjs
+
+      - name: Write the release identity into the build metadata
+        run: node scripts/sync-version.mjs --release-version "$env:RELEASE_VERSION"
+
+      - name: Install the pinned Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+          wails3 version
+
+      - name: Install the pinned NSIS
+        run: |
+          $nsisVersion = (Get-Content toolchain.lock.json -Raw | ConvertFrom-Json).nsis.version
+          choco install nsis --version=$nsisVersion --yes --no-progress
+          $nsisBin = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisBin
+          & (Join-Path $nsisBin 'makensis.exe') /VERSION
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      # The production binaries embed the built frontend, so the bundle is
+      # built from the same commit as the binaries that carry it.
+      - name: Build frontend assets
+        run: npm run --prefix frontend build
+
+      # The PFX is written to the runner's temporary directory for the two
+      # signing steps and removed afterwards, whatever their outcome. Its path
+      # and password reach the scripts through the environment only.
+      - name: Decode the code-signing certificate
+        if: env.CAN_SIGN == 'true'
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+        run: |
+          $certificate = Join-Path $env:RUNNER_TEMP 'windows-signing.pfx'
+          [System.IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String(($env:CERTIFICATE_BASE64 -replace '\s', '')))
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_SIGNING_CERTIFICATE_FILE=$certificate"
+
+      - name: Build the release binaries
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $sign = $env:CAN_SIGN -eq 'true'
+          # An unsigned release passes an empty publisher, which compiles none.
+          ./scripts/build-windows.ps1 `
+            -ReleaseVersion "$env:RELEASE_VERSION" `
+            -Arch amd64 `
+            -Channel "$env:RELEASE_CHANNEL" `
+            -FeedRoot "$env:FEED_ROOT" `
+            -Publisher "$env:RELEASE_PUBLISHER" `
+            -Sign:$sign
+
+      - name: Package the installer
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ vars.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $sign = $env:CAN_SIGN -eq 'true'
+          ./scripts/package-windows.ps1 `
+            -ReleaseVersion "$env:RELEASE_VERSION" `
+            -Arch amd64 `
+            -Channel "$env:RELEASE_CHANNEL" `
+            -FeedRoot "$env:FEED_ROOT" `
+            -Publisher "$env:RELEASE_PUBLISHER" `
+            -Sign:$sign
+
+      - name: Remove the code-signing certificate
+        if: always() && env.WINDOWS_SIGNING_CERTIFICATE_FILE != ''
+        shell: pwsh
+        run: Remove-Item -LiteralPath $env:WINDOWS_SIGNING_CERTIFICATE_FILE -Force -ErrorAction SilentlyContinue
+
+      # The installer an installation downloads must be signed by the
+      # publisher compiled into every released build, or that installation
+      # refuses it. This is the same check the update client makes.
+      - name: Verify the installer publisher
+        if: env.CAN_SIGN == 'true'
+        shell: pwsh
+        run: |
+          . ./scripts/windows-signing.ps1
+          $installer = "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe"
+          foreach ($file in @('bin/dsh-work.exe', 'bin/dsh-work-cli.exe', $installer)) {
+            Assert-AuthenticodePublisher -Path $file -Publisher $env:RELEASE_PUBLISHER
+            Write-Host "$file is signed by $env:RELEASE_PUBLISHER"
+          }
+
+      - name: Verify the installer bytes against the release identity
+        shell: pwsh
+        run: |
+          $installer = "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe"
+          if (-not (Test-Path -LiteralPath $installer)) { throw "the packager did not produce $installer" }
+          $expected = (Get-Content -LiteralPath "$installer.sha256" -Raw).Split(' ')[0].Trim().ToLower()
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "SHA-256 sidecar $expected does not match the installer bytes $actual" }
+          Write-Host "installer SHA-256 $actual matches its sidecar"
+
+      # A release candidate that cannot be installed by the feed is not a
+      # release candidate. The version this package carries must be the
+      # identity the preflight computed, or the whole run stops here.
+      - name: Verify the packaged installer reports the release identity
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path -LiteralPath "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe").Path
+          $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($installer)
+          $product = $version.ProductVersion
+          $fileVersion = $version.FileVersion
+          Write-Host "installer ProductVersion=$product FileVersion=$fileVersion"
+          $expectedFile = '${{ needs.plan.outputs.file_version }}'
+          if ($product -notlike "*$env:RELEASE_VERSION*") {
+            throw "the installer reports ProductVersion '$product', which does not carry the release version '$env:RELEASE_VERSION'"
+          }
+          if ($fileVersion -ne $expectedFile) {
+            throw "the installer reports file version '$fileVersion', the release identity is '$expectedFile'"
+          }
+
+      - name: Upload the candidate package for diagnosis
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer
+          path: |
+            bin/dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer.exe
+            bin/dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish the release record and the channel manifest
+    needs: [plan, build]
+    if: needs.plan.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: false
+
+      - name: Install the pinned Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Download the candidate package
+        uses: actions/download-artifact@v6
+        with:
+          name: dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer
+          path: release-assets
+
+      - name: Refuse a package that is not the one this run built
+        run: |
+          set -euo pipefail
+          ls -l release-assets
+          installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
+          test -f "$installer"
+          expected=$(cut -d' ' -f1 < "$installer.sha256")
+          actual=$(sha256sum "$installer" | cut -d' ' -f1)
+          if [ "$expected" != "$actual" ]; then
+            echo "release-publish: sidecar $expected does not match $actual" >&2
+            exit 1
+          fi
+
+      # An already published release is never rewritten. A rerun inspects the
+      # published and draft state and only removes its own draft, so a retry
+      # cannot silently replace bytes a user may already be installing.
+      - name: Inspect any existing release for this version
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          state=$(gh release view "$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName 2>/dev/null || true)
+          if [ -z "$state" ]; then
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$state"
+          if [ "$(jq -r .isDraft <<<"$state")" = "true" ]; then
+            echo "state=draft" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "state=published" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to overwrite a published release
+        if: steps.existing.outputs.state == 'published'
+        run: |
+          echo "release-publish: $VERSION is already published; a published release is immutable" >&2
+          echo "release-publish: raise the version instead of re-running this pipeline" >&2
+          exit 1
+
+      - name: Drop the stale draft of this version
+        if: steps.existing.outputs.state == 'draft'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$VERSION" -R "$GITHUB_REPOSITORY" --yes
+
+      - name: Create the release and upload the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
+          notes=$(printf '%s\n\n%s\n%s\n' \
+            "Channel: \`$CHANNEL\`" \
+            "Built from \`${{ needs.plan.outputs.source_sha }}\` by run \`${{ github.run_id }}\`." \
+            "The Windows package verifies against the compiled-in update feed.")
+          flags=(--title "$VERSION" --notes "$notes" --target "${{ needs.plan.outputs.source_sha }}")
+          if [ "$CHANNEL" = "stable" ]; then
+            flags+=(--latest)
+          else
+            flags+=(--prerelease)
+          fi
+          gh release create "$VERSION" "$installer" "$installer.sha256" "${flags[@]}"
+
+      - name: Confirm the uploaded asset bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$VERSION" -R "$GITHUB_REPOSITORY" \
+            --pattern 'dsh-work-*-windows-amd64-installer.exe' --dir downloaded
+          local_installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
+          remote_installer=$(ls downloaded/*.exe)
+          local_sum=$(sha256sum "$local_installer" | cut -d' ' -f1)
+          remote_sum=$(sha256sum "$remote_installer" | cut -d' ' -f1)
+          if [ "$local_sum" != "$remote_sum" ]; then
+            echo "release-publish: the uploaded asset is not the built package" >&2
+            exit 1
+          fi
+          echo "$remote_sum" > asset.sha256
+
+      # The manifest is the artifact that carries the release identity onto
+      # the feed. It records the SHA-512 digest of the signed installer; the
+      # installer's own Authenticode signature is what an installation trusts.
+      - name: Build the channel manifest
+        run: |
+          set -euo pipefail
+          installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
+          wails3 updater manifest \
+            -version "$VERSION" \
+            -channel "$CHANNEL" \
+            -name "dsh-work $VERSION" \
+            -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}" \
+            -output feed/manifest.json \
+            "$installer"
+
+          # The manifest on the feed must contain nothing about this runner.
+          if grep -E '/home/runner|/tmp/|runneradmin|C:\\\\' feed/manifest.json; then
+            echo "release-publish: the manifest leaks a local path; it is not publishable" >&2
+            exit 1
+          fi
+
+      # The CLI writes the manifest with only the fields the updater needs to
+      # check bytes: no filename, no filetype, and no metadata. The
+      # installation reads a filename and requires an installer payload, so
+      # the pipeline completes the document and then verifies the completed
+      # document with the same CLI before anything is published.
+      - name: Complete the manifest for the update client
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const manifestPath = "feed/manifest.json";
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+            if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 1) {
+              throw new Error(`expected exactly one artifact, found ${manifest.artifacts?.length}`);
+            }
+            const basename = (url) => String(url).split("?")[0].split("/").pop();
+            for (const artifact of manifest.artifacts) {
+              const filename = basename(artifact.url);
+              if (!filename) {
+                throw new Error("the artifact carries no url to derive a filename from");
+              }
+              if (artifact.platform !== "windows" || artifact.arch !== "amd64") {
+                throw new Error(`unexpected artifact target ${artifact.platform}/${artifact.arch}`);
+              }
+              if (!filename.endsWith(".exe")) {
+                throw new Error(`${filename} is not an installer payload`);
+              }
+              if (!artifact.digest) {
+                throw new Error("the artifact carries no digest; the pipeline never publishes it");
+              }
+              artifact.filename = filename;
+              artifact.filetype = filename.split(".").pop();
+            }
+            // The client reads this to decide that the payload is an installer
+            // and not a self-replacing executable.
+            manifest.metadata = { installMode: "installer" };
+            fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+          '
+
+      # Fail closed: a manifest whose digest does not describe the uploaded
+      # installer stops the run here, before any release or feed is promoted.
+      - name: Verify the manifest against the installer bytes
+        run: |
+          set -euo pipefail
+          wails3 updater verify \
+            -manifest feed/manifest.json \
+            -dir release-assets
+          jq -e '.schemaVersion == 1 and .version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' feed/manifest.json > /dev/null
+          jq -e '.metadata.installMode == "installer"' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select((.digest // "") == "")] | length == 0' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select(.platform != "windows" or .arch != "amd64")] | length == 0' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select((.filename // "") | test("^dsh-work-.*-windows-amd64-installer\\.exe$"))] | length == 1' feed/manifest.json > /dev/null
+
+      - name: Upload the manifest as a build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dsh-work-${{ needs.plan.outputs.version }}-channel-manifest
+          path: feed/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish the manifest next to the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp feed/manifest.json "release-assets/dsh-work-${VERSION}-windows-amd64-manifest.json"
+          gh release upload "$VERSION" "release-assets/dsh-work-${VERSION}-windows-amd64-manifest.json" -R "$GITHUB_REPOSITORY" --clobber
+
+  promote:
+    name: Promote the channel feed
+    needs: [plan, publish]
+    if: needs.plan.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One repository-wide critical section: this job is the only writer of the
+    # updater-<channel> releases, so one promotion runs at a time and a queued
+    # run waits instead of cancelling the run that holds the lock. The feed is
+    # read and replaced inside it, so no two runs decide on the same live feed.
+    concurrency:
+      group: feed-promotion
+      cancel-in-progress: false
+    env:
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+      # The bytes the feed will point at, so the promotion can prove that the
+      # manifest it publishes describes this installer and not another one.
+      ARTIFACT: release-assets/dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer.exe
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download the channel manifest
+        uses: actions/download-artifact@v6
+        with:
+          name: dsh-work-${{ needs.plan.outputs.version }}-channel-manifest
+          path: feed
+
+      - name: Download the installer the manifest describes
+        uses: actions/download-artifact@v6
+        with:
+          name: dsh-work-${{ needs.plan.outputs.version }}-windows-amd64-installer
+          path: release-assets
+
+      # The live feed is the update.json asset of the release tagged
+      # updater-<channel>. It is read, compared with the candidate by
+      # promote-feed.sh, and replaced only on a promote decision. The release
+      # is a prerelease that is never marked latest, so it cannot become the
+      # repository's latest release or the stable gate of a nightly.
+      - name: Promote ${{ needs.plan.outputs.channel }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate="feed/manifest.json"
+          jq -e '.version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' "$candidate" > /dev/null
+          tag="updater-$CHANNEL"
+
+          if ! gh release view "$tag" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "feed-promotion: $tag does not exist yet, this run creates it"
+            gh release create "$tag" -R "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" --prerelease --latest=false \
+              --title "Update feed ($CHANNEL)" \
+              --notes "The $CHANNEL update feed read by installed dsh-work builds. Download releases from the versioned releases, not from here."
+          fi
+
+          mkdir -p live
+          current="live/update.json"
+          rm -f "$current"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern update.json --dir live 2> /dev/null || true
+
+          decision=""
+          if decision=$(bash .github/workflows/promote-feed.sh \
+            "$candidate" "$current" "$VERSION" "$CHANNEL" "$ARTIFACT" 2> feed-promotion.err); then
+            echo "feed-promotion: $decision"
+          else
+            echo "feed-promotion: the candidate is refused" >&2
+            cat feed-promotion.err >&2
+            exit 1
+          fi
+          case "$decision" in
+            idempotent)
+              echo "feed-promotion: $CHANNEL already offers $VERSION with the same bytes"
+              exit 0
+              ;;
+            promote)
+              ;;
+            *)
+              echo "feed-promotion: unexpected decision '$decision'" >&2
+              exit 1
+              ;;
+          esac
+
+          mkdir -p next
+          cp "$candidate" next/update.json
+          gh release upload "$tag" next/update.json -R "$GITHUB_REPOSITORY" --clobber
+          echo "feed-promotion: published $CHANNEL $VERSION"
+
+      - name: Confirm the promoted channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf confirm && mkdir confirm
+          gh release download "updater-$CHANNEL" -R "$GITHUB_REPOSITORY" --pattern update.json --dir confirm
+          jq -e --arg v "$VERSION" '.version == $v' confirm/update.json > /dev/null
+          echo "the $CHANNEL feed now offers $VERSION"
+
+  verify-feed:
+    name: Verify the versioned manifest serves the release
+    needs: [plan, promote]
+    if: needs.plan.outputs.publishable == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ">=24"
+          check-latest: true
+          package-manager-cache: false
+
+      # The published manifest and the installer it points at are fetched from
+      # the public URLs a real installation uses, not from CI storage, so a
+      # feed that only works inside the workflow is not a feed.
+      - name: Fetch the published channel feed and its installer
+        shell: pwsh
+        run: |
+          $manifestUrl = "$env:FEED_ROOT/updater-$env:CHANNEL/update.json"
+          Write-Host "fetching $manifestUrl"
+          $response = Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing
+          $manifest = $response.Content | ConvertFrom-Json
+          if ($manifest.version -ne $env:VERSION) { throw "the $env:CHANNEL feed offers $($manifest.version), expected $env:VERSION" }
+          if ($manifest.channel -ne $env:CHANNEL) { throw "the feed advertises channel $($manifest.channel) from the $env:CHANNEL endpoint" }
+          $artifact = $manifest.artifacts | Where-Object { $_.platform -eq 'windows' -and $_.arch -eq 'amd64' } | Select-Object -First 1
+          if (-not $artifact) { throw "the feed entry carries no windows/amd64 artifact" }
+          New-Item -ItemType Directory -Path feed-check -Force | Out-Null
+          $installerPath = Join-Path 'feed-check' ([System.IO.Path]::GetFileName($artifact.url))
+          Invoke-WebRequest -Uri $artifact.url -OutFile $installerPath -UseBasicParsing
+          $bytes = [System.IO.File]::ReadAllBytes($installerPath)
+          $sha512 = [System.Security.Cryptography.SHA512]::Create()
+          try { $digest = ($sha512.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '' }
+          finally { $sha512.Dispose() }
+          $expected = [Convert]::ToHexString([Convert]::FromBase64String($artifact.digest)).ToLower()
+          if ($digest -ne $expected) { throw "the published installer does not match the digest the feed advertises" }
+          Write-Host "the feed entry, the digest and the published bytes agree"
+
+      # Installing the previous release and updating it through the feed is
+      # the only end-to-end proof that the promotion produced something a real
+      # installation can consume. It needs a host that already runs N-1, so it
+      # is deliberately the last step and never a step that publishes.
+      - name: Report the in-place update check
+        if: needs.plan.outputs.last_stable != ''
+        run: |
+          echo "::notice title=N-1 to N install check::The ${{ needs.plan.outputs.channel }} feed now offers ${{ needs.plan.outputs.version }} after ${{ needs.plan.outputs.last_stable }}. A host running ${{ needs.plan.outputs.last_stable }} performs the in-place update check; this workflow proves the feed, the publisher signature and the bytes, not the installer handoff on a user machine."
