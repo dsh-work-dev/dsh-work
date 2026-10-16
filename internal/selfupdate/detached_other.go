@@ -17,3 +17,9 @@ type detachedProcess struct {
 	handle uintptr
 	PID    int
 }
+
+// Wait completes the shared shape; startDetachedProcess never returns a
+// process on this platform, so it only reports that.
+func (p *detachedProcess) Wait() error {
+	return fmt.Errorf("%w: installer handoff is only defined on Windows", ErrUnsupportedPlatform)
+}
