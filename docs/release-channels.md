@@ -225,10 +225,11 @@ Every run goes through the same stages in the same order:
    the binaries and the installer are signed and all three are checked against
    the publisher.
 3. **publish** (`ubuntu-latest`, `contents: write`) — only when the plan allows
-   publication. Re-verify the downloaded bytes, inspect the published/draft
+   publication. Re-verify the downloaded bytes, build the channel manifest and
+   verify its digest against the installer, then inspect the published/draft
    state of the version, create the GitHub Release, re-download the asset and
-   compare digests, build the channel manifest, verify its digest against the
-   installer, and upload the manifest as a release asset.
+   compare digests, and upload the manifest as a release asset. The manifest is
+   built first so a run that cannot produce it publishes nothing.
 4. **promote** (`ubuntu-latest`, `contents: write`) — the single serialized
    section that writes the channel feed.
 5. **verify-feed** (`windows-latest`) — fetch the published feed and the
