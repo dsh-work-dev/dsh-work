@@ -517,6 +517,83 @@ jobs:
             exit 1
           fi
 
+      # The manifest is the artifact that carries the release identity onto
+      # the feed. It is built and verified before any release exists, so a
+      # manifest that cannot be produced leaves nothing published. It records the SHA-512 digest of the signed installer; the
+      # installer's own Authenticode signature is what an installation trusts.
+      - name: Build the channel manifest
+        run: |
+          set -euo pipefail
+          installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
+          # wails3 does not create the output directory.
+          mkdir -p feed
+          wails3 updater manifest \
+            -version "$VERSION" \
+            -channel "$CHANNEL" \
+            -name "dsh-work $VERSION" \
+            -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}" \
+            -output feed/manifest.json \
+            "$installer"
+
+          # The manifest on the feed must contain nothing about this runner.
+          if grep -E '/home/runner|/tmp/|runneradmin|C:\\\\' feed/manifest.json; then
+            echo "release-publish: the manifest leaks a local path; it is not publishable" >&2
+            exit 1
+          fi
+
+      # The CLI writes the manifest with only the fields the updater needs to
+      # check bytes: no filename, no filetype, and no metadata. The
+      # installation reads a filename and requires an installer payload, so
+      # the pipeline completes the document and then verifies the completed
+      # document with the same CLI before anything is published.
+      - name: Complete the manifest for the update client
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const manifestPath = "feed/manifest.json";
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+            if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 1) {
+              throw new Error(`expected exactly one artifact, found ${manifest.artifacts?.length}`);
+            }
+            const basename = (url) => String(url).split("?")[0].split("/").pop();
+            for (const artifact of manifest.artifacts) {
+              const filename = basename(artifact.url);
+              if (!filename) {
+                throw new Error("the artifact carries no url to derive a filename from");
+              }
+              if (artifact.platform !== "windows" || artifact.arch !== "amd64") {
+                throw new Error(`unexpected artifact target ${artifact.platform}/${artifact.arch}`);
+              }
+              if (!filename.endsWith(".exe")) {
+                throw new Error(`${filename} is not an installer payload`);
+              }
+              if (!artifact.digest) {
+                throw new Error("the artifact carries no digest; the pipeline never publishes it");
+              }
+              artifact.filename = filename;
+              artifact.filetype = filename.split(".").pop();
+            }
+            // The client reads this to decide that the payload is an installer
+            // and not a self-replacing executable.
+            manifest.metadata = { installMode: "installer" };
+            fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+          '
+
+      # Fail closed: a manifest whose digest does not describe the uploaded
+      # installer stops the run here, before any release or feed is promoted.
+      - name: Verify the manifest against the installer bytes
+        run: |
+          set -euo pipefail
+          wails3 updater verify \
+            -manifest feed/manifest.json \
+            -dir release-assets
+          jq -e '.schemaVersion == 1 and .version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' feed/manifest.json > /dev/null
+          jq -e '.metadata.installMode == "installer"' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select((.digest // "") == "")] | length == 0' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select(.platform != "windows" or .arch != "amd64")] | length == 0' feed/manifest.json > /dev/null
+          jq -e '[.artifacts[] | select((.filename // "") | test("^dsh-work-.*-windows-amd64-installer\\.exe$"))] | length == 1' feed/manifest.json > /dev/null
+
       # An already published release is never rewritten. A rerun inspects the
       # published and draft state and only removes its own draft, so a retry
       # cannot silently replace bytes a user may already be installing.
@@ -585,80 +662,6 @@ jobs:
             exit 1
           fi
           echo "$remote_sum" > asset.sha256
-
-      # The manifest is the artifact that carries the release identity onto
-      # the feed. It records the SHA-512 digest of the signed installer; the
-      # installer's own Authenticode signature is what an installation trusts.
-      - name: Build the channel manifest
-        run: |
-          set -euo pipefail
-          installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
-          wails3 updater manifest \
-            -version "$VERSION" \
-            -channel "$CHANNEL" \
-            -name "dsh-work $VERSION" \
-            -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}" \
-            -output feed/manifest.json \
-            "$installer"
-
-          # The manifest on the feed must contain nothing about this runner.
-          if grep -E '/home/runner|/tmp/|runneradmin|C:\\\\' feed/manifest.json; then
-            echo "release-publish: the manifest leaks a local path; it is not publishable" >&2
-            exit 1
-          fi
-
-      # The CLI writes the manifest with only the fields the updater needs to
-      # check bytes: no filename, no filetype, and no metadata. The
-      # installation reads a filename and requires an installer payload, so
-      # the pipeline completes the document and then verifies the completed
-      # document with the same CLI before anything is published.
-      - name: Complete the manifest for the update client
-        run: |
-          set -euo pipefail
-          node -e '
-            const fs = require("fs");
-            const manifestPath = "feed/manifest.json";
-            const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-            if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 1) {
-              throw new Error(`expected exactly one artifact, found ${manifest.artifacts?.length}`);
-            }
-            const basename = (url) => String(url).split("?")[0].split("/").pop();
-            for (const artifact of manifest.artifacts) {
-              const filename = basename(artifact.url);
-              if (!filename) {
-                throw new Error("the artifact carries no url to derive a filename from");
-              }
-              if (artifact.platform !== "windows" || artifact.arch !== "amd64") {
-                throw new Error(`unexpected artifact target ${artifact.platform}/${artifact.arch}`);
-              }
-              if (!filename.endsWith(".exe")) {
-                throw new Error(`${filename} is not an installer payload`);
-              }
-              if (!artifact.digest) {
-                throw new Error("the artifact carries no digest; the pipeline never publishes it");
-              }
-              artifact.filename = filename;
-              artifact.filetype = filename.split(".").pop();
-            }
-            // The client reads this to decide that the payload is an installer
-            // and not a self-replacing executable.
-            manifest.metadata = { installMode: "installer" };
-            fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-          '
-
-      # Fail closed: a manifest whose digest does not describe the uploaded
-      # installer stops the run here, before any release or feed is promoted.
-      - name: Verify the manifest against the installer bytes
-        run: |
-          set -euo pipefail
-          wails3 updater verify \
-            -manifest feed/manifest.json \
-            -dir release-assets
-          jq -e '.schemaVersion == 1 and .version == "'"$VERSION"'" and .channel == "'"$CHANNEL"'"' feed/manifest.json > /dev/null
-          jq -e '.metadata.installMode == "installer"' feed/manifest.json > /dev/null
-          jq -e '[.artifacts[] | select((.digest // "") == "")] | length == 0' feed/manifest.json > /dev/null
-          jq -e '[.artifacts[] | select(.platform != "windows" or .arch != "amd64")] | length == 0' feed/manifest.json > /dev/null
-          jq -e '[.artifacts[] | select((.filename // "") | test("^dsh-work-.*-windows-amd64-installer\\.exe$"))] | length == 1' feed/manifest.json > /dev/null
 
       - name: Upload the manifest as a build artifact
         uses: actions/upload-artifact@v7
