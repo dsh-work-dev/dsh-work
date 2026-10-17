@@ -47,7 +47,7 @@ system-wide Windows service.
 | `internal/supervisor` | platform-neutral Worker process contract |
 | `internal/platform` | production platform selection and native adapters |
 | `internal/platform/windows` | process creation, Job Object cleanup, atomic file replacement and explicit runtime installation |
-| `internal/dshadapter` | exact-version launch, readiness, profile and plugin command grammar, startup-failure plugin attribution |
+| `internal/dshadapter` | minimum-version launch, readiness, profile and plugin command grammar, startup-failure plugin attribution |
 | `internal/dshmanager` | runtime catalog, profiles, plugin commands, startup-failure bundle deselection, version snapshots and serialized recovery state |
 | `internal/workspacecontext` | per-generation DSH Workspace context |
 | `internal/workerchannel` | per-generation channel, authentication cookies and activity lifetime |
@@ -357,11 +357,19 @@ that does not need a loopback origin.
 
 ## Runtime catalog
 
-dsh-work keeps an external catalog of exact-version DSH runtimes and explicit
+dsh-work keeps an external catalog of DSH runtimes and explicit
 Node, data-directory and profile selections. Normal startup resolves local
 files only. Version recovery is the separate path that force-reinstalls the
 recorded DSH version into its managed directory through npm or pnpm and may
 download packages; a matching version alone does not skip repair.
+Each launch runs the selected runtime's `--version`. That observed version is
+authoritative. The catalog's recorded version is a cache, refreshed when it
+differs, and never a reason to refuse a launch. dsh-work refuses only runtimes
+older than `MinimumVersion` in `internal/dshadapter`, currently `0.2.0-rc.2`.
+That is the first release whose Worker carrier contract
+(`WebServer.listenedPort` and `getOrigin`) dsh-work supports. An explicit
+install of a version must still report that exact version. Revisit the minimum
+when the carrier contract changes.
 
 Each runtime owns independent files. pnpm installs use
 `package-import-method=clone-or-copy` instead of hard-linking from the user's

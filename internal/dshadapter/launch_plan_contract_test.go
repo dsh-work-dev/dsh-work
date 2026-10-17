@@ -10,10 +10,10 @@ import (
 )
 
 func TestBuildLaunchPlanRequiresAnExplicitBootstrapDirectory(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	_, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID:  "generation",
-		Runtime:       Runtime{Path: `C:\tools\dsh.cmd`, Version: SupportedVersion},
+		Runtime:       Runtime{Path: `C:\tools\dsh.cmd`, Version: testDSHVersion},
 		DataDirectory: `C:\Users\you\AppData\Local\dsh-work\dsh`,
 		Profile:       "web",
 		Workspace:     workspacecontext.Context{GenerationID: "generation", State: workspacecontext.StateSelectionRequired},
@@ -25,7 +25,7 @@ func TestBuildLaunchPlanRequiresAnExplicitBootstrapDirectory(t *testing.T) {
 }
 
 func TestBuildLaunchPlanCarriesAnExplicitWorkspaceContext(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	bootstrap := t.TempDir()
 	workspacePath := filepath.Join(t.TempDir(), "project")
 	if err := os.Mkdir(workspacePath, 0o700); err != nil {
@@ -42,7 +42,7 @@ func TestBuildLaunchPlanCarriesAnExplicitWorkspaceContext(t *testing.T) {
 	}
 	plan, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID:       "generation",
-		Runtime:            Runtime{Path: `C:\tools\dsh.cmd`, Version: SupportedVersion},
+		Runtime:            Runtime{Path: `C:\tools\dsh.cmd`, Version: testDSHVersion},
 		BootstrapDirectory: bootstrap,
 		DataDirectory:      filepath.Join(t.TempDir(), "dsh-data"),
 		Profile:            "web",

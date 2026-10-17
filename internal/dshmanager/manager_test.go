@@ -135,7 +135,7 @@ func TestManagerDelegatesProfileCatalogAndRuntimeVerification(t *testing.T) {
 	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	verifier := &recordingRuntimeVerifier{}
+	verifier := &recordingRuntimeVerifier{version: "0.1.2-alpha.3"}
 	manager, err := New(Config{
 		StatePath:       filepath.Join(root, "manager.json"),
 		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
@@ -191,6 +191,52 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	var failure lifecycle.Failure
 	if !errors.As(err, &failure) || failure.CorrelationID == "" {
 		t.Fatalf("compatibility failure = %#v, want correlation id", err)
+	}
+}
+
+func TestResolveLaunchRefreshesCatalogVersion(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	if err := os.MkdirAll(homePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		StatePath:       filepath.Join(root, "manager.json"),
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
+		ProfileCatalog: testProfileCatalog{definitions: []ProfileDefinition{{
+			Name: "web", Kind: ProfileKindBuiltIn, AutoInitialize: true,
+		}}},
+		RuntimeVerifier: &recordingRuntimeVerifier{version: "0.2.1-rc.2"},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.2.1-alpha.1", Path: runtimePath}},
+	}
+	manager, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := manager.ResolveLaunch(context.Background(), LaunchRequest{
+		RuntimeID: "dsh-test",
+		Profile:   ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveLaunch() error = %v", err)
+	}
+	if resolved.Runtime.Version != "0.2.1-rc.2" {
+		t.Fatalf("resolved runtime version = %q, want 0.2.1-rc.2", resolved.Runtime.Version)
+	}
+	reloaded, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Runtimes) != 1 || snapshot.Runtimes[0].Version != "0.2.1-rc.2" {
+		t.Fatalf("reloaded catalog runtimes = %#v, want version 0.2.1-rc.2", snapshot.Runtimes)
 	}
 }
 
@@ -1006,7 +1052,7 @@ func TestManagerVerifiesRuntimeBeforeRegisteringIt(t *testing.T) {
 	root := t.TempDir()
 	toolchainPath := filepath.Join(root, "node")
 	installer := &recordingInstaller{runtime: RuntimeInfo{Path: filepath.Join(root, "dsh.cmd"), ToolchainPath: toolchainPath}}
-	verifier := &recordingRuntimeVerifier{}
+	verifier := &recordingRuntimeVerifier{version: "1.2.3"}
 	manager, err := New(Config{
 		StatePath:        filepath.Join(root, "manager.json"),
 		RuntimeInstaller: installer,
@@ -1036,7 +1082,7 @@ func TestManagerCanAcquireMissingConfiguredRuntimeOnFirstUse(t *testing.T) {
 	}
 	manager, err := New(Config{
 		StatePath: filepath.Join(root, "manager.json"), RuntimeInstaller: installer,
-		DSHReleases: testDSHReleases("1.2.3"), RuntimeVerifier: &recordingRuntimeVerifier{},
+		DSHReleases: testDSHReleases("1.2.3"), RuntimeVerifier: &recordingRuntimeVerifier{version: "1.2.3"},
 		Runtimes:          []RuntimeInfo{{ID: "dsh-1.2.3", Version: "1.2.3", Path: filepath.Join(root, "missing.cmd")}},
 		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}},
 	})
@@ -1075,6 +1121,29 @@ func TestManagerDoesNotRegisterRuntimeRejectedByVerifier(t *testing.T) {
 	}
 	if len(snapshot.Runtimes) != 0 {
 		t.Fatalf("rejected runtime was registered: %#v", snapshot.Runtimes)
+	}
+}
+
+func TestInstallRuntimeRejectsMismatchedObservedVersion(t *testing.T) {
+	root := t.TempDir()
+	installer := &recordingInstaller{runtime: RuntimeInfo{Path: filepath.Join(root, "dsh.cmd")}}
+	manager, err := New(Config{
+		StatePath:        filepath.Join(root, "manager.json"),
+		RuntimeInstaller: installer,
+		DSHReleases:      testDSHReleases("0.2.1-rc.2"),
+		RuntimeVerifier:  &recordingRuntimeVerifier{version: "0.2.1-rc.1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.InstallRuntime(context.Background(), "0.2.1-rc.2")
+	assertFailureCode(t, err, lifecycle.ErrorDSHUnsupportedVersion)
+	snapshot, snapshotErr := manager.Snapshot(context.Background())
+	if snapshotErr != nil {
+		t.Fatal(snapshotErr)
+	}
+	if len(snapshot.Runtimes) != 0 {
+		t.Fatalf("mismatched runtime was registered: %#v", snapshot.Runtimes)
 	}
 }
 
@@ -1615,16 +1684,16 @@ type recordingRuntimeVerifier struct {
 	profileCalls         int
 }
 
-func (v *recordingRuntimeVerifier) Verify(_ context.Context, path, version string) error {
+// Verify records the call and reports the configured runtime version.
+func (v *recordingRuntimeVerifier) Verify(_ context.Context, path string) (string, error) {
 	v.path = path
-	v.version = version
 	v.calls++
-	return nil
+	return v.version, nil
 }
 
-func (v *recordingRuntimeVerifier) VerifyWithEnvironment(ctx context.Context, path, version string, env map[string]string) error {
+func (v *recordingRuntimeVerifier) VerifyWithEnvironment(ctx context.Context, path string, env map[string]string) (string, error) {
 	v.env = env
-	return v.Verify(ctx, path, version)
+	return v.Verify(ctx, path)
 }
 
 func (v *recordingRuntimeVerifier) VerifyProfile(_ context.Context, _, _ string, dataDirectoryPath, profileName string) error {
@@ -1636,8 +1705,8 @@ func (v *recordingRuntimeVerifier) VerifyProfile(_ context.Context, _, _ string,
 
 type failingRuntimeVerifier struct{}
 
-func (failingRuntimeVerifier) Verify(context.Context, string, string) error {
-	return lifecycle.Failure{
+func (failingRuntimeVerifier) Verify(context.Context, string) (string, error) {
+	return "", lifecycle.Failure{
 		Code:    lifecycle.ErrorDSHUnsupportedVersion,
 		Summary: "the test adapter rejected this runtime",
 	}

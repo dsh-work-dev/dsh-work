@@ -34,7 +34,7 @@ silently mutate DSH-owned data.
 
 ## Current capabilities
 
-- The Host starts one exact-version DSH runtime through an authenticated local
+- The Host starts one selected DSH runtime through an authenticated local
   channel and exposes the Workspace only after readiness validation.
 - Runtime, DSH data-directory and profile switches are serialized. A candidate
   becomes current only when ready. Failure follows the automatic-recovery or

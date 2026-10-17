@@ -21,6 +21,8 @@ import (
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
+const testDSHVersion = "0.2.1-rc.2"
+
 type testDSH struct {
 	server       *httptest.Server
 	announcedURL string
@@ -113,7 +115,7 @@ func newHostTestManager(t *testing.T, profile string) *dshmanager.Manager {
 			ID: "dsh-work", Name: "dsh-work", Path: dataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+			ID: "dsh-test", Version: testDSHVersion, Path: runtimePath,
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: profile},
@@ -126,7 +128,7 @@ func newHostTestManager(t *testing.T, profile string) *dshmanager.Manager {
 }
 
 func (d *testDSH) Discover(context.Context) (dshadapter.Runtime, error) {
-	return dshadapter.Runtime{Path: "test-dsh", Version: dshadapter.SupportedVersion}, nil
+	return dshadapter.Runtime{Path: "test-dsh", Version: testDSHVersion}, nil
 }
 
 func (d *testDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (supervisor.LaunchPlan, error) {
@@ -343,7 +345,7 @@ func TestHostDoesNotPullMissingRuntimeDuringStartup(t *testing.T) {
 			ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+			ID: "dsh-test", Version: testDSHVersion, Path: runtimePath,
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
@@ -403,7 +405,7 @@ func TestHostUsesManagerRunContextAndClearsCurrentState(t *testing.T) {
 			ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+			ID: "dsh-test", Version: testDSHVersion, Path: runtimePath,
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "coding"},
@@ -470,7 +472,7 @@ func TestHostDoesNotCreateMissingUserDSHHome(t *testing.T) {
 			ID: "personal", Name: "Personal DSH", Path: missingHome, Ownership: dshmanager.DataDirectoryOwnershipUser,
 		}},
 		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath,
+			ID: "dsh-test", Version: testDSHVersion, Path: runtimePath,
 		}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "personal", Name: "web"},
@@ -1061,8 +1063,8 @@ func newRunContextSwitchFixture(t *testing.T, configure ...func(*dshmanager.Conf
 			{ID: "beta-home", Name: "Beta DSH", Path: homeBeta, Ownership: dshmanager.DataDirectoryOwnershipDSHWork},
 		},
 		Runtimes: []dshmanager.RuntimeInfo{
-			{ID: "dsh-alpha", Version: dshadapter.SupportedVersion, Path: runtimeAlpha},
-			{ID: "dsh-beta", Version: dshadapter.SupportedVersion, Path: runtimeBeta},
+			{ID: "dsh-alpha", Version: testDSHVersion, Path: runtimeAlpha},
+			{ID: "dsh-beta", Version: testDSHVersion, Path: runtimeBeta},
 		},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-alpha",
@@ -1200,7 +1202,7 @@ func (d *switchTestDSH) BuildLaunchPlan(launch dshadapter.LaunchContext) (superv
 }
 
 func (d *switchTestDSH) Discover(context.Context) (dshadapter.Runtime, error) {
-	return dshadapter.Runtime{Path: "switch-test-dsh", Version: dshadapter.SupportedVersion}, nil
+	return dshadapter.Runtime{Path: "switch-test-dsh", Version: testDSHVersion}, nil
 }
 
 func (d *switchTestDSH) ParseReadyAnnouncement(text string) (dshadapter.ReadyAnnouncement, bool) {
@@ -1444,7 +1446,7 @@ func TestReadinessFailureKeepsSafeProbeDiagnostic(t *testing.T) {
 		http.Error(w, "private upstream detail", http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	adapter := dshadapter.New(nil, dshadapter.SupportedVersion)
+	adapter := dshadapter.New(nil)
 	err := adapter.Probe(context.Background(), dshadapter.ReadyAnnouncement{URL: server.URL + "/?token=private-launch-token"}, supervisor.LaunchPlan{ExpectedOrigin: server.URL}, server.Client())
 	if err == nil {
 		t.Fatal("probe unexpectedly succeeded")

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/supervisor"
@@ -103,7 +102,7 @@ func newFaultTestHostWith(t *testing.T, supervisorAdapter supervisor.Adapter) (*
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath:       filepath.Join(root, "manager.json"),
 		DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: dataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
-		Runtimes:        []dshmanager.RuntimeInfo{{ID: "dsh-test", Version: dshadapter.SupportedVersion, Path: runtimePath}},
+		Runtimes:        []dshmanager.RuntimeInfo{{ID: "dsh-test", Version: testDSHVersion, Path: runtimePath}},
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},

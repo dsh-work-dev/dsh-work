@@ -16,6 +16,8 @@ import (
 	"github.com/local/dsh-work/internal/workspacecontext"
 )
 
+const testDSHVersion = "0.2.1-rc.2"
+
 type fakeExecutor struct {
 	result CommandResult
 	err    error
@@ -37,27 +39,53 @@ func (f *fakeExecutor) Run(_ context.Context, path string, args []string, env ma
 	return f.result, f.err
 }
 
-func TestDiscoverRequiresExactPinnedVersion(t *testing.T) {
+func TestDiscoverAcceptsAnyVersionAtOrAboveMinimum(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dsh.cmd")
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion + "\n"}}
-	adapter := New(executor, SupportedVersion)
-	adapter.SetExecutableOverride(path)
-	runtime, err := adapter.Discover(context.Background())
-	if err != nil {
-		t.Fatalf("Discover() error = %v", err)
+	for _, version := range []string{"0.2.0-rc.2", "0.2.1-rc.2", "0.3.0"} {
+		executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + version + "\n"}}
+		adapter := New(executor)
+		adapter.SetExecutableOverride(path)
+		runtime, err := adapter.Discover(context.Background())
+		if err != nil {
+			t.Fatalf("Discover() with %s error = %v", version, err)
+		}
+		if runtime.Path != path || runtime.Version != version || strings.Join(executor.args, " ") != "--version" {
+			t.Fatalf("unexpected runtime or version command for %s: %+v %#v", version, runtime, executor.args)
+		}
 	}
-	if runtime.Path != path || runtime.Version != SupportedVersion || strings.Join(executor.args, " ") != "--version" {
-		t.Fatalf("unexpected runtime or version command: %+v %#v", runtime, executor.args)
-	}
+}
 
-	executor.result.Stdout = "dsh 0.1.2-alpha.2\n"
-	_, err = adapter.Discover(context.Background())
+func TestDiscoverRejectsVersionsBelowMinimum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"0.1.7-rc.2", "0.2.0-rc.1"} {
+		adapter := New(&fakeExecutor{result: CommandResult{Stdout: "dsh " + version + "\n"}})
+		_, err := adapter.DiscoverPath(context.Background(), path)
+		var failure lifecycle.Failure
+		if err == nil || !asFailure(err, &failure) || failure.Code != lifecycle.ErrorDSHUnsupportedVersion {
+			t.Fatalf("DiscoverPath() with %s: expected unsupported version failure, got %v", version, err)
+		}
+		if !strings.Contains(failure.Detail, "0.2.0-rc.2") {
+			t.Fatalf("DiscoverPath() with %s: detail = %q, want the minimum version", version, failure.Detail)
+		}
+	}
+}
+
+func TestDiscoverRejectsUnparseableVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dsh.cmd")
+	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := New(&fakeExecutor{result: CommandResult{Stdout: "dsh dev"}})
+	_, err := adapter.DiscoverPath(context.Background(), path)
 	var failure lifecycle.Failure
-	if err == nil || !asFailure(err, &failure) || failure.Code != lifecycle.ErrorDSHUnsupportedVersion {
-		t.Fatalf("expected unsupported version failure, got %v", err)
+	if err == nil || !asFailure(err, &failure) || failure.Code != lifecycle.ErrorDSHVersionCheckFailed {
+		t.Fatalf("expected version check failure, got %v", err)
 	}
 }
 
@@ -66,26 +94,27 @@ func TestVerifyWithEnvironmentPassesChildToolchainOverlay(t *testing.T) {
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion}}
-	adapter := New(executor, SupportedVersion)
-	if err := adapter.VerifyWithEnvironment(context.Background(), path, SupportedVersion, map[string]string{"PATH": "managed-node"}); err != nil {
+	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh " + testDSHVersion}}
+	adapter := New(executor)
+	version, err := adapter.VerifyWithEnvironment(context.Background(), path, map[string]string{"PATH": "managed-node"})
+	if err != nil {
 		t.Fatalf("VerifyWithEnvironment() error = %v", err)
 	}
-	if executor.env["PATH"] != "managed-node" {
-		t.Fatalf("verification environment = %#v", executor.env)
+	if version != testDSHVersion || executor.env["PATH"] != "managed-node" {
+		t.Fatalf("verification version = %q environment = %#v", version, executor.env)
 	}
 }
 
-func TestDiscoverSelectedPathUsesCatalogVersionInsteadOfFixtureVersion(t *testing.T) {
+func TestDiscoverSelectedPathReportsObservedVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dsh.cmd")
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh 2.4.6"}}
-	adapter := New(executor, SupportedVersion)
-	runtime, err := adapter.DiscoverSelectedPathWithEnvironment(context.Background(), path, "2.4.6", map[string]string{"PATH": "managed-node"})
+	adapter := New(executor)
+	runtime, err := adapter.DiscoverSelectedPath(context.Background(), path, map[string]string{"PATH": "managed-node"})
 	if err != nil {
-		t.Fatalf("DiscoverSelectedPathWithEnvironment() error = %v", err)
+		t.Fatalf("DiscoverSelectedPath() error = %v", err)
 	}
 	if runtime.Version != "2.4.6" || executor.env["PATH"] != "managed-node" {
 		t.Fatalf("selected runtime = %#v env=%#v", runtime, executor.env)
@@ -99,7 +128,7 @@ func TestDiscoverUsesDSHWorkOverrideNameOnly(t *testing.T) {
 	}
 	t.Setenv("DSH_WORK_EXECUTABLE", path)
 	t.Setenv("WORK_DSH_EXECUTABLE", filepath.Join(t.TempDir(), "old-dsh.cmd"))
-	adapter := New(&fakeExecutor{result: CommandResult{Stdout: "dsh " + SupportedVersion}}, SupportedVersion)
+	adapter := New(&fakeExecutor{result: CommandResult{Stdout: "dsh " + testDSHVersion}})
 
 	runtime, err := adapter.Discover(context.Background())
 	if err != nil {
@@ -117,7 +146,7 @@ func TestDiscoverUsesDSHWorkOverrideNameOnly(t *testing.T) {
 }
 
 func TestParseAndValidateReadyAnnouncement(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	announcement, ok := adapter.ParseReadyAnnouncement("\x1b[32mdsh web:\x1b[0m http://127.0.0.1:4321/.\r\n")
 	if !ok || announcement.URL != "http://127.0.0.1:4321/" {
 		t.Fatalf("unexpected announcement: %+v, %v", announcement, ok)
@@ -152,12 +181,12 @@ func TestParseAndValidateReadyAnnouncement(t *testing.T) {
 }
 
 func TestBuildLaunchPlanUsesHostChannelAndDataDirectory(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	bootstrapDirectory := t.TempDir()
 	dataDirectory := filepath.Join(t.TempDir(), "dsh-data")
 	plan, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID:       "generation",
-		Runtime:            Runtime{Path: "C:\\tools\\dsh.cmd", Version: SupportedVersion},
+		Runtime:            Runtime{Path: "C:\\tools\\dsh.cmd", Version: testDSHVersion},
 		BootstrapDirectory: bootstrapDirectory,
 		DataDirectory:      dataDirectory,
 		Profile:            "web",
@@ -176,7 +205,7 @@ func TestBuildLaunchPlanUsesHostChannelAndDataDirectory(t *testing.T) {
 }
 
 func TestBuildLaunchPlanAcceptsSelectedExactRuntimeVersion(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	plan, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID: "generation", Runtime: Runtime{Path: `C:\tools\dsh-9.cmd`, Version: "9.8.7"},
 		BootstrapDirectory: t.TempDir(), DataDirectory: t.TempDir(), Profile: "web",
@@ -190,28 +219,29 @@ func TestBuildLaunchPlanAcceptsSelectedExactRuntimeVersion(t *testing.T) {
 	}
 }
 
-func TestVerifyUsesRequestedCatalogVersionRatherThanFixturePin(t *testing.T) {
+func TestVerifyReturnsObservedVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dsh.cmd")
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	executor := &fakeExecutor{result: CommandResult{Stdout: "dsh 9.8.7"}}
-	adapter := New(executor, SupportedVersion)
-	if err := adapter.Verify(context.Background(), path, "9.8.7"); err != nil {
+	adapter := New(executor)
+	version, err := adapter.Verify(context.Background(), path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := adapter.Verify(context.Background(), path, "9.8.6"); err == nil {
-		t.Fatal("Verify() accepted exact version mismatch")
+	if version != "9.8.7" {
+		t.Fatalf("Verify() version = %q, want 9.8.7", version)
 	}
 }
 
 func TestBuildLaunchPlanCarriesOnlyTheRuntimeToolchainOverlay(t *testing.T) {
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	plan, err := adapter.BuildLaunchPlan(LaunchContext{
 		GenerationID: "generation",
 		Runtime: Runtime{
 			Path:    `C:\tools\dsh.cmd`,
-			Version: SupportedVersion,
+			Version: testDSHVersion,
 			Env:     map[string]string{"PATH": `C:\dsh-work\node`},
 		},
 		BootstrapDirectory: t.TempDir(),
@@ -233,11 +263,11 @@ func TestVerifyProfileValidatesTheRuntimeProfilePair(t *testing.T) {
 	if err := os.WriteFile(runtimePath, []byte("placeholder"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	adapter := New(nil, SupportedVersion)
-	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "web"); err != nil {
+	adapter := New(nil)
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, testDSHVersion, t.TempDir(), "web"); err != nil {
 		t.Fatalf("VerifyProfile() error = %v", err)
 	}
-	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "../web"); err == nil {
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, testDSHVersion, t.TempDir(), "../web"); err == nil {
 		t.Fatal("VerifyProfile() accepted a path-shaped profile name")
 	} else {
 		var failure lifecycle.Failure
@@ -252,15 +282,15 @@ func TestDesktopRejectsNonWebBuiltInProfiles(t *testing.T) {
 	if err := os.WriteFile(runtimePath, []byte("placeholder"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	for _, name := range []string{"headless", "sdk", "sdk-minimal", "acp"} {
-		err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), name)
+		err := adapter.VerifyProfile(context.Background(), runtimePath, testDSHVersion, t.TempDir(), name)
 		var failure lifecycle.Failure
 		if !asFailure(err, &failure) || failure.Code != lifecycle.ErrorRuntimeProfileIncompatible || failure.Retryable {
 			t.Errorf("%s: want non-retryable incompatibility before launch, got %v", name, err)
 		}
 	}
-	if err := adapter.VerifyProfile(context.Background(), runtimePath, SupportedVersion, t.TempDir(), "my-web"); err != nil {
+	if err := adapter.VerifyProfile(context.Background(), runtimePath, testDSHVersion, t.TempDir(), "my-web"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -278,7 +308,7 @@ func TestProbeRequiresHTMLAtTheExpectedOrigin(t *testing.T) {
 	server.Start()
 	defer server.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	plan := supervisor.LaunchPlan{
 		GenerationID:     "generation",
 		Executable:       "dsh.cmd",
@@ -311,7 +341,7 @@ func TestProbeCompletesDSHLaunchTokenExchange(t *testing.T) {
 		GenerationID:   "probe-token-exchange",
 		ExpectedOrigin: server.URL,
 	}
-	adapter := New(nil, SupportedVersion)
+	adapter := New(nil)
 	if err := adapter.Probe(context.Background(), ReadyAnnouncement{URL: server.URL + "/?token=launch-token"}, plan, server.Client()); err != nil {
 		t.Fatalf("Probe() did not complete token exchange: %v", err)
 	}
