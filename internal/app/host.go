@@ -671,18 +671,7 @@ func (h *Host) ListPlugins(ctx context.Context, request dshmanager.PluginListReq
 	if err := h.callPluginManager(ctx, "listBundles", map[string]any{}, &bundles); err != nil {
 		return nil, err
 	}
-	byName := make(map[string]pluginManagerBundle, len(bundles))
-	for _, bundle := range bundles {
-		byName[bundle.Name] = bundle
-	}
-	for index := range plugins {
-		bundle, found := byName[plugins[index].Package]
-		if !found || !bundle.Installed {
-			continue
-		}
-		plugins[index].Disabled = !bundle.Enabled
-		plugins[index].CanToggle = bundle.ReadOnlyReason == "" && bundle.Error == nil
-	}
+	applyBundleState(plugins, bundles)
 	return plugins, nil
 }
 

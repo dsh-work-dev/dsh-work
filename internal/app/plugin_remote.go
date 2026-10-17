@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workeripc"
@@ -29,6 +30,7 @@ type pluginManagerBundle struct {
 	Name           string            `json:"name"`
 	Enabled        bool              `json:"enabled"`
 	Installed      bool              `json:"installed"`
+	Availability   string            `json:"availability"`
 	ReadOnlyReason string            `json:"readOnlyReason"`
 	Error          *pluginManagerErr `json:"error"`
 }
@@ -139,6 +141,24 @@ func (h *Host) callPluginManager(ctx context.Context, method string, args any, v
 		return fmt.Errorf("DSH PluginManager %s returned an invalid value: %w", method, err)
 	}
 	return nil
+}
+
+// applyBundleState overlays DSH's live bundle state on the profile listing.
+// A bundle is toggleable only when the profile declares it, its files are
+// readable, and DSH reports no read-only reason or error.
+func applyBundleState(plugins []dshmanager.PluginInfo, bundles []pluginManagerBundle) {
+	byName := make(map[string]pluginManagerBundle, len(bundles))
+	for _, bundle := range bundles {
+		byName[bundle.Name] = bundle
+	}
+	for index := range plugins {
+		bundle, found := byName[plugins[index].Package]
+		if !found || !bundle.Installed {
+			continue
+		}
+		plugins[index].Disabled = !bundle.Enabled
+		plugins[index].CanToggle = bundle.Availability != "missing" && bundle.ReadOnlyReason == "" && bundle.Error == nil
+	}
 }
 
 func pluginManagerChangeFailure(change pluginManagerChange) error {
