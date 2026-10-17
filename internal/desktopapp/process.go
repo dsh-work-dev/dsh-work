@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,7 +16,9 @@ import (
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
+	"github.com/local/dsh-work/internal/storagepaths"
 )
 
 type Resources struct {
@@ -26,12 +27,17 @@ type Resources struct {
 }
 
 func Run(resources Resources) {
+	proc := logging.ProcessUI
+	if len(os.Args) > 1 && os.Args[1] == "--daemon" {
+		proc = logging.ProcessDaemon
+	}
+	logging.Init(proc, logRoot())
+	defer logging.Close()
 	if maintenance.InstallerInProgress() {
 		if len(os.Args) < 2 || os.Args[1] != "--daemon" {
 			maintenance.ShowInstallerBusy()
 		}
-		log.Printf("dsh-work installer is performing maintenance; reopen after it finishes")
-		os.Exit(1)
+		logging.Fatal(logging.Module(logging.ModApp), "installer maintenance in progress")
 	}
 	identity := filepath.Dir(app.DefaultConfig(currentDiscoveryRoot()).SettingsPath)
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
@@ -46,9 +52,19 @@ func Run(resources Resources) {
 		if errors.As(err, &failure) && failure.Code == lifecycle.ErrorManagerOperationBusy {
 			maintenance.ShowInstallerBusy()
 		}
-		log.Printf("desktop: %v", err)
-		os.Exit(1)
+		logging.Fatal(logging.Module(logging.ModApp), "desktop client failed", logging.ErrAttrs(err, "")...)
 	}
+}
+
+func logRoot() string {
+	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		return filepath.Join(root, "logs")
+	}
+	paths, err := storagepaths.DefaultDirectories()
+	if err != nil {
+		return ""
+	}
+	return paths.LogRoot
 }
 
 func ensureDaemon(ctx context.Context, identity string) (*daemon.Client, daemon.Snapshot, error) {

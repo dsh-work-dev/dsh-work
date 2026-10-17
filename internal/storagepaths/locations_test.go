@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,20 @@ func contents(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestDefaultDirectoriesIncludeLogRoot(t *testing.T) {
+	paths, err := DefaultDirectories()
+	if err != nil {
+		t.Fatalf("DefaultDirectories() error = %v", err)
+	}
+	if paths.LogRoot == "" || !filepath.IsAbs(paths.LogRoot) {
+		t.Fatalf("LogRoot = %q, want an absolute path", paths.LogRoot)
+	}
+	if runtime.GOOS == "windows" && filepath.Dir(paths.LogRoot) != paths.CacheRoot {
+		t.Fatalf("LogRoot parent = %q, want CacheRoot %q", filepath.Dir(paths.LogRoot), paths.CacheRoot)
+	}
+}
+
 func TestRelocateAndReopenWithDefaultAndExternalData(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		t.Run(map[bool]string{false: "default", true: "external"}[external], func(t *testing.T) {
@@ -194,6 +209,7 @@ func TestPreparationFailureDoesNotPublishOrDeleteData(t *testing.T) {
 		t.Fatal("left partial staging directories")
 	}
 }
+
 func TestNestedRootIsRejectedWhenCurrentRootIsALink(t *testing.T) {
 	base := tempDir(t)
 	target := filepath.Join(base, "real")

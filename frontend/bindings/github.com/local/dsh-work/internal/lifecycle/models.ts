@@ -60,6 +60,11 @@ export enum ErrorCode {
     ErrorRuntimeInstallFailed = "RUNTIME_INSTALL_FAILED",
     ErrorTrustedSurfaceRequired = "TRUSTED_SURFACE_REQUIRED",
     ErrorPluginIncompatible = "PLUGIN_INCOMPATIBLE",
+    ErrorProcessCrashed = "PROCESS_CRASHED",
+    ErrorUIScriptError = "UI_SCRIPT_ERROR",
+    ErrorHostPluginLoadFailed = "HOST_PLUGIN_LOAD_FAILED",
+    ErrorUpdateDownloadFailed = "UPDATE_DOWNLOAD_FAILED",
+    ErrorUpdateInstallFailed = "UPDATE_INSTALL_FAILED",
 };
 
 /**

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/local/dsh-work/internal/desktopprobe"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	"github.com/local/dsh-work/internal/settings"
@@ -64,6 +64,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	if err != nil {
 		return err
 	}
+	if err := logging.Attach(); err != nil {
+		logging.Module(logging.ModApp).Warn("log files unavailable", logging.ErrAttrs(err, "")...)
+	}
 	defer listener.Close()
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	client, state, err := ensureDaemon(ctx, identity)
@@ -71,6 +74,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	if err != nil {
 		return err
 	}
+	logging.SetVerbose(state.Preferences.VerboseLogging)
 	paths, err := storagepaths.DefaultDirectories()
 	if err != nil {
 		return fmt.Errorf("resolve dsh-work cache directory: %w", err)
@@ -135,7 +139,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			desktop.Event.Emit("builtin-components", statuses)
 		}
 	}}
-	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon,
+	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon, Logger: logging.WailsLogger(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
@@ -313,7 +317,7 @@ func runDesktopClient(identity string, resources Resources) error {
 					cancel()
 					if err != nil {
 						if pollCtx.Err() == nil {
-							log.Printf("background disconnected: %v", err)
+							logging.Module(logging.ModIPC).Warn("daemon connection lost", logging.ErrAttrs(err, "")...)
 							desktop.Quit()
 						}
 						return
@@ -325,13 +329,15 @@ func runDesktopClient(identity string, resources Resources) error {
 					mu.Lock()
 					current = next
 					mu.Unlock()
+					logging.SetVerbose(next.Preferences.VerboseLogging)
 					cursor = next.Cursor
 					for _, event := range next.Events {
 						if err := replayEvent(event, func(e *application.CustomEvent) error {
 							desktop.Event.EmitEvent(e)
 							return nil
 						}); err != nil {
-							log.Printf("decode background event %s: %v", event.Name, err)
+							attrs := append([]any{"event", event.Name}, logging.ErrAttrs(err, "")...)
+							logging.Module(logging.ModIPC).Warn("background event decode failed", attrs...)
 						}
 					}
 					statusJSON, _ := json.Marshal(next.Status)

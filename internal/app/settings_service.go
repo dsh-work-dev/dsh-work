@@ -20,6 +20,7 @@ type SettingsService struct {
 	onRuntimeRollbackChanged func(bool)
 	onAppearanceChanged      func(settings.Appearance)
 	onUpdateChannelChanged   func(context.Context, settings.UpdateChannel) error
+	onVerboseLoggingChanged  func(bool)
 }
 
 // SetAppearanceChanged installs the publisher that pushes a saved appearance
@@ -37,6 +38,13 @@ func SetAppearanceChanged(service *SettingsService, changed func(settings.Appear
 func SetUpdateChannelChanged(service *SettingsService, changed func(context.Context, settings.UpdateChannel) error) {
 	if service != nil {
 		service.onUpdateChannelChanged = changed
+	}
+}
+
+// SetVerboseLoggingChanged installs the hook that applies a saved verbose-logging choice.
+func SetVerboseLoggingChanged(service *SettingsService, changed func(bool)) {
+	if service != nil {
+		service.onVerboseLoggingChanged = changed
 	}
 }
 
@@ -68,6 +76,25 @@ func (s *SettingsService) SetAutomaticRuntimeRollback(ctx context.Context, enabl
 	}
 	if s.onRuntimeRollbackChanged != nil {
 		s.onRuntimeRollbackChanged(values.AutomaticRuntimeRollback)
+	}
+	return values, nil
+}
+
+func (s *SettingsService) SetVerboseLogging(ctx context.Context, enabled bool) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	values, err := s.manager.SetVerboseLogging(ctx, enabled)
+	if err != nil {
+		return settings.Values{}, err
+	}
+	if s.onVerboseLoggingChanged != nil {
+		s.onVerboseLoggingChanged(values.VerboseLogging)
 	}
 	return values, nil
 }

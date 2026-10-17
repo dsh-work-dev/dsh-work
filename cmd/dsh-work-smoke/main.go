@@ -16,6 +16,7 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workeripc"
@@ -25,6 +26,12 @@ import (
 // Supervisor used by the desktop composition root. It never substitutes a
 // fake worker, server or readiness signal.
 func main() {
+	if os.Getenv("DSH_WORK_LOG_LEVEL") == "" {
+		_ = os.Setenv("DSH_WORK_LOG_LEVEL", "debug")
+	}
+	_ = os.Setenv("DSH_WORK_LOG_STDERR", "1")
+	logging.Init(logging.ProcessDaemon, "")
+
 	root, err := os.Getwd()
 	if err != nil {
 		fatalf("resolve repository root: %v", err)
@@ -87,7 +94,6 @@ func main() {
 		statuses <- status
 	})
 	host.SetReadyHandler(func(url string) { workspaceURL = url })
-	host.SetDebug(func(message string) { fmt.Printf("DEBUG %s\n", message) })
 
 	start := host.Start()
 	if start.State != lifecycle.StateStarting {

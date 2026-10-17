@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/local/dsh-work/internal/supervisor"
+	"github.com/local/dsh-work/internal/redact"
 )
 
 type commandOutputKey struct{}
@@ -81,7 +81,7 @@ func (w *CommandOutputWriter) flush() {
 		}
 		return r
 	}, line)
-	line = supervisor.Redact(commandURLCredentials.ReplaceAllString(line, "${1}[REDACTED]@"))
+	line = redact.Secrets(commandURLCredentials.ReplaceAllString(line, "${1}[REDACTED]@"))
 	if strings.TrimSpace(line) == "" {
 		return
 	}

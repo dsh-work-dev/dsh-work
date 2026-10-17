@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workerchannel"
@@ -166,6 +169,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		value, err := s.invoke(r.Context(), call)
+		logCall(call, err)
 		if isQuitCall(call) && err != nil {
 			s.ResetDrain()
 		}
@@ -364,7 +368,8 @@ func maintenanceFailure() lifecycle.Failure {
 // constructors, Host internals and methods without a context are inaccessible.
 func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, err error) {
 	defer func() {
-		if recover() != nil {
+		if recovered := recover(); recovered != nil {
+			logging.Module(logging.ModIPC).Error("call panicked", "service", call.Service, "method", call.Method, "panic", fmt.Sprint(recovered), "stack", string(debug.Stack()))
 			data = nil
 			err = errors.New("background call failed")
 		}
@@ -415,6 +420,26 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 		return json.RawMessage("null"), nil
 	}
 	return json.Marshal(results[0].Interface())
+}
+
+func logCall(call Call, err error) {
+	if err == nil {
+		return
+	}
+	logger := logging.Module(logging.ModIPC)
+	var failure lifecycle.Failure
+	var pointer *lifecycle.Failure
+	if errors.As(err, &pointer) && pointer != nil {
+		failure = *pointer
+	} else if !errors.As(err, &failure) {
+		logger.Warn("call failed", append([]any{"service", call.Service, "method", call.Method}, logging.ErrAttrs(err, "")...)...)
+		return
+	}
+	if failure.Code == lifecycle.ErrorCancelled {
+		logger.Info("call cancelled", "service", call.Service, "method", call.Method)
+		return
+	}
+	logger.Error("call failed", append([]any{"service", call.Service, "method", call.Method, "op", failure.CorrelationID}, logging.ErrAttrs(failure, "")...)...)
 }
 
 func (s *Server) forwardWorker(w http.ResponseWriter, r *http.Request) {

@@ -204,6 +204,7 @@ func (s *testSupervisor) Start(_ context.Context, plan supervisor.LaunchPlan, ra
 type testWorker struct {
 	events            chan supervisor.OutputEvent
 	exited            chan struct{}
+	closeGate         <-chan struct{}
 	once              sync.Once
 	closeOnce         sync.Once
 	waitEmptyFailures int
@@ -235,10 +236,83 @@ func (w *testWorker) WaitEmpty(context.Context) error {
 func (*testWorker) Diagnostics() supervisor.Diagnostics { return supervisor.Diagnostics{} }
 func (w *testWorker) Close() error {
 	w.closeOnce.Do(func() {
+		if w.closeGate != nil {
+			<-w.closeGate
+		}
 		w.closed = true
 		close(w.events)
 	})
 	return nil
+}
+
+func TestHostForwardsWorkerOutputUntilExit(t *testing.T) {
+	dsh := newTestDSH()
+	defer dsh.server.Close()
+	manager := newHostTestManager(t, "web")
+	supervisorAdapter := &testSupervisor{}
+	var outputMu sync.Mutex
+	var outputs []supervisor.OutputEvent
+	var generations []string
+	outputReady := make(chan struct{}, 3)
+	host := NewHost(Dependencies{
+		DSH: dsh, Manager: manager, Supervisor: supervisorAdapter, Channel: &testChannel{server: dsh.server},
+		WorkerOutput: func(generation string, event supervisor.OutputEvent) {
+			outputMu.Lock()
+			outputs = append(outputs, event)
+			generations = append(generations, generation)
+			outputMu.Unlock()
+			outputReady <- struct{}{}
+		},
+	}, Config{
+		BootstrapDirectory:  t.TempDir(),
+		DSHDataDirectory:    t.TempDir(),
+		ReadinessTimeout:    time.Second,
+		ProbeTimeout:        time.Second,
+		GracefulStopTimeout: time.Second,
+		ForceStopTimeout:    time.Second,
+		EmptyTimeout:        time.Second,
+		ShutdownTimeout:     time.Second,
+	})
+	defer host.ShutdownForApp()
+	statuses := make(chan lifecycle.Status, 16)
+	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
+	if status := host.Start(); status.State != lifecycle.StateStarting {
+		t.Fatalf("Start() status = %+v", status)
+	}
+	ready := waitForStatus(t, statuses, lifecycle.StateReady)
+	worker := supervisorAdapter.worker
+	if worker == nil {
+		t.Fatal("supervisor did not create a worker")
+	}
+	closeGate := make(chan struct{})
+	defer close(closeGate)
+	worker.closeGate = closeGate
+	worker.events <- supervisor.OutputEvent{Stream: supervisor.StreamStdout, Text: "first"}
+	worker.events <- supervisor.OutputEvent{Stream: supervisor.StreamStderr, Text: "second"}
+	worker.once.Do(func() { close(worker.exited) })
+	worker.events <- supervisor.OutputEvent{Stream: supervisor.StreamStdout, Text: "after exit"}
+
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for i := 0; i < 3; i++ {
+		select {
+		case <-outputReady:
+		case <-deadline.C:
+			outputMu.Lock()
+			defer outputMu.Unlock()
+			t.Fatalf("received %d Worker output events, want 3: %#v", len(outputs), outputs)
+		}
+	}
+	outputMu.Lock()
+	defer outputMu.Unlock()
+	if len(outputs) != 3 || outputs[0].Text != "first" || outputs[1].Text != "second" || outputs[2].Text != "after exit" {
+		t.Fatalf("Worker outputs = %#v; ready generation = %q", outputs, ready.GenerationID)
+	}
+	for _, generation := range generations {
+		if generation != ready.GenerationID {
+			t.Fatalf("Worker output generation = %q, want %q", generation, ready.GenerationID)
+		}
+	}
 }
 
 func TestHostStartsReadyAndCleansUpToStopped(t *testing.T) {

@@ -146,6 +146,7 @@ export interface Values {
     "pet": PetPreference;
     "appearance": Appearance;
     "updateChannel": UpdateChannel;
+    "verboseLogging": boolean;
 }
 
 /**

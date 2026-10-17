@@ -208,6 +208,7 @@ type Values struct {
 	Pet                      PetPreference             `json:"pet"`
 	Appearance               Appearance                `json:"appearance"`
 	UpdateChannel            UpdateChannel             `json:"updateChannel"`
+	VerboseLogging           bool                      `json:"verboseLogging"`
 }
 
 func DefaultValues() Values {
@@ -250,6 +251,22 @@ func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool)
 	defer m.mu.Unlock()
 	next := m.values
 	next.AutomaticRuntimeRollback = enabled
+	next.Version = stateVersion
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		return Values{}, err
+	}
+	m.values = next
+	return next, nil
+}
+
+func (m *Manager) SetVerboseLogging(ctx context.Context, enabled bool) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := m.values
+	next.VerboseLogging = enabled
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
 		return Values{}, err
@@ -420,6 +437,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		Pet                      json.RawMessage `json:"pet"`
 		Appearance               *Appearance     `json:"appearance"`
 		UpdateChannel            *UpdateChannel  `json:"updateChannel"`
+		VerboseLogging           *bool           `json:"verboseLogging"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
@@ -440,6 +458,9 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	// existing but unsupported value is also replaced instead of failing the load.
 	if raw.UpdateChannel != nil && raw.UpdateChannel.Valid() {
 		values.UpdateChannel = *raw.UpdateChannel
+	}
+	if raw.VerboseLogging != nil {
+		values.VerboseLogging = *raw.VerboseLogging
 	}
 	if len(raw.Notifications) > 0 && string(raw.Notifications) != "null" {
 		var candidate struct {

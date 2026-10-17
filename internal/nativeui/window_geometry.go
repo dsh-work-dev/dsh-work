@@ -2,10 +2,10 @@ package nativeui
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -45,7 +45,8 @@ func RememberWindowGeometry(window application.Window, options application.Webvi
 	g := settings.WindowGeometry{Width: options.Width, Height: options.Height, Maximised: options.StartState == application.WindowStateMaximised}
 	save := func() {
 		if err := manager.SetWindowGeometry(context.Background(), options.Name, g); err != nil {
-			log.Printf("save %s window size: %v", options.Name, err)
+			attrs := append([]any{"window", options.Name}, logging.ErrAttrs(err, "")...)
+			logging.Module(logging.ModSettings).Warn("window geometry save failed", attrs...)
 		}
 	}
 	flush := func() {

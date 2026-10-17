@@ -17,6 +17,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/local/dsh-work/internal/redact"
 	"github.com/local/dsh-work/internal/supervisor"
 	win "golang.org/x/sys/windows"
 )
@@ -510,7 +511,7 @@ func (w *jobWorker) readOutput(stream supervisor.OutputStream, file *os.File) {
 		if w.rawHandler != nil {
 			w.rawHandler(stream, rawText)
 		}
-		text := supervisor.Redact(rawText)
+		text := redact.Secrets(rawText)
 		w.tailMu.Lock()
 		if stream == supervisor.StreamStdout {
 			w.stdoutTail = appendTail(w.stdoutTail, text)

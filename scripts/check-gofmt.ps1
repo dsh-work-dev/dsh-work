@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$files = @(rg --files -g '*.go' -g '!tools/**' -g '!.tmp-wails-*/')
+# scripts/generate-daemon-client.py emits compact adapter source that is not gofmt-formatted.
+$files = @(rg --files -g '*.go' -g '!tools/**' -g '!internal/desktopclient/**' -g '!.tmp-wails-*/')
 if ($LASTEXITCODE -ne 0 -and $files.Count -eq 0) {
     exit 0
 }

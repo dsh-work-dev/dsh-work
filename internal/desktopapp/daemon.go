@@ -3,7 +3,6 @@ package desktopapp
 import (
 	"context"
 	"errors"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,6 +23,7 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
@@ -31,6 +31,7 @@ import (
 	"github.com/local/dsh-work/internal/platform"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
+	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/version"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -42,7 +43,7 @@ func runDaemon(identity string, resources Resources) {
 	dependencies := platform.New()
 	paths, pathErr := storagepaths.DefaultDirectories()
 	if pathErr != nil {
-		log.Fatalf("resolve dsh-work storage directories: %v", pathErr)
+		logging.Fatal(logging.Module(logging.ModStorage), "storage directories unavailable", logging.ErrAttrs(pathErr, "")...)
 	}
 	config := dshworkapp.DefaultConfig(currentDiscoveryRoot())
 	config.RequireWebBoot = true
@@ -56,13 +57,13 @@ func runDaemon(identity string, resources Resources) {
 	}
 	locations, err := storagepaths.Open(paths.LocationsFile, defaultRoot, defaultUserData)
 	if err != nil {
-		log.Fatalf("read storage locations: %v", err)
+		logging.Fatal(logging.Module(logging.ModStorage), "storage locations unreadable", logging.ErrAttrs(err, "")...)
 	}
 	// Keep the existing manager lock boundary while preparing a relocation.
 	previousRoot := locations.Snapshot().Current.Root
 	previousLock, err := dshworkapp.AcquireManagerProcessLock(filepath.Join(previousRoot, "settings.json"))
 	if err != nil {
-		log.Fatalf("lock current storage: %v", err)
+		logging.Fatal(logging.Module(logging.ModStorage), "storage lock failed", logging.ErrAttrs(err, "")...)
 	}
 	var nextRootLock *dshworkapp.ProcessLock
 	if err := locations.ApplyPendingWith(func(next storagepaths.Locations) error {
@@ -72,7 +73,7 @@ func runDaemon(identity string, resources Resources) {
 		nextRootLock, err = dshworkapp.AcquireManagerProcessLock(filepath.Join(next.Root, "settings.json"))
 		return err
 	}); err != nil {
-		log.Printf("storage migration failed; using original location: %v", err)
+		logging.Module(logging.ModStorage).Warn("storage migration failed", logging.ErrAttrs(err, "")...)
 		if nextRootLock != nil {
 			_ = nextRootLock.Close()
 			nextRootLock = nil
@@ -86,7 +87,7 @@ func runDaemon(identity string, resources Resources) {
 		managerLock = nextRootLock
 		if managerLock == nil {
 			_ = previousLock.Close()
-			log.Fatalf("storage location changed without acquiring its manager process lock")
+			logging.Fatal(logging.Module(logging.ModStorage), "storage lock missing after relocation")
 		}
 		_ = previousLock.Close()
 		if entries, e := os.ReadDir(previousRoot); e == nil && len(entries) == 1 && entries[0].Name() == "manager.lock" {
@@ -103,11 +104,14 @@ func runDaemon(identity string, resources Resources) {
 	config.DSHDataDirectory = filepath.Join(storage.Root, "environment")
 	config.BootstrapDirectory = filepath.Join(storage.Root, "bootstrap")
 	if managerLock == nil {
-		log.Fatalf("dsh-work could not acquire its manager process lock")
+		logging.Fatal(logging.Module(logging.ModStorage), "manager lock unavailable")
+	}
+	if err := logging.Attach(); err != nil {
+		logging.Module(logging.ModApp).Warn("log files unavailable", logging.ErrAttrs(err, "")...)
 	}
 	defer func() {
 		if err := managerLock.Close(); err != nil {
-			log.Printf("dsh-work manager process lock release: %v", err)
+			logging.Module(logging.ModStorage).Warn("manager lock release failed", logging.ErrAttrs(err, "")...)
 		}
 	}()
 	dsh := dshadapter.New(dependencies.CommandExecutor)
@@ -162,7 +166,7 @@ func runDaemon(identity string, resources Resources) {
 	desktopprobe.Configure(&managerConfig, dsh, storage.Root)
 	manager, managerErr := dshmanager.New(managerConfig)
 	if managerErr != nil {
-		log.Printf("dsh-work manager state unavailable: %v", managerErr)
+		logging.Module(logging.ModRuntime).Error("manager state unavailable", logging.ErrAttrs(managerErr, lifecycle.ErrorManagerStateInvalid)...)
 		manager = nil
 	}
 	channel := workerchannel.New()
@@ -177,6 +181,9 @@ func runDaemon(identity string, resources Resources) {
 		Channel:                  channel,
 		PlatformError:            dependencies.Err,
 		AutomaticRuntimeRollback: automaticRuntimeRollback.Load,
+		WorkerOutput: func(generation string, event supervisor.OutputEvent) {
+			logging.WorkerOutput(generation, string(event.Stream), event.Text)
+		},
 	}, config)
 	settingsManager, settingsErr := dshworksettings.New(dshworksettings.Config{
 		Path:     config.SettingsPath,
@@ -185,19 +192,20 @@ func runDaemon(identity string, resources Resources) {
 	localePreference := dshworksettings.DefaultLocale
 	notificationPreference := dshworknotifications.DefaultPreferences()
 	if settingsErr != nil {
-		log.Printf("dsh-work settings unavailable: %v", settingsErr)
+		logging.Module(logging.ModSettings).Error("settings unavailable", logging.ErrAttrs(settingsErr, lifecycle.ErrorSettingsUnavailable)...)
 	} else if values, err := settingsManager.Snapshot(context.Background()); err != nil {
-		log.Printf("dsh-work settings could not be loaded: %v", err)
+		logging.Module(logging.ModSettings).Error("settings load failed", logging.ErrAttrs(err, lifecycle.ErrorSettingsStateInvalid)...)
 	} else {
 		localePreference = values.Locale
 		notificationPreference = values.Notifications
 		automaticRuntimeRollback.Store(values.AutomaticRuntimeRollback)
+		logging.SetVerbose(values.VerboseLogging)
 		// Settings written before dsh-work owned its appearance followed the
 		// DSH theme; adopt that mode once so the look does not change on upgrade.
 		if manager != nil {
 			if theme, err := manager.Theme(context.Background()); err == nil {
 				if err := settingsManager.ImportAppearanceMode(context.Background(), dshworksettings.AppearanceMode(theme)); err != nil {
-					log.Printf("dsh-work appearance could not be imported: %v", err)
+					logging.Module(logging.ModSettings).Warn("appearance import failed", logging.ErrAttrs(err, "")...)
 				}
 			}
 		}
@@ -211,12 +219,9 @@ func runDaemon(identity string, resources Resources) {
 		petCatalogConfig.CommunityHome = ""
 	}
 	if catalog, err := dshworkpet.NewPetCatalog(petCatalogConfig); err != nil {
-		log.Printf("dsh-work Pet catalog unavailable: %v", err)
+		logging.Module(logging.ModPet).Warn("pet catalog unavailable", logging.ErrAttrs(err, "")...)
 	} else {
 		petCatalog = catalog
-	}
-	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
-		host.SetDebug(func(message string) { log.Print(message) })
 	}
 	var activeLocale atomic.Value
 	activeLocale.Store(string(localePreference))
@@ -307,6 +312,7 @@ func runDaemon(identity string, resources Resources) {
 			publishAppearance(appearance)
 		}
 	})
+	dshworkapp.SetVerboseLoggingChanged(settingsService, logging.SetVerbose)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
 	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
 	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
@@ -329,7 +335,7 @@ func runDaemon(identity string, resources Resources) {
 		server.ServeAccountCallback(w, r, generation)
 	})
 	if callbackErr != nil {
-		log.Printf("account sign-in callback listener unavailable: %v", callbackErr)
+		logging.Module(logging.ModAccount).Warn("account callback listener unavailable", logging.ErrAttrs(callbackErr, "")...)
 	} else {
 		server.AccountCallback = accountCallback
 		defer accountCallback.Close()
@@ -341,13 +347,14 @@ func runDaemon(identity string, resources Resources) {
 	server.Media = dshworkapp.PetMediaHandler(petSettingsService, http.NotFoundHandler())
 	listener, err := daemon.Listen(identity)
 	if err != nil {
-		log.Fatalf("listen background: %v", err)
+		logging.Fatal(logging.Module(logging.ModIPC), "background listen failed", logging.ErrAttrs(err, "")...)
 	}
 	ipcServer := daemon.HTTPServer(server)
 	defer ipcServer.Close()
 	defer listener.Close()
 	desktop = application.New(application.Options{
 		Name:        "dsh-work",
+		Logger:      logging.WailsLogger(),
 		Description: "A local desktop shell for DSH workspaces.",
 		Icon:        resources.AppIcon,
 		Windows: application.WindowsOptions{
@@ -388,7 +395,7 @@ func runDaemon(identity string, resources Resources) {
 				Body:   copy.Body,
 				Target: "about",
 			}); err != nil {
-				log.Printf("update notification delivery: %v", err)
+				logging.Module(logging.ModNotify).Warn("update notification failed", logging.ErrAttrs(err, "")...)
 			}
 		}
 	})
@@ -497,7 +504,7 @@ func runDaemon(identity string, resources Resources) {
 			return
 		}
 		if err := dshworkapp.PersistPetPosition(context.Background(), petSettingsService, position); err != nil {
-			log.Printf("dsh-work Pet position: %v", err)
+			logging.Module(logging.ModPet).Warn("pet position save failed", logging.ErrAttrs(err, "")...)
 		}
 	}
 	dshworkapp.AttachPetOverlayHooks(petSettingsService, dshworkapp.PetOverlayHooks{
@@ -596,12 +603,12 @@ func runDaemon(identity string, resources Resources) {
 			return
 		}
 		if err := launcher.Open(""); err != nil {
-			log.Printf("open UI: %v", err)
+			logging.Module(logging.ModApp).Error("open window failed", logging.ErrAttrs(err, "")...)
 		}
 	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
 		if result.Error != nil {
-			log.Printf("desktop notification response: %v", result.Error)
+			logging.Module(logging.ModNotify).Warn("notification response failed", logging.ErrAttrs(result.Error, "")...)
 			return
 		}
 		if result.Response.ID == "" {
@@ -765,7 +772,7 @@ func runDaemon(identity string, resources Resources) {
 			case requested := <-petMenuActionRequests:
 				_, err := dshworkapp.SetPetVisibilityFromHost(menuRefreshContext, petSettingsService, requested)
 				if err != nil && !applicationShuttingDown.Load() {
-					log.Printf("dsh-work Pet menu visibility: %v", err)
+					logging.Module(logging.ModPet).Warn("pet menu visibility failed", logging.ErrAttrs(err, "")...)
 					labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
 					desktop.Dialog.Info().SetTitle(labels.PetMenuErrorTitle).SetMessage(labels.PetMenuErrorMessage).Show()
 				}
@@ -834,19 +841,36 @@ func runDaemon(identity string, resources Resources) {
 			return
 		}
 		if err := launcher.Open(section); err != nil {
-			log.Printf("open Settings: %v", err)
+			attrs := append([]any{"section", section}, logging.ErrAttrs(err, "")...)
+			logging.Module(logging.ModApp).Error("open settings failed", attrs...)
 		}
 	}
+	var lifecycleLogMu sync.Mutex
+	var lifecycleLogKey, lifecycleLogFailure string
 	host.SetPublish(func(status lifecycle.Status) {
 		if status.State == lifecycle.StateStarting && status.Phase == lifecycle.PhaseCheckpoint {
 			go func() {
 				if err := launcher.Open("__boot"); err != nil {
-					log.Printf("open boot WebView: %v", err)
+					logging.Module(logging.ModApp).Error("open boot window failed", logging.ErrAttrs(err, "")...)
 				}
 			}()
 		}
-		if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && status.Error != nil {
-			log.Printf("Host failure: %+v diagnostics=%+v", status.Error, host.Diagnostics())
+		key := string(status.State) + "|" + string(status.Phase) + "|" + status.GenerationID
+		failureKey := ""
+		if status.Error != nil {
+			failureKey = string(status.Error.Code) + "|" + status.Error.CorrelationID
+		}
+		lifecycleLogMu.Lock()
+		changed := key != lifecycleLogKey
+		failed := failureKey != "" && failureKey != lifecycleLogFailure
+		lifecycleLogKey, lifecycleLogFailure = key, failureKey
+		lifecycleLogMu.Unlock()
+		lifecycleLogger := logging.Module(logging.ModLifecycle)
+		if changed {
+			lifecycleLogger.Info("status changed", "state", string(status.State), "phase", string(status.Phase), "gen", status.GenerationID, "op", status.CorrelationID)
+		}
+		if failed {
+			lifecycleLogger.Error("lifecycle failed", "code", string(status.Error.Code), "op", status.Error.CorrelationID, "gen", status.GenerationID, "retryable", status.Error.Retryable, "summary", status.Error.Summary, "err", status.Error.Detail)
 		}
 		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
@@ -894,7 +918,7 @@ func runDaemon(identity string, resources Resources) {
 			}
 		}
 		if err := notificationRouter.Publish(context.Background(), notification); err != nil {
-			log.Printf("desktop notification delivery: %v", err)
+			logging.Module(logging.ModNotify).Warn("notification delivery failed", logging.ErrAttrs(err, "")...)
 		}
 	})
 	host.SetQuitHandler(func() {
@@ -914,7 +938,7 @@ func runDaemon(identity string, resources Resources) {
 				}
 			},
 			func(err error) {
-				log.Printf("dsh-work host shutdown: %v", err)
+				logging.Module(logging.ModLifecycle).Error("host shutdown failed", logging.ErrAttrs(err, "")...)
 				if applicationShuttingDown.Load() {
 					return
 				}
@@ -941,10 +965,10 @@ func runDaemon(identity string, resources Resources) {
 		hideBackgroundSurfaces()
 		petWindowCloseAllowed.Store(true)
 		if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
-			log.Printf("dsh-work Pet shutdown: %v", err)
+			logging.Module(logging.ModPet).Warn("pet shutdown failed", logging.ErrAttrs(err, "")...)
 		}
 		if err := host.ShutdownForApp(); err != nil {
-			log.Printf("dsh-work host shutdown: %v", err)
+			logging.Module(logging.ModLifecycle).Error("host shutdown failed", logging.ErrAttrs(err, "")...)
 		}
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
@@ -964,14 +988,14 @@ func runDaemon(identity string, resources Resources) {
 		}
 		go func() {
 			if err := ipcServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-				log.Printf("background IPC: %v", err)
+				logging.Module(logging.ModIPC).Error("background ipc stopped", logging.ErrAttrs(err, "")...)
 				host.Quit()
 			}
 		}()
 	})
 
 	if err := desktop.Run(); err != nil {
-		log.Printf("dsh-work desktop run: %v", err)
+		logging.Module(logging.ModApp).Error("wails run failed", logging.ErrAttrs(err, "")...)
 	}
 	if stopPetMenuRefresh != nil {
 		stopPetMenuRefresh()
