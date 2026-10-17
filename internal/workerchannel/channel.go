@@ -8,7 +8,6 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/local/dsh-work/internal/workeripc"
@@ -43,7 +42,7 @@ func (a *Adapter) Current() Session {
 	}
 	return a.current
 }
-func (a *Adapter) Prepare(ctx context.Context, generation, dataDirectory, profile string) (Session, error) {
+func (a *Adapter) Prepare(ctx context.Context, generation, runtimeExecutable string) (Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -56,7 +55,7 @@ func (a *Adapter) Prepare(ctx context.Context, generation, dataDirectory, profil
 		pipe.Close()
 		return nil, err
 	}
-	patch, err := pipe.Prepare(root, filepath.Join(dataDirectory, "profiles", profile), "")
+	patch, err := pipe.Prepare(root, runtimeExecutable, "")
 	if err != nil {
 		pipe.Close()
 		os.RemoveAll(root)

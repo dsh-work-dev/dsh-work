@@ -30,7 +30,7 @@ type testChannel struct {
 	server *httptest.Server
 }
 
-func (g *testChannel) Prepare(context.Context, string, string, string) (workerchannel.Session, error) {
+func (g *testChannel) Prepare(context.Context, string, string) (workerchannel.Session, error) {
 	return testChannelSession{url: "/?generation=test-session"}, nil
 }
 

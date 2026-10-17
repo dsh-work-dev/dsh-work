@@ -87,7 +87,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		t.Fatal(err)
 	}
 	defer carrier.Close()
-	patch, err = carrier.Prepare(filepath.Join(home, "carrier"), filepath.Join(home, "dsh-home", "profiles", "web"), patch)
+	patch, err = carrier.Prepare(filepath.Join(home, "carrier"), cli, patch)
 	if err != nil {
 		t.Fatal(err)
 	}

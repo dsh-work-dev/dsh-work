@@ -36,7 +36,7 @@ type DSHAdapter interface {
 }
 
 type WorkerChannel interface {
-	Prepare(context.Context, string, string, string) (workerchannel.Session, error)
+	Prepare(ctx context.Context, generation, runtimeExecutable string) (workerchannel.Session, error)
 }
 
 // ProfilePluginManager is the manager surface used by the trusted Settings
@@ -1497,7 +1497,7 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 		return nil, nil
 	}
 
-	channel, err := h.deps.Channel.Prepare(run.ctx, run.generation, launch.dataDirectory.Path, launch.profile)
+	channel, err := h.deps.Channel.Prepare(run.ctx, run.generation, launch.runtime.Path)
 	if err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorChannelStartFailed, "dsh-work could not prepare Worker communication.", true)
 	}

@@ -91,11 +91,17 @@ ends the connected UI client. The daemon remains the source of lifecycle truth.
 The Host creates a fresh authenticated named pipe before each Windows Worker
 launch. `go-winio` enforces a current-user SID ACL and rejects remote pipe
 clients. Per-launch random credentials authenticate both ends with HMAC. The
-Node carrier connects to that pipe and reuses the published DSH WebServer route,
-index and upgrade contracts without calling TCP listen. The HTTP authority
-`http://127.0.0.1:1` is an internal routing identity; the transport can only dial
-the pipe. Credentials and carrier modules live in an owned temporary directory
-and are removed with the generation.
+Node carrier resolves DSH's `WebServer` and `Service` classes from the selected
+DSH runtime executable, then reuses the published WebServer route, index and
+upgrade contracts without calling TCP listen. The profile directory is not a
+module-resolution base because it may contain stale or incomplete copies of DSH
+core packages. Core DSH packages are not copied into profiles; the selected
+runtime remains their module source for each launch. The carrier exposes logical
+port `1` so `WebServer.getOrigin()` produces `http://127.0.0.1:1`; this is an
+internal routing identity, and the transport can only dial the pipe. No TCP
+listener is opened. Credentials and carrier modules live in an owned temporary
+directory and are removed with the generation. Revisit this boundary if DSH
+publishes a stable, version-independent carrier interface.
 
 The DSH process still uses its normal Node HTTP server and route semantics. The
 carrier changes the server's listening transport to the authenticated generation
