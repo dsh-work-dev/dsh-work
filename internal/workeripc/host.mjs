@@ -3,19 +3,20 @@
 import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
-import {join} from 'node:path';
 import {createServer} from 'node:http';
 import {connect} from 'node:net';
 import {createHmac, timingSafeEqual} from 'node:crypto';
 
 const config = JSON.parse(readFileSync(new URL('./connection.json', import.meta.url), 'utf8'));
-const require = createRequire(join(config.profileRoot, 'package.json'));
+const require = createRequire(config.runtimeExecutable);
 const {WebServer} = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-host-webserver')).href);
 const {Service} = await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href);
 
 export default class PipeWebServer extends WebServer {
-  get port() { return 1; }
   async [Service.init]() {
+    // The DSH web app calls the base getOrigin() while announcing readiness.
+    // This carrier has no TCP listener, but its HTTP routing identity is port 1.
+    this.listenedPort = 1;
     const sockets = new Set(), timers = new Set();
     let stopped = false;
     const server = createServer(async (req, res) => {

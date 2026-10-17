@@ -167,8 +167,16 @@ func (t *Transport) Close() error {
 }
 
 // Prepare adds a launch-only carrier override. It never changes the profile.
-// profileRoot is the selected DSH profile npm project.
-func (t *Transport) Prepare(root, profileRoot, previousPatch string) (string, error) {
+// runtimeExecutable anchors resolution of DSH-owned service modules to the
+// exact runtime selected for this Worker.
+func (t *Transport) Prepare(root, runtimeExecutable, previousPatch string) (string, error) {
+	if runtimeExecutable == "" {
+		return "", errors.New("selected DSH runtime executable is required")
+	}
+	runtimeExecutable, err := filepath.Abs(runtimeExecutable)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return "", err
 	}
@@ -197,7 +205,7 @@ func (t *Transport) Prepare(root, profileRoot, previousPatch string) (string, er
 	rows = append(rows, map[string]any{"id": "webserver", "disabled": true}, map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pipe", "name": u, "config": map[string]any{"host": "127.0.0.1", "port": 1, "compression": "none"}}}})
 	// Module imports happen before schema processing. Per-launch sidecar owns
 	// credentials and module resolution; only its path enters the patch graph.
-	config, _ := json.Marshal(map[string]string{"pipe": t.path, "token": t.token, "profileRoot": profileRoot})
+	config, _ := json.Marshal(map[string]string{"pipe": t.path, "token": t.token, "runtimeExecutable": runtimeExecutable})
 	if err := os.WriteFile(filepath.Join(root, "connection.json"), config, 0600); err != nil {
 		return "", err
 	}
