@@ -2,6 +2,13 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'resolve-nsis.ps1')
 
 $manifest = Get-Content -Raw (Join-Path $PSScriptRoot '..\toolchain.lock.json') | ConvertFrom-Json
+$fixtureManifest = Get-Content -Raw (Join-Path $PSScriptRoot '..\tools\dsh\package.json') | ConvertFrom-Json
+$fixtureDeclared = $fixtureManifest.dependencies.'@deepseek-ai/dsh'
+# Windows PowerShell's ConvertFrom-Json rejects the lockfile's empty root package key.
+$fixtureLocked = (node -p "require(process.argv[1]).packages['node_modules/@deepseek-ai/dsh'].version" (Join-Path $PSScriptRoot '..\tools\dsh\package-lock.json')).Trim()
+if ($fixtureDeclared -ne $manifest.dsh.version -or $fixtureLocked -ne $manifest.dsh.version) {
+    throw "DSH development fixture mismatch: toolchain.lock.json=$($manifest.dsh.version) tools/dsh/package.json=$fixtureDeclared package-lock=$fixtureLocked"
+}
 
 $go = (go version).Trim()
 $node = (node --version).Trim()
