@@ -96,7 +96,6 @@ type Config struct {
 	DSHDataDirectory    string
 	SettingsPath        string
 	CacheDirectory      string
-	ExpectedDSHVersion  string
 	ReadinessTimeout    time.Duration
 	ProbeTimeout        time.Duration
 	GracefulStopTimeout time.Duration
@@ -115,7 +114,6 @@ func DefaultConfig(discoveryRoot string) Config {
 	if err != nil {
 		return Config{
 			DiscoveryRoot:       discoveryRoot,
-			ExpectedDSHVersion:  dshadapter.SupportedVersion,
 			configError:         fmt.Errorf("dsh-work could not resolve its per-user data and cache directories: %w", err),
 			ReadinessTimeout:    60 * time.Second,
 			ProbeTimeout:        750 * time.Millisecond,
@@ -131,7 +129,6 @@ func DefaultConfig(discoveryRoot string) Config {
 		DSHDataDirectory:    filepath.Join(paths.Root, "environment"),
 		SettingsPath:        filepath.Join(paths.Root, "settings.json"),
 		CacheDirectory:      paths.CacheRoot,
-		ExpectedDSHVersion:  dshadapter.SupportedVersion,
 		ReadinessTimeout:    60 * time.Second,
 		ProbeTimeout:        750 * time.Millisecond,
 		GracefulStopTimeout: 4 * time.Second,
@@ -161,9 +158,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.CacheDirectory == "" {
 		c.CacheDirectory = defaults.CacheDirectory
-	}
-	if c.ExpectedDSHVersion == "" {
-		c.ExpectedDSHVersion = defaults.ExpectedDSHVersion
 	}
 	if c.ReadinessTimeout <= 0 {
 		c.ReadinessTimeout = defaults.ReadinessTimeout
@@ -1622,9 +1616,9 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 	}
 	runtime := runtimeAdapterValue(resolved.Runtime, resolved.Node)
 	if verifier, ok := h.deps.DSH.(interface {
-		DiscoverSelectedPathWithEnvironment(context.Context, string, string, map[string]string) (dshadapter.Runtime, error)
+		DiscoverSelectedPath(context.Context, string, map[string]string) (dshadapter.Runtime, error)
 	}); ok {
-		verified, verifyErr := verifier.DiscoverSelectedPathWithEnvironment(run.ctx, runtime.Path, resolved.Runtime.Version, runtime.Env)
+		verified, verifyErr := verifier.DiscoverSelectedPath(run.ctx, runtime.Path, runtime.Env)
 		if verifyErr != nil {
 			if run.ctx.Err() != nil {
 				return hostLaunch{}, nil
@@ -1642,12 +1636,6 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 			}
 			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not verify the selected DSH runtime.", false)
 		}
-		if verified.Version != resolved.Runtime.Version {
-			return hostLaunch{}, h.failureFor(lifecycle.Failure{
-				Code:    lifecycle.ErrorDSHUnsupportedVersion,
-				Summary: "The selected DSH runtime does not match the catalog.",
-			}, lifecycle.ErrorDSHUnsupportedVersion, "The selected DSH runtime does not match the catalog.", false)
-		}
 		runtime = dshadapter.Runtime{Path: verified.Path, Version: verified.Version, Env: runtime.Env}
 	} else if verifier, ok := h.deps.DSH.(interface {
 		DiscoverPath(context.Context, string) (dshadapter.Runtime, error)
@@ -1658,12 +1646,6 @@ func (h *Host) resolveLaunch(run *generationRun) (hostLaunch, *lifecycle.Failure
 				return hostLaunch{}, nil
 			}
 			return hostLaunch{}, h.failureFor(verifyErr, lifecycle.ErrorDSHRuntimeNotFound, "dsh-work could not verify the selected DSH runtime.", false)
-		}
-		if verified.Version != resolved.Runtime.Version {
-			return hostLaunch{}, h.failureFor(lifecycle.Failure{
-				Code:    lifecycle.ErrorDSHUnsupportedVersion,
-				Summary: "The selected DSH runtime does not match the catalog.",
-			}, lifecycle.ErrorDSHUnsupportedVersion, "The selected DSH runtime does not match the catalog.", false)
 		}
 		runtime = dshadapter.Runtime{Path: verified.Path, Version: verified.Version, Env: runtime.Env}
 	}

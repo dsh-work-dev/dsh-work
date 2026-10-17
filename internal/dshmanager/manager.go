@@ -135,18 +135,17 @@ type RuntimeRemover interface {
 	Remove(context.Context, RuntimeInfo) error
 }
 
-// RuntimeVerifier is implemented by the selected DSH adapter. The manager
-// owns catalog identity and presence checks; only the adapter can verify that
-// an executable speaks the DSH contract expected by this dsh-work build.
+// RuntimeVerifier runs a runtime, returns the version it reports and rejects
+// versions older than dsh-work's minimum. The catalog version is only a cache.
 type RuntimeVerifier interface {
-	Verify(context.Context, string, string) error
+	Verify(ctx context.Context, path string) (string, error)
 }
 
 // RuntimeVerifierWithEnvironment is the optional verifier boundary for a
 // managed runtime whose launcher needs a child-only toolchain environment.
 // Implementations must not mutate the parent process environment.
 type RuntimeVerifierWithEnvironment interface {
-	VerifyWithEnvironment(context.Context, string, string, map[string]string) error
+	VerifyWithEnvironment(ctx context.Context, path string, env map[string]string) (string, error)
 }
 
 // RuntimeProfileVerifier is an optional DSH-adapter seam for compatibility
@@ -517,6 +516,19 @@ func (m *Manager) registerRuntime(ctx context.Context, runtime RuntimeInfo) (Sna
 	return m.Snapshot(context.Background())
 }
 
+// observeRuntimeVersion refreshes the catalog cache when a runtime reports a
+// different version than the one recorded. It never rejects the runtime.
+func (m *Manager) observeRuntimeVersion(ctx context.Context, runtime RuntimeInfo, observed string) (RuntimeInfo, error) {
+	if observed == "" || observed == runtime.Version {
+		return runtime, nil
+	}
+	runtime.Version = observed
+	if _, err := m.registerRuntime(ctx, runtime); err != nil {
+		return RuntimeInfo{}, err
+	}
+	return runtime, nil
+}
+
 func (m *Manager) InstallRuntime(ctx context.Context, version string) (Snapshot, error) {
 	return m.InstallRuntimeWithProgress(ctx, version, nil)
 }
@@ -633,11 +645,19 @@ func (m *Manager) InstallRuntimeWithProgress(ctx context.Context, version string
 		}
 		return Snapshot{}, cancellation
 	}
-	if err := verifyRuntime(ctx, verifier, runtime); err != nil {
+	observed, err := verifyRuntime(ctx, verifier, runtime)
+	if err != nil {
 		if cleanupErr := m.discardRuntimeCandidate(ctx, installer, runtime); cleanupErr != nil {
 			return Snapshot{}, candidateCleanupFailure(err)
 		}
 		return Snapshot{}, err
+	}
+	if observed != version {
+		installFailure := failure(lifecycle.ErrorDSHUnsupportedVersion, "The installed DSH runtime version does not match the request", "the candidate was not added to the runtime catalog")
+		if cleanupErr := m.discardRuntimeCandidate(ctx, installer, runtime); cleanupErr != nil {
+			return Snapshot{}, candidateCleanupFailure(installFailure)
+		}
+		return Snapshot{}, installFailure
 	}
 	if cancellation := contextError(ctx); cancellation != nil {
 		if cleanupErr := m.discardRuntimeCandidate(ctx, installer, runtime); cleanupErr != nil {
@@ -1531,7 +1551,11 @@ func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, 
 	}
 	environment := cloneEnvironment(node.ChildEnvironment)
 	environment["DSH_HOME"] = dataDirectory.Path
-	if err := verifyRuntimeWithEnvironment(ctx, config.RuntimeVerifier, runtime, environment); err != nil {
+	observed, err := verifyRuntimeWithEnvironment(ctx, config.RuntimeVerifier, runtime, environment)
+	if err != nil {
+		return DataDirectoryInfo{}, RuntimeInfo{}, nil, err
+	}
+	if runtime, err = m.observeRuntimeVersion(ctx, runtime, observed); err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, nil, err
 	}
 	if err := verifyRuntimeProfile(ctx, config.RuntimeVerifier, runtime, dataDirectory, current.Profile); err != nil {
@@ -1584,7 +1608,11 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 	if !runtimeInstallationPresent(runtime) {
 		return ResolvedLaunch{}, failureWithMeta(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before starting dsh-work", true, false)
 	}
-	if err := verifyRuntimeWithEnvironment(ctx, config.RuntimeVerifier, runtime, resolvedNode.ChildEnvironment); err != nil {
+	observed, err := verifyRuntimeWithEnvironment(ctx, config.RuntimeVerifier, runtime, resolvedNode.ChildEnvironment)
+	if err != nil {
+		return ResolvedLaunch{}, err
+	}
+	if runtime, err = m.observeRuntimeVersion(ctx, runtime, observed); err != nil {
 		return ResolvedLaunch{}, err
 	}
 	runtime.Installed = true
@@ -2427,27 +2455,28 @@ func failureWithMeta(code lifecycle.ErrorCode, summary, detail string, retryable
 	}
 }
 
-func verifyRuntime(ctx context.Context, verifier RuntimeVerifier, runtime RuntimeInfo) error {
+func verifyRuntime(ctx context.Context, verifier RuntimeVerifier, runtime RuntimeInfo) (string, error) {
 	return verifyRuntimeWithEnvironment(ctx, verifier, runtime, runtimeChildEnvironment(runtime))
 }
 
-func verifyRuntimeWithEnvironment(ctx context.Context, verifier RuntimeVerifier, runtime RuntimeInfo, environment map[string]string) error {
+func verifyRuntimeWithEnvironment(ctx context.Context, verifier RuntimeVerifier, runtime RuntimeInfo, environment map[string]string) (string, error) {
 	if verifier == nil {
-		return nil
+		return runtime.Version, nil
 	}
+	var observed string
 	var err error
 	if environmentVerifier, ok := verifier.(RuntimeVerifierWithEnvironment); ok {
-		err = environmentVerifier.VerifyWithEnvironment(ctx, runtime.Path, runtime.Version, environment)
+		observed, err = environmentVerifier.VerifyWithEnvironment(ctx, runtime.Path, environment)
 	} else {
-		err = verifier.Verify(ctx, runtime.Path, runtime.Version)
+		observed, err = verifier.Verify(ctx, runtime.Path)
 	}
 	if err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
-			return cancellation
+			return "", cancellation
 		}
-		return preserveFailure(err, lifecycle.ErrorDSHVersionCheckFailed, "The selected DSH runtime could not be verified.", "the DSH adapter rejected the selected runtime", false, false)
+		return "", preserveFailure(err, lifecycle.ErrorDSHVersionCheckFailed, "The selected DSH runtime could not be verified.", "the DSH adapter rejected the selected runtime", false, false)
 	}
-	return nil
+	return observed, nil
 }
 
 func runtimeChildEnvironment(runtime RuntimeInfo) map[string]string {

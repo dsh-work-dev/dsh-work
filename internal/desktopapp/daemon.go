@@ -110,7 +110,7 @@ func runDaemon(identity string, resources Resources) {
 			log.Printf("dsh-work manager process lock release: %v", err)
 		}
 	}()
-	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
+	dsh := dshadapter.New(dependencies.CommandExecutor)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
 	dsh.SetUserDataDirectory(storage.UserDataPath())
 	petActivity := dshactivity.New()

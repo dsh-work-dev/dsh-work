@@ -12,6 +12,8 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 )
 
+const testDSHVersion = "0.2.1-rc.2"
+
 type preparationCommandRunner struct{ CommandExecutor }
 
 func (r preparationCommandRunner) Run(ctx context.Context, executable string, args []string, env map[string]string, dir string) (dshmanager.CommandResult, error) {
@@ -32,7 +34,7 @@ func TestPrepareFirstUseProfileStartsWithValidWorkingDirectory(t *testing.T) {
 		DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
 		Runtimes:        []dshmanager.RuntimeInfo{{ID: "dsh", Version: "1.0.0", Path: runtime}},
 		CommandRunner:   preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(),
-		ProfileCatalog: dshadapter.New(nil, dshadapter.SupportedVersion),
+		ProfileCatalog: dshadapter.New(nil),
 	})
 	if err != nil {
 		t.Fatal(err)

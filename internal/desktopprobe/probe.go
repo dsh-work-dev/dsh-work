@@ -2,13 +2,16 @@
 package desktopprobe
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/dshadapter"
@@ -197,11 +200,19 @@ func Configure(c *dshmanager.Config, dsh *dshadapter.Adapter, root string) {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") == "" {
 		return
 	}
-	hint := dsh.RuntimeHint()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var runtime dshadapter.Runtime
+	var err error
 	if selected := os.Getenv("DSH_WORK_DESKTOP_RUNTIME"); selected != "" {
-		hint.Path, hint.Version = selected, os.Getenv("DSH_WORK_DESKTOP_VERSION")
+		runtime, err = dsh.DiscoverPath(ctx, selected)
+	} else {
+		runtime, err = dsh.DevelopmentFixture(ctx)
+	}
+	if err != nil {
+		panic(fmt.Errorf("desktop probe runtime: %w", err))
 	}
 	c.StatePath = filepath.Join(root, "manager.json")
-	c.Runtimes = []dshmanager.RuntimeInfo{{ID: "dsh-" + hint.Version, Version: hint.Version, Path: hint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
-	c.DefaultRunContext = dshmanager.RunContext{RuntimeID: "dsh-" + hint.Version, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+	c.Runtimes = []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: runtime.Version, Path: runtime.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
+	c.DefaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
 }

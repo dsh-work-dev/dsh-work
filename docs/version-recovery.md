@@ -109,11 +109,10 @@ a currently live Worker.
 
 ## Compatibility and recovery limits
 
-The supported reference environment is Windows with the exact DSH version
-pinned as `SupportedVersion` in `internal/dshadapter/adapter.go` and in
-`toolchain.lock.json`, together with its pnpm
-profile workflow. Compatibility is validated against
-exact DSH versions; this is not a promise that future releases work unchanged.
+The reference environment is Windows with the development fixture version in
+`toolchain.lock.json`, together with its pnpm profile workflow. dsh-work accepts
+any DSH release at or above `MinimumVersion` in `internal/dshadapter`. Newer
+releases are not guaranteed to work unchanged.
 Registry dependencies with usable lock inputs are supported. Local or
 Git sources, advanced manifest dependency configuration (such as overrides or
 peer configuration), and auxiliary dependency files are not promised historical

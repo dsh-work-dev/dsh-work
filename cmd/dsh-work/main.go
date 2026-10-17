@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	dshworkapp "github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/dshadapter"
@@ -114,9 +115,16 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		}
 	}
 	dependencies := platform.New()
-	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
+	dsh := dshadapter.New(dependencies.CommandExecutor)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
-	hint := dsh.RuntimeHint()
+	var fixtureRuntimes []dshmanager.RuntimeInfo
+	var defaultRunContext dshmanager.RunContext
+	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 15*time.Second)
+	if fixture, err := dsh.DevelopmentFixture(fixtureCtx); err == nil {
+		fixtureRuntimes = []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
+		defaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+	}
+	cancelFixture()
 	var runner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
@@ -136,15 +144,8 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
-		Runtimes: []dshmanager.RuntimeInfo{{
-			ID: "dsh-" + hint.Version, Version: hint.Version, Path: hint.Path,
-			Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: executableExists(hint.Path),
-		}},
-		DefaultRunContext: dshmanager.RunContext{
-			RuntimeID: "dsh-" + hint.Version,
-			Node:      dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem},
-			Profile:   dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
-		},
+		Runtimes:          fixtureRuntimes,
+		DefaultRunContext: defaultRunContext,
 	})
 	if err != nil {
 		_ = managerLock.Close()

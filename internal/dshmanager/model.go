@@ -25,6 +25,9 @@ const (
 	RuntimeSourceSystem             RuntimeSource = "system"
 )
 
+// DevelopmentFixtureRuntimeID is the catalog id of the repository DSH fixture.
+const DevelopmentFixtureRuntimeID = "dsh-development-fixture"
+
 // RuntimeToolchain identifies the toolchain used to materialize a managed
 // DSH runtime. dsh-work never installs a managed pnpm toolchain.
 type RuntimeToolchain string

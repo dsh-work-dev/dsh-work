@@ -51,9 +51,14 @@ func main() {
 	config.EmptyTimeout = 8 * time.Second
 	config.ShutdownTimeout = 25 * time.Second
 
-	dsh := dshadapter.New(dependencies.CommandExecutor, config.ExpectedDSHVersion)
+	dsh := dshadapter.New(dependencies.CommandExecutor)
 	dsh.SetDiscoveryRoot(root)
-	runtimeHint := dsh.RuntimeHint()
+	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 30*time.Second)
+	fixture, err := dsh.DevelopmentFixture(fixtureCtx)
+	cancelFixture()
+	if err != nil {
+		fatalf("locate the development DSH fixture: %v", err)
+	}
 	manager, err := dshmanager.New(dshmanager.Config{
 		StatePath:         filepath.Join(root, ".task", "dsh-smoke-manager.json"),
 		PluginCommands:    dshadapter.NewPluginCommands(),
@@ -61,8 +66,8 @@ func main() {
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
 		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
-		Runtimes:          []dshmanager.RuntimeInfo{{ID: "dsh-" + runtimeHint.Version, Version: runtimeHint.Version, Path: runtimeHint.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultRunContext: dshmanager.RunContext{RuntimeID: "dsh-" + runtimeHint.Version, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}},
+		Runtimes:          []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
+		DefaultRunContext: dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)

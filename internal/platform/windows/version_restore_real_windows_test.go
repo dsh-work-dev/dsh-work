@@ -47,10 +47,10 @@ func TestVersionRestoreRealDSH(t *testing.T) {
 	store := filepath.Join(work, "runtimes")
 	// Exercise recovery of an acquisition-published tree too: pnpm can retain
 	// the staging virtual-store path after the directory is moved into place.
-	if _, err := NewRuntimeInstaller(run, store).Install(ctx, dshadapter.SupportedVersion); err != nil {
+	if _, err := NewRuntimeInstaller(run, store).Install(ctx, testDSHVersion); err != nil {
 		t.Fatal(err)
 	}
-	config := dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, store), NodeResolver: NewRunNodeResolver(run, store), ProfileCatalog: dshadapter.New(run, dshadapter.SupportedVersion), Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
+	config := dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, store), NodeResolver: NewRunNodeResolver(run, store), ProfileCatalog: dshadapter.New(run), Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: testDSHVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}}
 	m, err := dshmanager.New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -143,9 +143,9 @@ func TestVersionPointRealStartup(t *testing.T) {
 	home := filepath.Join(work, "home")
 	fixture := filepath.Join(root, "tools", "dsh", "run-dsh.cmd")
 	run := CommandExecutor{}
-	adapter := dshadapter.New(run, dshadapter.SupportedVersion)
+	adapter := dshadapter.New(run)
 	adapter.SetDiscoveryRoot(root)
-	m, err := dshmanager.New(dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, filepath.Join(work, "runtimes")), NodeResolver: NewRunNodeResolver(run, filepath.Join(work, "runtimes")), ProfileCatalog: adapter, Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: dshadapter.SupportedVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}, DefaultRunContext: dshmanager.RunContext{RuntimeID: "fixture", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "home", Name: "web"}}})
+	m, err := dshmanager.New(dshmanager.Config{StatePath: filepath.Join(work, "manager.json"), CommandRunner: preparationCommandRunner{}, PluginCommands: dshadapter.NewPluginCommands(), RuntimeInstaller: NewRuntimeInstaller(run, filepath.Join(work, "runtimes")), NodeResolver: NewRunNodeResolver(run, filepath.Join(work, "runtimes")), ProfileCatalog: adapter, Runtimes: []dshmanager.RuntimeInfo{{ID: "fixture", Version: testDSHVersion, Path: fixture}}, DataDirectories: []dshmanager.DataDirectoryInfo{{ID: "home", Path: home, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}}, DefaultRunContext: dshmanager.RunContext{RuntimeID: "fixture", Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "home", Name: "web"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,9 +30,9 @@ func TestRealWorkerPipe(t *testing.T) {
 	}
 	root, _ := filepath.Abs("../..")
 	home := t.TempDir()
-	runtimePath, runtimeVersion := filepath.Join(root, "tools/dsh/run-dsh.cmd"), dshadapter.SupportedVersion
+	runtimePath := filepath.Join(root, "tools/dsh/run-dsh.cmd")
 	if selected := os.Getenv("DSH_WORK_PIPE_RUNTIME"); selected != "" {
-		runtimePath, runtimeVersion = selected, os.Getenv("DSH_WORK_PIPE_VERSION")
+		runtimePath = selected
 	}
 	transport, err := workeripc.New()
 	if err != nil {
@@ -56,7 +56,12 @@ func TestRealWorkerPipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := platform.New()
-	adapter := dshadapter.New(deps.CommandExecutor, runtimeVersion)
+	adapter := dshadapter.New(deps.CommandExecutor)
+	observed, err := adapter.DiscoverPath(context.Background(), runtimePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeVersion := observed.Version
 	plan, err := adapter.BuildLaunchPlan(dshadapter.LaunchContext{GenerationID: "pipe-test", Runtime: dshadapter.Runtime{Path: runtimePath, Version: runtimeVersion}, BootstrapDirectory: home, DataDirectory: filepath.Join(home, "data"), Profile: "web", HostPatch: patch, Workspace: workspacecontext.Context{GenerationID: "pipe-test", State: workspacecontext.StateSelectionRequired}})
 	if err != nil {
 		t.Fatal(err)

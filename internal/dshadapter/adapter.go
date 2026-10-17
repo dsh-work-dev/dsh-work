@@ -17,9 +17,12 @@ import (
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
 	"github.com/local/dsh-work/internal/workspacecontext"
+	"golang.org/x/mod/semver"
 )
 
-const SupportedVersion = "0.2.1-alpha.1"
+// MinimumVersion is the oldest DSH release whose Worker carrier contract
+// (WebServer listenedPort and getOrigin) this dsh-work build supports.
+const MinimumVersion = "0.2.0-rc.2"
 
 var exactRuntimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 
@@ -65,7 +68,6 @@ type LaunchContext struct {
 
 type Adapter struct {
 	executor           CommandExecutor
-	expectedVersion    string
 	executableOverride string
 	discoveryRoot      string
 	coreOverlayPatch   func(string) (string, error)
@@ -79,14 +81,8 @@ func (a *Adapter) SetCoreOverlayPatch(prepare func(string) (string, error)) {
 
 func (a *Adapter) SetUserDataDirectory(path string) { a.userDataDirectory = path }
 
-func New(executor CommandExecutor, expectedVersion string) *Adapter {
-	if expectedVersion == "" {
-		expectedVersion = SupportedVersion
-	}
-	return &Adapter{
-		executor:        executor,
-		expectedVersion: expectedVersion,
-	}
+func New(executor CommandExecutor) *Adapter {
+	return &Adapter{executor: executor}
 }
 
 func (a *Adapter) SetExecutableOverride(path string) {
@@ -99,12 +95,11 @@ func (a *Adapter) SetDiscoveryRoot(path string) {
 	a.discoveryRoot = path
 }
 
-// RuntimeHint exposes the configured executable/version pair to a catalog
-// owner without claiming that the executable exists. The manager can show the
-// candidate immediately, while DiscoverPath remains the authoritative check
-// before a Worker starts.
-func (a *Adapter) RuntimeHint() Runtime {
-	return Runtime{Path: a.executableHint(), Version: a.expectedVersion}
+// DevelopmentFixture locates the repository DSH fixture (DSH_WORK_EXECUTABLE,
+// the executable override, or tools/dsh/run-dsh.cmd under the discovery root)
+// and reports its observed version.
+func (a *Adapter) DevelopmentFixture(ctx context.Context) (Runtime, error) {
+	return a.Discover(ctx)
 }
 
 func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
@@ -129,9 +124,9 @@ func (a *Adapter) Discover(ctx context.Context) (Runtime, error) {
 
 // DiscoverPath verifies one catalog-selected executable. Runtime management
 // may expose several paths, but every selected path still crosses this DSH
-// adapter so the selected catalog version is checked at the process boundary.
+// adapter so the observed runtime version is checked at the process boundary.
 func (a *Adapter) DiscoverPath(ctx context.Context, path string) (Runtime, error) {
-	return a.discoverPath(ctx, path, nil, a.expectedVersion)
+	return a.discoverPath(ctx, path, nil)
 }
 
 // DiscoverPathWithEnvironment verifies a runtime launcher with a child-only
@@ -139,17 +134,16 @@ func (a *Adapter) DiscoverPath(ctx context.Context, path string) (Runtime, error
 // make node.exe available to npm-generated .cmd shims without changing the
 // dsh-work process environment.
 func (a *Adapter) DiscoverPathWithEnvironment(ctx context.Context, path string, env map[string]string) (Runtime, error) {
-	return a.discoverPath(ctx, path, env, a.expectedVersion)
+	return a.discoverPath(ctx, path, env)
 }
 
-// DiscoverSelectedPathWithEnvironment verifies the exact catalog-selected
-// runtime. The adapter's configured version remains only the development
-// fixture default used by Discover and RuntimeHint.
-func (a *Adapter) DiscoverSelectedPathWithEnvironment(ctx context.Context, path, expectedVersion string, env map[string]string) (Runtime, error) {
-	return a.discoverPath(ctx, path, env, expectedVersion)
+// DiscoverSelectedPath verifies the catalog-selected runtime and reports the
+// runtime version it observes. The catalog version is only a cache.
+func (a *Adapter) DiscoverSelectedPath(ctx context.Context, path string, env map[string]string) (Runtime, error) {
+	return a.discoverPath(ctx, path, env)
 }
 
-func (a *Adapter) discoverPath(ctx context.Context, path string, env map[string]string, expectedVersion string) (Runtime, error) {
+func (a *Adapter) discoverPath(ctx context.Context, path string, env map[string]string) (Runtime, error) {
 	path, err := existingExecutable(path)
 	if err != nil {
 		return Runtime{}, lifecycle.Failure{
@@ -167,12 +161,19 @@ func (a *Adapter) discoverPath(ctx context.Context, path string, env map[string]
 		}
 	}
 	version := ParseVersion(result.Stdout + "\n" + result.Stderr)
-	if version == "" || (expectedVersion != "" && version != expectedVersion) {
+	if version == "" || !semver.IsValid("v"+version) {
+		return Runtime{}, lifecycle.Failure{
+			Code:      lifecycle.ErrorDSHVersionCheckFailed,
+			Summary:   "The DSH runtime returned an invalid version.",
+			Retryable: false,
+		}
+	}
+	if semver.Compare("v"+version, "v"+MinimumVersion) < 0 {
 		return Runtime{}, lifecycle.Failure{
 			Code:      lifecycle.ErrorDSHUnsupportedVersion,
-			Summary:   "The configured DSH version does not match the selected runtime.",
+			Summary:   "This DSH version is older than dsh-work supports.",
 			Retryable: false,
-			Detail:    "Expected " + expectedVersion,
+			Detail:    "DSH " + version + " is older than the minimum " + MinimumVersion + ".",
 		}
 	}
 	return Runtime{Path: path, Version: version}, nil
@@ -180,26 +181,20 @@ func (a *Adapter) discoverPath(ctx context.Context, path string, env map[string]
 
 // Verify checks a catalog-selected executable against the DSH adapter
 // contract. It intentionally returns the adapter's stable lifecycle failure
-// so the manager can project it without knowing DSH CLI details.
-func (a *Adapter) Verify(ctx context.Context, path, expectedVersion string) error {
-	return a.VerifyWithEnvironment(ctx, path, expectedVersion, nil)
+// so the manager can project it without knowing DSH CLI details. It returns
+// the observed runtime version.
+func (a *Adapter) Verify(ctx context.Context, path string) (string, error) {
+	return a.VerifyWithEnvironment(ctx, path, nil)
 }
 
 // VerifyWithEnvironment is the manager-facing equivalent of Verify for a
 // runtime that needs a child-only toolchain environment.
-func (a *Adapter) VerifyWithEnvironment(ctx context.Context, path, expectedVersion string, env map[string]string) error {
-	runtime, err := a.discoverPath(ctx, path, env, expectedVersion)
+func (a *Adapter) VerifyWithEnvironment(ctx context.Context, path string, env map[string]string) (string, error) {
+	runtime, err := a.discoverPath(ctx, path, env)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if expectedVersion != "" && runtime.Version != expectedVersion {
-		return lifecycle.Failure{
-			Code:    lifecycle.ErrorDSHUnsupportedVersion,
-			Summary: "The selected DSH runtime does not match the catalog version.",
-			Detail:  "Expected " + expectedVersion,
-		}
-	}
-	return nil
+	return runtime.Version, nil
 }
 
 // VerifyProfile rejects known non-Web built-ins before the Host stops its
@@ -458,24 +453,6 @@ func (a *Adapter) locateExecutable() (string, error) {
 		}
 	}
 	return "", os.ErrNotExist
-}
-
-func (a *Adapter) executableHint() string {
-	if override := strings.TrimSpace(a.executableOverride); override != "" {
-		return override
-	}
-	if override := strings.TrimSpace(os.Getenv("DSH_WORK_EXECUTABLE")); override != "" {
-		return override
-	}
-	root := a.discoveryRoot
-	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			return ""
-		}
-	}
-	return filepath.Join(root, "tools", "dsh", "run-dsh.cmd")
 }
 
 func existingExecutable(path string) (string, error) {
