@@ -358,10 +358,26 @@ func (h *Host) start(workspaceRequest workspacecontext.Request) lifecycle.Status
 			}
 			h.mu.Unlock()
 		default:
-			return status
+			if status.State != lifecycle.StateFailed && status.State != lifecycle.StateStopped {
+				return status
+			}
+			// A failed or stopped generation publishes its final status just
+			// before its goroutine releases the run. Wait briefly for that
+			// release so an immediate retry is not dropped.
+			release := time.NewTimer(runReleaseWait)
+			select {
+			case <-run.done:
+				release.Stop()
+			case <-release.C:
+				return status
+			}
 		}
 	}
 }
+
+// runReleaseWait bounds how long Start waits for a finished generation to
+// release itself after publishing its final status.
+const runReleaseWait = 2 * time.Second
 
 func (h *Host) beginRunLocked(parent context.Context, workspaceRequest workspacecontext.Request, launch *dshmanager.ResolvedLaunch) (*generationRun, lifecycle.Status, error) {
 	generation, status, err := h.machine.BeginStart()
