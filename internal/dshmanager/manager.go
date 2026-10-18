@@ -163,6 +163,7 @@ type PluginCommandBuilder interface {
 	Install(string, string) ([]string, error)
 	InstallAt(string, string, string) ([]string, error)
 	Prepare(string) ([]string, error)
+	AllowVersion(string, string, string) ([]string, error)
 	Remove(string, string) ([]string, error)
 	List(string) ([]string, error)
 	Outdated(string) ([]string, error)
@@ -1111,45 +1112,84 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	if runner == nil || commands == nil {
 		return PluginResult{}, failure(lifecycle.ErrorPluginCommandUnavailable, "The DSH plugin command is unavailable", "run this operation on a platform with a native command adapter")
 	}
-	var args []string
 	successfulRoute := RuntimeArtifactSourceNone
 	profilePath := filepath.Join(dataDirectory.Path, "profiles", target.Profile.Name)
 	customRegistry := configuredPluginRegistry(profilePath, pluginPackageName(packageSpec))
-	if operation == "remove" {
-		args, err = commands.Remove(target.Profile.Name, packageSpec)
-		if err == nil {
-			_, err = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
-		}
-	} else if customRegistry != "" {
-		if operation == "add" {
-			args, err = commands.InstallAt(target.Profile.Name, packageSpec, customRegistry)
+	execute := func() error {
+		var args []string
+		var executeErr error
+		if operation == "remove" {
+			args, executeErr = commands.Remove(target.Profile.Name, packageSpec)
+			if executeErr == nil {
+				var result CommandResult
+				result, executeErr = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
+				if executeErr != nil {
+					if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
+						executeErr = incompatiblePluginError{items: items}
+					}
+				}
+			}
+		} else if customRegistry != "" {
+			if operation == "add" {
+				args, executeErr = commands.InstallAt(target.Profile.Name, packageSpec, customRegistry)
+			} else {
+				args, executeErr = commands.Update(target.Profile.Name, packageSpec, customRegistry)
+			}
+			if executeErr == nil {
+				var result CommandResult
+				result, executeErr = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
+				if executeErr != nil {
+					if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
+						executeErr = incompatiblePluginError{items: items}
+					}
+				}
+			}
+		} else if classifyRequestedPluginSource(packageSpec) == PluginSourcePublicRegistry {
+			var route acquisition.Route
+			route, _, executeErr = m.runPublicPluginAttempt(ctx, dataDirectory, runtime, target.Profile, packageSpec, operation, environment)
+			if route == acquisition.RouteMirror {
+				successfulRoute = RuntimeArtifactSourceMirror
+			} else if route == acquisition.RouteOfficial {
+				successfulRoute = RuntimeArtifactSourceOfficial
+			}
 		} else {
-			args, err = commands.Update(target.Profile.Name, packageSpec, customRegistry)
+			if operation == "add" {
+				args, executeErr = commands.Install(target.Profile.Name, packageSpec)
+			} else {
+				args, executeErr = commands.Update(target.Profile.Name, packageSpec, "")
+			}
+			if executeErr == nil {
+				var result CommandResult
+				result, executeErr = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
+				if executeErr != nil {
+					if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
+						executeErr = incompatiblePluginError{items: items}
+					}
+				}
+			}
 		}
-		if err == nil {
-			_, err = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
+		return executeErr
+	}
+	err = execute()
+	var incompatible incompatiblePluginError
+	if errors.As(err, &incompatible) && AcceptIncompatible(ctx) {
+		for _, item := range incompatible.items {
+			args, allowErr := commands.AllowVersion(target.Profile.Name, item.Name+"@"+item.Version, item.DSHVersion)
+			if allowErr == nil {
+				_, allowErr = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
+			}
+			if allowErr != nil {
+				return PluginResult{}, failureWithMeta(lifecycle.ErrorPluginIncompatible, "The plugin version could not be allowed for this DSH version", allowErr.Error(), true, false)
+			}
 		}
-	} else if classifyRequestedPluginSource(packageSpec) == PluginSourcePublicRegistry {
-		var route acquisition.Route
-		route, _, err = m.runPublicPluginAttempt(ctx, dataDirectory, runtime, target.Profile, packageSpec, operation, environment)
-		if route == acquisition.RouteMirror {
-			successfulRoute = RuntimeArtifactSourceMirror
-		} else if route == acquisition.RouteOfficial {
-			successfulRoute = RuntimeArtifactSourceOfficial
-		}
-	} else {
-		if operation == "add" {
-			args, err = commands.Install(target.Profile.Name, packageSpec)
-		} else {
-			args, err = commands.Update(target.Profile.Name, packageSpec, "")
-		}
-		if err == nil {
-			_, err = runner.Run(ctx, runtime.Path, args, cloneEnvironment(environment), dataDirectory.Path)
-		}
+		err = execute()
 	}
 	if err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
 			return PluginResult{}, cancellation
+		}
+		if errors.As(err, &incompatible) {
+			return PluginResult{}, failureWithMeta(lifecycle.ErrorPluginIncompatible, "This plugin version does not declare support for the current DSH version", incompatible.Error(), true, true)
 		}
 		return PluginResult{}, failureWithMeta(lifecycle.ErrorPluginCommandFailed, "The DSH plugin operation failed", "DSH rejected the profile plugin operation", true, true)
 	}
@@ -1172,7 +1212,6 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 	restartRequired := current != nil && current.Profile == target.Profile
 	return PluginResult{Profile: target.Profile, Plugins: plugins, RestartRequired: restartRequired}, nil
 }
-
 func (m *Manager) recordPluginProvenance(ctx context.Context, record PluginProvenanceRecord) error {
 	record.RequestedSpec = boundedPluginSpec(record.RequestedSpec)
 	if record.SourceKind != PluginSourcePublicRegistry {
@@ -1328,6 +1367,12 @@ func (a pluginAttemptAdapter) Attempt(ctx context.Context, request acquisition.A
 	// pnpm outdated exits non-zero whenever a package is outdated; its JSON
 	// report on stdout is still the result.
 	if err != nil && !(a.operation == "outdated" && isOutdatedReport(result.Stdout)) {
+		if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
+			return acquisition.AttemptResult{}, acquisition.Failure{
+				Kind: acquisition.FailureSemantic, Summary: "plugin version is incompatible",
+				Cause: incompatiblePluginError{items: items},
+			}
+		}
 		return acquisition.AttemptResult{}, classifyPluginAttemptFailure(result, err)
 	}
 	payload := ""
@@ -1426,16 +1471,36 @@ func applyPluginProvenance(plugins []PluginInfo, profile ProfileRef, profilePath
 }
 
 func applyPluginListJSON(plugins []PluginInfo, data string) {
-	var document struct {
+	var dependencies map[string]struct {
+		Version string `json:"version"`
+	}
+	var packages []struct {
 		Dependencies map[string]struct {
 			Version string `json:"version"`
 		} `json:"dependencies"`
 	}
-	if json.Unmarshal([]byte(data), &document) != nil {
-		return
+	if err := json.Unmarshal([]byte(data), &packages); err == nil {
+		dependencies = make(map[string]struct {
+			Version string `json:"version"`
+		})
+		for _, item := range packages {
+			for name, dependency := range item.Dependencies {
+				dependencies[name] = dependency
+			}
+		}
+	} else {
+		var document struct {
+			Dependencies map[string]struct {
+				Version string `json:"version"`
+			} `json:"dependencies"`
+		}
+		if json.Unmarshal([]byte(data), &document) != nil {
+			return
+		}
+		dependencies = document.Dependencies
 	}
 	for index := range plugins {
-		if dependency, ok := document.Dependencies[plugins[index].Package]; ok && validRuntimeVersion(dependency.Version) {
+		if dependency, ok := dependencies[plugins[index].Package]; ok && validRuntimeVersion(dependency.Version) {
 			plugins[index].Version = dependency.Version
 			plugins[index].CurrentVersion = dependency.Version
 		}

@@ -428,6 +428,9 @@ func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.P
 	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
+	if request.AcceptIncompatible {
+		ctx = dshmanager.WithAcceptIncompatible(ctx)
+	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
 	operationID := lifecycle.NewCorrelationID()
@@ -481,6 +484,23 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	return s.host.SetPluginDisabled(ctx, request)
 }
 
+// AllowIncompatiblePlugin grants an explicit DSH exemption for one exact plugin
+// and DSH version after confirmation in the trusted Settings window.
+func (s *ManagerService) AllowIncompatiblePlugin(ctx context.Context, request dshmanager.PluginExemptionRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	if s.host == nil {
+		return dshmanager.PluginResult{}, managerUnavailable()
+	}
+	return s.host.AllowIncompatiblePlugin(ctx, request)
+}
+
 // ListLoaderEntries lists the current profile's official loader entries.
 func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error) {
 	if s == nil || s.manager == nil {
@@ -520,6 +540,9 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in dsh-work Settings.")
 	}
+	if request.AcceptIncompatible {
+		ctx = dshmanager.WithAcceptIncompatible(ctx)
+	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
 	operationID := lifecycle.NewCorrelationID()
@@ -542,6 +565,9 @@ func (s *ManagerService) UpgradePlugins(ctx context.Context, request dshmanager.
 	}
 	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.PluginResult{}, trustedSurfaceRequired("DSH profile plugins are available only in dsh-work Settings.")
+	}
+	if request.AcceptIncompatible {
+		ctx = dshmanager.WithAcceptIncompatible(ctx)
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()

@@ -28,6 +28,8 @@ export type {
     NodeReleaseInfo,
     NodeSelection,
     PluginDisableRequest,
+    PluginExemptionRequest,
+    PluginIncompatibility,
     PluginInfo,
     PluginInstallRequest,
     PluginListRequest,

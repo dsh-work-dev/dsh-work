@@ -59,6 +59,7 @@ export enum ErrorCode {
     ErrorRuntimeInstallUnavailable = "RUNTIME_INSTALL_UNAVAILABLE",
     ErrorRuntimeInstallFailed = "RUNTIME_INSTALL_FAILED",
     ErrorTrustedSurfaceRequired = "TRUSTED_SURFACE_REQUIRED",
+    ErrorPluginIncompatible = "PLUGIN_INCOMPATIBLE",
 };
 
 /**

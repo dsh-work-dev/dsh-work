@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as dshmanager$0 from "../dshmanager/models.js";
 
+export function AllowIncompatiblePlugin(request: dshmanager$0.PluginExemptionRequest): $CancellablePromise<dshmanager$0.PluginResult> {
+    return $Call.ByID(3505349776, request);
+}
+
 export function BackupProfile(request: dshmanager$0.ProfileBackupRequest): $CancellablePromise<dshmanager$0.ProfileBackupResult> {
     return $Call.ByID(1114712960, request);
 }

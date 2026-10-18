@@ -145,6 +145,7 @@ const (
 	ErrorRuntimeInstallUnavailable  ErrorCode = "RUNTIME_INSTALL_UNAVAILABLE"
 	ErrorRuntimeInstallFailed       ErrorCode = "RUNTIME_INSTALL_FAILED"
 	ErrorTrustedSurfaceRequired     ErrorCode = "TRUSTED_SURFACE_REQUIRED"
+	ErrorPluginIncompatible         ErrorCode = "PLUGIN_INCOMPATIBLE"
 )
 
 // Failure is safe to project to the trusted UI. Detail is bounded diagnostic

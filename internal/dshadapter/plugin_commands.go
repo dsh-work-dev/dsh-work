@@ -76,6 +76,13 @@ func appendRegistry(args []string, registry string) ([]string, error) {
 	return append(args, "--registry", registry), nil
 }
 
+func (PluginCommands) AllowVersion(profile, packageVersion, dshVersion string) ([]string, error) {
+	if !validProfileName(profile) || !validPackageSpec(packageVersion) || !validPackageSpec(dshVersion) {
+		return nil, fmt.Errorf("invalid DSH plugin exemption target")
+	}
+	return []string{"plugin", "--profile", profile, "allow-version", packageVersion, "--dsh-version", dshVersion, "--accept-risk"}, nil
+}
+
 func (PluginCommands) Remove(profile, packageName string) ([]string, error) {
 	if !validProfileName(profile) || !validPackageSpec(packageName) {
 		return nil, fmt.Errorf("invalid DSH plugin remove target")

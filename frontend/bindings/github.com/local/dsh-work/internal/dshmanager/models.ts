@@ -161,6 +161,23 @@ export interface PluginDisableRequest {
     "disabled": boolean;
 }
 
+export interface PluginExemptionRequest {
+    "target": PluginTarget;
+    "package": string;
+    "version": string;
+    "dshVersion": string;
+}
+
+/**
+ * PluginIncompatibility is DSH's verdict that an installed plugin version does
+ * not declare support for the running DSH version.
+ */
+export interface PluginIncompatibility {
+    "version": string;
+    "dshVersion": string;
+    "requirements"?: { [_ in string]?: string } | null;
+}
+
 export interface PluginInfo {
     "name": string;
     "version"?: string;
@@ -178,11 +195,13 @@ export interface PluginInfo {
      */
     "disabled"?: boolean;
     "canToggle"?: boolean;
+    "incompatible"?: PluginIncompatibility | null;
 }
 
 export interface PluginInstallRequest {
     "target": PluginTarget;
     "package": string;
+    "acceptIncompatible"?: boolean;
 }
 
 export interface PluginListRequest {
@@ -241,11 +260,13 @@ export enum PluginUpdateCheck {
 export interface PluginUpgradeAllRequest {
     "target": PluginTarget;
     "packages": string[] | null;
+    "acceptIncompatible"?: boolean;
 }
 
 export interface PluginUpgradeRequest {
     "target": PluginTarget;
     "package": string;
+    "acceptIncompatible"?: boolean;
 }
 
 /**

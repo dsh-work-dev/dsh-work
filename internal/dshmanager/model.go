@@ -191,6 +191,14 @@ type ProfileInfo struct {
 	Plugins        []PluginInfo `json:"plugins,omitempty"`
 }
 
+// PluginIncompatibility is DSH's verdict that an installed plugin version does
+// not declare support for the running DSH version.
+type PluginIncompatibility struct {
+	Version      string            `json:"version"`
+	DSHVersion   string            `json:"dshVersion"`
+	Requirements map[string]string `json:"requirements,omitempty"`
+}
+
 type PluginInfo struct {
 	Name             string                `json:"name"`
 	Version          string                `json:"version,omitempty"`
@@ -203,8 +211,9 @@ type PluginInfo struct {
 	AvailableVersion string                `json:"availableVersion,omitempty"`
 	UpdateCheck      PluginUpdateCheck     `json:"updateCheck"`
 	// Disabled reflects DSH's selected-bundle state.
-	Disabled  bool `json:"disabled,omitempty"`
-	CanToggle bool `json:"canToggle,omitempty"`
+	Disabled     bool                   `json:"disabled,omitempty"`
+	CanToggle    bool                   `json:"canToggle,omitempty"`
+	Incompatible *PluginIncompatibility `json:"incompatible,omitempty"`
 }
 
 type PluginSourceKind string
@@ -234,8 +243,9 @@ type PluginTarget struct {
 }
 
 type PluginInstallRequest struct {
-	Target  PluginTarget `json:"target"`
-	Package string       `json:"package"`
+	Target             PluginTarget `json:"target"`
+	Package            string       `json:"package"`
+	AcceptIncompatible bool         `json:"acceptIncompatible,omitempty"`
 }
 
 type PluginRemoveRequest struct {
@@ -244,15 +254,24 @@ type PluginRemoveRequest struct {
 }
 
 type PluginUpgradeRequest struct {
-	Target  PluginTarget `json:"target"`
-	Package string       `json:"package"`
+	Target             PluginTarget `json:"target"`
+	Package            string       `json:"package"`
+	AcceptIncompatible bool         `json:"acceptIncompatible,omitempty"`
 }
 
 // PluginUpgradeAllRequest upgrades several profile plugins as one change, so
 // the Host stops, verifies and, on failure, restores the Worker only once.
 type PluginUpgradeAllRequest struct {
-	Target   PluginTarget `json:"target"`
-	Packages []string     `json:"packages"`
+	Target             PluginTarget `json:"target"`
+	Packages           []string     `json:"packages"`
+	AcceptIncompatible bool         `json:"acceptIncompatible,omitempty"`
+}
+
+type PluginExemptionRequest struct {
+	Target     PluginTarget `json:"target"`
+	Package    string       `json:"package"`
+	Version    string       `json:"version"`
+	DSHVersion string       `json:"dshVersion"`
 }
 
 // MaxPluginUpgradeBatch bounds a single upgrade-all request.
