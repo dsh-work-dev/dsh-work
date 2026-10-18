@@ -214,7 +214,18 @@ export function mountHost() {
       selectedRuntime = snapshot.current.runtimeId;
       selectedNode = snapshot.current.node.kind === "managed" ? snapshot.current.node.installationId ?? "system" : "system";
     }
-    selectedRuntime ||= snapshot.configured?.runtimeId ?? (snapshot.dshReleases?.[0] ? `dsh-${snapshot.dshReleases[0].version}` : "");
+    const runtimeSnapshot = snapshot;
+    const unsupported = (id: string | undefined) => !!id && (
+      !!runtimeSnapshot.runtimes?.some(r => r.id === id && r.unsupported) ||
+      (!runtimeSnapshot.runtimes?.some(r => r.id === id) && !!runtimeSnapshot.dshReleases?.some(r => `dsh-${r.version}` === id && r.unsupported)));
+    const firstSupportedInstalled = snapshot.runtimes?.find(r => r.installed && !r.unsupported)?.id;
+    const newestSupportedRelease = snapshot.dshReleases?.find(r => !r.unsupported);
+    if (!selectedRuntime || unsupported(selectedRuntime)) {
+      const configuredId = snapshot.configured?.runtimeId;
+      selectedRuntime = configuredId && !unsupported(configuredId)
+        ? configuredId
+        : firstSupportedInstalled ?? (newestSupportedRelease ? `dsh-${newestSupportedRelease.version}` : "");
+    }
     node.replaceChildren(new Option(`Node.js ${snapshot.systemNode?.version ?? ""} · ${t("startup.systemNode")}`, "system"));
     for (const n of snapshot.nodes ?? []) node.add(new Option(`Node.js ${n.version}`, n.id));
     if (!Array.from(node.options).some(o => o.value === selectedNode)) node.add(new Option(`${selectedNode} · ${t("startup.missingComponent")}`, selectedNode));
@@ -225,7 +236,10 @@ export function mountHost() {
     dsh.replaceChildren(...Array.from(versions).map(([id, version]) => {
       const installed = snapshot!.runtimes?.some(r => r.id === id && r.installed);
       const downloadable = snapshot!.dshReleases?.some(r => r.version === version);
-      return new Option(`DSH ${version} · ${t(installed ? "startup.localInstalled" : downloadable ? "startup.remoteDownload" : "startup.notInstalled")}`, id);
+      const isUnsupported = unsupported(id);
+      const option = new Option(`DSH ${version} · ${t(installed ? "startup.localInstalled" : downloadable ? "startup.remoteDownload" : "startup.notInstalled")}${isUnsupported ? ` · ${t("value.unsupportedRuntime")}` : ""}`, id);
+      option.disabled = isUnsupported;
+      return option;
     }));
     dsh.value = selectedRuntime;
     render();

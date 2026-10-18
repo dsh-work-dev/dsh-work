@@ -1294,10 +1294,11 @@ export function mountManager() {
     for (const release of snapshot?.dshReleases ?? []) {
       const option = document.createElement("option");
       option.value = release.version;
-      option.textContent = `${release.version} · ${t(snapshot?.runtimes?.some(r => r.version === release.version && r.installed) ? "startup.localInstalled" : "startup.remoteDownload")}${release.tags?.length ? ` · ${release.tags.join(", ")}` : ""}`;
+      option.textContent = `${release.version} · ${t(snapshot?.runtimes?.some(r => r.version === release.version && r.installed) ? "startup.localInstalled" : "startup.remoteDownload")}${release.tags?.length ? ` · ${release.tags.join(", ")}` : ""}${release.unsupported ? ` · ${t("value.unsupportedRuntime")}` : ""}`;
+      option.disabled = !!release.unsupported;
       runtimeVersion.append(option);
     }
-    if (selectedRelease && snapshot?.dshReleases?.some(item => item.version === selectedRelease)) runtimeVersion.value = selectedRelease;
+    if (selectedRelease && snapshot?.dshReleases?.some(item => item.version === selectedRelease && !item.unsupported)) runtimeVersion.value = selectedRelease;
     setContextControlsDisabled(contextSwitchInFlight);
     runtimeList.replaceChildren();
     const runtimes = snapshot?.runtimes ?? [];
@@ -1318,12 +1319,12 @@ export function mountManager() {
       if (selected) name.append(stateTag(t("action.selected")));
       const detail = document.createElement("span");
       const artifactSource = item.installSource && item.installSource !== "none" ? runtimeArtifactSourceLabel(item.installSource) : "";
-      detail.textContent = [runtimeSourceLabel(item.source), t(item.installed ? "value.verified" : "value.unverified"), artifactSource]
+      detail.textContent = [item.unsupported ? t("value.unsupportedRuntime") : "", runtimeSourceLabel(item.source), t(item.installed ? "value.verified" : "value.unverified"), artifactSource]
         .filter(Boolean)
         .join(" · ");
       text.append(name, detail);
       row.append(text);
-      if (!selected && item.installed && snapshot?.configured) {
+      if (!selected && item.installed && !item.unsupported && snapshot?.configured) {
         const switchButton = document.createElement("button");
         switchButton.className = "button";
         switchButton.type = "button";
