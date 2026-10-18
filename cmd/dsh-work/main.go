@@ -131,16 +131,17 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:        filepath.Join(current.Root, "manager.json"),
-		CommandRunner:    runner,
-		PluginCommands:   dshadapter.NewPluginCommands(),
-		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:     platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:  dsh,
-		ProfileCatalog:   dsh,
+		StatePath:         filepath.Join(current.Root, "manager.json"),
+		MinimumDSHVersion: dshadapter.MinimumVersion,
+		CommandRunner:     runner,
+		PluginCommands:    dshadapter.NewPluginCommands(),
+		RuntimeInstaller:  platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:        platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:       platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:     platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:      platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:   dsh,
+		ProfileCatalog:    dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

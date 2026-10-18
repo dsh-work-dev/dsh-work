@@ -16,6 +16,12 @@ export interface DSHReleaseInfo {
     "source": RuntimeArtifactSource;
     "fallbackUsed": boolean;
     "observedAt": string;
+
+    /**
+     * Unsupported marks a release older than this build's minimum DSH version.
+     * It is computed for each snapshot and never persisted.
+     */
+    "unsupported"?: boolean;
 }
 
 /**
@@ -478,6 +484,12 @@ export interface RuntimeInfo {
     "toolchainPath"?: string;
     "installed": boolean;
     "removable": boolean;
+
+    /**
+     * Unsupported marks a runtime older than this build's minimum DSH version.
+     * It is computed for each snapshot and never persisted.
+     */
+    "unsupported"?: boolean;
 }
 
 /**

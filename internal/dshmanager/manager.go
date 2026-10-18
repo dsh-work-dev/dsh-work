@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/storagepaths"
@@ -28,10 +30,14 @@ const (
 // manager. Workspace context is intentionally absent: it belongs to DSH's
 // session surface and is resolved per Worker generation.
 type Config struct {
-	StatePath              string
-	DataDirectories        []DataDirectoryInfo
-	Runtimes               []RuntimeInfo
-	DSHReleases            []DSHReleaseInfo
+	StatePath       string
+	DataDirectories []DataDirectoryInfo
+	Runtimes        []RuntimeInfo
+	DSHReleases     []DSHReleaseInfo
+	// MinimumDSHVersion is the oldest DSH release this build can run. Older
+	// releases and runtimes are marked unsupported in snapshots and cannot be
+	// installed. Empty disables these checks.
+	MinimumDSHVersion      string
 	Nodes                  []NodeInstallationInfo
 	DefaultRunContext      RunContext
 	CommandRunner          CommandRunner
@@ -553,6 +559,13 @@ func (m *Manager) InstallRuntimeWithProgress(ctx context.Context, version string
 	if !validRuntimeVersion(version) {
 		return Snapshot{}, failure(lifecycle.ErrorRuntimeInstallFailed, "DSH runtime version is invalid", "use a semantic version such as 0.1.2-alpha.3")
 	}
+	m.mu.RLock()
+	minimumVersion := m.config.MinimumDSHVersion
+	belowMinimum := dshVersionBelow(version, minimumVersion)
+	m.mu.RUnlock()
+	if belowMinimum {
+		return Snapshot{}, failure(lifecycle.ErrorDSHUnsupportedVersion, "This DSH version is older than dsh-work supports", "choose DSH "+minimumVersion+" or newer")
+	}
 	if !m.catalogContainsDSHVersion(version) {
 		return Snapshot{}, failure(lifecycle.ErrorDSHUnsupportedVersion, "The requested DSH runtime version is not in the refreshed catalog", "refresh releases and choose an exact published version")
 	}
@@ -883,6 +896,9 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	versionPoints := m.versionViewLocked()
 	provenance := append([]PluginProvenanceRecord(nil), m.pluginProvenance...)
 	m.mu.RUnlock()
+	for i := range dshReleases {
+		dshReleases[i].Unsupported = dshVersionBelow(dshReleases[i].Version, config.MinimumDSHVersion)
+	}
 
 	profiles := discoverProfiles(ctx, config.DataDirectories, config.ProfileCatalog, config.ProfileReader, current, configured, knownGood, lastSwitchAttempt)
 	for i := range profiles {
@@ -897,7 +913,7 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	return Snapshot{
 		RestorePoints:     versionPoints,
-		Runtimes:          refreshRuntimes(config.Runtimes),
+		Runtimes:          refreshRuntimes(config.Runtimes, config.MinimumDSHVersion),
 		DSHReleases:       dshReleases,
 		Nodes:             refreshNodes(config.Nodes),
 		SystemNode:        systemNode,
@@ -2637,6 +2653,15 @@ func cloneDSHReleases(releases []DSHReleaseInfo) []DSHReleaseInfo {
 	return cloned
 }
 
+// dshVersionBelow reports whether version is a valid semantic version older
+// than minimum. Unparseable versions are left to the existing validation.
+func dshVersionBelow(version, minimum string) bool {
+	if minimum == "" || !semver.IsValid("v"+version) || !semver.IsValid("v"+minimum) {
+		return false
+	}
+	return semver.Compare("v"+version, "v"+minimum) < 0
+}
+
 func cloneSwitchAttempt(attempt *SwitchAttempt) *SwitchAttempt {
 	if attempt == nil {
 		return nil
@@ -2658,10 +2683,11 @@ func refreshNodes(nodes []NodeInstallationInfo) []NodeInstallationInfo {
 	return refreshed
 }
 
-func refreshRuntimes(runtimes []RuntimeInfo) []RuntimeInfo {
+func refreshRuntimes(runtimes []RuntimeInfo, minimum string) []RuntimeInfo {
 	refreshed := cloneRuntimes(runtimes)
 	for i := range refreshed {
 		refreshed[i].Installed = runtimeInstallationPresent(refreshed[i])
+		refreshed[i].Unsupported = dshVersionBelow(refreshed[i].Version, minimum)
 	}
 	return refreshed
 }

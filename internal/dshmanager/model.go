@@ -88,6 +88,9 @@ type DSHReleaseInfo struct {
 	Source       RuntimeArtifactSource `json:"source"`
 	FallbackUsed bool                  `json:"fallbackUsed"`
 	ObservedAt   string                `json:"observedAt"`
+	// Unsupported marks a release older than this build's minimum DSH version.
+	// It is computed for each snapshot and never persisted.
+	Unsupported bool `json:"unsupported,omitempty"`
 }
 
 // NodeInstallationInfo is one immutable managed installation or the current
@@ -140,6 +143,9 @@ type RuntimeInfo struct {
 	ToolchainPath string                `json:"toolchainPath,omitempty"`
 	Installed     bool                  `json:"installed"`
 	Removable     bool                  `json:"removable"`
+	// Unsupported marks a runtime older than this build's minimum DSH version.
+	// It is computed for each snapshot and never persisted.
+	Unsupported bool `json:"unsupported,omitempty"`
 }
 
 // DataDirectoryInfo is a DSH_HOME identity. Profiles and their plugin state
