@@ -353,10 +353,11 @@ func runDaemon(identity string, resources Resources) {
 	defer ipcServer.Close()
 	defer listener.Close()
 	desktop = application.New(application.Options{
-		Name:        "dsh-work",
-		Logger:      logging.WailsLogger(),
-		Description: "A local desktop shell for DSH workspaces.",
-		Icon:        resources.AppIcon,
+		Name:         "dsh-work",
+		Logger:       logging.WailsLogger(),
+		ErrorHandler: logging.WailsErrorHandler(),
+		Description:  "A local desktop shell for DSH workspaces.",
+		Icon:         resources.AppIcon,
 		Windows: application.WindowsOptions{
 			WebviewUserDataPath:           filepath.Join(config.CacheDirectory, "webview-background"),
 			DisableQuitOnLastWindowClosed: true,

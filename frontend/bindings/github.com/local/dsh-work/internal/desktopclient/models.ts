@@ -10,6 +10,17 @@ export interface BuiltinComponentStatus {
 }
 
 /**
+ * LogEntry is one record from the trusted workbench frontend.
+ */
+export interface LogEntry {
+    "level": string;
+    "module": string;
+    "message": string;
+    "detail"?: string;
+    "code"?: string;
+}
+
+/**
  * ShellPet is what the shell menu needs from the pet panel.
  */
 export interface ShellPet {

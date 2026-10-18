@@ -8,6 +8,8 @@ import {applyLocale, defaultLocale, mountLocale} from "./i18n";
 import {mountManager} from "./manager";
 import {mountPetOverlay} from "./pet_overlay";
 import {mountAppearance} from "./theme";
+import {appLog} from "./app-log";
+import {installGlobalErrorLogging} from "./log";
 import {HostService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 
 const surface = new URLSearchParams(window.location.search).get("surface");
@@ -24,6 +26,7 @@ if (surface === "pet") {
   document.getElementById("pet-surface")?.removeAttribute("hidden");
   mountPetOverlay();
 } else {
+  installGlobalErrorLogging(appLog);
   mountAppearance(() => HostService.GetAppearance());
   mountHost();
   if (new URLSearchParams(window.location.search).get("shell") === "1") {
