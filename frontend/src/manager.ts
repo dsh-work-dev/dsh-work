@@ -1818,6 +1818,12 @@ export function mountManager() {
       invalidatePluginObservation();
       await refreshCurrentPluginObservation();
       renderProfiles();
+      // A failed listing clears the observation; an unreachable registry leaves
+      // public plugins without an update verdict. Either way the check failed.
+      const checked = pluginObservation?.plugins;
+      if (!checked || checked.some((plugin) => plugin.sourceKind === "public-registry" && plugin.updateCheck === "unknown")) {
+        pluginsFeedback(t("error.checkPluginUpdates"), "error");
+      }
     } finally {
       checkingPluginUpdates = false;
       checkUpdates.textContent = t("action.checkPluginUpdates");
