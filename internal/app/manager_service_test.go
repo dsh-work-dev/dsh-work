@@ -151,3 +151,32 @@ func assertServiceFailureCode(t *testing.T, err error, want lifecycle.ErrorCode)
 		t.Fatalf("failure code = %s, want %s", failure.Code, want)
 	}
 }
+
+type acceptingPluginManager struct {
+	*dshmanager.Manager
+	accepted bool
+}
+
+func (m *acceptingPluginManager) ApplyPlugin(ctx context.Context, launch dshmanager.ResolvedLaunch, _, _ string) (dshmanager.PluginResult, error) {
+	m.accepted = dshmanager.AcceptIncompatible(ctx)
+	return dshmanager.PluginResult{Profile: launch.Target.Profile}, nil
+}
+
+func TestUpgradePluginCarriesAcceptIncompatibleToManager(t *testing.T) {
+	f := newRunContextSwitchFixture(t)
+	defer f.close()
+	f.startReady(t)
+	manager := &acceptingPluginManager{Manager: f.manager}
+	f.host.deps.Manager = manager
+	service := NewManagerService(f.manager, f.host)
+	ctx := context.WithValue(context.Background(), application.WindowKey, startupTestWindow{name: "workspace"})
+	_, err := service.UpgradePlugin(ctx, dshmanager.PluginUpgradeRequest{
+		Target: dshmanager.PluginTarget{Profile: f.target("alpha").Profile}, Package: "@scope/pkg", AcceptIncompatible: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manager.accepted {
+		t.Fatal("Host did not preserve the accepted incompatibility context")
+	}
+}

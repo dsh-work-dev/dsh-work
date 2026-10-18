@@ -649,6 +649,20 @@ func (h *Host) SetPluginDisabled(ctx context.Context, request dshmanager.PluginD
 	})
 }
 
+// AllowIncompatiblePlugin grants DSH's exact-version exemption through the live
+// PluginManager after the user accepted the risk.
+func (h *Host) AllowIncompatiblePlugin(ctx context.Context, request dshmanager.PluginExemptionRequest) (dshmanager.PluginResult, error) {
+	if strings.TrimSpace(request.Package) == "" || strings.TrimSpace(request.Version) == "" || strings.TrimSpace(request.DSHVersion) == "" {
+		return dshmanager.PluginResult{}, errors.New("plugin exemption needs a package, version and DSH version")
+	}
+	return h.mutateOfficialPlugin(ctx, request.Target, "setVersionExemption", map[string]any{
+		"packageVersion": request.Package + "@" + request.Version,
+		"runtimeVersion": request.DSHVersion,
+		"enabled":        true,
+		"acceptRisk":     true,
+	})
+}
+
 // SetLoaderEntryDisabled delegates entry activation to DSH's live PluginManager.
 func (h *Host) SetLoaderEntryDisabled(ctx context.Context, request dshmanager.LoaderEntryDisableRequest) (dshmanager.PluginResult, error) {
 	return h.mutateOfficialPlugin(ctx, request.Target, "setPluginEnabled", map[string]any{

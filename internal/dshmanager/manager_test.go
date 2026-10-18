@@ -1502,6 +1502,10 @@ func (testPluginCommands) Prepare(profile string) ([]string, error) {
 	return []string{"plugin", "--profile", profile, "install"}, nil
 }
 
+func (testPluginCommands) AllowVersion(profile, packageVersion, dshVersion string) ([]string, error) {
+	return []string{"plugin", "--profile", profile, "allow-version", packageVersion, "--dsh-version", dshVersion, "--accept-risk"}, nil
+}
+
 func (testPluginCommands) List(profile string) ([]string, error) {
 	return []string{"plugin", "--profile", profile, "list", "--depth", "0", "--json"}, nil
 }

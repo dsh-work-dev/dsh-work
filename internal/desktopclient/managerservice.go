@@ -148,6 +148,13 @@ func (s *ManagerService) SetPluginDisabled(ctx context.Context, request dshmanag
 	return value, err
 }
 
+func (s *ManagerService) AllowIncompatiblePlugin(ctx context.Context, request dshmanager.PluginExemptionRequest) (result dshmanager.PluginResult, resultErr error) {
+	if s.Local != nil { return s.Local.AllowIncompatiblePlugin(ctx, request) }
+	var value dshmanager.PluginResult
+	err := call(ctx, s.Client, "ManagerService", "AllowIncompatiblePlugin", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) ListLoaderEntries(ctx context.Context, request dshmanager.LoaderEntryListRequest) ([]dshmanager.LoaderLayer, error) {
 	if s.Local != nil { return s.Local.ListLoaderEntries(ctx, request) }
 	var value []dshmanager.LoaderLayer

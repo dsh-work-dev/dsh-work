@@ -46,8 +46,14 @@ type pluginManagerChange struct {
 }
 
 type pluginManagerErr struct {
-	Code       string `json:"code"`
-	Diagnostic string `json:"diagnostic"`
+	Code         string `json:"code"`
+	Diagnostic   string `json:"diagnostic"`
+	Incompatible []struct {
+		Name           string            `json:"name"`
+		Version        string            `json:"version"`
+		RuntimeVersion string            `json:"runtimeVersion"`
+		Requirements   map[string]string `json:"requirements"`
+	} `json:"incompatible"`
 }
 
 type pluginRemoteRequest struct {
@@ -74,7 +80,7 @@ type pluginRemoteErr struct {
 
 func (h *Host) callPluginManager(ctx context.Context, method string, args any, value any) error {
 	switch method {
-	case "setBundleEnabled", "setPluginEnabled", "listPlugins", "listBundles":
+	case "setBundleEnabled", "setPluginEnabled", "setVersionExemption", "listPlugins", "listBundles":
 	default:
 		return errors.New("unsupported DSH PluginManager method")
 	}
@@ -158,6 +164,19 @@ func applyBundleState(plugins []dshmanager.PluginInfo, bundles []pluginManagerBu
 		}
 		plugins[index].Disabled = !bundle.Enabled
 		plugins[index].CanToggle = bundle.Availability != "missing" && bundle.ReadOnlyReason == "" && bundle.Error == nil
+		if bundle.Error != nil && bundle.Error.Code == "incompatible-version" && len(bundle.Error.Incompatible) > 0 {
+			itemIndex := 0
+			for candidateIndex, item := range bundle.Error.Incompatible {
+				if item.Name == plugins[index].Package {
+					itemIndex = candidateIndex
+					break
+				}
+			}
+			item := bundle.Error.Incompatible[itemIndex]
+			plugins[index].Incompatible = &dshmanager.PluginIncompatibility{
+				Version: item.Version, DSHVersion: item.RuntimeVersion, Requirements: item.Requirements,
+			}
+		}
 	}
 }
 

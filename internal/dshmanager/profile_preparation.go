@@ -48,9 +48,13 @@ func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) 
 	}
 	env := cloneEnvironment(launch.Node.ChildEnvironment)
 	env["DSH_HOME"] = launch.DataDirectory.Path
-	if _, err := runner.Run(ctx, launch.Runtime.Path, args, env, launch.DataDirectory.Path); err != nil {
+	result, err := runner.Run(ctx, launch.Runtime.Path, args, env, launch.DataDirectory.Path)
+	if err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
 			return cancellation
+		}
+		if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
+			return failureWithMeta(lifecycle.ErrorPluginIncompatible, "A profile plugin does not declare support for the current DSH version", incompatiblePluginError{items: items}.Error(), true, false)
 		}
 		return failureWithMeta(lifecycle.ErrorProfilePreparationFailed, "the DSH profile could not be prepared", "DSH could not reconcile the profile dependencies", true, true)
 	}

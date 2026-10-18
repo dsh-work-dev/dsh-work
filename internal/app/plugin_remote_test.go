@@ -41,3 +41,31 @@ func TestApplyBundleState(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyBundleStateMarksIncompatible(t *testing.T) {
+	const name = "@scope/pkg"
+	plugins := []dshmanager.PluginInfo{{Package: name}}
+	bundles := []pluginManagerBundle{{
+		Name: name, Installed: true, Enabled: false, Availability: "profile",
+		Error: &pluginManagerErr{
+			Code: "incompatible-version",
+			Incompatible: []struct {
+				Name           string            `json:"name"`
+				Version        string            `json:"version"`
+				RuntimeVersion string            `json:"runtimeVersion"`
+				Requirements   map[string]string `json:"requirements"`
+			}{{
+				Name: name, Version: "1.0.20", RuntimeVersion: "0.2.1-rc.2",
+				Requirements: map[string]string{"dsh": "^0.3.0"},
+			}},
+		},
+	}}
+	applyBundleState(plugins, bundles)
+	got := plugins[0].Incompatible
+	if got == nil || got.Version != "1.0.20" || got.DSHVersion != "0.2.1-rc.2" || got.Requirements["dsh"] != "^0.3.0" {
+		t.Fatalf("Incompatible = %#v, want DSH's version and requirement", got)
+	}
+	if plugins[0].CanToggle {
+		t.Fatal("incompatible plugin must not be toggleable")
+	}
+}
