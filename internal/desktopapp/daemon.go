@@ -144,16 +144,17 @@ func runDaemon(identity string, resources Resources) {
 	}
 	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	managerConfig := dshmanager.Config{
-		StatePath:        filepath.Join(storage.Root, "manager.json"),
-		CommandRunner:    managerRunner,
-		PluginCommands:   dshadapter.NewPluginCommands(),
-		RuntimeInstaller: platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:       platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:      platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:    platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:     platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:  dsh,
-		ProfileCatalog:   dsh,
+		StatePath:         filepath.Join(storage.Root, "manager.json"),
+		MinimumDSHVersion: dshadapter.MinimumVersion,
+		CommandRunner:     managerRunner,
+		PluginCommands:    dshadapter.NewPluginCommands(),
+		RuntimeInstaller:  platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:        platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:       platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:     platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:      platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:   dsh,
+		ProfileCatalog:    dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

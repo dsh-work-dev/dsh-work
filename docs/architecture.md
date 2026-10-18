@@ -370,6 +370,10 @@ That is the first release whose Worker carrier contract
 (`WebServer.listenedPort` and `getOrigin`) dsh-work supports. An explicit
 install of a version must still report that exact version. Revisit the minimum
 when the carrier contract changes.
+Releases and installed runtimes older than that minimum stay listed but are
+marked not supported and cannot be selected; Settings offers only removal for
+such a runtime, startup never preselects one, and an install request below the
+minimum is refused before any download.
 
 Each runtime owns independent files. pnpm installs use
 `package-import-method=clone-or-copy` instead of hard-linking from the user's

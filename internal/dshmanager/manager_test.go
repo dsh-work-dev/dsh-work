@@ -1048,6 +1048,101 @@ func TestManagerRefreshesAndPersistsDSHReleaseCatalogOnlyExplicitly(t *testing.T
 	}
 }
 
+func TestSnapshotMarksReleasesAndRuntimesBelowMinimum(t *testing.T) {
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	releases := testDSHReleases("0.2.1-rc.2", "0.2.0-rc.2", "0.2.0-rc.1", "0.1.7-rc.2")
+	runtimes := []RuntimeInfo{
+		{ID: "dsh-0.1.7-rc.2", Version: "0.1.7-rc.2", Path: runtimePath, Source: RuntimeSourceDevelopmentFixture},
+		{ID: "dsh-0.2.1-rc.2", Version: "0.2.1-rc.2", Path: runtimePath, Source: RuntimeSourceDevelopmentFixture},
+	}
+	config := Config{
+		StatePath:         filepath.Join(root, "manager.json"),
+		MinimumDSHVersion: "0.2.0-rc.2",
+		DSHReleases:       releases,
+		Runtimes:          runtimes,
+	}
+	manager, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseVersions := make([]string, len(snapshot.DSHReleases))
+	releaseUnsupported := make([]bool, len(snapshot.DSHReleases))
+	for i, release := range snapshot.DSHReleases {
+		releaseVersions[i] = release.Version
+		releaseUnsupported[i] = release.Unsupported
+	}
+	if want := []string{"0.2.1-rc.2", "0.2.0-rc.2", "0.2.0-rc.1", "0.1.7-rc.2"}; !slices.Equal(releaseVersions, want) {
+		t.Fatalf("release versions = %#v, want %#v", releaseVersions, want)
+	}
+	if want := []bool{false, false, true, true}; !slices.Equal(releaseUnsupported, want) {
+		t.Fatalf("unsupported releases = %#v, want %#v", releaseUnsupported, want)
+	}
+	runtimeUnsupported := make([]bool, len(snapshot.Runtimes))
+	for i, runtime := range snapshot.Runtimes {
+		runtimeUnsupported[i] = runtime.Unsupported
+	}
+	if want := []bool{true, false}; !slices.Equal(runtimeUnsupported, want) {
+		t.Fatalf("unsupported runtimes = %#v, want %#v", runtimeUnsupported, want)
+	}
+	if _, err := manager.RegisterRuntime(context.Background(), runtimes[0]); err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(config.StatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(state), "\"unsupported\"") {
+		t.Fatalf("persisted manager state contains snapshot-only unsupported marker: %s", state)
+	}
+}
+
+func TestInstallRuntimeRejectsVersionBelowMinimumBeforeDownload(t *testing.T) {
+	installer := &recordingInstaller{}
+	manager, err := New(Config{
+		StatePath:         filepath.Join(t.TempDir(), "manager.json"),
+		MinimumDSHVersion: "0.2.0-rc.2",
+		RuntimeInstaller:  installer,
+		DSHReleases:       testDSHReleases("0.1.7-rc.2"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.InstallRuntime(context.Background(), "0.1.7-rc.2")
+	assertFailureCode(t, err, lifecycle.ErrorDSHUnsupportedVersion)
+	if installer.calls != 0 {
+		t.Fatalf("installer calls = %d, want 0", installer.calls)
+	}
+}
+
+func TestEmptyMinimumMarksNothing(t *testing.T) {
+	root := t.TempDir()
+	manager, err := New(Config{
+		StatePath:   filepath.Join(root, "manager.json"),
+		DSHReleases: testDSHReleases("0.1.7-rc.2"),
+		Runtimes: []RuntimeInfo{{
+			ID: "dsh-0.1.7-rc.2", Version: "0.1.7-rc.2", Path: filepath.Join(root, "dsh.cmd"), Source: RuntimeSourceDevelopmentFixture,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.DSHReleases[0].Unsupported || snapshot.Runtimes[0].Unsupported {
+		t.Fatalf("empty minimum marked entries unsupported: releases=%#v runtimes=%#v", snapshot.DSHReleases, snapshot.Runtimes)
+	}
+}
+
 func TestManagerVerifiesRuntimeBeforeRegisteringIt(t *testing.T) {
 	root := t.TempDir()
 	toolchainPath := filepath.Join(root, "node")
@@ -1525,6 +1620,7 @@ func (testPluginCommands) Remove(profile, packageName string) ([]string, error) 
 type recordingInstaller struct {
 	runtime RuntimeInfo
 	version string
+	calls   int
 }
 
 type recordingDSHCatalog struct {
@@ -1546,6 +1642,7 @@ func testDSHReleases(versions ...string) []DSHReleaseInfo {
 }
 
 func (i *recordingInstaller) Install(_ context.Context, version string) (RuntimeInfo, error) {
+	i.calls++
 	i.version = version
 	return i.runtime, nil
 }
