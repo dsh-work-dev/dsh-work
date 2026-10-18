@@ -32,3 +32,7 @@ export function SetNotificationPreference(key: string, enabled: boolean): $Cance
 export function SetUpdateChannel(channel: string): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(1670588961, channel);
 }
+
+export function SetVerboseLogging(enabled: boolean): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(1911655272, enabled);
+}

@@ -146,6 +146,11 @@ const (
 	ErrorRuntimeInstallFailed       ErrorCode = "RUNTIME_INSTALL_FAILED"
 	ErrorTrustedSurfaceRequired     ErrorCode = "TRUSTED_SURFACE_REQUIRED"
 	ErrorPluginIncompatible         ErrorCode = "PLUGIN_INCOMPATIBLE"
+	ErrorProcessCrashed             ErrorCode = "PROCESS_CRASHED"
+	ErrorUIScriptError              ErrorCode = "UI_SCRIPT_ERROR"
+	ErrorHostPluginLoadFailed       ErrorCode = "HOST_PLUGIN_LOAD_FAILED"
+	ErrorUpdateDownloadFailed       ErrorCode = "UPDATE_DOWNLOAD_FAILED"
+	ErrorUpdateInstallFailed        ErrorCode = "UPDATE_INSTALL_FAILED"
 )
 
 // Failure is safe to project to the trusted UI. Detail is bounded diagnostic

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,6 +14,8 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/selfupdate"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/version"
@@ -378,7 +379,7 @@ func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
 		state.LastCheckedAt = time.Now().UTC().Format(time.RFC3339)
 	})
 	if err != nil {
-		log.Printf("update check: %v", err)
+		logging.Module(logging.ModUpdate).Warn("update check failed", logging.ErrAttrs(err, "")...)
 		r.setError("check")
 		return
 	}
@@ -449,7 +450,7 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
 			return
 		}
-		log.Printf("update download: %v", err)
+		logging.Module(logging.ModUpdate).Error("update download failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateDownloadFailed)...)
 		r.setError("download")
 		return
 	}
@@ -466,13 +467,13 @@ func (r *updateRunner) runInstall(ctx context.Context) {
 	// a payload that changed on disk after staging is refused while the running
 	// workbench can still be kept.
 	if err := r.backend.Recheck(); err != nil {
-		log.Printf("staged installer recheck: %v", err)
+		logging.Module(logging.ModUpdate).Warn("staged installer recheck failed", logging.ErrAttrs(err, "")...)
 		r.setError("install")
 		return
 	}
 	if r.stopUI != nil {
 		if err := r.stopUI(); err != nil {
-			log.Printf("stop UI before update: %v", err)
+			logging.Module(logging.ModUpdate).Warn("ui stop before update failed", logging.ErrAttrs(err, "")...)
 			r.setError("install")
 			return
 		}
@@ -487,7 +488,7 @@ func (r *updateRunner) runInstall(ctx context.Context) {
 		state.ErrorCode = ""
 	})
 	if err := r.backend.Install(ctx); err != nil {
-		log.Printf("install update: %v", err)
+		logging.Module(logging.ModUpdate).Error("update install failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateInstallFailed)...)
 		r.setError("install")
 	}
 }
@@ -571,12 +572,12 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 	}
 	feedRoot := resolveUpdateFeed()
 	if feedRoot == "" {
-		log.Printf("no update feed is configured for this build; updates stay unavailable")
+		logging.Module(logging.ModUpdate).Info("update feed not configured")
 		return runner
 	}
 	staging, err := selfupdate.NewStaging(stagingBase)
 	if err != nil {
-		log.Printf("update staging unavailable: %v", err)
+		logging.Module(logging.ModUpdate).Warn("update staging unavailable", logging.ErrAttrs(err, "")...)
 		return runner
 	}
 	manifest := manifestURL(feedRoot, string(channel))
@@ -586,7 +587,7 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 		HTTPClient: &http.Client{Timeout: updateDownloadTimeout},
 	})
 	if err != nil {
-		log.Printf("update feed unavailable: %v", err)
+		logging.Module(logging.ModUpdate).Warn("update feed unavailable", logging.ErrAttrs(err, "")...)
 		return runner
 	}
 	runner.backend = &installerBackend{
@@ -634,7 +635,7 @@ func (r *updateRunner) SetChannel(ctx context.Context, channel settings.UpdateCh
 		return err
 	}
 	if err := backend.Discard(); err != nil {
-		log.Printf("discard staged update: %v", err)
+		logging.Module(logging.ModUpdate).Warn("staged update discard failed", logging.ErrAttrs(err, "")...)
 	}
 	r.mu.Lock()
 	r.backend = next

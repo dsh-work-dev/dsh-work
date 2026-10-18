@@ -16,6 +16,8 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
+	"github.com/local/dsh-work/internal/redact"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/supervisor"
@@ -87,6 +89,8 @@ type Dependencies struct {
 	Channel                  WorkerChannel
 	PlatformError            error
 	AutomaticRuntimeRollback func() bool
+	// WorkerOutput receives every redacted output line of every Worker generation.
+	WorkerOutput func(generation string, event supervisor.OutputEvent)
 }
 
 type Config struct {
@@ -202,7 +206,6 @@ type Host struct {
 	lastDiagnostics      supervisor.Diagnostics
 	// pluginFault is lock-free because Status() is read while h.mu is held.
 	pluginFault atomic.Pointer[failedPluginStart]
-	debug       func(string)
 }
 
 type generationRun struct {
@@ -272,14 +275,6 @@ func (h *Host) SetRecoveryHandler(fn func()) {
 func (h *Host) SetQuitHandler(fn func()) {
 	h.mu.Lock()
 	h.quit = fn
-	h.mu.Unlock()
-}
-
-// SetDebug installs an optional bounded smoke-test hook. It never receives
-// raw process output or session credentials.
-func (h *Host) SetDebug(fn func(string)) {
-	h.mu.Lock()
-	h.debug = fn
 	h.mu.Unlock()
 }
 
@@ -1550,12 +1545,15 @@ func (h *Host) startWorker(run *generationRun) (supervisor.Worker, *lifecycle.Fa
 	if err != nil {
 		return nil, h.failureFor(err, lifecycle.ErrorProcessStartFailed, "dsh-work could not start the managed DSH process.", true)
 	}
+	if h.deps.WorkerOutput != nil {
+		go drainWorkerOutput(worker, run.generation, h.deps.WorkerOutput)
+	}
 	run.mu.Lock()
 	run.plan = plan
 	run.readiness = readiness
 	run.workspace = launch.workspace
 	run.mu.Unlock()
-	h.debugf("managed DSH worker started with authenticated IPC")
+	logging.Module(logging.ModLifecycle).Debug("worker started", "gen", run.generation)
 	return worker, nil
 }
 
@@ -1720,7 +1718,7 @@ func (h *Host) commitReady(run *generationRun) *lifecycle.Failure {
 			_, commitErr = manager.CommitCurrent(run.ctx, target)
 		}
 		if err := commitErr; err != nil {
-			detail := supervisor.Redact(err.Error())
+			detail := redact.Secrets(err.Error())
 			if len(detail) > 4096 {
 				detail = detail[:4096]
 			}
@@ -1748,7 +1746,6 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 	defer deadline.Stop()
 	deadlineAt := time.Now().Add(h.config.ReadinessTimeout)
 	readiness := run.readinessChannel()
-	var output <-chan supervisor.OutputEvent = worker.Events()
 	var announcement dshadapter.ReadyAnnouncement
 	plan := run.launchPlan()
 	for {
@@ -1759,13 +1756,13 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 			return announcement, h.failureFor(errors.New("DSH exited before readiness"), lifecycle.ErrorDSHEarlyExit, "The DSH process exited before its workspace became ready.", true)
 		case candidate := <-readiness:
 			announcement = candidate
-			h.debugf("readiness signal observed at %s", readinessOrigin(candidate.URL))
+			logging.Module(logging.ModLifecycle).Debug("readiness signal observed", "gen", run.generation, "origin", readinessOrigin(candidate.URL))
 			if err := h.deps.DSH.ValidateReady(candidate, plan); err != nil {
-				h.debugf("readiness validation rejected the announced origin")
+				logging.Module(logging.ModLifecycle).Debug("readiness origin rejected", "gen", run.generation)
 				return announcement, h.failureFor(err, lifecycle.ErrorDSHInvalidReadiness, "DSH announced an untrusted workspace origin.", false)
 			}
 			if failure := h.probeUntilReady(run, worker, candidate, plan, deadlineAt); failure == nil {
-				h.debugf("active readiness probe passed")
+				logging.Module(logging.ModLifecycle).Debug("readiness probe passed", "gen", run.generation)
 				channel, err := h.startChannel(run, candidate.URL)
 				if err != nil {
 					return announcement, h.failureFor(err, lifecycle.ErrorChannelStartFailed, "dsh-work could not establish the trusted DSH workspace path.", true)
@@ -1777,15 +1774,46 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 			} else if failure.Code == lifecycle.ErrorDSHInvalidReadiness {
 				return announcement, failure
 			} else {
-				h.debugf("active readiness probe is still pending")
-			}
-		case _, ok := <-output:
-			if !ok {
-				output = nil
-				continue
+				logging.Module(logging.ModLifecycle).Debug("readiness probe pending", "gen", run.generation)
 			}
 		case <-deadline.C:
 			return announcement, h.failureFor(errors.New("DSH readiness deadline exceeded"), lifecycle.ErrorDSHReadinessTimeout, "DSH did not become ready before the bounded startup deadline.", true)
+		}
+	}
+}
+
+// drainWorkerOutput forwards worker output through process exit and until the stream stays idle for one second.
+func drainWorkerOutput(worker supervisor.Worker, generation string, sink func(string, supervisor.OutputEvent)) {
+	events, exited := worker.Events(), worker.Exited()
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			sink(generation, event)
+		case <-exited:
+			idle := time.NewTimer(time.Second)
+			defer idle.Stop()
+			for {
+				select {
+				case event, ok := <-events:
+					if !ok {
+						return
+					}
+					sink(generation, event)
+					if !idle.Stop() {
+						select {
+						case <-idle.C:
+						default:
+						}
+					}
+					idle.Reset(time.Second)
+				case <-idle.C:
+					return
+				}
+			}
 		}
 	}
 }
@@ -1948,7 +1976,7 @@ func (h *Host) beginManagerStopGuard(run *generationRun) bool {
 		return true
 	}
 	if err := manager.BeginRunContextSwitch(context.Background()); err != nil {
-		h.debugf("could not guard Run context during stop: %s", err)
+		logging.Module(logging.ModLifecycle).Warn("run context stop guard failed", logging.ErrAttrs(err, "")...)
 		return false
 	}
 	run.setManagerGuarded(true)
@@ -1964,7 +1992,7 @@ func (h *Host) releaseManagerStopGuard(run *generationRun) {
 		return
 	}
 	if err := manager.EndRunContextSwitch(context.Background()); err != nil {
-		h.debugf("could not release Run context stop guard: %s", err)
+		logging.Module(logging.ModLifecycle).Warn("run context stop guard release failed", logging.ErrAttrs(err, "")...)
 	}
 }
 
@@ -2127,15 +2155,6 @@ func (h *Host) emit(status lifecycle.Status) {
 	h.mu.Unlock()
 	if publish != nil {
 		publish(h.withPluginFault(status))
-	}
-}
-
-func (h *Host) debugf(format string, args ...any) {
-	h.mu.Lock()
-	debug := h.debug
-	h.mu.Unlock()
-	if debug != nil {
-		debug(fmt.Sprintf(format, args...))
 	}
 }
 

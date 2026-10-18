@@ -2,10 +2,10 @@ package nativeui
 
 import (
 	"context"
-	"log"
 	"sync/atomic"
 
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/notifications"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	wailsnotifications "github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -32,7 +32,7 @@ func (s *NotificationService) ServiceStartup(ctx context.Context, options applic
 	}
 	if err := s.service.ServiceStartup(ctx, options); err != nil {
 		s.startupFailed.Store(true)
-		log.Printf("%s: desktop notification service unavailable", lifecycle.ErrorNotificationDeliveryFailed)
+		logging.Module(logging.ModNotify).Warn("notification service unavailable", logging.ErrAttrs(err, lifecycle.ErrorNotificationDeliveryFailed)...)
 	}
 	return nil
 }
@@ -42,7 +42,7 @@ func (s *NotificationService) ServiceShutdown() error {
 		return nil
 	}
 	if err := s.service.ServiceShutdown(); err != nil {
-		log.Printf("%s: desktop notification service shutdown failed", lifecycle.ErrorNotificationDeliveryFailed)
+		logging.Module(logging.ModNotify).Warn("notification service shutdown failed", logging.ErrAttrs(err, "")...)
 	}
 	return nil
 }

@@ -33,6 +33,27 @@ func TestSetAppearanceRequiresTheWorkbenchAndPublishesAfterSave(t *testing.T) {
 	}
 }
 
+func TestSetVerboseLoggingRequiresTheWorkbenchAndNotifies(t *testing.T) {
+	manager := newPetServiceManager(t, settings.DefaultValues())
+	service := NewSettingsService(manager, nil, nil)
+	var applied []bool
+	SetVerboseLoggingChanged(service, func(enabled bool) { applied = append(applied, enabled) })
+
+	if _, err := service.SetVerboseLogging(LocalClientContext(context.Background(), "worker"), true); err == nil {
+		t.Fatal("an untrusted surface changed verbose logging")
+	}
+	if len(applied) != 0 {
+		t.Fatalf("verbose logging applied before a successful trusted save: %v", applied)
+	}
+	values, err := service.SetVerboseLogging(LocalClientContext(context.Background(), "workspace"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !values.VerboseLogging || len(applied) != 1 || !applied[0] {
+		t.Fatalf("values = %v, applied = %v", values.VerboseLogging, applied)
+	}
+}
+
 func TestSetUpdateChannelSwitchesTheUpdaterBeforeSaving(t *testing.T) {
 	values := settings.DefaultValues()
 	store := &petServiceStore{values: &values}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/redact"
 	"github.com/local/dsh-work/internal/supervisor"
 )
 
@@ -39,7 +40,7 @@ func (h *Host) ReportWebBoot(generation, detail string) error {
 	if len(detail) > 4096 {
 		detail = detail[:4096]
 	}
-	run.webBootOnce.Do(func() { run.webBoot <- supervisor.Redact(detail) })
+	run.webBootOnce.Do(func() { run.webBoot <- redact.Secrets(detail) })
 	return nil
 }
 

@@ -65,6 +65,41 @@ func TestSettingsPersistAutomaticRuntimeRollback(t *testing.T) {
 	}
 }
 
+func TestSettingsPersistVerboseLogging(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil || values.VerboseLogging {
+		t.Fatalf("initial verbose logging = %v, error = %v", values.VerboseLogging, err)
+	}
+	values, err = manager.SetVerboseLogging(context.Background(), true)
+	if err != nil || !values.VerboseLogging {
+		t.Fatalf("SetVerboseLogging(true) = %v, error = %v", values.VerboseLogging, err)
+	}
+	reloaded, err := New(Config{Path: path, Replacer: renameReplacer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err = reloaded.Snapshot(context.Background())
+	if err != nil || !values.VerboseLogging {
+		t.Fatalf("reloaded verbose logging = %v, error = %v", values.VerboseLogging, err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err = legacy.Snapshot(context.Background())
+	if err != nil || values.VerboseLogging {
+		t.Fatalf("version 2 without verboseLogging = %v, error = %v", values.VerboseLogging, err)
+	}
+}
+
 func TestSettingsPetDefaultsStartHiddenWithoutASelection(t *testing.T) {
 	manager, err := New(Config{Path: filepath.Join(t.TempDir(), "settings.json")})
 	if err != nil {

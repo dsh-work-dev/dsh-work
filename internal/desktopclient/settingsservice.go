@@ -17,6 +17,13 @@ func (s *SettingsService) SetAutomaticRuntimeRollback(ctx context.Context, enabl
 	return value, err
 }
 
+func (s *SettingsService) SetVerboseLogging(ctx context.Context, enabled bool) (settings.Values, error) {
+	if s.Local != nil { return s.Local.SetVerboseLogging(ctx, enabled) }
+	var value settings.Values
+	err := call(ctx, s.Client, "SettingsService", "SetVerboseLogging", []any{enabled}, &value)
+	return value, err
+}
+
 func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, error) {
 	if s.Local != nil { return s.Local.GetSettings(ctx) }
 	var value settings.Values
