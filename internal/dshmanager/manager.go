@@ -1426,16 +1426,36 @@ func applyPluginProvenance(plugins []PluginInfo, profile ProfileRef, profilePath
 }
 
 func applyPluginListJSON(plugins []PluginInfo, data string) {
-	var document struct {
+	var dependencies map[string]struct {
+		Version string `json:"version"`
+	}
+	var packages []struct {
 		Dependencies map[string]struct {
 			Version string `json:"version"`
 		} `json:"dependencies"`
 	}
-	if json.Unmarshal([]byte(data), &document) != nil {
-		return
+	if err := json.Unmarshal([]byte(data), &packages); err == nil {
+		dependencies = make(map[string]struct {
+			Version string `json:"version"`
+		})
+		for _, item := range packages {
+			for name, dependency := range item.Dependencies {
+				dependencies[name] = dependency
+			}
+		}
+	} else {
+		var document struct {
+			Dependencies map[string]struct {
+				Version string `json:"version"`
+			} `json:"dependencies"`
+		}
+		if json.Unmarshal([]byte(data), &document) != nil {
+			return
+		}
+		dependencies = document.Dependencies
 	}
 	for index := range plugins {
-		if dependency, ok := document.Dependencies[plugins[index].Package]; ok && validRuntimeVersion(dependency.Version) {
+		if dependency, ok := dependencies[plugins[index].Package]; ok && validRuntimeVersion(dependency.Version) {
 			plugins[index].Version = dependency.Version
 			plugins[index].CurrentVersion = dependency.Version
 		}

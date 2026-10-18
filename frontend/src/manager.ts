@@ -268,6 +268,10 @@ export function mountManager() {
   const pluginScopeNote = document.getElementById("manager-plugin-scope-note") as HTMLParagraphElement;
   const profilePlugins = document.getElementById("manager-profile-plugins") as HTMLDivElement;
   const upgradeAll = document.getElementById("manager-plugin-upgrade-all") as HTMLButtonElement;
+  const checkUpdates = document.getElementById("manager-plugin-check-updates") as HTMLButtonElement;
+  checkUpdates.disabled = true;
+  let pluginControlsDisabled = false;
+  let checkingPluginUpdates = false;
   let upgradablePackages: string[] = [];
   const profileList = document.getElementById("manager-profiles") as HTMLDivElement;
   const runtimeList = document.getElementById("manager-runtimes") as HTMLDivElement;
@@ -1497,6 +1501,7 @@ export function mountManager() {
     loadRetry.disabled = true;
     try {
       [snapshot, hostStatus] = await Promise.all([getSnapshot(), getHostStatus()]);
+      syncPluginCheckUpdatesDisabled();
       try {
         updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
       } catch (error) {
@@ -1647,6 +1652,12 @@ export function mountManager() {
       control.disabled = disabled;
     }
     upgradeAll.disabled = disabled;
+    pluginControlsDisabled = disabled;
+    syncPluginCheckUpdatesDisabled();
+  }
+
+  function syncPluginCheckUpdatesDisabled() {
+    checkUpdates.disabled = pluginControlsDisabled || checkingPluginUpdates || hostStatus?.state !== "Ready";
   }
 
   // Upgrades every plugin with an available update in one Worker restart.
@@ -1711,6 +1722,21 @@ export function mountManager() {
 
   install.addEventListener("click", () => void mutatePlugin("install"));
   upgradeAll.addEventListener("click", () => void upgradeAllPlugins());
+  checkUpdates.addEventListener("click", () => void (async () => {
+    checkingPluginUpdates = true;
+    checkUpdates.disabled = true;
+    checkUpdates.textContent = t("feedback.checkingPluginUpdates");
+    try {
+      invalidatePluginObservation();
+      await refreshCurrentPluginObservation();
+      renderProfiles();
+    } finally {
+      checkingPluginUpdates = false;
+      checkUpdates.textContent = t("action.checkPluginUpdates");
+      checkUpdates.disabled = false;
+      syncPluginCheckUpdatesDisabled();
+    }
+  })());
 
   profileRename.addEventListener("click", () => void (async () => {
     const item = managedProfileItem();
