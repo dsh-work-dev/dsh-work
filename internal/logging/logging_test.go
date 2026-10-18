@@ -452,6 +452,29 @@ func TestErrAttrs(t *testing.T) {
 	}
 }
 
+func TestWailsErrorHandlerDowngradesCancelledCalls(t *testing.T) {
+	logger := testLogger(t, ProcessUI, "", nil, &bytes.Buffer{})
+	previous := current.Swap(logger)
+	t.Cleanup(func() { current.Store(previous) })
+	handler := WailsErrorHandler()
+
+	handler(errors.New("Binding call failed: Bound method returned an error: CANCELLED: manager operation was cancelled"))
+	logger.mu.Lock()
+	cancelledRecords := len(logger.pending)
+	logger.mu.Unlock()
+	if cancelledRecords != 0 {
+		t.Fatalf("cancelled call produced %d records, want none at the default level", cancelledRecords)
+	}
+
+	handler(errors.New("Binding call failed: Bound method returned an error: PLUGIN_INCOMPATIBLE: plugin cannot load"))
+	logger.mu.Lock()
+	records := append([]slog.Record(nil), logger.pending...)
+	logger.mu.Unlock()
+	if len(records) != 1 || records[0].Level != slog.LevelError {
+		t.Fatalf("non-cancelled error records = %#v, want one ERROR", records)
+	}
+}
+
 func TestHandlerGroupsAndAttributes(t *testing.T) {
 	logger := testLogger(t, ProcessUI, "", nil, &bytes.Buffer{})
 	if err := logger.attach(); err != nil {

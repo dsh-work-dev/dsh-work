@@ -139,13 +139,14 @@ func runDesktopClient(identity string, resources Resources) error {
 			desktop.Event.Emit("builtin-components", statuses)
 		}
 	}}
-	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon, Logger: logging.WailsLogger(),
+	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
 			application.NewService(shellService),
+			application.NewService(&desktopclient.LogService{}),
 		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
 			mu.Lock()
 			defer mu.Unlock()

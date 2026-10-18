@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/pet"
 )
 
@@ -92,6 +94,7 @@ func (s *ShellService) failUnreported(round uint64) {
 		for id, state := range s.components {
 			if state == "loading" {
 				s.components[id] = "failed"
+				logging.Module(logging.ModPlugin).Error("host plugin did not load", "plugin", "@dsh-work/"+id, "code", string(lifecycle.ErrorHostPluginLoadFailed))
 				changed = true
 			}
 		}

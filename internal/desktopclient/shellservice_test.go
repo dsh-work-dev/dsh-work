@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/pet"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -191,6 +192,37 @@ func TestBuiltinComponentsThatNeverReportAreMarkedFailed(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatal("components that never reported stayed loading")
+		}
+	}
+}
+
+func TestUnreportedBuiltinComponentsLogLoadFailure(t *testing.T) {
+	captured := captureDefaultLogs(t)
+	s := &ShellService{BuiltinComponentTimeout: 10 * time.Millisecond}
+	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	if err := s.BeginBuiltinComponents(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReportBuiltinComponent(workspace, "shell"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	found := make(map[string]bool)
+	for _, record := range captured.snapshot() {
+		if record.Message != "host plugin did not load" {
+			continue
+		}
+		attrs := recordAttributes(record)
+		plugin := attrs["plugin"].String()
+		if attrs["code"].String() != string(lifecycle.ErrorHostPluginLoadFailed) {
+			t.Errorf("%s code = %q", plugin, attrs["code"].String())
+		}
+		found[plugin] = true
+	}
+	for _, plugin := range []string{"@dsh-work/account", "@dsh-work/pet"} {
+		if !found[plugin] {
+			t.Errorf("missing load failure record for %s", plugin)
 		}
 	}
 }
