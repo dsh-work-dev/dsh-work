@@ -39,6 +39,7 @@ const installPlugin = ManagerService.InstallPlugin;
 const listPlugins = ManagerService.ListPlugins;
 const removePlugin = ManagerService.RemovePlugin;
 const setPluginDisabled = ManagerService.SetPluginDisabled;
+const allowIncompatiblePlugin = ManagerService.AllowIncompatiblePlugin;
 const listLoaderEntries = ManagerService.ListLoaderEntries;
 const setLoaderEntryDisabled = ManagerService.SetLoaderEntryDisabled;
 const upgradePlugin = ManagerService.UpgradePlugin;
@@ -58,6 +59,15 @@ const restoreKnownGood = ManagerService.RestoreKnownGood;
 function managerErrorMessage(error: unknown, fallbackKey: string): string {
   void error;
   return t(fallbackKey);
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String((error as {message: unknown}).message);
+  return String(error);
+}
+function isPluginIncompatible(error: unknown): boolean {
+  return errorText(error).includes("PLUGIN_INCOMPATIBLE");
 }
 
 function switchReason(code: string): string {
@@ -165,7 +175,8 @@ export function mergePluginObservation(plugins: PluginInfo[], observed: PluginIn
       version: match.version || plugin.version,
       currentVersion: match.currentVersion || plugin.currentVersion,
       availableVersion: match.availableVersion,
-      updateCheck: match.updateCheck
+      updateCheck: match.updateCheck,
+      incompatible: match.incompatible
     };
   });
 }
@@ -775,13 +786,17 @@ export function mountManager() {
     name.textContent = plugin.name;
     const detail = document.createElement("span");
     const currentVersion = plugin.currentVersion || plugin.version;
-    detail.textContent = [
+    const details = [
       plugin.disabled ? t("value.pluginDisabled") : "",
       pluginSourceLabel(plugin),
       currentVersion ? t("value.currentVersion", {version: currentVersion}) : t("value.installed"),
       plugin.availableVersion ? t("value.availableVersion", {version: plugin.availableVersion}) : "",
+    ].filter(Boolean);
+    detail.textContent = [
+      plugin.incompatible ? t("plugins.incompatible", {dsh: plugin.incompatible.dshVersion}) : "",
+      item.launchable ? details.join(" · ") : t("profiles.noDesktop"),
     ].filter(Boolean).join(" · ");
-    if (!item.launchable) detail.textContent = t("profiles.noDesktop");
+
     text.append(name, detail);
     row.append(text);
     if (!mutable) return row;
@@ -792,6 +807,9 @@ export function mountManager() {
     row.append(pluginButton("action.remove", "button-secondary", () => mutatePlugin("remove", packageName)));
     if (plugin.canToggle) {
       row.append(pluginToggleSwitch(!plugin.disabled, plugin.name, (enabled) => mutatePlugin(enabled ? "enable" : "disable", packageName)));
+    }
+    if (plugin.incompatible) {
+      row.append(pluginButton("action.allowIncompatible", "button-secondary", () => allowIncompatible(plugin)));
     }
     return row;
   }
@@ -804,7 +822,9 @@ export function mountManager() {
     button.dataset.pluginControl = "true";
     button.addEventListener("click", () => {
       button.disabled = true;
-      void action();
+      void action().finally(() => {
+        if (button.isConnected && !pluginControlsDisabled) button.disabled = false;
+      });
     });
     return button;
   }
@@ -1664,8 +1684,9 @@ export function mountManager() {
   async function upgradeAllPlugins() {
     const packages = [...upgradablePackages];
     if (packages.length === 0) return;
+    let target: {profile: ProfileRef} | undefined;
     try {
-      const target = explicitPluginTarget();
+      target = explicitPluginTarget();
       setPluginControlsDisabled(true);
       const result = await upgradePlugins({target, packages});
       invalidatePluginObservation();
@@ -1675,6 +1696,24 @@ export function mountManager() {
     } catch (error) {
       // A failed candidate may have restored the previous environment.
       await Promise.allSettled([refresh()]);
+      if (target && isPluginIncompatible(error)) {
+        if (!window.confirm(t("confirm.upgradeAllIncompatible"))) {
+          pluginsFeedback(t("error.pluginIncompatible"), "error");
+          return;
+        }
+        try {
+          const result = await upgradePlugins({target, packages, acceptIncompatible: true});
+          invalidatePluginObservation();
+          await refresh(target.profile);
+          document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
+          pluginsFeedback(t("feedback.pluginsUpgraded", {profile: result.profile.name, count: String(packages.length)}), "success");
+        } catch (retryError) {
+          await Promise.allSettled([refresh()]);
+          pluginsFeedback(managerErrorMessage(retryError, "error.changePlugins"), "error");
+          console.error("Could not upgrade profile plugins", retryError);
+        }
+        return;
+      }
       pluginsFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
       console.error("Could not upgrade profile plugins", error);
     } finally {
@@ -1691,8 +1730,9 @@ export function mountManager() {
       }
       return;
     }
+    let target: {profile: ProfileRef} | undefined;
     try {
-      const target = explicitPluginTarget();
+      target = explicitPluginTarget();
       setPluginControlsDisabled(true);
       const result = operation === "disable-entry" || operation === "enable-entry"
         ? await setLoaderEntryDisabled({target, id: packageSpec, disabled: operation === "disable-entry"})
@@ -1713,8 +1753,56 @@ export function mountManager() {
     } catch (error) {
       // A failed candidate may have restored the previous environment.
       await Promise.allSettled([refresh()]);
+      if (target && (operation === "install" || operation === "upgrade") && isPluginIncompatible(error)) {
+        if (!window.confirm(t("confirm.installIncompatible", {plugin: packageSpec}))) {
+          pluginsFeedback(t("error.pluginIncompatible"), "error");
+          return;
+        }
+        try {
+          const result = operation === "install"
+            ? await installPlugin({target, package: packageSpec, acceptIncompatible: true})
+            : await upgradePlugin({target, package: packageSpec, acceptIncompatible: true});
+          invalidatePluginObservation();
+          await refresh(target.profile);
+          document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
+          const feedbackKey = operation === "install" ? "feedback.pluginInstalled" : "feedback.pluginUpgraded";
+          pluginsFeedback(result.restartRequired
+            ? t("feedback.pluginChangedRestart")
+            : t(feedbackKey, {profile: result.profile.name}), "success", result.restartRequired);
+        } catch (retryError) {
+          await Promise.allSettled([refresh()]);
+          pluginsFeedback(managerErrorMessage(retryError, "error.changePlugins"), "error");
+          console.error("Could not change profile plugin", retryError);
+        }
+        return;
+      }
       pluginsFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
       console.error("Could not change profile plugin", error);
+    } finally {
+      setPluginControlsDisabled(false);
+    }
+  }
+
+  async function allowIncompatible(plugin: PluginInfo) {
+    const incompatible = plugin.incompatible;
+    if (!incompatible || !window.confirm(t("confirm.allowIncompatible", {plugin: plugin.name, dsh: incompatible.dshVersion}))) return;
+    try {
+      const target = explicitPluginTarget();
+      setPluginControlsDisabled(true);
+      const result = await allowIncompatiblePlugin({
+        target,
+        package: plugin.package || plugin.name,
+        version: incompatible.version,
+        dshVersion: incompatible.dshVersion,
+      });
+      invalidatePluginObservation();
+      await refresh(target.profile);
+      document.getElementById("plugins-restart")!.hidden = !result.restartRequired;
+      pluginsFeedback(t("feedback.pluginEnabled", {profile: result.profile.name}), "success", true);
+    } catch (error) {
+      await Promise.allSettled([refresh()]);
+      pluginsFeedback(managerErrorMessage(error, "error.changePlugins"), "error");
+      console.error("Could not allow incompatible plugin", error);
     } finally {
       setPluginControlsDisabled(false);
     }
