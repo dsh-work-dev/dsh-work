@@ -16,6 +16,9 @@ import (
 	"github.com/local/dsh-work/internal/storagepaths"
 )
 
+// Settings is hosted by the workspace window, so CLI daemon calls use its surface.
+const cliSurface = "workspace"
+
 type managerAPI interface {
 	Snapshot(context.Context) (dshmanager.Snapshot, error)
 	InstallRuntime(context.Context, string) (dshmanager.Snapshot, error)
@@ -31,43 +34,43 @@ type managerAPI interface {
 type onlineManager struct{ client *daemon.Client }
 
 func (m onlineManager) Snapshot(ctx context.Context) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "GetSnapshot", "settings", nil, &v)
+	err = m.client.Call(ctx, "ManagerService", "GetSnapshot", cliSurface, nil, &v)
 	return
 }
 func (m onlineManager) InstallRuntime(ctx context.Context, a string) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "InstallRuntime", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "InstallRuntime", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) RegisterRuntime(ctx context.Context, a dshmanager.RuntimeInfo) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "RegisterRuntime", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "RegisterRuntime", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) RemoveRuntime(ctx context.Context, a string) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "RemoveRuntime", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "RemoveRuntime", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) RegisterDataDirectory(ctx context.Context, a dshmanager.DataDirectoryInfo) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "RegisterDataDirectory", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "RegisterDataDirectory", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) RemoveDataDirectory(ctx context.Context, a string) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "RemoveDataDirectory", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "RemoveDataDirectory", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) SetConfigured(ctx context.Context, a dshmanager.RunContext) (v dshmanager.Snapshot, err error) {
-	err = m.client.Call(ctx, "ManagerService", "SetRunContext", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "SetRunContext", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) ListPlugins(ctx context.Context, a dshmanager.PluginListRequest) (v []dshmanager.PluginInfo, err error) {
-	err = m.client.Call(ctx, "ManagerService", "ListPlugins", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "ListPlugins", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) InstallPlugin(ctx context.Context, a dshmanager.PluginInstallRequest) (v dshmanager.PluginResult, err error) {
-	err = m.client.Call(ctx, "ManagerService", "InstallPlugin", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "InstallPlugin", cliSurface, []any{a}, &v)
 	return
 }
 func (m onlineManager) RemovePlugin(ctx context.Context, a dshmanager.PluginRemoveRequest) (v dshmanager.PluginResult, err error) {
-	err = m.client.Call(ctx, "ManagerService", "RemovePlugin", "settings", []any{a}, &v)
+	err = m.client.Call(ctx, "ManagerService", "RemovePlugin", cliSurface, []any{a}, &v)
 	return
 }
 
