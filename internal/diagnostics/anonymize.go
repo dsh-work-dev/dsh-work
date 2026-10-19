@@ -1,17 +1,18 @@
 package diagnostics
 
 import (
-	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 func (d *Diagnostics) anonymize(text string) string {
 	if home := d.config.HomeDir; home != "" {
+		// Convert backslashes explicitly: filepath.ToSlash only rewrites the
+		// running OS's separator, so it leaves a Windows path unchanged elsewhere.
 		variants := []string{
 			home,
 			strings.ReplaceAll(home, `\`, `\\`),
-			filepath.ToSlash(home),
+			strings.ReplaceAll(home, `\`, "/"),
 		}
 		for _, variant := range variants {
 			if variant == "" {
