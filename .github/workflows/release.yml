@@ -639,10 +639,20 @@ jobs:
             "Built from \`${{ needs.plan.outputs.source_sha }}\` by run \`${{ github.run_id }}\`." \
             "The Windows package verifies against the compiled-in update feed.")
           flags=(--title "$VERSION" --notes "$notes" --target "${{ needs.plan.outputs.source_sha }}")
-          if [ "$CHANNEL" = "stable" ]; then
-            flags+=(--latest --generate-notes)
-          elif [ "$CHANNEL" = "beta" ]; then
-            flags+=(--prerelease --generate-notes)
+          if [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "beta" ]; then
+            previous_stable=$(gh release list -R "$GITHUB_REPOSITORY" \
+              --exclude-drafts --exclude-pre-releases \
+              --json tagName,publishedAt --limit 100 \
+              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')
+            if [ -z "$previous_stable" ]; then
+              previous_stable="release-notes-baseline-v0.1.0"
+            fi
+            flags+=(--generate-notes --notes-start-tag "$previous_stable")
+            if [ "$CHANNEL" = "stable" ]; then
+              flags+=(--latest)
+            else
+              flags+=(--prerelease)
+            fi
           else
             # Nightly releases are frequent; keep their release records concise.
             flags+=(--prerelease)
