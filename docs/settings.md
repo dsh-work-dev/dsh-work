@@ -68,7 +68,7 @@ Every Settings page follows one grammar so pages read as one application:
 
 Overview stands alone. The sidebar groups Application (General, Notifications,
 Pets), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
-About). The narrow-window selector uses the same groups. Switching sections
+Diagnostics, About). The narrow-window selector uses the same groups. Switching sections
 preserves their selection and remembers content scroll and return focus within
 the current Settings instance.
 
@@ -81,6 +81,18 @@ the current Settings instance.
 | Pets | Display section (show, always on top, size), then the pet list. The pet being viewed opens its preview in place under its row (large preview, description, Clear/Retry/Use), one pet at a time; the page opens on the pet in use. Arrow keys move between pets. |
 | General and Notifications | General has Startup (failure policy) and Interface (language, theme, appearance) sections; Notifications is one group with the desktop switch and its nested event switches. |
 | Storage and About | Storage has one section per location, with migration save/cancel in the user-data footer. About has a product section (version, description, help, copy diagnostics) and an application update section. |
+| Diagnostics | Recent problems from the last 7 days, one row each with a plain title, time and repeat count, or a short empty state. Expanding a row shows the code and message, the actions that fit its code, Copy report and Report on GitHub. Below, a Logs group has the Detailed logging switch, Open log folder and Export diagnostics bundle; an exported bundle shows its saved path and any files left out. |
+
+Problem actions map diagnostic codes to existing places: runtime and version
+problems open Runtimes; DSH start failures offer Restart and Plugins; plugin
+problems open Plugins; profile and Workspace problems open Profiles; saved-data
+and settings problems open Storage; update failures check for updates. Other
+codes offer only the report actions. Report on GitHub copies the report, then
+opens the dsh-work issue form with the code and message as the title; the
+report itself never goes into the URL. Help › Logs opens this page, and Help ›
+Copy diagnostics, About and the failed-startup Report problem use the same
+report for the newest problem, or an environment-only report when there is
+none.
 
 Version history uses a list, selected details and restore confirmation in the
 same dialog rather than expanding every record inline. Backup history has its
@@ -92,7 +104,7 @@ reconstructs dependency versions; it does not archive conversation data.
 
 Startup shows Node, DSH, profile/plugins and service-start steps. When a step
 fails, its summary, available recovery actions and bounded diagnostic output
-appear together. Copy is available beside the diagnostics. A failure with no
+appear together. Copy and Report problem are available beside the diagnostics. A failure with no
 known step is presented as a general failure rather than assigned to Node.
 When the Worker fails to start or stops unexpectedly, a panel lists that
 profile's third-party plugins with Disable and Remove. Plugins the failure

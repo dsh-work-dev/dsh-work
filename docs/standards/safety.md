@@ -23,6 +23,12 @@
   versioned contract.
 - Do not silently change global shell, package-manager or DSH configuration.
 - Redact process output before logging or UI projection.
+- Remove secrets when a log record is written, so they never reach a file.
+  Paths and user names stay in local logs for troubleshooting and are
+  anonymized (home directory, host name) only when a problem, report or
+  bundle leaves the log layer.
+- Keep logs local, non-migrating and bounded: per-file size, backup count and
+  age limits, and capped crash files, problem lists, reports and bundles.
 - Never log credentials, tokens, cookies, sensitive form values or full page
   content.
 - Do not upload user content or diagnostics without a separate explicit action.
