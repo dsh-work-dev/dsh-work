@@ -469,3 +469,20 @@ func mapDirEntries(entries []os.DirEntry) []string {
 	}
 	return names
 }
+
+// The workbench shows the message and puts it in the GitHub issue title, so
+// it must be anonymized like the report.
+func TestProblemsAnonymizeMessage(t *testing.T) {
+	dir := t.TempDir()
+	record := testRecord(testNow().Add(-time.Hour), "ERROR", "DSH_START_FAILED", "gen-1")
+	record["msg"] = `open C:\Users\Alice\dsh on my-host failed`
+	writeRecords(t, dir, "daemon.log", record)
+
+	problems, err := New(Config{Dir: dir, Now: testNow, HomeDir: `C:\Users\Alice`, HostName: "my-host"}).Problems(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 1 || problems[0].Message != `open ~\dsh on <host> failed` {
+		t.Fatalf("problems = %#v, want an anonymized message", problems)
+	}
+}

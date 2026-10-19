@@ -54,7 +54,7 @@ func (d *Diagnostics) Problems(ctx context.Context) ([]Problem, error) {
 			ID:        hex.EncodeToString(sum[:])[:12],
 			Code:      entry.code,
 			Level:     entry.level,
-			Message:   entry.message,
+			Message:   d.anonymize(entry.message),
 			Proc:      entry.proc,
 			Gen:       entry.gen,
 			Op:        entry.op,
