@@ -59,3 +59,11 @@ func SaveProfileArchive(app *application.App, filename string) (string, error) {
 	}
 	return path, err
 }
+
+func SaveDiagnosticsBundle(app *application.App, filename string) (string, error) {
+	path, err := app.Dialog.SaveFile().SetFilename(filename).AddFilter("Diagnostics bundle", "*.zip").CanCreateDirectories(true).PromptForSingleSelection()
+	if runtime.GOOS == "windows" && err != nil && err.Error() == "cancelled by user" {
+		return "", nil
+	}
+	return path, err
+}
