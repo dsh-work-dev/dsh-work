@@ -107,6 +107,14 @@ bin\dsh-work-cli.exe use --runtime "<runtime-id>" --data-directory dsh-work --pr
 bin\dsh-work-cli.exe plugin list --data-directory dsh-work --profile web
 ```
 
+## DSH release channels
+
+Use `main` for DSH release candidates and stable releases. Use the literal
+`dsh-preview` branch for DSH alpha releases; it has no `codex/` prefix. Land
+ordinary dsh-work changes on `main` and merge them into `dsh-preview` so alpha
+compatibility work stays current. Pin and verify an exact DSH version on each
+branch before changing its runtime.
+
 ## Engineering rules
 
 - Build one end-to-end slice at a time.
