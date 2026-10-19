@@ -123,6 +123,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       host("feedbackDesktop", {kind: "link", target: "feedback-desktop"}),
       host("feedbackDsh", {kind: "link", target: "feedback-dsh"}),
       separator,
+      {...settings("diagnostics", "diagnostics"), key: "logs", label: t("shell.menu.logs")},
       host("copyDiagnostics", {kind: "diagnostics"}),
       host("devtools", {kind: "devtools"}),
       separator,

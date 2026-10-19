@@ -5,7 +5,7 @@ import {Events} from "@wailsio/runtime";
 
 import {HostService, ManagerService, SettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {buildBuiltinComponentViews} from "./builtin-components";
-import {diagnosticsReport} from "./diagnostics";
+import {copyReport, latestProblem} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
@@ -637,7 +637,7 @@ export function mountManager() {
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;
     try {
-      await navigator.clipboard.writeText(diagnosticsReport({update: updateState, state: hostStatus?.state, snapshot}));
+      await copyReport(await latestProblem());
       transientStatus(result, t("logs.copied"));
     } catch { result.textContent = t("logs.copyFailed"); }
   })());
