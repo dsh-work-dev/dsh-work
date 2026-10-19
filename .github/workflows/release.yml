@@ -12,9 +12,10 @@
 # `pull_request`, and no step of this pipeline runs on a pull request: package
 # checks stay in pc.yml, which never sees signing material.
 #
-# Publication is fail-closed. One release identity is computed by the
-# preflight (`scripts/release-version.mjs`) and every later step consumes that
-# one value. A channel feed is published only after the installer was built
+# Publication is fail-closed. The preflight (`scripts/release-version.mjs`)
+# computes the product version, while the pipeline carries the GitHub release
+# tag separately so the version string and tag cannot drift apart. A channel
+# feed is published only after the installer was built
 # from that identity, its digest was checked against the uploaded bytes, and,
 # when a code-signing certificate and publisher are configured, the binaries
 # and the installer were signed and checked against that publisher. Without a
@@ -38,6 +39,11 @@ on:
         description: Commit the release is built from.
         required: true
         type: string
+      release_tag:
+        description: Stable or beta source tag; nightly tags are derived from the release version.
+        required: false
+        type: string
+        default: ""
       run_id:
         description: Workflow run id, part of a nightly version.
         required: false
@@ -72,6 +78,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.identity.outputs.version }}
+      release_tag: ${{ steps.identity.outputs.releaseTag }}
       base: ${{ steps.identity.outputs.base }}
       file_version: ${{ steps.identity.outputs.fileVersion }}
       channel: ${{ steps.gates.outputs.channel }}
@@ -147,6 +154,7 @@ jobs:
         id: identity
         env:
           CHANNEL: ${{ inputs.channel }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -174,19 +182,27 @@ jobs:
               args+=(--last-stable "$last_stable")
             fi
             node scripts/release-version.mjs "${args[@]}" --json > release-identity.json
+            # Match the tag shape in E-38; the product version stays unprefixed.
+            release_tag="v$(jq -r .version release-identity.json)"
           else
             # A release tag goes in unchanged; the preflight refuses a tag that
             # does not belong to the base in build/config.yml and refuses a
             # nightly-shaped tag on these channels.
+            if [ -z "$RELEASE_TAG" ] || [ "$RELEASE_TAG" != "$GITHUB_REF_NAME" ]; then
+              echo "release-plan: the supplied release tag '$RELEASE_TAG' does not match the triggering tag '$GITHUB_REF_NAME'" >&2
+              exit 1
+            fi
             node scripts/release-version.mjs --channel "$CHANNEL" \
-              --version "$GITHUB_REF_NAME" --config "$BASE_CONFIG" \
+              --version "$RELEASE_TAG" --config "$BASE_CONFIG" \
               --source-sha "$SOURCE_SHA" --json > release-identity.json
+            release_tag="$RELEASE_TAG"
           fi
 
           cat release-identity.json
           jq -e '.version and .channel and (.fileVersion | length > 0)' release-identity.json > /dev/null
           {
             echo "version=$(jq -r .version release-identity.json)"
+            echo "releaseTag=$release_tag"
             echo "base=$(jq -r .base release-identity.json)"
             echo "fileVersion=$(jq -r .fileVersion release-identity.json)"
             echo "sourceSha=$(jq -r .sourceSha release-identity.json)"
@@ -472,6 +488,7 @@ jobs:
     env:
       CHANNEL: ${{ needs.plan.outputs.channel }}
       VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
     steps:
       - name: Check out the release commit
         uses: actions/checkout@v5
@@ -531,7 +548,7 @@ jobs:
             -version "$VERSION" \
             -channel "$CHANNEL" \
             -name "dsh-work $VERSION" \
-            -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}" \
+            -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
             -output feed/manifest.json \
             "$installer"
 
@@ -603,7 +620,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          state=$(gh release view "$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName 2>/dev/null || true)
+          state=$(gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName 2>/dev/null || true)
           if [ -z "$state" ]; then
             echo "state=missing" >> "$GITHUB_OUTPUT"
             exit 0
@@ -626,7 +643,7 @@ jobs:
         if: steps.existing.outputs.state == 'draft'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete "$VERSION" -R "$GITHUB_REPOSITORY" --yes
+        run: gh release delete "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --yes
 
       - name: Create the release and upload the installer
         env:
@@ -639,6 +656,9 @@ jobs:
             "Built from \`${{ needs.plan.outputs.source_sha }}\` by run \`${{ github.run_id }}\`." \
             "The Windows package verifies against the compiled-in update feed.")
           flags=(--title "$VERSION" --notes "$notes" --target "${{ needs.plan.outputs.source_sha }}")
+          if [ "$CHANNEL" != "nightly" ]; then
+            flags+=(--verify-tag)
+          fi
           if [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "beta" ]; then
             # Read every page so a long history of nightly releases cannot
             # push the most recent stable release out of the search window.
@@ -659,14 +679,14 @@ jobs:
             # Nightly releases are frequent; keep their release records concise.
             flags+=(--prerelease)
           fi
-          gh release create "$VERSION" "$installer" "$installer.sha256" "${flags[@]}"
+          gh release create "$RELEASE_TAG" "$installer" "$installer.sha256" "${flags[@]}"
 
       - name: Confirm the uploaded asset bytes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download "$VERSION" -R "$GITHUB_REPOSITORY" \
+          gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
             --pattern 'dsh-work-*-windows-amd64-installer.exe' --dir downloaded
           local_installer="release-assets/dsh-work-${VERSION}-windows-amd64-installer.exe"
           remote_installer=$(ls downloaded/*.exe)
@@ -692,7 +712,7 @@ jobs:
         run: |
           set -euo pipefail
           cp feed/manifest.json "release-assets/dsh-work-${VERSION}-windows-amd64-manifest.json"
-          gh release upload "$VERSION" "release-assets/dsh-work-${VERSION}-windows-amd64-manifest.json" -R "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$RELEASE_TAG" "release-assets/dsh-work-${VERSION}-windows-amd64-manifest.json" -R "$GITHUB_REPOSITORY" --clobber
 
   promote:
     name: Promote the channel feed

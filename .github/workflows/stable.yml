@@ -36,6 +36,7 @@ jobs:
     with:
       channel: stable
       source_sha: ${{ github.sha }}
+      release_tag: ${{ github.ref_name }}
     secrets:
       WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
       WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
