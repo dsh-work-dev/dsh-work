@@ -19,7 +19,7 @@ test("menus follow the 文件／视图／设置／帮助 layout", () => {
   assert.deepEqual(menus.map(keysOf), [
     ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "refresh", "restart", "-", "closeWindow", "quit"],
     ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
-    ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "-", "settings.open"],
+    ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "settings.diagnostics", "-", "settings.open"],
     ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "copyDiagnostics", "devtools", "-", "update", "about"],
   ]);
 });

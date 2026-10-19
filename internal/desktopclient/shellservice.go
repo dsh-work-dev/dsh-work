@@ -174,7 +174,7 @@ func (s *ShellService) publishBuiltinComponents() {
 
 var shellSettingsSections = map[string]bool{
 	"overview": true, "settings": true, "notifications": true, "pets": true,
-	"runtimes": true, "profiles": true, "plugins": true, "data-directories": true, "about": true,
+	"runtimes": true, "profiles": true, "plugins": true, "data-directories": true, "diagnostics": true, "about": true,
 }
 
 // OpenSettings shows dsh-work Settings at a section the shell menu offers.

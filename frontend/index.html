@@ -88,6 +88,7 @@
           </optgroup>
           <optgroup label="Maintenance" data-i18n-label="manager.groupMaintenance">
           <option value="data-directories" data-i18n="manager.dataDirectories">DSH data directories</option>
+          <option value="diagnostics" data-i18n="manager.diagnostics">Diagnostics</option>
           <option value="about" data-i18n="manager.about">About</option>
           </optgroup>
         </select>
@@ -108,6 +109,7 @@
           <div class="nav-group" role="group" aria-labelledby="settings-group-maintenance">
             <h2 id="settings-group-maintenance" class="nav-heading" data-i18n="manager.groupMaintenance">Maintenance</h2>
             <button class="nav-item" data-manager-section="data-directories" type="button"><span data-i18n="manager.dataDirectories">DSH data directories</span></button>
+            <button class="nav-item" data-manager-section="diagnostics" type="button"><span data-i18n="manager.diagnostics">Diagnostics</span></button>
             <button class="nav-item" data-manager-section="about" type="button"><span data-i18n="manager.about">About</span><span id="about-update-badge" class="nav-badge" data-i18n="about.updateBadge" hidden>更新</span></button>
           </div>
         </nav>
@@ -341,6 +343,20 @@
             </section>
           </section>
 
+          <section id="manager-section-diagnostics" class="panel settings-section" data-manager-panel="diagnostics" aria-labelledby="manager-title" hidden>
+            <section class="section" aria-labelledby="diagnostics-recent-title">
+              <div class="section-head"><h2 id="diagnostics-recent-title" data-i18n="diagnostics.recent">Recent problems</h2></div>
+              <p id="diagnostics-status" class="note" role="status" aria-live="polite"></p>
+              <div id="diagnostics-problems" class="group" hidden></div>
+            </section>
+            <section class="section" aria-labelledby="diagnostics-tools-title">
+              <div class="section-head"><h2 id="diagnostics-tools-title" data-i18n="diagnostics.tools">Logs</h2></div>
+              <div class="group settings-list">
+                <div data-setting-switch="settings-verbose-logging" data-label="diagnostics.verbose" data-detail="diagnostics.verboseDetail"></div>
+                <div class="row row-foot"><div class="row-trail"><button id="diagnostics-open-folder" type="button" class="button" data-i18n="diagnostics.openLogFolder">Open log folder</button><button id="diagnostics-export" type="button" class="button" data-i18n="diagnostics.exportBundle">Export diagnostics bundle</button></div></div>
+              </div>
+            </section>
+          </section>
           <section id="manager-section-settings" class="panel settings-section" data-manager-panel="settings" aria-labelledby="manager-title" hidden>
             <div class="settings-list">
               <section class="section" aria-labelledby="general-startup-title">
