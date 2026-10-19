@@ -640,8 +640,11 @@ jobs:
             "The Windows package verifies against the compiled-in update feed.")
           flags=(--title "$VERSION" --notes "$notes" --target "${{ needs.plan.outputs.source_sha }}")
           if [ "$CHANNEL" = "stable" ]; then
-            flags+=(--latest)
+            flags+=(--latest --generate-notes)
+          elif [ "$CHANNEL" = "beta" ]; then
+            flags+=(--prerelease --generate-notes)
           else
+            # Nightly releases are frequent; keep their release records concise.
             flags+=(--prerelease)
           fi
           gh release create "$VERSION" "$installer" "$installer.sha256" "${flags[@]}"
