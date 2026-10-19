@@ -26,7 +26,7 @@ function keyForCode(code) {
 // names and dsh-work's own decoration values cross the frame, each checked
 // against the CSS property it feeds.
 const MAX_THEME_TOKENS = 256;
-const DECOR_SHADOWS = ['--dsh-work-stroke', '--dsh-work-raised', '--dsh-work-floating', '--dsh-work-button'];
+const DECOR_SHADOWS = ['--dsh-work-stroke', '--dsh-work-raised', '--dsh-work-floating', '--dsh-work-composer', '--dsh-work-button'];
 function tokenProperty(name) {
   if (name === '--dsh-work-backdrop') return 'background-image';
   if (name === '--dsh-work-blur' || name === '--dsw-menu-backdrop-filter') return 'backdrop-filter';
@@ -149,7 +149,7 @@ body[data-dsh-work-decor], body[data-dsh-work-decor] * {
   --dsw-elevation-prominent: var(--dsh-work-floating);
 }
 body[data-dsh-work-decor] :is([data-slot="main"], [data-slot="main.conversation"]) > :not([data-slot]) { background-image: var(--dsh-work-backdrop); background-attachment: fixed; }
-body[data-dsh-work-decor] [data-composer-card] { box-shadow: var(--dsh-work-raised); backdrop-filter: var(--dsh-work-blur); }
+body[data-dsh-work-decor] [data-composer-card] { box-shadow: var(--dsh-work-composer); backdrop-filter: var(--dsh-work-blur); }
 /* Lists DSH marks as plugin groups and the task manager list take the theme's group: one
    card with the group border, shadow and radius, rows split by the theme's row divider. */
 body[data-dsh-work-decor] [data-plugin-group] > ul,

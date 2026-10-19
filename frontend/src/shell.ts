@@ -2,7 +2,7 @@ import {Browser, Events, Window} from "@wailsio/runtime";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
-import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrameText, windowFrame, type Rgba} from "./dsh-theme";
+import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
 import {parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
@@ -180,15 +180,15 @@ export function mountShell() {
     const root = document.documentElement;
     const style = getComputedStyle(root);
     const read = (name: string) => style.getPropertyValue(name).trim();
-    root.style.setProperty("--shell-page-fg", pageFrameText(read, resolveColor));
-    const chrome = windowFrame(read, resolveColor);
-    if (chrome) {
-      root.style.setProperty("--shell-frame-bg", chrome.fill);
-      root.style.setProperty("--shell-frame-fg", chrome.text);
-    } else {
-      root.style.removeProperty("--shell-frame-bg");
-      root.style.removeProperty("--shell-frame-fg");
-    }
+    const setFrame = (prefix: string, values: Record<string, string> | undefined) => {
+      for (const [key, name] of Object.entries({fill: "bg", text: "fg", hover: "hover", active: "active", activeText: "active-fg"})) {
+        const value = values?.[key];
+        if (value) root.style.setProperty(`${prefix}-${name}`, value);
+        else root.style.removeProperty(`${prefix}-${name}`);
+      }
+    };
+    setFrame("--shell-page", pageFrame(read, resolveColor));
+    setFrame("--shell-frame", windowFrame(read, resolveColor));
     const supports = (property: string, value: string) => CSS.supports(property, value);
     const tokens = dshThemeTokens(read, supports, resolveColor);
     // A probe resolves theme borders (shorthands, nested var()) to a width and colour.
@@ -199,7 +199,8 @@ export function mountShell() {
       probe.style.border = `var(${name})`;
       const computed = getComputedStyle(probe);
       const width = computed.borderTopWidth;
-      return computed.borderTopStyle === "none" || parseFloat(width) === 0 ? undefined : {width, color: computed.borderTopColor};
+      const invisible = computed.borderTopStyle === "none" || parseFloat(width) === 0 || resolveColor(computed.borderTopColor)?.[3] === 0;
+      return invisible ? undefined : {width, color: computed.borderTopColor};
     };
     for (const [name, value] of Object.entries(dshDecorTokens(read, border))) if (supports(dshTokenProperty(name), value)) tokens[name] = value;
     probe.remove();

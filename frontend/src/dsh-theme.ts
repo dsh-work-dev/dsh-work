@@ -87,24 +87,58 @@ function frame(palette: Palette): {fill: string; source: string} | undefined {
   return undefined;
 }
 
-/** The window frame colours dsh-work paints its title bar with and gives DSH's sidebar. */
-export function windowFrame(read: Read, resolve: Resolve = parseColor): {fill: string; text: string} | undefined {
-  const palette: Palette = {read, color: name => { const value = read(name); return value ? resolve(value) : undefined; }};
-  const chosen = frame(palette);
-  if (!chosen) return undefined;
-  // Navigation text belongs to the navigation fill; a quieter fill takes body text.
-  return {fill: chosen.fill, text: read(chosen.source === "--nav-bg" ? "--nav-fg" : "--text") || read("--text")};
+/** Fills for title bar buttons under the pointer and with their menu open, and the open button's text. */
+export type FrameStates = {hover: string; active: string; activeText: string};
+
+// Button states on a frame. The theme's navigation states belong to its
+// navigation fill; on any other frame the bar uses the theme's general hover and
+// selection. A state must read with its text and stand out from the frame,
+// otherwise the frame's text is laid over it as a tint.
+function frameStates(palette: Palette, fill: Rgba, text: string, nav: boolean): FrameStates {
+  const textColor = palette.color(text) ?? palette.color("--text") ?? [0, 0, 0, 1];
+  const pick = (pairs: [string, string][], tint: number) => {
+    for (const [name, label] of pairs) {
+      const value = palette.color(name);
+      if (!value) continue;
+      const solid = over(value, fill);
+      // a label such as "inherit" names no colour of its own
+      const ink = palette.color(label) && !/^(inherit|initial|unset|revert|currentcolor)$/i.test(palette.read(label)) ? label : text;
+      if (contrastRatio(solid, fill) >= 1.05 && readable(palette.color(ink) ?? textColor, solid)) return {fill: css(solid), text: palette.read(ink)};
+    }
+    // toward the text, or away from it where that would cost the text its contrast
+    const ink = over(textColor, fill);
+    const toward = blend(ink, fill, tint);
+    const away = blend(luminance(ink) > luminance(fill) ? [0, 0, 0, 1] : WHITE, fill, tint);
+    return {fill: css(readable(ink, toward) ? toward : away), text: palette.read(text)};
+  };
+  const hover = pick([...(nav ? [["--nav-hover-bg", text]] as [string, string][] : []), ["--hover", text]], 0.08);
+  const active = pick([...(nav ? [["--nav-active-bg", "--nav-active-fg"]] as [string, string][] : []), ["--selection", "--selection-fg"]], 0.14);
+  return {hover: hover.fill, active: active.fill, activeText: active.text};
 }
 
-/** Title bar text on the startup page, where the bar is the page's own canvas. */
-export function pageFrameText(read: Read, resolve: Resolve = parseColor): string {
-  const canvas = resolve(read("--canvas"));
-  if (!canvas) return read("--text");
-  const ground = over(canvas, WHITE);
-  return ["--text", "--on-ink", "--canvas"].map(read).find(value => {
-    const ink = value ? resolve(value) : undefined;
+const paletteOf = (read: Read, resolve: Resolve): Palette => ({read, color: name => { const value = read(name); return value ? resolve(value) : undefined; }});
+
+/** The window frame colours dsh-work paints its title bar with and gives DSH's sidebar. */
+export function windowFrame(read: Read, resolve: Resolve = parseColor): ({fill: string; text: string} & FrameStates) | undefined {
+  const palette = paletteOf(read, resolve);
+  const chosen = frame(palette);
+  const fill = chosen && parseColor(chosen.fill);
+  if (!chosen || !fill) return undefined;
+  // Navigation text belongs to the navigation fill; a quieter fill takes body text.
+  const nav = chosen.source === "--nav-bg";
+  const text = nav && read("--nav-fg") ? "--nav-fg" : "--text";
+  return {fill: chosen.fill, text: read(text), ...frameStates(palette, fill, text, nav)};
+}
+
+/** The title bar on the startup page, where the bar is the page's own canvas. */
+export function pageFrame(read: Read, resolve: Resolve = parseColor): {text: string} & FrameStates {
+  const palette = paletteOf(read, resolve);
+  const ground = over(palette.color("--canvas") ?? WHITE, WHITE);
+  const text = ["--text", "--on-ink", "--canvas"].find(name => {
+    const ink = palette.color(name);
     return ink && contrastRatio(over(ink, ground), ground) >= 4.5;
-  }) ?? read("--text");
+  }) ?? "--text";
+  return {text: read(text), ...frameStates(palette, ground, text, false)};
 }
 
 // A surface DSH draws over its base: the first candidate the theme's text reads
@@ -352,14 +386,22 @@ export function dshDecorTokens(read: Read, border: (name: string) => Border): Re
     const resolved = border(name);
     return resolved ? `${resolved.width} solid ${resolved.color}` : "0 solid transparent";
   };
+  // DSH's raised surfaces (menus, popovers, floating buttons, cards) take the
+  // theme's group frame. Where groups lie flat on the page (Claude, Swiss) that
+  // frame is empty and the surfaces would lose their edges, so they take the
+  // theme's floating frame instead.
+  const group = join(ring("--group-border"), shadow("--group-shadow"));
+  const flat = group === "none";
   return {
     // DSH lists drawn as the theme's groups (plugin list, automation tasks)
     "--dsh-work-group-border": line("--group-border"),
     "--dsh-work-group-shadow": shadow("--group-shadow") || "none",
     "--dsh-work-row-divider": line("--row-divider"),
-    "--dsh-work-stroke": ring("--group-border") || "0 0 0 0 transparent",
-    "--dsh-work-raised": join(ring("--group-border"), shadow("--group-shadow")),
+    "--dsh-work-stroke": ring("--group-border") || (flat && ring("--dialog-border")) || "0 0 0 0 transparent",
+    "--dsh-work-raised": flat ? join(ring("--dialog-border"), shadow("--dialog-shadow")) : group,
     "--dsh-work-floating": join(ring("--dialog-border"), shadow("--dialog-shadow")),
+    // The composer is a text field: on flat groups it keeps the theme's input frame
+    "--dsh-work-composer": join(ring("--group-border") || ring("--input-border"), shadow("--group-shadow") || (flat ? shadow("--dialog-shadow") : "")),
     "--dsh-work-button": join(ring("--button-border"), shadow("--button-shadow")),
     "--dsh-work-backdrop": read("--aurora") || "none",
     "--dsh-work-blur": read("--surface-blur") || "none",

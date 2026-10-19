@@ -243,8 +243,12 @@ receives, and raised buttons take the theme's button fill. The shell resolves th
 Decoration follows the same values. The shell derives raised, floating and
 button shadows from the theme's group, dialog and button borders and shadows
 (a border becomes a box-shadow ring of the same width, since DSH border widths
-have no token), plus the theme's backdrop (`--aurora`) and surface blur
-(`--surface-blur`). DSH declares its `--dsw-elevation-*` shadows on every
+have no token). DSH's raised shadows also edge its menus, popovers, tooltips,
+floating buttons and cards, so a theme whose groups lie flat on the page
+(no group border or shadow, as Claude and Swiss) gives them its floating frame
+instead, and DSH's composer, a text field, takes the theme's input border
+there. The theme's backdrop (`--aurora`) and surface blur (`--surface-blur`)
+come along too. DSH declares its `--dsw-elevation-*` shadows on every
 element (`body, body *`), so `@dsh-work/shell` injects one stylesheet, active
 while `body[data-dsh-work-decor]` is set, that redeclares them from those
 values and decorates DSH's semantic hooks (`data-slot`, `data-composer-card`,
@@ -565,9 +569,16 @@ paints its bar with it and sends the same fill to DSH as its sidebar colour (see
 [Page bootstrap and host plugins](#page-bootstrap-and-host-plugins)). DSH never
 decides the bar. On the startup page there is no sidebar, so the bar is
 transparent over the page's own background and its text takes the first theme
-colour that reads on the canvas. Its text,
-menu buttons, menus and status line use the theme's navigation and dialog
-tokens (font, radius, hover and active fills, border and shadow). While DSH
+colour that reads on the canvas (`pageFrame`). The bar's menu and window buttons
+take hover and open fills that belong to the surface they sit on: the theme's
+navigation hover and active fills only when the frame is the navigation fill,
+otherwise the theme's general hover and selection. A fill is used only when the
+bar's text reads on it and it stands out from the bar; otherwise the bar's
+text is laid over it as a light tint, or the bar is darkened or lightened away
+from the text where that tint would cost the text contrast. Bauhaus is the case
+this guards: its navigation fill is dark, so the frame falls back to a light
+fill, and the dark navigation hover would hide the menu labels. Menus and the
+status line use the theme's dialog tokens (font, radius, border and shadow). While DSH
 shows a modal dialog (`role="dialog"` with `aria-modal` or
 `data-shortcut-modal`), `@dsh-work/shell` reports the colour and blur of its
 mask, and the shell draws the same mask over the top bar so the window reads
