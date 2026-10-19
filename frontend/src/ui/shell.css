@@ -24,7 +24,7 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
   display: grid; place-items: center; cursor: default;
 }
 .shell-controls button svg { width: 15px; height: 15px; stroke-width: 1.5; }
-.shell-controls button:hover { background: var(--nav-hover-bg); }
+.shell-controls button:hover { background: var(--bar-hover); }
 .shell-controls .shell-close:hover { background: #c42b1c; color: #fff; }
 .shell-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; }
 /* The bar is the window frame dsh-work chooses (--shell-frame-*); DSH's sidebar takes the same fill. */
@@ -33,10 +33,18 @@ html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
   /* Composited over the canvas, as DSH composites its sidebar over its base. */
   background: linear-gradient(var(--bar-fill), var(--bar-fill)), var(--canvas);
   color: var(--shell-frame-fg, var(--nav-fg)); font-family: var(--font-body);
+  --bar-hover: var(--shell-frame-hover, var(--nav-hover-bg));
+  --bar-active: var(--shell-frame-active, var(--nav-active-bg));
+  --bar-active-fg: var(--shell-frame-active-fg, var(--nav-active-fg));
 }
 /* The startup page has no sidebar, so there the frame is the page itself: the bar
    lets the page's background (canvas or a theme backdrop) run under it. */
-html[data-shell]:not([data-shell-framed]) .shell-bar { background: transparent; color: var(--shell-page-fg, var(--text)); }
+html[data-shell]:not([data-shell-framed]) .shell-bar {
+  background: transparent; color: var(--shell-page-fg, var(--text));
+  --bar-hover: var(--shell-page-hover, var(--hover));
+  --bar-active: var(--shell-page-active, var(--selection));
+  --bar-active-fg: var(--shell-page-active-fg, var(--text));
+}
 html[data-shell]:not([data-shell-framed]) body { background: var(--canvas); }
 .shell-modal-mask {
   position: absolute; z-index: 5; inset: 0;
@@ -52,8 +60,8 @@ html[data-shell]:not([data-shell-framed]) body { background: var(--canvas); }
   height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit;
   font: inherit; font-size: var(--fs-control); font-weight: var(--nav-weight); cursor: default; position: relative;
 }
-.shell-menu-button:hover { background: var(--nav-hover-bg); }
-.shell-menu-button[aria-expanded="true"] { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+.shell-menu-button:hover { background: var(--bar-hover); }
+.shell-menu-button[aria-expanded="true"] { background: var(--bar-active); color: var(--bar-active-fg); }
 .shell-menu-button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .shell-menu-badge::after {
   content: ""; position: absolute; top: 5px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #2f6feb);

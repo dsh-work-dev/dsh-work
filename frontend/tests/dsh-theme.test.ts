@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {controlTokenProperty} from "../src/dsh-controls";
-import {dshDecorTokens, dshThemeTokens, pageFrameText, parseColor, windowFrame, type Border} from "../src/dsh-theme";
+import {dshDecorTokens, dshThemeTokens, pageFrame, parseColor, windowFrame, type Border} from "../src/dsh-theme";
 
 const isColor = (property: string, value: string) => property !== "color" || !/gradient|url\(/.test(value);
 
@@ -74,9 +74,19 @@ test("theme borders and shadows become DSH's raised and floating decoration", ()
   const tokens = dshDecorTokens(name => brutal[name] ?? "", name => borders[name]);
   assert.equal(tokens["--dsh-work-raised"], "0 0 0 3px rgb(17, 17, 17), 6px 6px 0 #111111");
   assert.equal(tokens["--dsh-work-floating"], "0 0 0 3px rgb(17, 17, 17), 8px 8px 0 #111111");
-  const flat = dshDecorTokens(name => (name === "--group-shadow" ? "none" : ""), () => undefined);
-  assert.equal(flat["--dsh-work-raised"], "none");
-  assert.equal(flat["--dsh-work-stroke"], "0 0 0 0 transparent");
+});
+
+test("on a theme whose groups lie flat, DSH's raised surfaces keep the theme's floating frame", () => {
+  const claude: Record<string, string> = {"--group-shadow": "none", "--dialog-shadow": "0 2px 4px rgb(11 11 11 / 7%)"};
+  const borders: Record<string, Border> = {"--input-border": {width: "1px", color: "rgba(11, 11, 11, 0.1)"}, "--dialog-border": {width: "1px", color: "rgba(11, 11, 11, 0.05)"}};
+  const tokens = dshDecorTokens(name => claude[name] ?? "", name => borders[name]);
+  assert.equal(tokens["--dsh-work-raised"], "0 0 0 1px rgba(11, 11, 11, 0.05), 0 2px 4px rgb(11 11 11 / 7%)");
+  assert.equal(tokens["--dsh-work-stroke"], "0 0 0 1px rgba(11, 11, 11, 0.05)");
+  assert.equal(tokens["--dsh-work-composer"], "0 0 0 1px rgba(11, 11, 11, 0.1), 0 2px 4px rgb(11 11 11 / 7%)", "the composer is framed as the theme's inputs");
+  assert.equal(tokens["--dsh-work-group-border"], "0 solid transparent", "lists drawn as the theme's groups stay flat");
+  const bare = dshDecorTokens(name => (name === "--group-shadow" ? "none" : ""), () => undefined);
+  assert.equal(bare["--dsh-work-raised"], "none");
+  assert.equal(bare["--dsh-work-stroke"], "0 0 0 0 transparent");
 });
 
 test("translucent theme fills become opaque DSH surfaces", () => {
@@ -95,18 +105,27 @@ test("control values are checked against the property they feed", () => {
 });
 
 test("dsh-work chooses the window frame and gives DSH's sidebar the same fill", () => {
-  const theme: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111", "--nav-bg": "#ffd23f", "--nav-fg": "#111111"};
+  const theme: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111", "--nav-bg": "#ffd23f", "--nav-fg": "#111111", "--nav-hover-bg": "#ffe27a", "--nav-active-bg": "#111111", "--nav-active-fg": "#ffd23f"};
   const read = (name: string) => theme[name] ?? "";
   const chrome = windowFrame(read);
-  assert.deepEqual(chrome, {fill: "rgb(255, 210, 63)", text: "#111111"});
+  assert.deepEqual(chrome, {fill: "rgb(255, 210, 63)", text: "#111111", hover: "rgb(255, 226, 122)", active: "rgb(17, 17, 17)", activeText: "#ffd23f"}, "a navigation frame keeps the theme's navigation states");
   assert.equal(dshThemeTokens(read, isColor)["--dsw-specific-sidebar-fill"], chrome!.fill);
-  const bauhaus: Record<string, string> = {"--canvas": "#f4efe6", "--text": "#111111", "--nav-bg": "#111111", "--nav-fg": "#ffffff", "--wash": "#ebe4d6"};
-  assert.deepEqual(windowFrame(name => bauhaus[name] ?? ""), {fill: "rgb(235, 228, 214)", text: "#111111"}, "a fill body text cannot read on falls to a quieter one");
 });
 
-test("startup title bar text reads on the page canvas", () => {
-  const classic: Record<string, string> = {"--canvas": "#008080", "--text": "#000000", "--on-ink": "#ffffff"};
-  assert.equal(pageFrameText(name => classic[name] ?? ""), "#ffffff");
-  const brutal: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111"};
-  assert.equal(pageFrameText(name => brutal[name] ?? ""), "#111111");
+test("a frame that is not the navigation fill does not take the navigation states", () => {
+  const bauhaus: Record<string, string> = {"--canvas": "#f4efe6", "--text": "#111111", "--nav-bg": "#111111", "--nav-fg": "#ffffff", "--nav-hover-bg": "#2a2a2a", "--nav-active-bg": "#f5c518", "--nav-active-fg": "#121212", "--wash": "#ebe4d6", "--hover": "#e6e0d2", "--selection": "#f5c518", "--selection-fg": "#121212"};
+  assert.deepEqual(windowFrame(name => bauhaus[name] ?? ""), {fill: "rgb(235, 228, 214)", text: "#111111", hover: "rgb(218, 211, 198)", active: "rgb(245, 197, 24)", activeText: "#121212"}, "a fill body text cannot read on falls to a quieter one, with the general selection; a hover that does not stand out from it becomes a tint");
+});
+
+test("startup title bar text and button states read on the page canvas", () => {
+  const classic: Record<string, string> = {"--canvas": "#008080", "--text": "#000000", "--on-ink": "#ffffff", "--hover": "#d4d0c8", "--selection": "#000080", "--selection-fg": "#ffffff"};
+  const page = pageFrame(name => classic[name] ?? "");
+  assert.equal(page.text, "#ffffff");
+  assert.equal(page.hover, "rgb(0, 118, 118)", "a hover the bar's text cannot read on becomes a tint away from that text, which keeps it readable");
+  assert.deepEqual([page.active, page.activeText], ["rgb(0, 0, 128)", "#ffffff"]);
+  const brutal: Record<string, string> = {"--canvas": "#fff4e0", "--text": "#111111", "--selection": "#fff08a", "--selection-fg": "inherit"};
+  const plain = pageFrame(name => brutal[name] ?? "");
+  assert.equal(plain.text, "#111111");
+  assert.deepEqual([plain.active, plain.activeText], ["rgb(255, 240, 138)", "#111111"], "a label that names no colour leaves the bar's text");
+  assert.equal(plain.hover, "rgb(236, 226, 207)", "a theme without a hover tints the canvas with its text");
 });
