@@ -98,9 +98,15 @@ silently mutate DSH-owned data.
   menus 文件 (new session, workspace, terminal and browser; close, quit), 视图
   (sidebars, zoom, full screen, desktop pet), 运行 (refresh, restart DSH, safe
   mode), 设置 (each Settings section and DSH settings) and 帮助 (docs, keyboard
-  shortcuts, feedback, diagnostics, updates, about); DSH commands show their
+  shortcuts, feedback, logs, diagnostics, updates, about); DSH commands show their
   current DSH shortcuts. The bar ends with native-behaving minimise, maximise
   (with Windows 11 Snap layouts) and close buttons. Alt or F10 focuses the menus, also while typing in DSH.
+- Each process keeps a bounded local log. Settings › Diagnostics lists recent
+  problems with a plain title and the action that usually fixes them, copies
+  an anonymized Markdown report, opens a prefilled dsh-work GitHub issue form
+  for pasting it, exports a diagnostics bundle the user attaches themselves,
+  opens the log folder and turns detailed logging on until it is turned off.
+  Nothing is uploaded automatically.
 - The manager CLI shares the daemon for online operations and uses locked
   offline access when the daemon is unavailable.
 - Windows uses a Job Object to own the Worker process tree.

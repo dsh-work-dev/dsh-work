@@ -60,6 +60,9 @@ system-wide Windows service.
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
 | `internal/pet` | data-only Pet catalog adapters, bounded cache, runtime, renderer and overlay projection |
+| `internal/redact` | secret removal shared by Worker output and log records |
+| `internal/logging` | per-process structured log files, rotation, crash capture and the log file layout |
+| `internal/diagnostics` | daemon-side problem list, issue report and diagnostics bundle derived from the log files |
 | `frontend` | trusted Host state projection and interaction |
 
 ## Dependency direction
@@ -657,6 +660,75 @@ Assign the initial window URL before creating the window to avoid a second
 initial navigation. On Windows, child launch uses CREATE_NO_WINDOW to
 suppress the console; STARTF_USESHOWWINDOW/SW_HIDE would override the first
 native ShowWindow request and must not be used for the UI launch.
+
+## Logging and diagnostics
+
+Logging has three layers with one dependency direction:
+`redact` ← `logging` ← `diagnostics` ← daemon services ← `desktopclient` ←
+frontend.
+
+| Layer | Module | Owns | Does not |
+|---|---|---|---|
+| Record | `internal/redact`, `internal/logging` | one JSONL file per process, rotation and retention, secret removal at write time, crash stacks | read logs or know the UI |
+| Diagnose | `internal/diagnostics` (daemon) | problem list, Markdown issue report, diagnostics bundle, anonymization on export | write logs or depend on Wails |
+| Present | frontend (Settings › Diagnostics, Help menu, failed-startup panel, About) | problems with actions, copy report, open GitHub, export | parse log files |
+
+**Files.** Logs live in the local, non-migrating log root
+(`%LOCALAPPDATA%\dsh-work\logs` on Windows, `~/Library/Logs/dsh-work` on macOS,
+`${XDG_STATE_HOME:-~/.local/state}/dsh-work/logs` on Linux), directory 0700 and
+files 0600. Each process writes only its own file, and only after it holds its
+single-instance lock; earlier records are buffered and, if the process exits
+first, written to `<proc>-early.log`.
+
+| File | Writer | Content | Size × backups | Max age |
+|---|---|---|---|---|
+| `daemon.log` | daemon | Host, lifecycle, update, storage, plugins, notifications, IPC, Wails | 5 MB × 5 | 14 days |
+| `worker.log` | daemon | DSH Worker stdout (INFO) and stderr (WARN), one record per line | 10 MB × 3 | 7 days |
+| `ui.log` | UI client | UI process events and batched frontend reports | 2 MB × 3 | 14 days |
+| `crash/` | each process | `runtime/debug.SetCrashOutput` target, rotated to a timestamped file on the next start | newest 10 | 30 days |
+
+Backups are gzip-compressed; the worst case is about 35 MB. The CLI keeps its
+console output and writes no log file; operations it sends to the daemon are
+logged there.
+
+**Records.** Each line is a `slog` JSON object with `time`, `level`, `msg` (a
+stable English phrase), `proc`, `run` (per-process-run id) and `mod` (a fixed
+module vocabulary), plus `gen`, `op` (the UI operation id, shared across
+processes) and `code` when they apply. ERROR means an operation failed or a
+feature is unavailable, WARN a degraded continuation, INFO state transitions and
+user-initiated operations, DEBUG step detail. Every user-visible failure carries
+a `lifecycle.ErrorCode`; a WARN or ERROR record with a `code` is what the problem
+list reads. Packages obtain loggers through `logging.Module(name)` at the call
+site; `logging.Init` also routes the standard `log` package and Wails system
+messages into the same file. The default level is INFO. The Host preference
+`verboseLogging` switches both processes to DEBUG at once through a
+`slog.LevelVar`; `DSH_WORK_LOG_LEVEL` overrides it for development, and
+development builds, desktop probes or `DSH_WORK_LOG_STDERR=1` also write text to
+stderr. The frontend reports through `LogService.Write` in batches, capped at
+50 entries a minute, and records uncaught script errors as `UI_SCRIPT_ERROR`.
+
+**Diagnostics.** `DiagnosticsService` serves only the trusted workbench window.
+Problems come from the last 7 days of `daemon.log` and `ui.log` including
+backups; records with the same code within 10 minutes merge into one counted
+problem, newest first, at most 20. Log files are read into memory and closed
+before parsing so a concurrent rotation is never blocked, and an unreadable
+backup is skipped. The report is Markdown of at most 12 KB: the problem, an
+environment table, related records around it and the Worker stderr tail of its
+generation. The bundle is a zip of at most 24 MB with a manifest, the
+environment, all logs, crash files and recent DSH startup logs; when it is too
+large the oldest Worker backups are dropped first and listed as omitted.
+Problem messages, reports and bundles replace the home directory with `~` and
+the host name with `<host>`.
+
+**Dependency decision.** Records use `log/slog` from the standard library.
+Rotation uses `gopkg.in/natefinch/lumberjack.v2`: it is the most widely used
+size-rotating `io.Writer` with backup count, age and gzip, and its
+one-writer-per-file assumption matches one file per process.
+`github.com/DeRuina/timberjack` was rejected because time-based rotation is not
+needed; a shared multi-process file was rejected because neither library
+supports concurrent writers. Revisit if logs need time-based rotation, a
+process must share another process's file, or lumberjack stops being
+maintained.
 
 ## Platform boundary
 
