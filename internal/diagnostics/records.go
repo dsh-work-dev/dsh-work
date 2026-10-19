@@ -54,7 +54,10 @@ func readRecords(dir, base string, since time.Time) ([]record, error) {
 	for _, path := range paths {
 		fileRecords, err := readRecordFile(path, since)
 		if err != nil {
-			return nil, err
+			// lumberjack compresses a rotated backup in the background, so a
+			// read can see a half-written .gz. Skip an unreadable file instead
+			// of failing every problem and report.
+			continue
 		}
 		records = append(records, fileRecords...)
 	}

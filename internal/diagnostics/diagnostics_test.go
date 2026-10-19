@@ -391,6 +391,43 @@ func TestWriteBundleRejectsRelativePath(t *testing.T) {
 	}
 }
 
+func TestProblemsSkipHalfWrittenGzipBackup(t *testing.T) {
+	dir := t.TempDir()
+	writeRecords(t, dir, "daemon.log", testRecord(testNow().Add(-time.Minute), "ERROR", "DSH_START_FAILED", "gen-1"))
+	// lumberjack writes the .gz in the background; a reader can see it cut short.
+	writeFile(t, filepath.Join(dir, "daemon-20261019-110000.log.gz"), []byte{0x1f, 0x8b, 0x08, 0x00})
+
+	problems, err := testDiagnostics(dir).Problems(context.Background())
+	if err != nil {
+		t.Fatalf("Problems() error = %v, want the damaged backup skipped", err)
+	}
+	if len(problems) != 1 || problems[0].Code != "DSH_START_FAILED" {
+		t.Fatalf("problems = %#v, want the record from daemon.log", problems)
+	}
+}
+
+func TestWriteBundleListsUnreadableBackupAsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	writeRecords(t, dir, "daemon.log", testRecord(testNow(), "INFO", "", ""))
+	writeFile(t, filepath.Join(dir, "daemon-20261019-110000.log.gz"), []byte{0x1f, 0x8b, 0x08, 0x00})
+
+	outputPath := filepath.Join(t.TempDir(), "bundle.zip")
+	result, err := testDiagnostics(dir).WriteBundle(context.Background(), outputPath)
+	if err != nil {
+		t.Fatalf("WriteBundle() error = %v, want the damaged backup omitted", err)
+	}
+	if len(result.Omitted) != 1 || result.Omitted[0] != "logs/daemon-20261019-110000.log.gz" {
+		t.Fatalf("Omitted = %#v, want the damaged backup", result.Omitted)
+	}
+	entries := readZip(t, outputPath)
+	if _, ok := entries["logs/daemon.log"]; !ok {
+		t.Fatalf("bundle entries = %v, want logs/daemon.log", mapKeys(entries))
+	}
+	if !strings.Contains(string(entries["manifest.json"]), "daemon-20261019-110000.log.gz") {
+		t.Fatalf("manifest = %s, want the omitted backup listed", entries["manifest.json"])
+	}
+}
+
 func readZip(t *testing.T, name string) map[string][]byte {
 	t.Helper()
 	archive, err := zip.OpenReader(name)

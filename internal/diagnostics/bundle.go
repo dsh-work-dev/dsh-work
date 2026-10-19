@@ -41,13 +41,13 @@ func (d *Diagnostics) WriteBundle(ctx context.Context, outputPath string) (Bundl
 	if err != nil {
 		return BundleResult{}, err
 	}
-	entries, err := d.bundleFiles()
+	entries, unreadable, err := d.bundleFiles()
 	if err != nil {
 		return BundleResult{}, err
 	}
 	entries = append(entries, bundleEntry{name: "environment.json", data: []byte(d.anonymize(string(environmentData)))})
 
-	omitted := make([]string, 0)
+	omitted := append(make([]string, 0, len(unreadable)), unreadable...)
 	manifestData, err := d.manifest(environment.AppVersion, omitted)
 	if err != nil {
 		return BundleResult{}, err
@@ -83,14 +83,15 @@ func (d *Diagnostics) WriteBundle(ctx context.Context, outputPath string) (Bundl
 	return BundleResult{Path: outputPath, Size: size, Omitted: omitted}, nil
 }
 
-func (d *Diagnostics) bundleFiles() ([]bundleEntry, error) {
+func (d *Diagnostics) bundleFiles() ([]bundleEntry, []string, error) {
 	if d.Dir() == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var entries []bundleEntry
+	var unreadable []string
 	logEntries, err := os.ReadDir(d.Dir())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, file := range logEntries {
 		name := file.Name()
@@ -102,29 +103,26 @@ func (d *Diagnostics) bundleFiles() ([]bundleEntry, error) {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("stat log file %s: %w", name, err)
+			return nil, nil, fmt.Errorf("stat log file %s: %w", name, err)
 		}
 		data, err := os.ReadFile(filepath.Join(d.Dir(), name))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("read log file %s: %w", name, err)
+			unreadable = append(unreadable, path.Join("logs", name))
+			continue
 		}
 		bundleName := name
 		if strings.HasSuffix(name, ".gz") {
-			reader, err := gzip.NewReader(bytes.NewReader(data))
+			// A backup lumberjack is still compressing, or a damaged one, is
+			// listed as omitted instead of failing the whole bundle.
+			decompressed, err := gunzip(data)
 			if err != nil {
-				return nil, fmt.Errorf("open gzip log %s: %w", name, err)
+				unreadable = append(unreadable, path.Join("logs", name))
+				continue
 			}
-			data, err = io.ReadAll(reader)
-			closeErr := reader.Close()
-			if err != nil {
-				return nil, fmt.Errorf("read gzip log %s: %w", name, err)
-			}
-			if closeErr != nil {
-				return nil, fmt.Errorf("close gzip log %s: %w", name, closeErr)
-			}
+			data = decompressed
 			bundleName = strings.TrimSuffix(name, ".gz")
 		}
 		backup, worker := isLogBackup(bundleName)
@@ -140,7 +138,7 @@ func (d *Diagnostics) bundleFiles() ([]bundleEntry, error) {
 	crashDir := filepath.Join(d.Dir(), logging.CrashDirName)
 	crashFiles, err := os.ReadDir(crashDir)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, file := range crashFiles {
 		if file.IsDir() || !strings.HasSuffix(file.Name(), ".txt") {
@@ -151,14 +149,14 @@ func (d *Diagnostics) bundleFiles() ([]bundleEntry, error) {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("stat crash file %s: %w", file.Name(), err)
+			return nil, nil, fmt.Errorf("stat crash file %s: %w", file.Name(), err)
 		}
 		data, err := os.ReadFile(filepath.Join(crashDir, file.Name()))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("read crash file %s: %w", file.Name(), err)
+			return nil, nil, fmt.Errorf("read crash file %s: %w", file.Name(), err)
 		}
 		entries = append(entries, bundleEntry{
 			name:    path.Join(logging.CrashDirName, file.Name()),
@@ -169,10 +167,10 @@ func (d *Diagnostics) bundleFiles() ([]bundleEntry, error) {
 
 	dshEntries, err := d.dshBundleFiles()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	entries = append(entries, dshEntries...)
-	return entries, nil
+	return entries, unreadable, nil
 }
 
 func (d *Diagnostics) dshBundleFiles() ([]bundleEntry, error) {
@@ -366,4 +364,13 @@ func writeBundleZip(outputPath string, entries []bundleEntry) (int64, error) {
 	}
 	keepTemporary = true
 	return info.Size(), nil
+}
+
+func gunzip(data []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
 }
