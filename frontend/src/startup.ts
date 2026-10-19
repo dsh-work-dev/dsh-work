@@ -7,6 +7,7 @@ import {runningLaunchSelection, startupProfileName, type FaultPlugin, type Lifec
 import {acquisitionPreparation, runtimePreparationText, formatRuntimeBytes} from "./acquisition-view";
 import {mountOperationLog} from "./operation-log";
 import {applyLocale, subscribeLocale, t} from "./i18n";
+import {latestProblem, reportOnGitHub} from "./diagnostics";
 import {icon} from "./ui/icons";
 
 export function mountHost() {
@@ -387,6 +388,15 @@ export function mountHost() {
     element("diagnostic-copy-status").textContent = t("common.copied");
   })().catch(() => { element("diagnostic-copy-status").textContent = t("common.copyFailed"); }));
 
+  element("report-startup-problem").addEventListener("click", () => void (async () => {
+    const result = element("diagnostic-copy-status");
+    try {
+      await reportOnGitHub(await latestProblem());
+      result.textContent = t("diagnostics.reportCopied");
+    } catch {
+      result.textContent = t("diagnostics.actionFailed");
+    }
+  })());
   const offAcquisition = Events.On("acquisition", event => {
     const update = event.data as OperationStatus;
     if (update.artifact.kind === "plugin") return;

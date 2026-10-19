@@ -5,7 +5,7 @@ import {Events} from "@wailsio/runtime";
 
 import {HostService, ManagerService, SettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {buildBuiltinComponentViews} from "./builtin-components";
-import {diagnosticsReport} from "./diagnostics";
+import {copyReport, latestProblem} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
 import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
@@ -15,6 +15,7 @@ import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
 import {mountNotifications, mountSettings} from "./settings";
 import {mountPets} from "./pets";
+import {mountDiagnostics} from "./diagnostics-panel";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
 import {subscribeLocale, t} from "./i18n";
 import {icon} from "./ui/icons";
@@ -138,13 +139,13 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "settings" | "notifications" | "pets" | "about";
+type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "pets" | "about";
 
 type DesktopUpdateState = UpdateSnapshot;
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
-  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
+  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
     return value;
   }
   return "overview";
@@ -338,6 +339,7 @@ export function mountManager() {
     plugins: {title: "manager.plugins"},
     runtimes: {title: "manager.runtimes"},
     "data-directories": {title: "manager.dataDirectories"},
+    diagnostics: {title: "manager.diagnostics"},
     notifications: {title: "manager.notifications"},
     pets: {title: "manager.pets"},
     about: {title: "manager.about"}
@@ -398,6 +400,12 @@ export function mountManager() {
   mountStorage();
   const notifications = mountNotifications(feedbackFor("notifications"));
   const pets = mountPets();
+  const diagnosticsPanel = mountDiagnostics({
+    feedback: feedbackFor("diagnostics"),
+    open: section => showSection(section),
+    restart: () => HostService.Restart(),
+    checkUpdates: () => { showSection("about"); void performUpdateAction(); },
+  });
 
   const sectionPositions = new Map<ManagerSection, number>();
   const sectionFocus = new Map<ManagerSection, {element: HTMLElement; selector?: string}>();
@@ -418,6 +426,7 @@ export function mountManager() {
     const changed = next !== currentSection;
     if (changed) sectionPositions.set(currentSection, contentScroller.scrollTop);
     currentSection = next;
+    if (next === "diagnostics") void diagnosticsPanel.refresh();
     const sharedState = document.querySelector<HTMLElement>(".manager-load-state");
     if (sharedState) sharedState.style.display = ["overview", "profiles", "plugins", "runtimes"].includes(next) ? "" : "none";
     managerTitle.textContent = t(sectionCopy[next].title);
@@ -628,7 +637,7 @@ export function mountManager() {
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;
     try {
-      await navigator.clipboard.writeText(diagnosticsReport({update: updateState, state: hostStatus?.state, snapshot}));
+      await copyReport(await latestProblem());
       transientStatus(result, t("logs.copied"));
     } catch { result.textContent = t("logs.copyFailed"); }
   })());

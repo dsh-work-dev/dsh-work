@@ -31,7 +31,7 @@ func TestShellServiceOpensOnlyMenuSectionsFromTrustedWindows(t *testing.T) {
 	if err := s.OpenSettings(trusted, "unknown"); err == nil {
 		t.Fatal("opened a section outside the menu")
 	}
-	for _, section := range []string{"overview", "settings", "notifications", "pets", "runtimes", "profiles", "plugins", "data-directories", "about"} {
+	for _, section := range []string{"overview", "settings", "notifications", "pets", "runtimes", "profiles", "plugins", "data-directories", "diagnostics", "about"} {
 		if err := s.OpenSettings(trusted, section); err != nil {
 			t.Fatal(err)
 		}

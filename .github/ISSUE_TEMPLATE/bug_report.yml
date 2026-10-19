@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a problem with dsh-work
+labels: [bug]
+body:
+  - type: textarea
+    id: report
+    attributes:
+      label: Report
+      description: Paste the report copied from dsh-work (Settings › Diagnostics › Copy report). You can drag a diagnostics bundle (.zip) here too.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What were you doing?
+      description: The steps before the problem appeared.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: false

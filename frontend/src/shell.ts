@@ -1,6 +1,6 @@
-import {Browser, Clipboard, Events, Window} from "@wailsio/runtime";
-import {HostService, ManagerService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
-import {diagnosticsReport} from "./diagnostics";
+import {Browser, Events, Window} from "@wailsio/runtime";
+import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
 import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrameText, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
@@ -83,11 +83,8 @@ export function mountShell() {
   };
   const toast = createToast();
   const copyDiagnostics = async () => {
-    const [status, update, snapshot] = await Promise.all([
-      HostService.GetStatus().catch(() => undefined), HostService.GetUpdateState().catch(() => undefined), ManagerService.GetSnapshot().catch(() => undefined),
-    ]);
     try {
-      await Clipboard.SetText(diagnosticsReport({update, state: status?.state, snapshot}));
+      await copyReport(await latestProblem());
       toast.show(t("shell.toast.diagnosticsCopied"));
     } catch (error) {
       toast.show(t("shell.toast.diagnosticsFailed"));

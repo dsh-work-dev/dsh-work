@@ -24,7 +24,7 @@ export interface MenuState {
   sidebarLeftOpen?: boolean;
 }
 
-export type SettingsSection = "overview" | "settings" | "notifications" | "pets" | "runtimes" | "profiles" | "plugins" | "data-directories" | "about";
+export type SettingsSection = "overview" | "settings" | "notifications" | "pets" | "runtimes" | "profiles" | "plugins" | "data-directories" | "diagnostics" | "about";
 export type WindowAction = "close" | "zoom-in" | "zoom-out" | "zoom-reset" | "fullscreen";
 /** Window actions with keys of their own, handled by the shell and forwarded by the DSH plugin. */
 export const keyedWindowActions: readonly WindowAction[] = ["zoom-in", "zoom-out", "zoom-reset", "fullscreen"];
@@ -113,6 +113,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       settings("runtimes", "runtimes"), settings("profiles", "profiles"), settings("plugins", "plugins"),
       separator,
       settings("data-directories", "dataDirectories"),
+      settings("diagnostics", "diagnostics"),
       separator,
       dsh("settings.open"),
     ]},
@@ -122,6 +123,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       host("feedbackDesktop", {kind: "link", target: "feedback-desktop"}),
       host("feedbackDsh", {kind: "link", target: "feedback-dsh"}),
       separator,
+      {...settings("diagnostics", "diagnostics"), key: "logs", label: t("shell.menu.logs")},
       host("copyDiagnostics", {kind: "diagnostics"}),
       host("devtools", {kind: "devtools"}),
       separator,
