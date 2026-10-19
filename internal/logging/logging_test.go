@@ -145,14 +145,16 @@ func TestSecretsNeverReachTheFile(t *testing.T) {
 	if err := logger.attach(); err != nil {
 		t.Fatal(err)
 	}
-	logger.module(ModApp).Error("token=abc", "detail", "password: hunter2", "err", fmt.Errorf("cookie=c1"))
+	logger.module(ModApp).Error("token=tok-secret-xyz", "detail", "password: hunter2", "err", fmt.Errorf("cookie=cookie-secret-qrs"))
 	logger.close()
 
 	data, err := os.ReadFile(filepath.Join(logger.dir, uiFile.name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"abc", "hunter2", "c1"} {
+	// Secrets use letters outside 0-9a-f so they cannot appear by chance in the
+	// random hex run id written on every record.
+	for _, secret := range []string{"tok-secret-xyz", "hunter2", "cookie-secret-qrs"} {
 		if bytes.Contains(data, []byte(secret)) {
 			t.Fatalf("log leaked %q: %s", secret, data)
 		}

@@ -9,15 +9,22 @@ import (
 	"time"
 )
 
+const (
+	DaemonLogFile = "daemon.log"
+	UILogFile     = "ui.log"
+	WorkerLogFile = "worker.log"
+	CrashDirName  = "crash"
+)
+
 type fileSpec struct {
 	name                              string
 	maxSizeMB, maxBackups, maxAgeDays int
 }
 
 var (
-	daemonFile = fileSpec{"daemon.log", 5, 5, 14}
-	workerFile = fileSpec{"worker.log", 10, 3, 7}
-	uiFile     = fileSpec{"ui.log", 2, 3, 14}
+	daemonFile = fileSpec{DaemonLogFile, 5, 5, 14}
+	workerFile = fileSpec{WorkerLogFile, 10, 3, 7}
+	uiFile     = fileSpec{UILogFile, 2, 3, 14}
 )
 
 const (
@@ -29,7 +36,7 @@ const (
 )
 
 func (l *Logger) rotateCrash() string {
-	dir := filepath.Join(l.dir, "crash")
+	dir := filepath.Join(l.dir, CrashDirName)
 	current := filepath.Join(dir, string(l.proc)+".current")
 	rotated := ""
 	if info, err := os.Stat(current); err == nil && info.Size() > 0 {

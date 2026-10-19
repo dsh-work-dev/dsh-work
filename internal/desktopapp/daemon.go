@@ -18,6 +18,7 @@ import (
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/desktopprobe"
+	"github.com/local/dsh-work/internal/diagnostics"
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
@@ -328,8 +329,52 @@ func runDaemon(identity string, resources Resources) {
 	storageService := dshworkapp.NewStorageService(locations,
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
 		func(currentPath string) (string, error) { return nativeui.ChooseDirectory(desktop, currentPath) })
+	diag := diagnostics.New(diagnostics.Config{Dir: logging.Dir(), Environment: func(ctx context.Context) diagnostics.Environment {
+		environment := diagnostics.Environment{
+			AppVersion: version.String(),
+			AppChannel: version.Channel(),
+			State:      string(host.Status().State),
+		}
+		if manager == nil {
+			return environment
+		}
+		snapshot, err := manager.Snapshot(ctx)
+		if err != nil || snapshot.Current == nil {
+			return environment
+		}
+		current := snapshot.Current
+		environment.Profile = current.Profile.Name
+		for _, runtime := range snapshot.Runtimes {
+			if runtime.ID == current.RuntimeID {
+				environment.DSHVersion = runtime.Version
+				break
+			}
+		}
+		if current.Node.Kind == dshmanager.NodeSelectionSystem {
+			if snapshot.SystemNode != nil {
+				environment.NodeVersion = snapshot.SystemNode.Version
+			}
+		} else {
+			for _, node := range snapshot.Nodes {
+				if node.ID == current.Node.InstallationID {
+					environment.NodeVersion = node.Version
+					break
+				}
+			}
+		}
+		for _, profile := range snapshot.Profiles {
+			if profile.Ref == current.Profile {
+				environment.PluginCount = len(profile.Plugins)
+				break
+			}
+		}
+		return environment
+	}})
+	diagnosticsService := dshworkapp.NewDiagnosticsService(diag,
+		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
+		func(name string) (string, error) { return nativeui.SaveDiagnosticsBundle(desktop, name) })
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Services: map[string]any{
-		"HostService": hostService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService,
+		"HostService": hostService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
 		server.ServeAccountCallback(w, r, generation)

@@ -5,7 +5,7 @@ import re
 root = Path(__file__).resolve().parent.parent
 sources = [p.read_text(encoding="utf-8") for p in (root / "internal/app").glob("*.go") if not p.name.endswith("_test.go")]
 types = set(re.findall(r"^type (\w+) ", "\n".join(sources), re.M))
-services = ["HostService", "ManagerService", "SettingsService", "StorageService", "PetSettingsService"]
+services = ["HostService", "ManagerService", "SettingsService", "StorageService", "PetSettingsService", "DiagnosticsService"]
 imports = {"context": "context", "app": "github.com/local/dsh-work/internal/app", "daemon": "github.com/local/dsh-work/internal/daemon"}
 mutating_pet_methods = {
     "SetPetHitRegions", "PetGesture", "OpenPetActivity", "SetPetReducedMotion",

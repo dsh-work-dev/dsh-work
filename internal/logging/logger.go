@@ -158,13 +158,13 @@ func (l *Logger) attach() error {
 	if alreadyAttached {
 		return errors.New("logging is already attached")
 	}
-	if err := os.MkdirAll(filepath.Join(l.dir, "crash"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(l.dir, CrashDirName), 0o700); err != nil {
 		return err
 	}
 	prev := l.rotateCrash()
 
 	var crashErr error
-	crashFile, err := os.OpenFile(filepath.Join(l.dir, "crash", string(l.proc)+".current"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	crashFile, err := os.OpenFile(filepath.Join(l.dir, CrashDirName, string(l.proc)+".current"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		crashErr = err
 	} else {

@@ -12,6 +12,14 @@ import (
 
 var current atomic.Pointer[Logger]
 
+// Dir returns the directory this process writes its logs to, or "" before Init.
+func Dir() string {
+	if logger := current.Load(); logger != nil {
+		return logger.dir
+	}
+	return ""
+}
+
 // Init configures structured logging before this process acquires its singleton boundary.
 func Init(proc Process, dir string) {
 	logger := newLogger(proc, dir, os.Getenv, os.Stderr, version.IsDevelopment())
