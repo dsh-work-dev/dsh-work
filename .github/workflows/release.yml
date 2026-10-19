@@ -640,10 +640,12 @@ jobs:
             "The Windows package verifies against the compiled-in update feed.")
           flags=(--title "$VERSION" --notes "$notes" --target "${{ needs.plan.outputs.source_sha }}")
           if [ "$CHANNEL" = "stable" ] || [ "$CHANNEL" = "beta" ]; then
-            previous_stable=$(gh release list -R "$GITHUB_REPOSITORY" \
-              --exclude-drafts --exclude-pre-releases \
-              --json tagName,publishedAt --limit 100 \
-              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(.publishedAt) | last | .tagName // empty')
+            # Read every page so a long history of nightly releases cannot
+            # push the most recent stable release out of the search window.
+            previous_stable=$(gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[ ] | select(.draft == false and .prerelease == false and (.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) | .tag_name' \
+              | sed -n '1p')
             if [ -z "$previous_stable" ]; then
               previous_stable="release-notes-baseline-v0.1.0"
             fi
