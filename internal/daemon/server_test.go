@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -162,7 +163,12 @@ func TestServerQuitCancelsInFlightCalls(t *testing.T) {
 }
 
 func TestForwardWorkerWaitsForEarlyResponseUpload(t *testing.T) {
-	workerClient := &http.Client{Transport: earlyResponseTransport{}}
+	const upload = "body that remains open while the worker answers"
+	// The Worker consumes the bytes already sent before answering, as a real
+	// streaming upload would. Bytes left unread on the loopback socket make
+	// Windows reset the connection when the frontend closes it, and the reset
+	// can discard the early response before the client reads it.
+	workerClient := &http.Client{Transport: earlyResponseTransport{consume: len(upload)}}
 	session := testWorkerSession{client: workerClient, generation: "test-generation"}
 
 	var serverLog bytes.Buffer
@@ -183,10 +189,28 @@ func TestForwardWorkerWaitsForEarlyResponseUpload(t *testing.T) {
 	}
 	writeDone := make(chan error, 1)
 	go func() {
-		_, err := writer.Write([]byte("body that remains open while the worker answers"))
+		_, err := writer.Write([]byte(upload))
 		writeDone <- err
 	}()
-	response, err := frontend.Client().Do(request)
+	type roundTrip struct {
+		response *http.Response
+		err      error
+	}
+	done := make(chan roundTrip, 1)
+	go func() {
+		response, err := frontend.Client().Do(request)
+		done <- roundTrip{response, err}
+	}()
+	var response *http.Response
+	select {
+	case result := <-done:
+		response, err = result.response, result.err
+	case <-time.After(10 * time.Second):
+		// A failed round trip waits for the request writer, which waits for
+		// more upload bytes; end the upload so the test fails instead of hanging.
+		_ = writer.CloseWithError(errors.New("early response did not arrive"))
+		t.Fatal("early response did not arrive while the upload was open")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,9 +260,16 @@ func (s testWorkerSession) Client() *http.Client { return s.client }
 func (s testWorkerSession) Activate(string)      {}
 func (s testWorkerSession) Close() error         { return nil }
 
-type earlyResponseTransport struct{}
+// earlyResponseTransport answers before the upload ends, after reading the
+// first consume bytes of the request body.
+type earlyResponseTransport struct{ consume int }
 
-func (earlyResponseTransport) RoundTrip(*http.Request) (*http.Response, error) {
+func (t earlyResponseTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if t.consume > 0 && request.Body != nil {
+		if _, err := io.ReadFull(request.Body, make([]byte, t.consume)); err != nil {
+			return nil, err
+		}
+	}
 	return &http.Response{
 		StatusCode:    http.StatusOK,
 		Header:        http.Header{"Content-Length": []string{"5"}},
