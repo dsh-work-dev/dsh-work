@@ -214,5 +214,5 @@ func Configure(c *dshmanager.Config, dsh *dshadapter.Adapter, root string) {
 	}
 	c.StatePath = filepath.Join(root, "state.json")
 	c.Runtimes = []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: runtime.Version, Path: runtime.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
-	c.DefaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+	c.DefaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}}
 }

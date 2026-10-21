@@ -165,12 +165,55 @@ type ProfileRef struct {
 	Name            string `json:"name"`
 }
 
+type AppProfileMigrationRequest struct {
+	Source      ProfileRef `json:"source"`
+	Plugins     []string   `json:"plugins"`
+	Patch       bool       `json:"patch"`
+	Credentials bool       `json:"credentials"`
+}
+
+type AppProfileMigrationPlugin struct {
+	Package          string `json:"package"`
+	Version          string `json:"version"`
+	AlreadyInstalled bool   `json:"alreadyInstalled"`
+}
+
+type AppProfileMigrationData struct {
+	Kind    string `json:"kind"`
+	Count   int    `json:"count,omitempty"`
+	Covered bool   `json:"covered"`
+}
+
+type AppProfileMigrationAnalysis struct {
+	Plugins []AppProfileMigrationPlugin `json:"plugins"`
+	Data    []AppProfileMigrationData   `json:"data"`
+}
+
+type AppProfileMigrationFailure struct {
+	Item    string `json:"item"`
+	Message string `json:"message"`
+}
+
+type AppProfileMigrationReport struct {
+	Applied  []string                     `json:"applied"`
+	Failures []AppProfileMigrationFailure `json:"failures"`
+}
+
+type AppProfileMigrationResult struct {
+	Report   AppProfileMigrationReport `json:"report"`
+	Snapshot Snapshot                  `json:"snapshot"`
+}
+
 type ProfileKind string
 
 const (
 	ProfileKindBuiltIn ProfileKind = "built-in"
 	ProfileKindCustom  ProfileKind = "custom"
+	ProfileKindApp     ProfileKind = "app"
 )
+
+// AppProfileName is the profile dsh-work owns in its managed DSH home.
+const AppProfileName = "dsh-work"
 
 // ProfileDefinition is supplied by the selected DSH adapter. Keeping built-in
 // profile knowledge at that boundary avoids making the manager duplicate a

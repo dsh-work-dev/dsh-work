@@ -1177,7 +1177,8 @@ func TestManagerCanAcquireMissingConfiguredRuntimeOnFirstUse(t *testing.T) {
 		StatePath: filepath.Join(root, "manager.json"), RuntimeInstaller: installer,
 		DSHReleases: testDSHReleases("1.2.3"), RuntimeVerifier: &recordingRuntimeVerifier{version: "1.2.3"},
 		Runtimes:          []RuntimeInfo{{ID: "dsh-1.2.3", Version: "1.2.3", Path: filepath.Join(root, "missing.cmd")}},
-		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}},
+		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}, Profile: ProfileRef{DataDirectoryID: "home", Name: "web"}},
+		DataDirectories:   []DataDirectoryInfo{{ID: "home", Path: filepath.Join(root, "home"), Ownership: DataDirectoryOwnershipDSHWork}},
 	})
 	if err != nil {
 		t.Fatal(err)

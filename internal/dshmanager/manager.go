@@ -50,6 +50,7 @@ type Config struct {
 	RuntimeVerifier        RuntimeVerifier
 	StateStore             StateStore
 	ProfileCatalog         ProfileCatalog
+	AppProfile             AppProfileProvider
 	ProfileReader          ProfileReader
 	ThemeReader            ThemeReader
 	PluginOfficialRegistry string
@@ -2333,6 +2334,9 @@ func discoverProfiles(ctx context.Context, dataDirectories []DataDirectoryInfo, 
 				profiles = append(profiles, profileInfo(ctx, dataDirectory, definition.Name, false, definitions, reader, current, configured, knownGood, lastSwitchAttempt))
 			}
 		}
+		if dataDirectory.Ownership == DataDirectoryOwnershipDSHWork && !containsProfile(profiles, dataDirectory.ID, AppProfileName) {
+			profiles = append(profiles, profileInfo(ctx, dataDirectory, AppProfileName, false, definitions, reader, current, configured, knownGood, lastSwitchAttempt))
+		}
 	}
 	return profiles
 }
@@ -2348,6 +2352,10 @@ func profileInfo(ctx context.Context, dataDirectory DataDirectoryInfo, name stri
 		}
 		autoInitialize = definition.AutoInitialize
 		desktopUnsupported = definition.DesktopUnsupported
+	}
+	if isAppProfile(dataDirectory, name) {
+		kind = ProfileKindApp
+		autoInitialize = true
 	}
 	plugins := []PluginInfo(nil)
 	isCurrent := current != nil && current.Profile == (ProfileRef{DataDirectoryID: dataDirectory.ID, Name: name})
@@ -2413,6 +2421,9 @@ func validatePluginSpec(spec string) error {
 
 func profileExists(catalog ProfileCatalog, dataDirectory DataDirectoryInfo, name string) bool {
 	if isBuiltInProfile(catalog, name) {
+		return true
+	}
+	if dataDirectory.Ownership == DataDirectoryOwnershipDSHWork && strings.EqualFold(name, AppProfileName) {
 		return true
 	}
 	info, err := os.Stat(filepath.Join(dataDirectory.Path, "profiles", name))

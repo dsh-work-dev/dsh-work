@@ -421,6 +421,33 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	return s.manager.ListPlugins(ctx, request)
 }
 
+func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.ProfileRef) (dshmanager.AppProfileMigrationAnalysis, error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.AppProfileMigrationAnalysis{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.AppProfileMigrationAnalysis{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.AnalyzeAppProfileMigration(ctx, source)
+}
+
+func (s *ManagerService) MigrateToAppProfile(ctx context.Context, request dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationResult, error) {
+	if s == nil || s.manager == nil {
+		return dshmanager.AppProfileMigrationResult{}, managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return dshmanager.AppProfileMigrationResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	if s.host == nil {
+		return dshmanager.AppProfileMigrationResult{}, managerUnavailable()
+	}
+	return s.host.MigrateToAppProfile(ctx, request)
+}
+
 func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.PluginInstallRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.PluginResult{}, managerUnavailable()

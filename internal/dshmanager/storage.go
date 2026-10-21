@@ -370,6 +370,11 @@ type ProfileCatalog interface {
 	BuiltInProfiles() []ProfileDefinition
 }
 
+type AppProfileProvider interface {
+	AppProfileBundles() []string
+	InitializeAppProfile(profilePath string) error
+}
+
 // ProfileReader is a read-only projection seam. DSH remains responsible for
 // reconciliation; the default reader only inspects direct dependency data.
 type ProfileReader interface {

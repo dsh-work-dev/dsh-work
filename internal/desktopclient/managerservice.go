@@ -197,6 +197,20 @@ func (s *ManagerService) CloneProfile(ctx context.Context, request dshmanager.Pr
 	return value, err
 }
 
+func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.ProfileRef) (dshmanager.AppProfileMigrationAnalysis, error) {
+	if s.Local != nil { return s.Local.AnalyzeAppProfileMigration(ctx, source) }
+	var value dshmanager.AppProfileMigrationAnalysis
+	err := call(ctx, s.Client, "ManagerService", "AnalyzeAppProfileMigration", []any{source}, &value)
+	return value, err
+}
+
+func (s *ManagerService) MigrateToAppProfile(ctx context.Context, request dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationResult, error) {
+	if s.Local != nil { return s.Local.MigrateToAppProfile(ctx, request) }
+	var value dshmanager.AppProfileMigrationResult
+	err := call(ctx, s.Client, "ManagerService", "MigrateToAppProfile", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) DeleteProfile(ctx context.Context, request dshmanager.ProfileDeleteRequest) (dshmanager.Snapshot, error) {
 	if s.Local != nil { return s.Local.DeleteProfile(ctx, request) }
 	var value dshmanager.Snapshot

@@ -58,6 +58,11 @@ func (m *Manager) CloneProfile(ctx context.Context, request ProfileCloneRequest)
 				return ProfileCloneResult{}, err
 			}
 			info, err = os.Lstat(source)
+		} else if errors.Is(err, os.ErrNotExist) && isAppProfile(dataDirectory, request.Profile.Name) {
+			if err := ensureAppProfile(config, dataDirectory, request.Profile.Name); err != nil {
+				return ProfileCloneResult{}, err
+			}
+			info, err = os.Lstat(source)
 		}
 	}
 	if err == nil && info.Mode()&os.ModeSymlink != 0 {

@@ -123,7 +123,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 15*time.Second)
 	if fixture, err := dsh.DevelopmentFixture(fixtureCtx); err == nil {
 		fixtureRuntimes = []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
-		defaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+		defaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}}
 	}
 	cancelFixture()
 	var runner dshmanager.CommandRunner
@@ -142,6 +142,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		NodeResolver:      platform.NewNodeResolver(runtimeStore),
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
+		AppProfile:        dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

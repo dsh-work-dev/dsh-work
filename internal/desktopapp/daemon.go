@@ -159,6 +159,7 @@ func runDaemon(identity string, resources Resources) {
 		NodeResolver:      platform.NewNodeResolver(runtimeStore),
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
+		AppProfile:        dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

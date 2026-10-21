@@ -7,7 +7,7 @@ import {HostService, ManagerService, SettingsService, ShellService} from "../bin
 import {buildBuiltinComponentViews} from "./builtin-components";
 import {copyReport, latestProblem} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
-import {NodeSelectionKind, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {NodeSelectionKind, type AppProfileMigrationAnalysis, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
 import {beginControlUpdate} from "./ui/pending-control";
 import {mountOperationLog} from "./operation-log";
@@ -47,6 +47,8 @@ const upgradePlugin = ManagerService.UpgradePlugin;
 const upgradePlugins = ManagerService.UpgradePlugins;
 const renameProfile = ManagerService.RenameProfile;
 const cloneProfile = ManagerService.CloneProfile;
+const analyzeAppProfileMigration = ManagerService.AnalyzeAppProfileMigration;
+const migrateToAppProfile = ManagerService.MigrateToAppProfile;
 const deleteProfile = ManagerService.DeleteProfile;
 const backupProfile = ManagerService.BackupProfile;
 const installRuntime = ManagerService.InstallRuntime;
@@ -84,6 +86,9 @@ function profileKindLabel(value: string): string {
   }
   if (value === "custom") {
     return t("value.custom");
+  }
+  if (value === "app") {
+    return t("value.managed");
   }
   return t("value.other");
 }
@@ -247,6 +252,16 @@ export function mountManager() {
   const profileName = document.getElementById("manager-profile-name") as HTMLInputElement;
   const profileRename = document.getElementById("manager-profile-rename") as HTMLButtonElement;
   const profileClone = document.getElementById("manager-profile-clone") as HTMLButtonElement;
+  const profileMigrate = document.getElementById("manager-profile-migrate") as HTMLButtonElement;
+  const profileMigrateRow = document.getElementById("profile-migrate-row") as HTMLElement;
+  const profileMigrateDialog = document.getElementById("profile-migrate-dialog") as HTMLDialogElement;
+  const profileMigrateTitle = document.getElementById("profile-migrate-title") as HTMLElement;
+  const profileMigratePlugins = document.getElementById("profile-migrate-plugins") as HTMLDivElement;
+  const profileMigrateData = document.getElementById("profile-migrate-data") as HTMLDivElement;
+  const profileMigrateSubmit = document.getElementById("profile-migrate-submit") as HTMLButtonElement;
+  const profileMigrateFeedback = document.getElementById("profile-migrate-feedback") as HTMLParagraphElement;
+  let migrationSource: ProfileRef | undefined;
+  let migrationSubmitting = false;
   let exportInFlight = false;
   const profileExport = document.getElementById("manager-profile-export") as HTMLButtonElement;
   const renameControls = document.getElementById("profile-rename-controls") as HTMLElement;
@@ -670,14 +685,114 @@ export function mountManager() {
     return contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
   }
 
+  function currentIsAppProfile(): boolean {
+    const current = currentRunContext();
+    return current?.profile.dataDirectoryId === "dsh-work" && current.profile.name === "dsh-work";
+  }
+
+  function migrationOptions(): HTMLInputElement[] {
+    return Array.from(profileMigrateDialog.querySelectorAll<HTMLInputElement>("[data-profile-migration-option]"));
+  }
+
+  function updateMigrationSubmit() {
+    profileMigrateSubmit.disabled = migrationSubmitting || !migrationOptions().some(option => option.checked && !option.disabled) ||
+      !migrationSource || !currentIsAppProfile() || hostStatus?.state !== "Ready" || mutationBlocked();
+  }
+
+  function appendMigrationRow(label: string, checked: boolean, disabled: boolean, status?: string, packageName?: string, dataKind?: string) {
+    const row = document.createElement("label");
+    row.className = "row";
+    const main = document.createElement("div");
+    main.className = "row-main";
+    const title = document.createElement("span");
+    title.textContent = label;
+    main.append(title);
+    if (status) {
+      const detail = document.createElement("span");
+      detail.className = "row-hint";
+      detail.textContent = status;
+      main.append(detail);
+    }
+    const trail = document.createElement("div");
+    trail.className = "row-trail";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checked;
+    checkbox.disabled = disabled;
+    checkbox.setAttribute("data-profile-migration-option", "true");
+    if (packageName !== undefined) checkbox.dataset.profileMigrationPackage = packageName;
+    if (dataKind !== undefined) checkbox.dataset.profileMigrationKind = dataKind;
+    checkbox.addEventListener("change", updateMigrationSubmit);
+    trail.append(checkbox);
+    row.append(main, trail);
+    if (status) row.setAttribute("aria-label", `${label}, ${status}`);
+    profileMigratePlugins.append(row);
+  }
+
+  function renderMigrationAnalysis(analysis: AppProfileMigrationAnalysis) {
+    profileMigratePlugins.replaceChildren();
+    profileMigrateData.replaceChildren();
+    for (const plugin of analysis.plugins ?? []) {
+      const installed = plugin.alreadyInstalled;
+      appendMigrationRow(`${plugin.package} ${plugin.version}`, !installed, installed,
+        installed ? t("migrate.installed") : undefined, plugin.package);
+    }
+    for (const item of analysis.data ?? []) {
+      if (item.kind !== "patch" && item.kind !== "credentials") continue;
+      const covered = item.covered;
+      const label = item.kind === "patch" ? t("migrate.patch", {count: item.count ?? 0}) : t("migrate.credentials");
+      const row = document.createElement("label");
+      row.className = "row";
+      const main = document.createElement("div");
+      main.className = "row-main";
+      const title = document.createElement("span");
+      title.textContent = label;
+      main.append(title);
+      if (covered) {
+        const detail = document.createElement("span");
+        detail.className = "row-hint";
+        detail.textContent = t("migrate.covered");
+        main.append(detail);
+      }
+      const trail = document.createElement("div");
+      trail.className = "row-trail";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !covered && item.kind === "patch";
+      checkbox.disabled = covered;
+      checkbox.setAttribute("data-profile-migration-option", "true");
+      checkbox.dataset.profileMigrationKind = item.kind;
+      checkbox.addEventListener("change", updateMigrationSubmit);
+      trail.append(checkbox);
+      row.append(main, trail);
+      if (covered) row.setAttribute("aria-label", `${label}, ${t("migrate.covered")}`);
+      profileMigrateData.append(row);
+    }
+    if ((analysis.plugins?.length ?? 0) === 0 && (analysis.data?.length ?? 0) === 0) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const main = document.createElement("div");
+      main.className = "row-main";
+      main.textContent = t("migrate.nothing");
+      row.append(main);
+      profileMigratePlugins.append(row);
+    }
+    updateMigrationSubmit();
+  }
+
   function canMutateProfile(ref: ManagerProfileRef | undefined): boolean {
     const current = currentRunContext();
     return !mutationBlocked() && !!ref && !!current && hostStatus?.state === "Ready" && sameProfileRef(ref, current.profile);
   }
 
   function dataDirectoryLabel(dataDirectoryId: string): string {
-	if (dataDirectoryId === "dsh-work") return "DSH Work";
+    if (dataDirectoryId === "dsh-work") return "DSH Work";
     return (snapshot?.dataDirectories ?? []).find((item) => item.id === dataDirectoryId)?.name ?? dataDirectoryId;
+  }
+
+  function profileLabel(ref: ManagerProfileRef): string {
+    if (ref.dataDirectoryId === "dsh-work" && ref.name === "dsh-work") return "DSH Work";
+    return ref.name;
   }
 
   function renderOverviewLane(lane: OverviewLane, fields: {runtime: HTMLElement; dataDirectory: HTMLElement; profile: HTMLElement}) {
@@ -685,7 +800,7 @@ export function mountManager() {
       ? `${lane.runtime.version} · ${t(lane.runtime.installed ? "value.verified" : "value.unverified")}`
       : lane.target?.runtimeId || t("value.noRuntime");
     fields.dataDirectory.textContent = lane.dataDirectory?.name ?? lane.target?.profile.dataDirectoryId ?? t("value.noDataDirectory");
-    fields.profile.textContent = lane.target?.profile.name ?? t("value.noProfile");
+    fields.profile.textContent = lane.target ? profileLabel(lane.target.profile) : t("value.noProfile");
   }
 
   function renderOverview() {
@@ -939,18 +1054,24 @@ export function mountManager() {
     if (!item) {
       profileName.value = "";
       profileClone.disabled = true;
+      profileMigrateRow.hidden = true;
+      profileMigrate.disabled = true;
+      document.getElementById("profile-delete-row")!.hidden = true;
       profileBackup.disabled = true;
       profileExport.disabled = true;
       profileDelete.disabled = true;
       return;
     }
-    selectedProfileLabel.textContent = item.ref.name;
+    selectedProfileLabel.textContent = profileLabel(item.ref);
     const current = currentRunContext();
     const isCurrent = !!current && sameProfileRef(item.ref, current.profile);
     const canRename = item.renamable && !isCurrent && !mutationBlocked();
     profileScopeNote.textContent = [profileKindLabel(item.kind), isCurrent ? t("profiles.current") : ""].filter(Boolean).join(" · ");
     profilePluginCount.textContent = t("profiles.pluginCount", {count: item.pluginCount, plural: item.pluginCount === 1 ? "" : "s"});
     document.getElementById("profile-rename-row")!.hidden = !item.renamable || !renameControls.hidden;
+    document.getElementById("profile-delete-row")!.hidden = item.kind === "app" || item.kind === "built-in";
+    profileMigrateRow.hidden = item.kind === "app" || !item.exists || !item.launchable;
+    profileMigrate.disabled = profileMigrateRow.hidden || !currentIsAppProfile() || hostStatus?.state !== "Ready" || mutationBlocked();
     renameStart.disabled = !canRename;
     const switchProfile = document.getElementById("profile-switch") as HTMLButtonElement;
     switchProfile.hidden = isCurrent;
@@ -963,6 +1084,7 @@ export function mountManager() {
     profileBackup.disabled = !item.exists || mutationBlocked();
     profileExport.disabled = !item.exists || mutationBlocked() || exportInFlight;
     profileDelete.disabled = !item.deletable || mutationBlocked();
+    updateMigrationSubmit();
   }
 
   function renderPluginPanel() {
@@ -974,7 +1096,7 @@ export function mountManager() {
       profilePlugins.replaceChildren();
       return;
     }
-    pluginProfileLabel.textContent = item.ref.name;
+    pluginProfileLabel.textContent = profileLabel(item.ref);
     const mutable = canMutateProfile(item.ref);
     pluginScopeNote.hidden = mutable || mutationBlocked();
     pluginScopeNote.textContent = t("plugins.startToEdit");
@@ -998,7 +1120,8 @@ export function mountManager() {
     for (const item of profiles) {
       const option = document.createElement("option");
       option.value = item.ref.name;
-      option.textContent = !item.launchable ? `${item.ref.name} · ${t("profiles.noDesktop")}` : item.exists ? item.ref.name : `${item.ref.name} · ${t("value.new")}`;
+      const label = profileLabel(item.ref);
+      option.textContent = !item.launchable ? `${label} · ${t("profiles.noDesktop")}` : item.exists ? label : `${label} · ${t("value.new")}`;
       option.disabled = !item.launchable;
       profile.append(option);
     }
@@ -1270,7 +1393,7 @@ export function mountManager() {
       const text = document.createElement("div");
       text.className = "row-main";
       const name = document.createElement("strong");
-      name.textContent = item.ref.name;
+      name.textContent = profileLabel(item.ref);
       if (current && sameProfileRef(item.ref, current.profile)) name.append(stateTag(t("profiles.current")));
       const detail = document.createElement("span");
       detail.textContent = t("profiles.pluginDetail", {
@@ -1284,7 +1407,7 @@ export function mountManager() {
       choose.className = "row-select row-drill";
       choose.type = "button";
       choose.dataset.profileKey = `${item.ref.dataDirectoryId}/${item.ref.name}`;
-      choose.setAttribute("aria-label", t("profile.inspect", {profile: item.ref.name}));
+      choose.setAttribute("aria-label", t("profile.inspect", {profile: profileLabel(item.ref)}));
       choose.append(text, icon("chevron-right"));
       choose.addEventListener("click", () => selectProfile(item.ref));
       row.append(choose);
@@ -1898,12 +2021,73 @@ export function mountManager() {
     }
   })());
 
+  document.getElementById("profile-migrate-close")!.addEventListener("click", () => profileMigrateDialog.close());
+
+  profileMigrate.addEventListener("click", () => void (async () => {
+    const item = managedProfileItem();
+    if (!item || item.kind === "app" || !item.exists || !item.launchable || !currentIsAppProfile() ||
+        hostStatus?.state !== "Ready" || mutationBlocked()) return;
+    migrationSource = {...item.ref};
+    migrationSubmitting = false;
+    profileMigrateTitle.textContent = t("migrate.title", {profile: profileLabel(item.ref)});
+    profileMigratePlugins.replaceChildren();
+    profileMigrateData.replaceChildren();
+    profileMigrateFeedback.textContent = "";
+    updateMigrationSubmit();
+    if (!profileMigrateDialog.open) profileMigrateDialog.showModal();
+    try {
+      renderMigrationAnalysis(await analyzeAppProfileMigration(item.ref));
+    } catch (error) {
+      profileMigrateFeedback.textContent = managerErrorMessage(error, "error.migrateAnalyze");
+      console.error("Could not analyze DSH profile migration", error);
+    } finally {
+      updateMigrationSubmit();
+    }
+  })());
+
+  profileMigrateSubmit.addEventListener("click", () => void (async () => {
+    if (!migrationSource || profileMigrateSubmit.disabled) return;
+    const options = migrationOptions().filter(option => option.checked && !option.disabled);
+    const request = {
+      source: {...migrationSource},
+      plugins: options.map(option => option.dataset.profileMigrationPackage).filter((name): name is string => name !== undefined),
+      patch: options.some(option => option.dataset.profileMigrationKind === "patch"),
+      credentials: options.some(option => option.dataset.profileMigrationKind === "credentials"),
+    };
+    migrationSubmitting = true;
+    profileMigrateFeedback.textContent = "";
+    updateMigrationSubmit();
+    try {
+      const result = await migrateToAppProfile(request);
+      profileMigrateDialog.close();
+      migrationSource = undefined;
+      snapshot = result.snapshot;
+      renderSelection();
+      renderOverview();
+      renderProfiles();
+      renderRuntimes();
+      const failures = result.report.failures ?? [];
+      if (failures.length === 0) {
+        profilesFeedback(t("feedback.profileMigrated"), "success");
+      } else {
+        const items = failures.map(failure => `${failure.item}: ${failure.message}`).join("; ");
+        profilesFeedback(t("feedback.profileMigratedPartly", {items}), "error");
+      }
+    } catch (error) {
+      profileMigrateFeedback.textContent = managerErrorMessage(error, "error.migrateProfile");
+      console.error("Could not migrate DSH profile", error);
+    } finally {
+      migrationSubmitting = false;
+      updateMigrationSubmit();
+    }
+  })());
+
   profileDelete.addEventListener("click", () => void (async () => {
     const item = managedProfileItem();
     if (!item?.deletable || contextSwitchInFlight) {
       return;
     }
-    if (!window.confirm(t("confirm.deleteProfile", {profile: item.ref.name}))) {
+    if (!window.confirm(t("confirm.deleteProfile", {profile: profileLabel(item.ref)}))) {
       return;
     }
     profileDelete.disabled = true;
@@ -1915,7 +2099,7 @@ export function mountManager() {
       renderProfiles();
       renderRuntimes();
       showSection("profiles");
-      profilesFeedback(t("feedback.profileDeleted", {profile: item.ref.name}), "success");
+      profilesFeedback(t("feedback.profileDeleted", {profile: profileLabel(item.ref)}), "success");
     } catch (error) {
       profilesFeedback(managerErrorMessage(error, "error.deleteProfile"), "error");
       console.error("Could not delete DSH profile", error);

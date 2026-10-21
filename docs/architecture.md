@@ -414,6 +414,14 @@ retried on later removals without blocking them. Directories not in the
 catalog are never swept, because a lost or reset manager state would otherwise
 delete every installed runtime.
 
+## DSH Work profile
+
+dsh-work's managed DSH data directory runs the profile `dsh-work`, which the UI titles "DSH Work" and marks managed. dsh-work does not use DSH's `web` profile. DSH auto-initializes only its template names, so `internal/dshadapter` creates the profile files itself: before startup, before preparing a Run context, and before cloning, it writes whichever of the three `initProfile` files are missing. It writes `package.json` last and never touches files that already exist. The bundles are `@deepseek-ai/dsh-base` and `@deepseek-ai/dsh-web-app`, the same layers official DSH Desktop uses. The profile cannot be renamed or deleted, and its name is reserved case-insensitively in the managed directory. User-registered data directories never get this profile.
+
+"Migrate to DSH Work" follows dsh-tauri's model. The user picks another profile, and dsh-work lists what can come along: the registry plugins installed in that profile, its patch layer, and, when the profile is in a user-registered DSH data directory, that home's `.credentials.yaml`. The user ticks what to bring. Merges only add, and DSH Work wins every conflict: patch entries merge by `id`, plugins DSH Work already has are skipped, and existing credentials are never overwritten. Nothing is backed up because nothing is replaced. Credentials start unticked. They go into the managed DSH home's `.credentials.yaml`, which every profile in that home shares. The migration runs in one Host switch on the Ready DSH Work context: data first, then plugins. Items succeed or fail independently. An incompatible plugin fails on install and shows DSH's own reason; dsh-work does not suggest other versions. DSH version exemptions (`compatibility.json`) are not migrated, because each one names an exact runtime. The source profile is never changed.
+
+Revisit the bundle list when the pinned DSH changes `PROFILE_TEMPLATES.web`.
+
 ## Launch adapter and byte semantics
 
 The desktop carrier preserves upstream opaque resource queries, including DSH
