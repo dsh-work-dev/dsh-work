@@ -18,8 +18,9 @@
 - Preserve user and DSH-owned data by default.
 - Keep dsh-work application data, installed runtime files, DSH data directories
   and Workspaces as separate ownership domains.
-- Persist manager State using its documented field-compatible contract and
-  replace complete documents safely. Global Host preferences remain a separate
+- Persist manager State (`state.json` and each profile's `.dsh-work/` records)
+  using its documented field-compatible contract and replace complete documents
+  safely. Global Host preferences remain a separate
   versioned contract.
 - Do not silently change global shell, package-manager or DSH configuration.
 - Redact process output before logging or UI projection.
