@@ -439,14 +439,22 @@ gateway and standalone prototype/comparison entry points are removed.
 ## Manager persistence
 
 `internal/dshmanager` persists the configured Run context and its known local
-catalog records in the application-data manager file. This manager State is a
+catalog records in `state.json` in app data. This manager State is a
 field-based contract without a schema-version marker. Loading decodes the
 fields this build understands, ignores unknown fields, and validates the
 identities required to use the configuration. It does not translate historical
 file layouts. Runtime, Node, DSH-release and plugin records retain their own
 business version fields; those are data, not the manager State schema.
-The optional `versionRecovery` field has its own schema version (currently 1),
-covering snapshot inputs, per-profile success pointers and recovery progress.
+The optional `versionRecovery` field has its own schema version (currently 1)
+and keeps only the app-level part: the last-running point and the in-flight
+recovery operation. Records that describe a profile live with that profile in
+`<profile>/.dsh-work/`: `recovery.json` holds its version points and its
+last-successful pointer, and `provenance.json` holds its plugin sources. The
+manager loads `state.json` and every profile's records, drops pointers to points
+that no longer exist, and validates the combined state. Each save validates the
+combined state first, then writes the changed profile records and `state.json`,
+each atomically, and creates no `.dsh-work/` folder for a profile without
+records.
 
 Saving uses an atomic replace so a completed write contains one complete set of
 known fields. A malformed required identity is reported as invalid manager
@@ -501,8 +509,8 @@ running Worker, apart from the startup-failure path.
 
 ## Version recovery and window geometry
 
-`internal/dshmanager/restore_points.go` records verified version inputs and
-persists recovery stages in the existing atomic manager state. `internal/app`
+`internal/dshmanager/restore_points.go` records verified version inputs in each
+profile's `.dsh-work/recovery.json` and persists recovery stages in `state.json`. `internal/app`
 owns the stop/install/start boundary and failure-policy selection.
 `internal/dshadapter/version_profile.go` owns the DSH dependency-input contract;
 the Windows runtime installer and DSH plugin CLI perform package installation.
