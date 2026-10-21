@@ -3,10 +3,6 @@
 
 export interface Locations {
     "root": string;
-
-    /**
-     * Empty means follow Root/user-data, including when Root is moved.
-     */
     "userData": string;
 }
 

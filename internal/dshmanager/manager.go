@@ -181,6 +181,7 @@ type PluginCommandBuilder interface {
 // process logic.
 type Manager struct {
 	mu                sync.RWMutex
+	recordMu          sync.Mutex
 	config            Config
 	configured        *RunContext
 	current           *RunContext
@@ -195,6 +196,8 @@ type Manager struct {
 	switching         bool
 	operationGate     chan struct{}
 	store             StateStore
+	recordCache       map[string][]byte
+	unreadableRecords map[string]bool
 }
 
 // RefreshDSHReleases fetches public metadata without holding the environment
@@ -222,10 +225,9 @@ func (m *Manager) RefreshDSHReleases(ctx context.Context) (Snapshot, error) {
 	defer releaseOperation()
 	m.mu.RLock()
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	state.DSHReleases = cloneDSHReleases(releases)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -260,10 +262,9 @@ func (m *Manager) RefreshLatestNode(ctx context.Context) (Snapshot, error) {
 	}
 	m.mu.RLock()
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	state.LatestNode = cloneNodeRelease(&latest)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -335,7 +336,6 @@ func (m *Manager) installLatestNode(ctx context.Context, observer RuntimeInstall
 	m.mu.RLock()
 	nodes := cloneNodes(m.config.Nodes)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	updated := false
 	for index := range nodes {
@@ -350,7 +350,7 @@ func (m *Manager) installLatestNode(ctx context.Context, observer RuntimeInstall
 	}
 	state.Nodes = cloneNodes(nodes)
 	state.LatestNode = cloneNodeRelease(&latest)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, cleanupCandidate(err)
 	}
 	m.mu.Lock()
@@ -406,10 +406,9 @@ func (m *Manager) RemoveNode(ctx context.Context, id string) (Snapshot, error) {
 	nodes = append(nodes[:index], nodes[index+1:]...)
 	m.mu.RLock()
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	state.Nodes = cloneNodes(nodes)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -438,7 +437,7 @@ func New(config Config) (*Manager, error) {
 		return nil, err
 	}
 	if state != nil {
-		if err := validateState(*state); err != nil {
+		if err := validateAppState(persistState(*state)); err != nil {
 			return nil, failure(lifecycle.ErrorManagerStateInvalid, "manager state is invalid", "the persisted Run context has an unsupported shape")
 		}
 		if len(state.DataDirectories) > 0 {
@@ -458,14 +457,17 @@ func New(config Config) (*Manager, error) {
 	manager.config = normalized
 	if state != nil {
 		manager.versionRecovery = cloneVersionRecovery(state.VersionRecovery)
-		if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
-			manager.knownGood = cloneRunContext(&p.Target)
-		}
 		manager.lastSwitchAttempt = cloneSwitchAttempt(state.LastSwitchAttempt)
 		manager.latestNode = cloneNodeRelease(state.LatestNode)
 		manager.dshReleases = cloneDSHReleases(state.DSHReleases)
-		manager.pluginProvenance = append([]PluginProvenanceRecord(nil), state.PluginProvenance...)
 	}
+	manager.loadRecords(normalized.DataDirectories, state)
+	if manager.versionRecovery != nil {
+		if p := manager.versionRecovery.point(manager.versionRecovery.LastRunning); p != nil {
+			manager.knownGood = cloneRunContext(&p.Target)
+		}
+	}
+
 	if state != nil && state.Configured != nil {
 		configured := *state.Configured
 		manager.configured = &configured
@@ -500,7 +502,6 @@ func (m *Manager) registerRuntime(ctx context.Context, runtime RuntimeInfo) (Sna
 	m.mu.RLock()
 	runtimes := cloneRuntimes(m.config.Runtimes)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	updated := false
 	for i := range runtimes {
@@ -514,7 +515,7 @@ func (m *Manager) registerRuntime(ctx context.Context, runtime RuntimeInfo) (Sna
 		runtimes = append(runtimes, runtime)
 	}
 	state.Runtimes = cloneRuntimes(runtimes)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -772,7 +773,6 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 	}
 	runtimes := cloneRuntimes(m.config.Runtimes)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	remover, _ := m.config.RuntimeInstaller.(RuntimeRemover)
 	m.mu.RUnlock()
 	if runtimes[index].Source == RuntimeSourceManaged {
@@ -785,7 +785,7 @@ func (m *Manager) RemoveRuntime(ctx context.Context, id string) (Snapshot, error
 	}
 	runtimes = append(runtimes[:index], runtimes[index+1:]...)
 	state.Runtimes = cloneRuntimes(runtimes)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -814,7 +814,6 @@ func (m *Manager) RegisterDataDirectory(ctx context.Context, dataDirectory DataD
 	m.mu.RLock()
 	dataDirectories := cloneDataDirectories(m.config.DataDirectories)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	updated := false
 	for i := range dataDirectories {
@@ -828,7 +827,7 @@ func (m *Manager) RegisterDataDirectory(ctx context.Context, dataDirectory DataD
 		dataDirectories = append(dataDirectories, dataDirectory)
 	}
 	state.DataDirectories = cloneDataDirectories(dataDirectories)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -868,11 +867,10 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 	}
 	dataDirectories := cloneDataDirectories(m.config.DataDirectories)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	dataDirectories = append(dataDirectories[:index], dataDirectories[index+1:]...)
 	state.DataDirectories = cloneDataDirectories(dataDirectories)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -1072,10 +1070,10 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 		configured.Profile.Name = newName
 		state.Configured = cloneRunContext(configured)
 	}
+	newRef := request.Profile
+	newRef.Name = newName
 	if state.VersionRecovery != nil {
 		oldKey := profilePointKey(request.Profile)
-		newRef := request.Profile
-		newRef.Name = newName
 		if id := state.VersionRecovery.LastByProfile[oldKey]; id != "" {
 			delete(state.VersionRecovery.LastByProfile, oldKey)
 			state.VersionRecovery.LastByProfile[profilePointKey(newRef)] = id
@@ -1086,12 +1084,18 @@ func (m *Manager) RenameProfile(ctx context.Context, request ProfileRenameReques
 			}
 		}
 	}
-	if err := m.store.Save(ctx, m.config.StatePath, state); err != nil {
+	for i := range state.PluginProvenance {
+		if state.PluginProvenance[i].Profile == request.Profile {
+			state.PluginProvenance[i].Profile = newRef
+		}
+	}
+	if err := m.saveState(ctx, state); err != nil {
 		rollbackErr := os.Rename(newPath, oldPath)
 		m.mu.Unlock()
 		return Snapshot{}, errors.Join(err, rollbackErr)
 	}
 	m.versionRecovery = state.VersionRecovery
+	m.pluginProvenance = state.PluginProvenance
 	if configuredChanged {
 		m.configured = cloneRunContext(configured)
 	}
@@ -1239,7 +1243,6 @@ func (m *Manager) recordPluginProvenance(ctx context.Context, record PluginProve
 	m.mu.RLock()
 	records := append([]PluginProvenanceRecord(nil), m.pluginProvenance...)
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	filtered := records[:0]
 	for _, existing := range records {
@@ -1252,7 +1255,7 @@ func (m *Manager) recordPluginProvenance(ctx context.Context, record PluginProve
 		records = append([]PluginProvenanceRecord(nil), records[len(records)-256:]...)
 	}
 	state.PluginProvenance = append([]PluginProvenanceRecord(nil), records...)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -1746,10 +1749,9 @@ func (m *Manager) SetConfigured(ctx context.Context, target RunContext) (Snapsho
 	m.mu.Lock()
 	state := m.stateLocked()
 	state.Configured = cloneRunContext(&runContext)
-	statePath := m.config.StatePath
 	m.mu.Unlock()
 
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -1847,7 +1849,6 @@ func (m *Manager) RecordSwitchAttempt(ctx context.Context, attempt SwitchAttempt
 	attempt.Target.Node = selection
 	m.mu.RLock()
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	current := cloneRunContext(m.current)
 	m.mu.RUnlock()
 	if configureTarget {
@@ -1857,7 +1858,7 @@ func (m *Manager) RecordSwitchAttempt(ctx context.Context, attempt SwitchAttempt
 		state.Configured = cloneRunContext(&attempt.Target)
 	}
 	state.LastSwitchAttempt = cloneSwitchAttempt(&attempt)
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -1875,10 +1876,9 @@ func (m *Manager) ClearSwitchAttempt(ctx context.Context) (Snapshot, error) {
 	}
 	m.mu.RLock()
 	state := m.stateLocked()
-	statePath := m.config.StatePath
 	m.mu.RUnlock()
 	state.LastSwitchAttempt = nil
-	if err := m.store.Save(ctx, statePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return Snapshot{}, err
 	}
 	m.mu.Lock()
@@ -2276,7 +2276,9 @@ func mergeDataDirectories(base, persisted []DataDirectoryInfo) []DataDirectoryIn
 		found := false
 		for i := range merged {
 			if merged[i].ID == dataDirectory.ID {
-				merged[i] = dataDirectory
+				if merged[i].Ownership != DataDirectoryOwnershipDSHWork {
+					merged[i] = dataDirectory
+				}
 				found = true
 				break
 			}

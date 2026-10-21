@@ -339,7 +339,7 @@ func backupExcludedDirectory(name string) bool {
 
 func profileGeneratedDirectory(name string) bool {
 	switch strings.ToLower(name) {
-	case profileBackupFolder, "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
+	case profileRecordsFolder, "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
 		return true
 	default:
 		return false

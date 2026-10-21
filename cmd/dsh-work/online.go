@@ -247,7 +247,7 @@ func waitForDaemonStop(identity, root string, timeout time.Duration) error {
 			time.Sleep(150 * time.Millisecond)
 			continue
 		}
-		lockPath := filepath.Join(root, "manager.lock")
+		lockPath := filepath.Join(root, "state.lock")
 		if _, statErr := os.Stat(lockPath); statErr != nil {
 			if errors.Is(statErr, os.ErrNotExist) {
 				return nil
@@ -276,7 +276,7 @@ func resolveStorageRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	locations, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
+	locations, err := storagepaths.Open(paths.ConfigFile, paths.Root, paths.UserDataRoot)
 	if err != nil {
 		return "", err
 	}

@@ -252,7 +252,7 @@ func (m *Manager) commitVersionHealthy(ctx context.Context, launch ResolvedLaunc
 	if state.LastSwitchAttempt != nil && state.LastSwitchAttempt.Target == launch.Target {
 		state.LastSwitchAttempt = nil
 	}
-	if err = m.store.Save(ctx, m.config.StatePath, state); err != nil {
+	if err = m.saveState(ctx, state); err != nil {
 		saveErr = "The version record could not be saved"
 		verified = nil
 	}
@@ -296,7 +296,7 @@ func (m *Manager) saveVersionState(ctx context.Context, s *VersionRecoveryState)
 	state := m.stateLocked()
 	m.mu.RUnlock()
 	state.VersionRecovery = s
-	if err := m.store.Save(ctx, m.config.StatePath, state); err != nil {
+	if err := m.saveState(ctx, state); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -499,7 +499,7 @@ func (m *Manager) RecoverVersionPoint(ctx context.Context, id string) (launch Re
 	state := m.stateLocked()
 	m.mu.RUnlock()
 	state.Runtimes = mergeRuntimes(state.Runtimes, []RuntimeInfo{installed})
-	if err = m.store.Save(ctx, m.config.StatePath, state); err != nil {
+	if err = m.saveState(ctx, state); err != nil {
 		return launch, err
 	}
 	m.mu.Lock()

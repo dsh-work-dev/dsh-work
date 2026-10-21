@@ -1,5 +1,5 @@
 // Package storagepaths owns the desktop's storage locations, independently of
-// DSH_HOME. A small locations file stays at a fixed per-user path so moving the
+// DSH_HOME. A config.toml file stays at a fixed per-user path so moving the
 // application store does not make it undiscoverable on the next launch.
 package storagepaths
 
@@ -13,21 +13,40 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/local/dsh-work/internal/logging"
 	copyfs "github.com/otiai10/copy"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type Locations struct {
-	Root string `json:"root"`
-	// Empty means follow Root/user-data, including when Root is moved.
+	Root     string `json:"root"`
 	UserData string `json:"userData"`
 }
 
-func (l Locations) UserDataPath() string {
-	if l.UserData != "" {
-		return l.UserData
-	}
-	return filepath.Join(l.Root, "user-data")
+func (l Locations) UserDataPath() string { return l.UserData }
+
+// Layout derives the managed DSH home and app-owned runtime and state paths.
+func Layout(l Locations) (dshHome, runtimes, state string) {
+	return l.UserDataPath(), filepath.Join(l.Root, "runtimes"), filepath.Join(l.Root, "state.json")
 }
+
+type configFile struct {
+	Storage storageSection `toml:"storage"`
+}
+type storageSection struct {
+	App  string       `toml:"app" comment:"App data: runtimes, host plugins, updates and dsh-work state. Safe to delete; dsh-work rebuilds it.\nLeave empty for the default location. Editing this path does not move any files."`
+	Data string       `toml:"data" comment:"User data: the DSH home (profiles, sessions, credentials).\nLeave empty for the default location. Editing this path does not move any files."`
+	Move *storageMove `toml:"move,omitempty" comment:"Written by Settings > Storage. The move runs on the next launch, then this table is removed."`
+}
+type storageMove struct {
+	App  string `toml:"app"`
+	Data string `toml:"data"`
+}
+
+const configHeader = `# DSH Work configuration. Restart DSH Work after editing.
+# Windows paths: use forward slashes ("C:/Users/me/x") or single quotes ('C:\Users\me\x').
+# DSH Work rewrites this file when you change storage in Settings; comments you add are not kept.
+`
 
 type State struct {
 	Current Locations  `json:"current"`
@@ -38,43 +57,61 @@ type Manager struct {
 	mu              sync.Mutex
 	path            string
 	defaultUserData string
+	defaultRoot     string
+	extra           map[string]any
 	state           State
 }
 
-func Open(path, defaultRoot string, defaultUserData ...string) (*Manager, error) {
-	m := &Manager{path: path, state: State{Current: Locations{Root: defaultRoot}}}
-	if len(defaultUserData) > 0 {
-		m.defaultUserData = defaultUserData[0]
-		m.state.Current.UserData = m.defaultUserData
-	}
+func Open(path, defaultRoot, defaultUserData string) (*Manager, error) {
+	m := &Manager{path: path, defaultRoot: defaultRoot, defaultUserData: defaultUserData}
+	var config configFile
 	b, err := os.ReadFile(path)
-	if err == nil {
-		err = json.Unmarshal(b, &m.state)
-	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if !filepath.IsAbs(m.state.Current.Root) {
-		return nil, errors.New("invalid storage root")
+	if err == nil {
+		if err = toml.Unmarshal(b, &config); err != nil {
+			return nil, err
+		}
+		if err = toml.Unmarshal(b, &m.extra); err != nil {
+			return nil, err
+		}
+		delete(m.extra, "storage")
 	}
-	if m.state.Current.UserData == "" && m.defaultUserData != "" {
-		m.state.Current.UserData = m.defaultUserData
+	resolve := func(value, fallback, key string) (string, error) {
+		if value == "" {
+			value = fallback
+		}
+		value = filepath.FromSlash(value)
+		if !filepath.IsAbs(value) {
+			return "", fmt.Errorf("invalid storage location in config.toml: %s", key)
+		}
+		return value, nil
 	}
-	if m.state.Pending != nil && m.state.Pending.UserData == "" && m.defaultUserData != "" {
-		m.state.Pending.UserData = m.defaultUserData
+	locations := func(app, data, prefix string) (Locations, error) {
+		root, err := resolve(app, defaultRoot, prefix+"app")
+		if err != nil {
+			return Locations{}, err
+		}
+		user, err := resolve(data, defaultUserData, prefix+"data")
+		return Locations{Root: root, UserData: user}, err
+	}
+	m.state.Current, err = locations(config.Storage.App, config.Storage.Data, "storage.")
+	if err != nil {
+		return nil, err
+	}
+	if config.Storage.Move != nil {
+		next, err := locations(config.Storage.Move.App, config.Storage.Move.Data, "storage.move.")
+		if err != nil {
+			return nil, err
+		}
+		m.state.Pending = &next
 	}
 	return m, nil
 }
 
-// DefaultUserDataPath returns the platform's default user-data location for a
-// root. Windows and macOS keep default user-data under that root; Linux may
-// supply a separate XDG data directory when opening the manager.
-func (m *Manager) DefaultUserDataPath(root string) string {
-	if m.defaultUserData != "" {
-		return m.defaultUserData
-	}
-	return filepath.Join(root, "user-data")
-}
+// DefaultUserDataPath returns the platform default, independently of the app root.
+func (m *Manager) DefaultUserDataPath(root string) string { return m.defaultUserData }
 
 func (m *Manager) Snapshot() State {
 	m.mu.Lock()
@@ -125,11 +162,26 @@ func (m *Manager) write(s State) error {
 	if err := os.MkdirAll(filepath.Dir(m.path), 0700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(s, "", "  ")
+	encodePath := func(value, fallback string) string {
+		if same(value, fallback) {
+			return ""
+		}
+		return filepath.ToSlash(value)
+	}
+	config := configFile{Storage: storageSection{App: encodePath(s.Current.Root, m.defaultRoot), Data: encodePath(s.Current.UserData, m.defaultUserData)}}
+	if s.Pending != nil {
+		config.Storage.Move = &storageMove{App: encodePath(s.Pending.Root, m.defaultRoot), Data: encodePath(s.Pending.UserData, m.defaultUserData)}
+	}
+	b, err := toml.Marshal(config)
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(m.path), ".locations-*")
+	extra, err := toml.Marshal(m.extra)
+	if err != nil {
+		return err
+	}
+	b = append(append([]byte(configHeader), extra...), b...)
+	f, err := os.CreateTemp(filepath.Dir(m.path), ".config-*")
 	if err != nil {
 		return err
 	}
@@ -280,6 +332,7 @@ func (m *Manager) ApplyPendingWith(beforeCommit func(Locations) error) error {
 	if err != nil {
 		s := m.state
 		s.Error = err.Error()
+		logging.Module(logging.ModStorage).Warn("storage migration failed", "error", err)
 		s.Pending = nil
 		if e := m.write(s); e != nil {
 			return errors.Join(err, e)
@@ -294,7 +347,7 @@ func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) erro
 		moves = append(moves, relocation{source: old.Root, target: next.Root})
 	}
 	userMoved := !same(old.UserDataPath(), next.UserDataPath())
-	// Default user-data is copied independently to allow default <-> external.
+	// User data moves independently of application data.
 	if userMoved {
 		moves = append(moves, relocation{source: old.UserDataPath(), target: next.UserDataPath()})
 	}
@@ -324,12 +377,7 @@ func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) erro
 	}()
 	for i := range moves {
 		mv := &moves[i]
-		// Stage beside the application destination; default user-data is installed
-		// into that staged tree below rather than creating its final parent early.
 		parent := filepath.Dir(mv.target)
-		if same(mv.target, filepath.Join(next.Root, "user-data")) && !same(old.Root, next.Root) {
-			parent = filepath.Dir(next.Root)
-		}
 		if err := os.MkdirAll(parent, 0700); err != nil {
 			return err
 		}
@@ -344,7 +392,7 @@ func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) erro
 			return err
 		}
 		err = copyfs.Copy(mv.source, mv.stage, copyfs.Options{Sync: true, Skip: func(info fs.FileInfo, src, dst string) (bool, error) {
-			if same(mv.source, old.Root) && (same(src, filepath.Join(old.Root, "manager.lock")) || same(src, old.UserDataPath())) {
+			if same(mv.source, old.Root) && (same(src, filepath.Join(old.Root, "state.lock")) || same(src, m.path)) {
 				return true, nil
 			}
 			if info.Mode()&os.ModeSymlink != 0 {
@@ -366,12 +414,12 @@ func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) erro
 			return fmt.Errorf("迁移 %s：%w", mv.source, err)
 		}
 		if same(mv.source, old.Root) {
-			if err = rebaseManager(filepath.Join(mv.stage, "manager.json"), rebase); err != nil {
+			if err = rebaseState(filepath.Join(mv.stage, "state.json"), rebase); err != nil {
 				return err
 			}
 		}
 	}
-	// Publish root first, then its default data child (or the external data root).
+	// Publish each independently staged destination.
 	for _, mv := range moves {
 		if entries, e := os.ReadDir(mv.target); e == nil && len(entries) > 0 {
 			return fmt.Errorf("目标文件夹已被占用：%s", mv.target)
@@ -400,19 +448,32 @@ func (m *Manager) migrate(old, next Locations, beforeCommit func(Locations) erro
 	// Commit is durable. Failure to remove the old copy must not revert the new
 	// active location or repeat the migration on next launch.
 	for i := len(moves) - 1; i >= 0; i-- {
-		if err := os.RemoveAll(moves[i].source); err != nil {
-			// The caller still owns the old manager lock until ApplyPending
-			// returns. Leave that single file for the caller to close/remove.
-			if entries, e := os.ReadDir(moves[i].source); e == nil && len(entries) == 1 && entries[0].Name() == "manager.lock" {
+		source := moves[i].source
+		var err error
+		if inside(source, m.path) {
+			err = removeExceptConfig(source, m.path)
+		} else {
+			err = os.RemoveAll(source)
+		}
+		if err != nil {
+			entries, e := os.ReadDir(source)
+			protectedOnly := e == nil
+			for _, entry := range entries {
+				if entry.Name() != "state.lock" && !same(filepath.Join(source, entry.Name()), m.path) {
+					protectedOnly = false
+				}
+			}
+			if protectedOnly {
 				continue
 			}
-			m.state.Error = "迁移已完成，旧位置未能清理：" + moves[i].source
-			_ = m.write(m.state)
+			m.state.Error = "迁移已完成，旧位置未能清理：" + source
+			logging.Module(logging.ModStorage).Warn("old storage cleanup failed", "path", source, "error", err)
 		}
 	}
+
 	return nil
 }
-func rebaseManager(path string, rebase func(string) string) error {
+func rebaseState(path string, rebase func(string) string) error {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -447,4 +508,26 @@ func rebaseManager(path string, rebase func(string) string) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0600)
+}
+
+// removeExceptConfig keeps the fixed configuration and its parent directories.
+func removeExceptConfig(root, config string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, entry := range entries {
+		path := filepath.Join(root, entry.Name())
+		if same(path, config) {
+			continue
+		}
+		if inside(path, config) {
+			err = removeExceptConfig(path, config)
+		} else {
+			err = os.RemoveAll(path)
+		}
+		result = errors.Join(result, err)
+	}
+	return result
 }

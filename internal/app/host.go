@@ -130,7 +130,7 @@ func DefaultConfig(discoveryRoot string) Config {
 	return Config{
 		DiscoveryRoot:       discoveryRoot,
 		BootstrapDirectory:  filepath.Join(paths.Root, "bootstrap"),
-		DSHDataDirectory:    filepath.Join(paths.Root, "environment"),
+		DSHDataDirectory:    paths.UserDataRoot,
 		SettingsPath:        filepath.Join(paths.Root, "settings.json"),
 		CacheDirectory:      paths.CacheRoot,
 		ReadinessTimeout:    60 * time.Second,

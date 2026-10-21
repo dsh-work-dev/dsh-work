@@ -51,12 +51,12 @@ func runDaemon(identity string, resources Resources) {
 	defaultRoot := paths.Root
 	defaultUserData := paths.UserDataRoot
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
-		defaultRoot = root
-		defaultUserData = ""
+		defaultRoot = filepath.Join(root, "app")
+		defaultUserData = filepath.Join(root, "data")
 		config.CacheDirectory = filepath.Join(root, "cache")
-		paths.LocationsFile = filepath.Join(defaultRoot, "location", "locations.json")
+		paths.ConfigFile = filepath.Join(root, "config.toml")
 	}
-	locations, err := storagepaths.Open(paths.LocationsFile, defaultRoot, defaultUserData)
+	locations, err := storagepaths.Open(paths.ConfigFile, defaultRoot, defaultUserData)
 	if err != nil {
 		logging.Fatal(logging.Module(logging.ModStorage), "storage locations unreadable", logging.ErrAttrs(err, "")...)
 	}
@@ -91,8 +91,8 @@ func runDaemon(identity string, resources Resources) {
 			logging.Fatal(logging.Module(logging.ModStorage), "storage lock missing after relocation")
 		}
 		_ = previousLock.Close()
-		if entries, e := os.ReadDir(previousRoot); e == nil && len(entries) == 1 && entries[0].Name() == "manager.lock" {
-			_ = os.Remove(filepath.Join(previousRoot, "manager.lock"))
+		if entries, e := os.ReadDir(previousRoot); e == nil && len(entries) == 1 && entries[0].Name() == "state.lock" {
+			_ = os.Remove(filepath.Join(previousRoot, "state.lock"))
 			_ = os.Remove(previousRoot)
 		}
 	} else {
@@ -102,7 +102,8 @@ func runDaemon(identity string, resources Resources) {
 		managerLock = previousLock
 	}
 	config.SettingsPath = filepath.Join(storage.Root, "settings.json")
-	config.DSHDataDirectory = filepath.Join(storage.Root, "environment")
+	dshHome, runtimeStore, statePath := storagepaths.Layout(storage)
+	config.DSHDataDirectory = dshHome
 	config.BootstrapDirectory = filepath.Join(storage.Root, "bootstrap")
 	if managerLock == nil {
 		logging.Fatal(logging.Module(logging.ModStorage), "manager lock unavailable")
@@ -117,7 +118,6 @@ func runDaemon(identity string, resources Resources) {
 	}()
 	dsh := dshadapter.New(dependencies.CommandExecutor)
 	dsh.SetDiscoveryRoot(config.DiscoveryRoot)
-	dsh.SetUserDataDirectory(storage.UserDataPath())
 	petActivity := dshactivity.New()
 	defer petActivity.Close()
 	hostPlugins := hostplugins.NewOverlay(filepath.Join(filepath.Dir(config.SettingsPath), "host-plugins"), version.String())
@@ -147,9 +147,8 @@ func runDaemon(identity string, resources Resources) {
 	if dependencies.CommandExecutor != nil {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
 	}
-	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	managerConfig := dshmanager.Config{
-		StatePath:         filepath.Join(storage.Root, "manager.json"),
+		StatePath:         statePath,
 		MinimumDSHVersion: dshadapter.MinimumVersion,
 		CommandRunner:     managerRunner,
 		PluginCommands:    dshadapter.NewPluginCommands(),

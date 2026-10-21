@@ -16,13 +16,21 @@ type Directories struct {
 	UserDataRoot string
 	CacheRoot    string
 	// LogRoot holds per-machine log files; it never moves with Root.
-	LogRoot       string
-	LocationsFile string
+	LogRoot    string
+	ConfigFile string
 }
 
 // DefaultDirectories resolves dsh-work's platform storage layout.
 func DefaultDirectories() (Directories, error) {
 	var paths Directories
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		if err == nil {
+			err = fmt.Errorf("empty home directory")
+		}
+		return paths, fmt.Errorf("resolve user home directory: %w", err)
+	}
+	paths.UserDataRoot = filepath.Join(home, ".dsh-work")
 	switch runtime.GOOS {
 	case "windows":
 		configRoot, err := os.UserConfigDir()
@@ -40,11 +48,11 @@ func DefaultDirectories() (Directories, error) {
 			return paths, fmt.Errorf("resolve per-user cache directory: %w", err)
 		}
 		// Application data stays in Roaming AppData; WebView and other caches
-		// use Local AppData. Keep the location record as a file beside the cache.
+		// use Local AppData. Keep config.toml in Local AppData.
 		paths.Root = filepath.Join(configRoot, "dsh-work")
 		paths.CacheRoot = filepath.Join(cacheRoot, "dsh-work")
 		paths.LogRoot = filepath.Join(cacheRoot, "dsh-work", "logs")
-		paths.LocationsFile = filepath.Join(cacheRoot, "dsh-work-paths.json")
+		paths.ConfigFile = filepath.Join(cacheRoot, "dsh-work", "config.toml")
 	case "darwin":
 		configRoot, err := os.UserConfigDir()
 		if err != nil || configRoot == "" {
@@ -61,34 +69,19 @@ func DefaultDirectories() (Directories, error) {
 			return paths, fmt.Errorf("resolve per-user cache directory: %w", err)
 		}
 		// Application Support is the data root itself, without an extra storage
-		// directory. Keep its location record as a sibling file.
+		// directory. Keep config.toml inside Application Support.
 		paths.Root = filepath.Join(configRoot, "dsh-work")
 		paths.CacheRoot = filepath.Join(cacheRoot, "dsh-work")
-		home, err := os.UserHomeDir()
-		if err != nil || home == "" {
-			if err == nil {
-				err = fmt.Errorf("empty home directory")
-			}
-			return Directories{}, fmt.Errorf("resolve user home directory: %w", err)
-		}
 		paths.LogRoot = filepath.Join(home, "Library", "Logs", "dsh-work")
-		paths.LocationsFile = filepath.Join(configRoot, "dsh-work-paths.json")
+		paths.ConfigFile = filepath.Join(configRoot, "dsh-work", "config.toml")
 	default:
 		if xdg.ConfigHome == "" || xdg.DataHome == "" || xdg.CacheHome == "" || xdg.StateHome == "" {
 			return Directories{}, fmt.Errorf("XDG config, data, cache or state directory is unavailable")
 		}
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil || home == "" {
-			if homeErr == nil {
-				homeErr = fmt.Errorf("empty home directory")
-			}
-			return Directories{}, fmt.Errorf("resolve user home directory: %w", homeErr)
-		}
-		paths.Root = filepath.Join(home, ".dsh-work")
-		paths.UserDataRoot = filepath.Join(xdg.DataHome, "dsh-work")
+		paths.Root = filepath.Join(xdg.DataHome, "dsh-work")
 		paths.CacheRoot = filepath.Join(xdg.CacheHome, "dsh-work")
 		paths.LogRoot = filepath.Join(xdg.StateHome, "dsh-work", "logs")
-		paths.LocationsFile = filepath.Join(xdg.ConfigHome, "dsh-work.json")
+		paths.ConfigFile = filepath.Join(xdg.ConfigHome, "dsh-work", "config.toml")
 	}
 	return paths, nil
 }

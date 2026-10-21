@@ -68,15 +68,35 @@ func (FileStateStore) Load(ctx context.Context, path string) (*State, error) {
 // are intentionally ignored so a newer build can add optional catalog metadata
 // without making an older build lose the user's selection.
 type persistedState struct {
-	VersionRecovery   *VersionRecoveryState    `json:"versionRecovery,omitempty"`
-	LastSwitchAttempt *SwitchAttempt           `json:"lastSwitchAttempt,omitempty"`
-	DataDirectories   []DataDirectoryInfo      `json:"dataDirectories,omitempty"`
-	Runtimes          []RuntimeInfo            `json:"runtimes,omitempty"`
-	Nodes             []NodeInstallationInfo   `json:"nodes,omitempty"`
-	LatestNode        *NodeReleaseInfo         `json:"latestNode,omitempty"`
-	DSHReleases       []DSHReleaseInfo         `json:"dshReleases,omitempty"`
-	PluginProvenance  []PluginProvenanceRecord `json:"pluginProvenance,omitempty"`
-	Configured        *RunContext              `json:"configured,omitempty"`
+	VersionRecovery   *persistedVersionRecovery `json:"versionRecovery,omitempty"`
+	LastSwitchAttempt *SwitchAttempt            `json:"lastSwitchAttempt,omitempty"`
+	DataDirectories   []DataDirectoryInfo       `json:"dataDirectories,omitempty"`
+	Runtimes          []RuntimeInfo             `json:"runtimes,omitempty"`
+	Nodes             []NodeInstallationInfo    `json:"nodes,omitempty"`
+	LatestNode        *NodeReleaseInfo          `json:"latestNode,omitempty"`
+	DSHReleases       []DSHReleaseInfo          `json:"dshReleases,omitempty"`
+	Configured        *RunContext               `json:"configured,omitempty"`
+}
+
+// persistedVersionRecovery is the app-level part kept in state.json.
+// Points and per-profile pointers live in each profile's records.
+type persistedVersionRecovery struct {
+	SchemaVersion int                `json:"schemaVersion"`
+	LastRunning   string             `json:"lastRunning,omitempty"`
+	Pending       *RecoveryOperation `json:"pending,omitempty"`
+}
+
+func persistState(state State) persistedState {
+	result := persistedState{
+		LastSwitchAttempt: state.LastSwitchAttempt, DataDirectories: state.DataDirectories,
+		Runtimes: state.Runtimes, Nodes: state.Nodes, LatestNode: state.LatestNode,
+		DSHReleases: state.DSHReleases, Configured: state.Configured,
+	}
+	if state.VersionRecovery != nil {
+		recovery := state.VersionRecovery
+		result.VersionRecovery = &persistedVersionRecovery{SchemaVersion: recovery.SchemaVersion, LastRunning: recovery.LastRunning, Pending: recovery.Pending}
+	}
+	return result
 }
 
 func decodeState(data []byte) (State, error) {
@@ -92,16 +112,19 @@ func decodeState(data []byte) (State, error) {
 		return State{}, err
 	}
 	state := State{
-		VersionRecovery:   persisted.VersionRecovery,
 		LastSwitchAttempt: persisted.LastSwitchAttempt,
 		DataDirectories:   persisted.DataDirectories,
 		Runtimes:          persisted.Runtimes,
 		Nodes:             persisted.Nodes,
 		LatestNode:        persisted.LatestNode,
 		DSHReleases:       persisted.DSHReleases,
-		PluginProvenance:  persisted.PluginProvenance,
 		Configured:        persisted.Configured,
 	}
+	if persisted.VersionRecovery != nil {
+		recovery := persisted.VersionRecovery
+		state.VersionRecovery = &VersionRecoveryState{SchemaVersion: recovery.SchemaVersion, LastRunning: recovery.LastRunning, Pending: recovery.Pending, LastByProfile: map[string]string{}}
+	}
+
 	for index := range state.Runtimes {
 		normalized, err := normalizeRuntime(state.Runtimes[index])
 		if err != nil {
@@ -116,7 +139,7 @@ func decodeState(data []byte) (State, error) {
 		}
 		state.Configured.Node = selection
 	}
-	if err := validateState(state); err != nil {
+	if err := validateAppState(persistState(state)); err != nil {
 		return State{}, err
 	}
 	return state, nil
@@ -222,6 +245,64 @@ func validateState(state State) error {
 	return nil
 }
 
+func validateAppState(state persistedState) error {
+	if recovery := state.VersionRecovery; recovery != nil {
+		if recovery.SchemaVersion != 1 {
+			return errors.New("unsupported version snapshot state")
+		}
+		if recovery.Pending != nil && recovery.Pending.ResumeCount < 0 {
+			return errors.New("invalid pending snapshot recovery")
+		}
+	}
+	seenDataDirectories := make(map[string]struct{}, len(state.DataDirectories))
+	for _, dataDirectory := range state.DataDirectories {
+		if err := validateDataDirectory(dataDirectory); err != nil {
+			return err
+		}
+		if _, exists := seenDataDirectories[dataDirectory.ID]; exists {
+			return errors.New("duplicate DSH data-directory identity")
+		}
+		seenDataDirectories[dataDirectory.ID] = struct{}{}
+	}
+	seenNodes := make(map[string]struct{}, len(state.Nodes))
+	for _, node := range state.Nodes {
+		if err := validateNodeInstallation(node); err != nil {
+			return err
+		}
+		if _, exists := seenNodes[node.ID]; exists {
+			return errors.New("duplicate Node installation identity")
+		}
+		seenNodes[node.ID] = struct{}{}
+	}
+	if state.LatestNode != nil {
+		if err := validateNodeRelease(*state.LatestNode); err != nil {
+			return err
+		}
+	}
+	seenDSHReleases := make(map[string]struct{}, len(state.DSHReleases))
+	for _, release := range state.DSHReleases {
+		if err := validateDSHRelease(release); err != nil {
+			return err
+		}
+		if _, exists := seenDSHReleases[release.Version]; exists {
+			return errors.New("duplicate DSH release identity")
+		}
+		seenDSHReleases[release.Version] = struct{}{}
+	}
+	if state.Configured != nil {
+		if err := validateRunContext(*state.Configured); err != nil {
+			return err
+		}
+		selection, _ := normalizeNodeSelection(state.Configured.Node)
+		if selection.Kind == NodeSelectionManaged {
+			if _, exists := seenNodes[selection.InstallationID]; !exists {
+				return errors.New("configured managed Node installation is missing")
+			}
+		}
+	}
+	return nil
+}
+
 func validateRunContext(target RunContext) error {
 	if target.RuntimeID == "" {
 		return errors.New("Run context runtime identity is required")
@@ -236,10 +317,11 @@ func (FileStateStore) Save(ctx context.Context, path string, state State) error 
 	if err := contextError(ctx); err != nil {
 		return err
 	}
-	if err := validateVersionRecovery(state.VersionRecovery); err != nil {
+	persisted := persistState(state)
+	if err := validateAppState(persisted); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
 		return failure(lifecycle.ErrorManagerStateInvalid, "manager state could not be encoded", "the configured Run context could not be persisted")
 	}

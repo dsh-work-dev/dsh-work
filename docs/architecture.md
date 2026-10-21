@@ -176,14 +176,13 @@ WebSocket is faster, but not visibly in the UI.
 
 ### Page bootstrap and host plugins
 
-dsh-work extends DSH only through DSH's own plugin and page interfaces, in four
+dsh-work extends DSH only through DSH's own plugin and page interfaces, in three
 layers:
 
 | Layer | What | Loaded |
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
 | Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always |
-| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Always |
 | Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile |
 
 The host plugins are ordinary DSH plugins (a Host half and a Client half each).
@@ -361,6 +360,23 @@ the Wails build configuration.
 The callback listener is the one exception to "no TCP listener". It accepts no
 Worker traffic and only local requests. Revisit it if DSH offers a callback
 that does not need a loopback origin.
+
+## Storage layout
+
+dsh-work keeps app data and user data in separate places. `config.toml` records where they are, and Settings → Storage can move either one without touching the other.
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| `config.toml` (never moves) | `%LOCALAPPDATA%\dsh-work` | `~/Library/Application Support/dsh-work` | `$XDG_CONFIG_HOME/dsh-work` |
+| App data | `%APPDATA%\dsh-work` | `~/Library/Application Support/dsh-work` | `$XDG_DATA_HOME/dsh-work` |
+| User data (DSH home) | `%USERPROFILE%\.dsh-work` | `~/.dsh-work` | `~/.dsh-work` |
+| Cache and logs | `%LOCALAPPDATA%\dsh-work` | `~/Library/Caches`, `~/Library/Logs` | `$XDG_CACHE_HOME`, `$XDG_STATE_HOME` |
+
+The user data folder is dsh-work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. dsh-work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only dsh-work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
+
+App data holds what dsh-work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
+
+This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. dsh-work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
 
 ## Runtime catalog
 
