@@ -17,7 +17,9 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
-const profileBackupFolder = ".dsh-work-backups"
+const profileRecordsFolder = ".dsh-work"
+
+var profileBackupFolder = filepath.Join(profileRecordsFolder, "backups")
 
 const maxBackupBytes = 512 << 20
 const maxBackupEntries = 100000
@@ -371,7 +373,7 @@ func (m *Manager) ImportProfileBackup(ctx context.Context, id, file string) (res
 		if strings.HasPrefix(name, "_dsh-work/") {
 			return ProfileCloneResult{}, errors.New("unsupported backup metadata")
 		}
-		if strings.EqualFold(strings.Split(name, "/")[0], profileBackupFolder) {
+		if strings.EqualFold(strings.Split(name, "/")[0], profileRecordsFolder) {
 			continue
 		}
 		if entry.FileInfo().IsDir() {

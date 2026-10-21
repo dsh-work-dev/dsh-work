@@ -221,6 +221,10 @@
                     <div class="row-main"><strong data-i18n="action.clone">Clone</strong><p data-i18n="profiles.clone.note">Create a new profile from this one.</p></div>
                     <div class="row-trail"><button id="manager-profile-clone" class="button" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button></div>
                   </div>
+                  <div id="profile-migrate-row" class="row">
+                    <div class="row-main"><strong data-i18n="action.migrateToAppProfile">Migrate to DSH Work</strong><p data-i18n="profiles.migrate.note">Bring plugins and settings into DSH Work.</p></div>
+                    <div class="row-trail"><button id="manager-profile-migrate" class="button" data-context-mutation="true" data-i18n="action.migrateToAppProfile" type="button">Migrate to DSH Work</button></div>
+                  </div>
                   <div class="row">
                     <div class="row-main"><strong data-i18n="action.export">Export</strong><p data-i18n="profiles.export.note">Save a file you can import later.</p></div>
                     <div class="row-trail"><button id="manager-profile-export" class="button" data-i18n="action.export" type="button">Export</button></div>
@@ -233,7 +237,7 @@
                     <label class="field row-main"><span data-i18n="profiles.name">Profile name</span><input id="manager-profile-name" data-i18n-placeholder="placeholder.profileName" type="text" placeholder="coding" autocomplete="off" /></label>
                     <div class="row-trail profile-rename-row"><button id="profile-rename-cancel" class="button button-quiet" data-i18n="common.cancel" type="button">Cancel</button><button class="button button-primary" id="manager-profile-rename" data-i18n="action.save" type="button">Rename</button></div>
                   </div>
-                  <div class="row">
+                  <div id="profile-delete-row" class="row">
                     <div class="row-main"><strong data-i18n="action.delete">Delete</strong><p data-i18n="profiles.delete.note">Remove this profile and its plugins.</p></div>
                     <div class="row-trail"><button id="manager-profile-delete" class="button button-danger" data-context-mutation="true" data-i18n="action.delete" type="button">Delete</button></div>
                   </div>
@@ -249,6 +253,15 @@
                       </div>
                       <p id="backup-feedback" class="result" role="status"></p>
                     </section>
+                  </dialog>
+                  <dialog id="profile-migrate-dialog" aria-labelledby="profile-migrate-title">
+                    <header class="dialog-head"><h2 id="profile-migrate-title"></h2><button id="profile-migrate-close" class="button" data-i18n="startup.close" type="button">Close</button></header>
+                    <div class="group">
+                      <div id="profile-migrate-plugins" class="rows"></div>
+                      <div id="profile-migrate-data" class="rows"></div>
+                      <div class="row row-foot"><button id="profile-migrate-submit" class="button button-primary" data-i18n="action.migrate" type="button">Migrate</button></div>
+                    </div>
+                    <p id="profile-migrate-feedback" class="result" role="status"></p>
                   </dialog>
             </div>
           </section>

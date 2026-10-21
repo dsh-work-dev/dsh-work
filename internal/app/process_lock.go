@@ -33,7 +33,7 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 	if strings.TrimSpace(settingsPath) == "" {
 		return nil, nil
 	}
-	lockPath := filepath.Join(filepath.Dir(settingsPath), "manager.lock")
+	lockPath := filepath.Join(filepath.Dir(settingsPath), "state.lock")
 	return acquireProcessFileLock(lockPath)
 }
 

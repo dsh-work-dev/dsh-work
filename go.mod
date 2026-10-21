@@ -9,6 +9,7 @@ require (
 	github.com/at-wat/ebml-go v0.19.2
 	github.com/google/safeopen v0.0.0-20260327150837-43626d6f4685
 	github.com/otiai10/copy v1.14.1
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	golang.org/x/image v0.41.0

@@ -17,6 +17,13 @@ export {
 } from "./models.js";
 
 export type {
+    AppProfileMigrationAnalysis,
+    AppProfileMigrationData,
+    AppProfileMigrationFailure,
+    AppProfileMigrationPlugin,
+    AppProfileMigrationReport,
+    AppProfileMigrationRequest,
+    AppProfileMigrationResult,
     DSHReleaseInfo,
     DataDirectoryInfo,
     LaunchRequest,

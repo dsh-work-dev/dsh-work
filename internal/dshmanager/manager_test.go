@@ -685,13 +685,11 @@ func TestManagerDelegatesPluginOperationsToDSHForExplicitProfile(t *testing.T) {
 	if got := strings.Join(runner.args, " "); got != "plugin --profile alpha add @example/new-plugin@3.0.0 --registry https://registry.npmjs.org/" {
 		t.Fatalf("DSH plugin args = %q", got)
 	}
-	state, err := (FileStateStore{}).Load(context.Background(), filepath.Join(root, "manager.json"))
-	if err != nil {
-		t.Fatal(err)
+	_, _, provenance, unreadable := loadProfileRecords(manager.config.DataDirectories)
+	if len(unreadable) != 0 || len(provenance) != 1 || provenance[0].Package != "@example/new-plugin" || provenance[0].SourceKind != PluginSourcePublicRegistry || provenance[0].SuccessfulRoute != RuntimeArtifactSourceOfficial {
+		t.Fatalf("plugin provenance = %#v, unreadable = %#v", provenance, unreadable)
 	}
-	if state == nil || len(state.PluginProvenance) != 1 || state.PluginProvenance[0].Package != "@example/new-plugin" || state.PluginProvenance[0].SourceKind != PluginSourcePublicRegistry || state.PluginProvenance[0].SuccessfulRoute != RuntimeArtifactSourceOfficial {
-		t.Fatalf("plugin provenance = %#v", state)
-	}
+
 	upgrade, err := manager.UpgradePlugin(context.Background(), PluginUpgradeRequest{
 		Target: PluginTarget{Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "alpha"}}, Package: "@example/alpha",
 	})
@@ -1179,7 +1177,8 @@ func TestManagerCanAcquireMissingConfiguredRuntimeOnFirstUse(t *testing.T) {
 		StatePath: filepath.Join(root, "manager.json"), RuntimeInstaller: installer,
 		DSHReleases: testDSHReleases("1.2.3"), RuntimeVerifier: &recordingRuntimeVerifier{version: "1.2.3"},
 		Runtimes:          []RuntimeInfo{{ID: "dsh-1.2.3", Version: "1.2.3", Path: filepath.Join(root, "missing.cmd")}},
-		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}},
+		DefaultRunContext: RunContext{RuntimeID: "dsh-1.2.3", Node: NodeSelection{Kind: NodeSelectionSystem}, Profile: ProfileRef{DataDirectoryID: "home", Name: "web"}},
+		DataDirectories:   []DataDirectoryInfo{{ID: "home", Path: filepath.Join(root, "home"), Ownership: DataDirectoryOwnershipDSHWork}},
 	})
 	if err != nil {
 		t.Fatal(err)

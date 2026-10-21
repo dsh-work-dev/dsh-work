@@ -349,7 +349,7 @@ export function mountHost() {
     if (cancelRequested || !snapshot) return;
     acquiring = false; acquisitionKind = undefined;
     progressMessage.textContent = t("host.titleStarting"); progressBar.removeAttribute("value");
-    const target = {profile: snapshot.configured?.profile ?? {dataDirectoryId: "dsh-work", name: "web"}, runtimeId: selectedRuntime, node: selectedNode === "system" ? {kind: NodeSelectionKind.NodeSelectionSystem} : {kind: NodeSelectionKind.NodeSelectionManaged, installationId: selectedNode}};
+    const target = {profile: snapshot.configured?.profile ?? {dataDirectoryId: "dsh-work", name: "dsh-work"}, runtimeId: selectedRuntime, node: selectedNode === "system" ? {kind: NodeSelectionKind.NodeSelectionSystem} : {kind: NodeSelectionKind.NodeSelectionManaged, installationId: selectedNode}};
     starting = ManagerService.SetRunContext(target);
     try { await starting; } finally { starting = undefined; }
   }

@@ -32,6 +32,8 @@ Workspace context is selected separately through DSH and is scoped to a Worker
 generation. dsh-work must not infer a Workspace from its current directory or
 silently mutate DSH-owned data.
 
+dsh-work runs its own DSH profile, DSH Work, and can bring plugins, patch entries and credentials from another profile into it.
+
 ## Current capabilities
 
 - The Host starts one selected DSH runtime through an authenticated local

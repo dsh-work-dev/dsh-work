@@ -58,6 +58,11 @@ func (m *Manager) CloneProfile(ctx context.Context, request ProfileCloneRequest)
 				return ProfileCloneResult{}, err
 			}
 			info, err = os.Lstat(source)
+		} else if errors.Is(err, os.ErrNotExist) && isAppProfile(dataDirectory, request.Profile.Name) {
+			if err := ensureAppProfile(config, dataDirectory, request.Profile.Name); err != nil {
+				return ProfileCloneResult{}, err
+			}
+			info, err = os.Lstat(source)
 		}
 	}
 	if err == nil && info.Mode()&os.ModeSymlink != 0 {
@@ -339,7 +344,7 @@ func backupExcludedDirectory(name string) bool {
 
 func profileGeneratedDirectory(name string) bool {
 	switch strings.ToLower(name) {
-	case profileBackupFolder, "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
+	case profileRecordsFolder, "node_modules", ".cache", ".pnpm", ".dsh-module-fallback", "dist", "build", "tmp", "temp", "logs", ".logs", ".git":
 		return true
 	default:
 		return false

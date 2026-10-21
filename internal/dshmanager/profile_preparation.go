@@ -32,6 +32,9 @@ func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) 
 	runner := config.CommandRunner
 	commands := config.PluginCommands
 	m.mu.RUnlock()
+	if err := ensureAppProfile(config, launch.DataDirectory, launch.Target.Profile.Name); err != nil {
+		return err
+	}
 	profilePath := filepath.Join(launch.DataDirectory.Path, "profiles", launch.Target.Profile.Name)
 	if !profileNeedsPreparation(profilePath, isBuiltInProfile(config.ProfileCatalog, launch.Target.Profile.Name)) {
 		return nil
@@ -148,9 +151,8 @@ func profileNeedsPreparation(profilePath string, builtIn bool) bool {
 	manifestPath := filepath.Join(profilePath, "package.json")
 	info, err := os.Stat(manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
-		// A custom profile without a package manifest is already handled by
-		// DSH's normal profile boot path. Only an auto-initialized built-in
-		// needs the explicit CLI seam when its manifest is absent.
+		// DSH refuses to boot a non-template profile without a manifest; the
+		// app profile is created by ensureAppProfile before this probe.
 		return builtIn
 	}
 	if err != nil {

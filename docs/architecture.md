@@ -176,14 +176,13 @@ WebSocket is faster, but not visibly in the UI.
 
 ### Page bootstrap and host plugins
 
-dsh-work extends DSH only through DSH's own plugin and page interfaces, in four
+dsh-work extends DSH only through DSH's own plugin and page interfaces, in three
 layers:
 
 | Layer | What | Loaded |
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
 | Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always |
-| User-data overlay | DSH sessions, storage, attachments, settings and credentials in dsh-work's user-data folder | Always |
 | Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile |
 
 The host plugins are ordinary DSH plugins (a Host half and a Client half each).
@@ -362,6 +361,23 @@ The callback listener is the one exception to "no TCP listener". It accepts no
 Worker traffic and only local requests. Revisit it if DSH offers a callback
 that does not need a loopback origin.
 
+## Storage layout
+
+dsh-work keeps app data and user data in separate places. `config.toml` records where they are, and Settings → Storage can move either one without touching the other.
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| `config.toml` (never moves) | `%LOCALAPPDATA%\dsh-work` | `~/Library/Application Support/dsh-work` | `$XDG_CONFIG_HOME/dsh-work` |
+| App data | `%APPDATA%\dsh-work` | `~/Library/Application Support/dsh-work` | `$XDG_DATA_HOME/dsh-work` |
+| User data (DSH home) | `%USERPROFILE%\.dsh-work` | `~/.dsh-work` | `~/.dsh-work` |
+| Cache and logs | `%LOCALAPPDATA%\dsh-work` | `~/Library/Caches`, `~/Library/Logs` | `$XDG_CACHE_HOME`, `$XDG_STATE_HOME` |
+
+The user data folder is dsh-work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. dsh-work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only dsh-work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
+
+App data holds what dsh-work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
+
+This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. dsh-work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
+
 ## Runtime catalog
 
 dsh-work keeps an external catalog of DSH runtimes and explicit
@@ -397,6 +413,14 @@ after the rename is best effort: a file still held open stays aside and is
 retried on later removals without blocking them. Directories not in the
 catalog are never swept, because a lost or reset manager state would otherwise
 delete every installed runtime.
+
+## DSH Work profile
+
+dsh-work's managed DSH data directory runs the profile `dsh-work`, which the UI titles "DSH Work" and marks managed. dsh-work does not use DSH's `web` profile. DSH auto-initializes only its template names, so `internal/dshadapter` creates the profile files itself: before startup, before preparing a Run context, and before cloning, it writes whichever of the three `initProfile` files are missing. It writes `package.json` last and never touches files that already exist. The bundles are `@deepseek-ai/dsh-base` and `@deepseek-ai/dsh-web-app`, the same layers official DSH Desktop uses. The profile cannot be renamed or deleted, and its name is reserved case-insensitively in the managed directory. User-registered data directories never get this profile.
+
+"Migrate to DSH Work" follows dsh-tauri's model. The user picks another profile, and dsh-work lists what can come along: the registry plugins installed in that profile, its patch layer, and, when the profile is in a user-registered DSH data directory, that home's `.credentials.yaml`. The user ticks what to bring. Merges only add, and DSH Work wins every conflict: patch entries merge by `id`, plugins DSH Work already has are skipped, and existing credentials are never overwritten. Nothing is backed up because nothing is replaced. Credentials start unticked. They go into the managed DSH home's `.credentials.yaml`, which every profile in that home shares. The migration runs in one Host switch on the Ready DSH Work context: data first, then plugins. Items succeed or fail independently. An incompatible plugin fails on install and shows DSH's own reason; dsh-work does not suggest other versions. DSH version exemptions (`compatibility.json`) are not migrated, because each one names an exact runtime. The source profile is never changed.
+
+Revisit the bundle list when the pinned DSH changes `PROFILE_TEMPLATES.web`.
 
 ## Launch adapter and byte semantics
 

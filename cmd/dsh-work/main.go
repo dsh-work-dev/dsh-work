@@ -83,13 +83,14 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	locations, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
+	locations, err := storagepaths.Open(paths.ConfigFile, paths.Root, paths.UserDataRoot)
 	if err != nil {
 		return nil, nil, err
 	}
 	current := locations.Snapshot().Current
 	config.SettingsPath = filepath.Join(current.Root, "settings.json")
-	config.DSHDataDirectory = filepath.Join(current.Root, "environment")
+	dshHome, runtimeStore, statePath := storagepaths.Layout(current)
+	config.DSHDataDirectory = dshHome
 	config.BootstrapDirectory = filepath.Join(current.Root, "bootstrap")
 
 	managerLock, err := dshworkapp.AcquireManagerProcessLock(config.SettingsPath)
@@ -99,7 +100,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	// The daemon may have completed a move after we read the location record
 	// but before we acquired the old root lock. Recheck while holding that lock
 	// so this CLI never writes through a stale root.
-	latest, err := storagepaths.Open(paths.LocationsFile, paths.Root, paths.UserDataRoot)
+	latest, err := storagepaths.Open(paths.ConfigFile, paths.Root, paths.UserDataRoot)
 	if err != nil {
 		_ = managerLock.Close()
 		return nil, nil, err
@@ -122,16 +123,15 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 	fixtureCtx, cancelFixture := context.WithTimeout(context.Background(), 15*time.Second)
 	if fixture, err := dsh.DevelopmentFixture(fixtureCtx); err == nil {
 		fixtureRuntimes = []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}}
-		defaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"}}
+		defaultRunContext = dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}}
 	}
 	cancelFixture()
 	var runner dshmanager.CommandRunner
 	if dependencies.CommandExecutor != nil {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
 	}
-	runtimeStore := filepath.Join(filepath.Dir(config.DSHDataDirectory), "runtimes")
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:         filepath.Join(current.Root, "manager.json"),
+		StatePath:         statePath,
 		MinimumDSHVersion: dshadapter.MinimumVersion,
 		CommandRunner:     runner,
 		PluginCommands:    dshadapter.NewPluginCommands(),
@@ -142,6 +142,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		NodeResolver:      platform.NewNodeResolver(runtimeStore),
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
+		AppProfile:        dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

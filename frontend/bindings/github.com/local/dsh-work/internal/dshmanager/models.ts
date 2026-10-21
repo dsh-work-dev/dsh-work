@@ -5,6 +5,45 @@
 // @ts-ignore: Unused imports
 import * as lifecycle$0 from "../lifecycle/models.js";
 
+export interface AppProfileMigrationAnalysis {
+    "plugins": AppProfileMigrationPlugin[] | null;
+    "data": AppProfileMigrationData[] | null;
+}
+
+export interface AppProfileMigrationData {
+    "kind": string;
+    "count"?: number;
+    "covered": boolean;
+}
+
+export interface AppProfileMigrationFailure {
+    "item": string;
+    "message": string;
+}
+
+export interface AppProfileMigrationPlugin {
+    "package": string;
+    "version": string;
+    "alreadyInstalled": boolean;
+}
+
+export interface AppProfileMigrationReport {
+    "applied": string[] | null;
+    "failures": AppProfileMigrationFailure[] | null;
+}
+
+export interface AppProfileMigrationRequest {
+    "source": ProfileRef;
+    "plugins": string[] | null;
+    "patch": boolean;
+    "credentials": boolean;
+}
+
+export interface AppProfileMigrationResult {
+    "report": AppProfileMigrationReport;
+    "snapshot": Snapshot;
+}
+
 /**
  * DSHReleaseInfo is cached public-registry metadata produced only by an
  * explicit refresh. It describes availability, not product compatibility.
@@ -345,6 +384,7 @@ export enum ProfileKind {
 
     ProfileKindBuiltIn = "built-in",
     ProfileKindCustom = "custom",
+    ProfileKindApp = "app",
 };
 
 /**

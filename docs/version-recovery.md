@@ -58,10 +58,12 @@ the frozen lock; recaptured installed versions and digest verify the result. Ins
 conversation data and Workspace data are not snapshot contents. Inputs containing
 recognised credentials are rejected; inputs are validated again before applying.
 
-Snapshot metadata reuses the existing atomic manager file. Individual input
-files are limited to 4 MiB, aggregate snapshot inputs to 32 MiB, and the manager
-file to 64 MiB on read/write. Manual saving is rejected when the point collection
-already contains 128 entries; state validation accepts at most 1,024 entries.
+Points are stored per profile in `<profile>/.dsh-work/recovery.json`; `state.json`
+keeps only the last running point and the in-flight operation. Writes are atomic
+per file. Each file is limited to 64 MiB on read/write. Manual saving is rejected
+when the point collection already contains 128 entries; state validation
+accepts at most 1,024 entries. Individual snapshot input files are limited to
+4 MiB, and all snapshot inputs together are limited to 32 MiB.
 The frontend receives summaries, not private dependency input contents.
 
 ## Restore transaction

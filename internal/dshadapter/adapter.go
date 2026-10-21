@@ -71,15 +71,12 @@ type Adapter struct {
 	executableOverride string
 	discoveryRoot      string
 	coreOverlayPatch   func(string) (string, error)
-	userDataDirectory  string
 }
 
 // SetCoreOverlayPatch installs a Host-owned, ephemeral overlay for each Worker.
 func (a *Adapter) SetCoreOverlayPatch(prepare func(string) (string, error)) {
 	a.coreOverlayPatch = prepare
 }
-
-func (a *Adapter) SetUserDataDirectory(path string) { a.userDataDirectory = path }
 
 func New(executor CommandExecutor) *Adapter {
 	return &Adapter{executor: executor}
@@ -279,13 +276,6 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		Env:              env,
 		WorkingDirectory: workingDirectory,
 		ExpectedOrigin:   origin,
-	}
-	if a.userDataDirectory != "" {
-		patch, err := prepareUserDataPatch(dataDirectory, a.userDataDirectory)
-		if err != nil {
-			return supervisor.LaunchPlan{}, fmt.Errorf("prepare DSH user data: %w", err)
-		}
-		plan.Args = append([]string{"--patch", patch}, plan.Args...)
 	}
 	if a.coreOverlayPatch != nil {
 		patch, err := a.coreOverlayPatch(launch.GenerationID)

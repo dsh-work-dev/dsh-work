@@ -130,7 +130,7 @@ func DefaultConfig(discoveryRoot string) Config {
 	return Config{
 		DiscoveryRoot:       discoveryRoot,
 		BootstrapDirectory:  filepath.Join(paths.Root, "bootstrap"),
-		DSHDataDirectory:    filepath.Join(paths.Root, "environment"),
+		DSHDataDirectory:    paths.UserDataRoot,
 		SettingsPath:        filepath.Join(paths.Root, "settings.json"),
 		CacheDirectory:      paths.CacheRoot,
 		ReadinessTimeout:    60 * time.Second,
@@ -608,6 +608,34 @@ func (h *Host) RemovePlugin(ctx context.Context, request dshmanager.PluginRemove
 }
 func (h *Host) UpgradePlugin(ctx context.Context, request dshmanager.PluginUpgradeRequest) (dshmanager.PluginResult, error) {
 	return h.applyPlugin(ctx, request.Target, request.Package, "update")
+}
+
+func (h *Host) MigrateToAppProfile(ctx context.Context, request dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationResult, error) {
+	if failure := h.readyWorkerForPluginMutation(); failure != nil {
+		return dshmanager.AppProfileMigrationResult{}, failure
+	}
+	snapshot, err := h.deps.Manager.Snapshot(ctx)
+	if err != nil {
+		return dshmanager.AppProfileMigrationResult{}, err
+	}
+	appProfile := dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}
+	if snapshot.Current == nil || snapshot.Current.Profile != appProfile {
+		return dshmanager.AppProfileMigrationResult{}, h.failureFor(errors.New("switch to DSH Work before migrating"), lifecycle.ErrorManagerOperationBusy, "Switch to DSH Work before migrating.", true)
+	}
+	manager, ok := h.deps.Manager.(interface {
+		MigrateIntoAppProfile(context.Context, dshmanager.ResolvedLaunch, dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationReport, error)
+	})
+	if !ok {
+		return dshmanager.AppProfileMigrationResult{}, h.failureFor(errors.New("app profile migration is unavailable"), lifecycle.ErrorManagerStateInvalid, "DSH Work migration is unavailable.", true)
+	}
+	var report dshmanager.AppProfileMigrationReport
+	snapshot, err = h.applyRunContext(ctx, *snapshot.Current, func(ctx context.Context, launch dshmanager.ResolvedLaunch) error {
+		dshadapter.ReportCommandOutput(ctx, "Migrating to DSH Work…")
+		var migrateErr error
+		report, migrateErr = manager.MigrateIntoAppProfile(ctx, launch, request)
+		return migrateErr
+	}, nil, false)
+	return dshmanager.AppProfileMigrationResult{Report: report, Snapshot: snapshot}, err
 }
 
 // UpgradePlugins applies every upgrade inside one Run-context switch: the
