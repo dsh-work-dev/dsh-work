@@ -83,7 +83,7 @@ func TestHostMigrationRunsOnceInsideReadyAppProfileSwitch(t *testing.T) {
 	}
 	fixture.host.deps.Manager = migrationManager
 	fixture.startReady(t)
-	request := dshmanager.AppProfileMigrationRequest{Source: dshmanager.ProfileRef{DataDirectoryID: "other", Name: "src"}, Patch: true}
+	request := dshmanager.AppProfileMigrationRequest{Source: dshmanager.AppProfileMigrationSource{Home: "source-home", Profile: "src"}, Patch: true}
 
 	result, err := fixture.host.MigrateToAppProfile(context.Background(), request)
 	if err != nil {

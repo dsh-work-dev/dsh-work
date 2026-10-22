@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -421,7 +423,32 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	return s.manager.ListPlugins(ctx, request)
 }
 
-func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.ProfileRef) (dshmanager.AppProfileMigrationAnalysis, error) {
+func (s *ManagerService) DefaultImportDirectory(ctx context.Context) (string, error) {
+	if s == nil {
+		return "", managerUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return "", trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(home, ".dsh")
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", nil
+	}
+	return path, nil
+}
+
+func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.AppProfileMigrationSource) (dshmanager.AppProfileMigrationAnalysis, error) {
 	if s == nil || s.manager == nil {
 		return dshmanager.AppProfileMigrationAnalysis{}, managerUnavailable()
 	}
@@ -440,7 +467,7 @@ func (s *ManagerService) MigrateToAppProfile(ctx context.Context, request dshman
 	if !isTrustedWindow(ctx, "workspace") {
 		return dshmanager.AppProfileMigrationResult{}, trustedSurfaceRequired("DSH management is available only in dsh-work Settings.")
 	}
-	ctx, cancel := managerContext(ctx)
+	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
 	if s.host == nil {
 		return dshmanager.AppProfileMigrationResult{}, managerUnavailable()
