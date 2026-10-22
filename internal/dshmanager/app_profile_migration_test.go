@@ -132,7 +132,7 @@ func TestAnalyzeAppProfileMigrationListsInstalledRegistryPluginsPatchAndCredenti
 		t.Fatal(err)
 	}
 	want := AppProfileMigrationAnalysis{
-		Home: fixture.user.Path, Profiles: []string{"src"},
+		Home: canonicalImportPath(fixture.user.Path), Profiles: []string{"src"},
 		Plugins: []AppProfileMigrationPlugin{{Package: "@a/p", Version: "1.2.0"}, {Package: "@b/q", Version: "2.0.0", AlreadyInstalled: true}},
 		Data:    []AppProfileMigrationData{{Kind: "patch", Count: 3}, {Kind: "credentials", Count: 2}},
 	}
@@ -484,7 +484,7 @@ func TestAnalyzeAppProfileMigrationCountsSessionsAndWorkspaceChangesWithoutProfi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if analysis.Home != fixture.user.Path || !reflect.DeepEqual(analysis.Profiles, []string{"src"}) {
+	if analysis.Home != canonicalImportPath(fixture.user.Path) || !reflect.DeepEqual(analysis.Profiles, []string{"src"}) {
 		t.Fatalf("source identity = Home %q Profiles %#v", analysis.Home, analysis.Profiles)
 	}
 	if len(analysis.Plugins) != 0 {
@@ -706,6 +706,11 @@ func TestMigrateIntoAppProfileSkipsSessionContainingSymlink(t *testing.T) {
 
 func TestMigrateIntoAppProfileMergesWorkspacesAndPreservesTargetFields(t *testing.T) {
 	fixture := newAppProfileMigrationFixture(t, nil, nil, nil)
+	targetSamePath := `c:\SAME`
+	if runtime.GOOS != "windows" {
+		// Path case folding is platform-specific; POSIX paths are case-sensitive.
+		targetSamePath = `C:\same`
+	}
 	sourceDocument := workspaceFixture(
 		map[string]any{
 			"workspaceIds":       []string{"source-same", "collision"},
@@ -727,7 +732,7 @@ func TestMigrateIntoAppProfileMergesWorkspacesAndPreservesTargetFields(t *testin
 			"targetGlobalUnknown": "keep",
 		},
 		map[string]any{
-			"target-same": map[string]any{"path": `c:\SAME`, "sessionIds": []string{"existing-session"}, "title": "target title", "targetUnknown": true},
+			"target-same": map[string]any{"path": targetSamePath, "sessionIds": []string{"existing-session"}, "title": "target title", "targetUnknown": true},
 			"collision":   map[string]any{"path": `C:\other`, "sessionIds": []string{"other-session"}},
 		},
 	)
@@ -904,7 +909,7 @@ func TestMigrateIntoAppProfileImportsLegacyRedirectedData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if analysis.Home != legacyHome || !reflect.DeepEqual(analysis.Profiles, []string{"web"}) {
+	if analysis.Home != canonicalImportPath(legacyHome) || !reflect.DeepEqual(analysis.Profiles, []string{"web"}) {
 		t.Fatalf("legacy source identity = %#v", analysis)
 	}
 	wantData := []AppProfileMigrationData{

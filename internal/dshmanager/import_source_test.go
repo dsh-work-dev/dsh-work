@@ -35,8 +35,9 @@ func TestResolveImportSourceListsProfilesFromChosenHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.Home != chosen {
-		t.Fatalf("Home = %q, want %q", source.Home, chosen)
+	wantHome := canonicalImportPath(chosen)
+	if source.Home != wantHome {
+		t.Fatalf("Home = %q, want %q", source.Home, wantHome)
 	}
 	if !reflect.DeepEqual(source.Profiles, []string{"alpha", "zeta"}) {
 		t.Fatalf("Profiles = %#v, want [alpha zeta]", source.Profiles)
@@ -56,8 +57,9 @@ func TestResolveImportSourceFindsLegacyEnvironmentHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.Home != home || !reflect.DeepEqual(source.Profiles, []string{"web"}) {
-		t.Fatalf("resolved source = %#v, want Home %q and [web]", source, home)
+	wantHome := canonicalImportPath(home)
+	if source.Home != wantHome || !reflect.DeepEqual(source.Profiles, []string{"web"}) {
+		t.Fatalf("resolved source = %#v, want Home %q and [web]", source, wantHome)
 	}
 }
 
@@ -159,12 +161,13 @@ func TestResolveImportSourceIgnoresMalformedAndRelativeRedirects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			wantHome := canonicalImportPath(home)
 			want := importSource{
-				Home: home, Profiles: []string{},
-				Sessions:    filepath.Join(home, "sessions"),
-				Storages:    filepath.Join(home, "storages"),
-				Attachments: filepath.Join(home, "attachments", "v1"),
-				Credentials: filepath.Join(home, ".credentials.yaml"),
+				Home: wantHome, Profiles: []string{},
+				Sessions:    filepath.Join(wantHome, "sessions"),
+				Storages:    filepath.Join(wantHome, "storages"),
+				Attachments: filepath.Join(wantHome, "attachments", "v1"),
+				Credentials: filepath.Join(wantHome, ".credentials.yaml"),
 			}
 			if !reflect.DeepEqual(source, want) {
 				t.Fatalf("source = %#v, want %#v", source, want)
