@@ -6,17 +6,25 @@
 import * as lifecycle$0 from "../lifecycle/models.js";
 
 export interface AppProfileMigrationAnalysis {
+    "home": string;
+    "profiles": string[] | null;
     "plugins": AppProfileMigrationPlugin[] | null;
     "data": AppProfileMigrationData[] | null;
 }
 
 export interface AppProfileMigrationData {
+    /**
+     * "patch", "sessions", "workspaces", or "credentials"
+     */
     "kind": string;
     "count"?: number;
     "covered": boolean;
 }
 
 export interface AppProfileMigrationFailure {
+    /**
+     * package name, "patch", "sessions", "workspaces", or "credentials"
+     */
     "item": string;
     "message": string;
 }
@@ -33,15 +41,22 @@ export interface AppProfileMigrationReport {
 }
 
 export interface AppProfileMigrationRequest {
-    "source": ProfileRef;
+    "source": AppProfileMigrationSource;
     "plugins": string[] | null;
     "patch": boolean;
     "credentials": boolean;
+    "sessions": boolean;
+    "workspaces": boolean;
 }
 
 export interface AppProfileMigrationResult {
     "report": AppProfileMigrationReport;
     "snapshot": Snapshot;
+}
+
+export interface AppProfileMigrationSource {
+    "home": string;
+    "profile": string;
 }
 
 /**

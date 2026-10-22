@@ -13,7 +13,7 @@ export function AllowIncompatiblePlugin(request: dshmanager$0.PluginExemptionReq
     return $Call.ByID(3505349776, request);
 }
 
-export function AnalyzeAppProfileMigration(source: dshmanager$0.ProfileRef): $CancellablePromise<dshmanager$0.AppProfileMigrationAnalysis> {
+export function AnalyzeAppProfileMigration(source: dshmanager$0.AppProfileMigrationSource): $CancellablePromise<dshmanager$0.AppProfileMigrationAnalysis> {
     return $Call.ByID(1450689085, source);
 }
 
@@ -35,6 +35,10 @@ export function CancelRuntime(): $CancellablePromise<void> {
 
 export function CloneProfile(request: dshmanager$0.ProfileCloneRequest): $CancellablePromise<dshmanager$0.ProfileCloneResult> {
     return $Call.ByID(545840751, request);
+}
+
+export function DefaultImportDirectory(): $CancellablePromise<string> {
+    return $Call.ByID(2952351586);
 }
 
 export function DeleteProfile(request: dshmanager$0.ProfileDeleteRequest): $CancellablePromise<dshmanager$0.Snapshot> {

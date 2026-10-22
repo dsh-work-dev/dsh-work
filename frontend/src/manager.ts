@@ -3,11 +3,11 @@ import {mountRestorePoints} from "./restore-points";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
-import {HostService, ManagerService, SettingsService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {HostService, ManagerService, SettingsService, ShellService, StorageService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {buildBuiltinComponentViews} from "./builtin-components";
 import {copyReport, latestProblem} from "./diagnostics";
 import type {OperationStatus} from "../bindings/github.com/local/dsh-work/internal/acquisition/models";
-import {NodeSelectionKind, type AppProfileMigrationAnalysis, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
+import {NodeSelectionKind, type AppProfileMigrationAnalysis, type AppProfileMigrationSource, type DataDirectoryInfo, type LoaderEntry, type LoaderLayer, type PluginInfo, type PluginResult, type ProfileInfo, type ProfileRef, type RunContext, type RuntimeInfo, type Snapshot} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {createSettingSwitch} from "./ui/setting-switch";
 import {beginControlUpdate} from "./ui/pending-control";
 import {mountOperationLog} from "./operation-log";
@@ -48,6 +48,7 @@ const upgradePlugins = ManagerService.UpgradePlugins;
 const renameProfile = ManagerService.RenameProfile;
 const cloneProfile = ManagerService.CloneProfile;
 const analyzeAppProfileMigration = ManagerService.AnalyzeAppProfileMigration;
+const defaultImportDirectory = ManagerService.DefaultImportDirectory;
 const migrateToAppProfile = ManagerService.MigrateToAppProfile;
 const deleteProfile = ManagerService.DeleteProfile;
 const backupProfile = ManagerService.BackupProfile;
@@ -78,19 +79,6 @@ function switchReason(code: string): string {
   if (code === "DSH_EARLY_EXIT") return t("switch.earlyExit");
   if (code === "PROFILE_PREPARATION_FAILED") return t("switch.preparationFailed");
   return t("error.switchRunContext");
-}
-
-function profileKindLabel(value: string): string {
-  if (value === "built-in") {
-    return t("value.builtIn");
-  }
-  if (value === "custom") {
-    return t("value.custom");
-  }
-  if (value === "app") {
-    return t("value.managed");
-  }
-  return t("value.other");
 }
 
 function runtimeSourceLabel(value: string): string {
@@ -248,19 +236,22 @@ export function mountManager() {
   const profileScopeNote = document.getElementById("manager-profile-scope-note") as HTMLParagraphElement;
   const profileListView = document.getElementById("profile-list-view") as HTMLElement;
   const profilePluginCount = document.getElementById("profile-plugin-count") as HTMLParagraphElement;
+  const dshImport = document.getElementById("dsh-import") as HTMLButtonElement;
   const profileDetail = document.getElementById("manager-profile-detail") as HTMLElement;
   const profileName = document.getElementById("manager-profile-name") as HTMLInputElement;
   const profileRename = document.getElementById("manager-profile-rename") as HTMLButtonElement;
   const profileClone = document.getElementById("manager-profile-clone") as HTMLButtonElement;
-  const profileMigrate = document.getElementById("manager-profile-migrate") as HTMLButtonElement;
-  const profileMigrateRow = document.getElementById("profile-migrate-row") as HTMLElement;
   const profileMigrateDialog = document.getElementById("profile-migrate-dialog") as HTMLDialogElement;
   const profileMigrateTitle = document.getElementById("profile-migrate-title") as HTMLElement;
+  const profileMigrateSourceRow = document.getElementById("profile-migrate-source-row") as HTMLLabelElement;
+  const profileMigrateSource = document.getElementById("profile-migrate-source") as HTMLSelectElement;
   const profileMigratePlugins = document.getElementById("profile-migrate-plugins") as HTMLDivElement;
   const profileMigrateData = document.getElementById("profile-migrate-data") as HTMLDivElement;
   const profileMigrateSubmit = document.getElementById("profile-migrate-submit") as HTMLButtonElement;
   const profileMigrateFeedback = document.getElementById("profile-migrate-feedback") as HTMLParagraphElement;
-  let migrationSource: ProfileRef | undefined;
+  let migrationSource: AppProfileMigrationSource | undefined;
+  let migrationAnalysisGeneration = 0;
+  let migrationAnalyzing = false;
   let migrationSubmitting = false;
   let exportInFlight = false;
   const profileExport = document.getElementById("manager-profile-export") as HTMLButtonElement;
@@ -666,7 +657,7 @@ export function mountManager() {
     if (!managedProfile) {
       return undefined;
     }
-    return (snapshot?.profiles ?? []).find((item) => sameProfileRef(item.ref, managedProfile));
+    return (snapshot?.profiles ?? []).find((item) => sameProfileRef(item.ref, managedProfile) && (item.exists || item.kind === "app"));
   }
 
   function currentProfileItem(): ManagerProfile | undefined {
@@ -695,7 +686,7 @@ export function mountManager() {
   }
 
   function updateMigrationSubmit() {
-    profileMigrateSubmit.disabled = migrationSubmitting || !migrationOptions().some(option => option.checked && !option.disabled) ||
+    profileMigrateSubmit.disabled = migrationSubmitting || migrationAnalyzing || !migrationOptions().some(option => option.checked && !option.disabled) ||
       !migrationSource || !currentIsAppProfile() || hostStatus?.state !== "Ready" || mutationBlocked();
   }
 
@@ -738,9 +729,12 @@ export function mountManager() {
         installed ? t("migrate.installed") : undefined, plugin.package);
     }
     for (const item of analysis.data ?? []) {
-      if (item.kind !== "patch" && item.kind !== "credentials") continue;
+      if (item.kind !== "patch" && item.kind !== "sessions" && item.kind !== "workspaces" && item.kind !== "credentials") continue;
       const covered = item.covered;
-      const label = item.kind === "patch" ? t("migrate.patch", {count: item.count ?? 0}) : t("migrate.credentials");
+      const label = item.kind === "patch" ? t("migrate.patch", {count: item.count ?? 0})
+        : item.kind === "sessions" ? t("migrate.sessions", {count: item.count ?? 0})
+          : item.kind === "workspaces" ? t("migrate.workspaces", {count: item.count ?? 0})
+            : t("migrate.credentials");
       const row = document.createElement("label");
       row.className = "row";
       const main = document.createElement("div");
@@ -758,7 +752,7 @@ export function mountManager() {
       trail.className = "row-trail";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = !covered && item.kind === "patch";
+      checkbox.checked = !covered && (item.kind === "patch" || item.kind === "sessions" || item.kind === "workspaces");
       checkbox.disabled = covered;
       checkbox.setAttribute("data-profile-migration-option", "true");
       checkbox.dataset.profileMigrationKind = item.kind;
@@ -780,14 +774,65 @@ export function mountManager() {
     updateMigrationSubmit();
   }
 
+  async function analyzeMigrationSource(source: AppProfileMigrationSource) {
+    const generation = ++migrationAnalysisGeneration;
+    migrationSource = {...source};
+    migrationAnalyzing = true;
+    profileMigratePlugins.replaceChildren();
+    profileMigrateData.replaceChildren();
+    profileMigrateFeedback.textContent = "";
+    updateMigrationSubmit();
+    try {
+      let analysis = await analyzeAppProfileMigration(source);
+      if (generation !== migrationAnalysisGeneration) return;
+      const profiles = analysis.profiles ?? [];
+      if (profiles.length > 0) {
+        const selectedProfile = source.profile || (profiles.includes("web") ? "web" : profiles[0]);
+        profileMigrateSource.replaceChildren(...profiles.map((name) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          return option;
+        }));
+        profileMigrateSource.value = selectedProfile;
+        profileMigrateSourceRow.hidden = false;
+        if (!source.profile) {
+          const selectedSource = {home: source.home, profile: selectedProfile};
+          migrationSource = selectedSource;
+          analysis = await analyzeAppProfileMigration(selectedSource);
+          if (generation !== migrationAnalysisGeneration) return;
+        }
+      } else {
+        profileMigrateSource.replaceChildren();
+        profileMigrateSourceRow.hidden = true;
+        migrationSource = {home: source.home, profile: ""};
+      }
+      renderMigrationAnalysis(analysis);
+    } catch (error) {
+      if (generation === migrationAnalysisGeneration) {
+        profileMigrateFeedback.textContent = managerErrorMessage(error, "error.migrateAnalyze");
+        console.error("Could not analyze DSH profile migration", error);
+      }
+    } finally {
+      if (generation === migrationAnalysisGeneration) {
+        migrationAnalyzing = false;
+        updateMigrationSubmit();
+      }
+    }
+  }
+
+  async function openMigrationDialog(source: AppProfileMigrationSource, title: string) {
+    migrationSubmitting = false;
+    profileMigrateTitle.textContent = title;
+    profileMigrateSourceRow.hidden = true;
+    profileMigrateSource.replaceChildren();
+    if (!profileMigrateDialog.open) profileMigrateDialog.showModal();
+    await analyzeMigrationSource(source);
+  }
+
   function canMutateProfile(ref: ManagerProfileRef | undefined): boolean {
     const current = currentRunContext();
     return !mutationBlocked() && !!ref && !!current && hostStatus?.state === "Ready" && sameProfileRef(ref, current.profile);
-  }
-
-  function dataDirectoryLabel(dataDirectoryId: string): string {
-    if (dataDirectoryId === "dsh-work") return "DSH Work";
-    return (snapshot?.dataDirectories ?? []).find((item) => item.id === dataDirectoryId)?.name ?? dataDirectoryId;
   }
 
   function profileLabel(ref: ManagerProfileRef): string {
@@ -871,7 +916,7 @@ export function mountManager() {
   }
 
   function syncManagedProfile(preferred?: ManagerProfileRef) {
-    const profiles = snapshot?.profiles ?? [];
+    const profiles = (snapshot?.profiles ?? []).filter((item) => item.exists || item.kind === "app");
     const candidate = preferred ?? managedProfile ?? snapshot?.current?.profile ?? snapshot?.configured?.profile;
     const match = candidate && profiles.find((item) => sameProfileRef(item.ref, candidate));
     if (match) {
@@ -1054,8 +1099,6 @@ export function mountManager() {
     if (!item) {
       profileName.value = "";
       profileClone.disabled = true;
-      profileMigrateRow.hidden = true;
-      profileMigrate.disabled = true;
       document.getElementById("profile-delete-row")!.hidden = true;
       profileBackup.disabled = true;
       profileExport.disabled = true;
@@ -1066,12 +1109,10 @@ export function mountManager() {
     const current = currentRunContext();
     const isCurrent = !!current && sameProfileRef(item.ref, current.profile);
     const canRename = item.renamable && !isCurrent && !mutationBlocked();
-    profileScopeNote.textContent = [profileKindLabel(item.kind), isCurrent ? t("profiles.current") : ""].filter(Boolean).join(" · ");
+    profileScopeNote.textContent = isCurrent ? t("profiles.current") : "";
     profilePluginCount.textContent = t("profiles.pluginCount", {count: item.pluginCount, plural: item.pluginCount === 1 ? "" : "s"});
     document.getElementById("profile-rename-row")!.hidden = !item.renamable || !renameControls.hidden;
     document.getElementById("profile-delete-row")!.hidden = item.kind === "app" || item.kind === "built-in";
-    profileMigrateRow.hidden = item.kind === "app" || !item.exists || !item.launchable;
-    profileMigrate.disabled = profileMigrateRow.hidden || !currentIsAppProfile() || hostStatus?.state !== "Ready" || mutationBlocked();
     renameStart.disabled = !canRename;
     const switchProfile = document.getElementById("profile-switch") as HTMLButtonElement;
     switchProfile.hidden = isCurrent;
@@ -1084,7 +1125,6 @@ export function mountManager() {
     profileBackup.disabled = !item.exists || mutationBlocked();
     profileExport.disabled = !item.exists || mutationBlocked() || exportInFlight;
     profileDelete.disabled = !item.deletable || mutationBlocked();
-    updateMigrationSubmit();
   }
 
   function renderPluginPanel() {
@@ -1107,7 +1147,7 @@ export function mountManager() {
 
   function fillProfiles(preferred?: ManagerProfileRef) {
     profile.replaceChildren();
-    const profiles = (snapshot?.profiles ?? []).filter((item) => item.ref.dataDirectoryId === dataDirectory.value);
+    const profiles = (snapshot?.profiles ?? []).filter((item) => item.ref.dataDirectoryId === dataDirectory.value && (item.exists || item.kind === "app"));
     if (profiles.length === 0) {
       const option = document.createElement("option");
       option.value = "";
@@ -1121,7 +1161,7 @@ export function mountManager() {
       const option = document.createElement("option");
       option.value = item.ref.name;
       const label = profileLabel(item.ref);
-      option.textContent = !item.launchable ? `${label} · ${t("profiles.noDesktop")}` : item.exists ? label : `${label} · ${t("value.new")}`;
+      option.textContent = !item.launchable ? `${label} · ${t("profiles.noDesktop")}` : label;
       option.disabled = !item.launchable;
       profile.append(option);
     }
@@ -1373,7 +1413,7 @@ export function mountManager() {
   function renderProfiles() {
     const focusedKey = (document.activeElement as HTMLElement)?.dataset.profileKey;
     profileList.replaceChildren();
-    const profiles = snapshot?.profiles ?? [];
+    const profiles = (snapshot?.profiles ?? []).filter((item) => item.exists || item.kind === "app");
     const current = currentRunContext();
     if (!managedProfileItem()) {
       syncManagedProfile();
@@ -1397,8 +1437,6 @@ export function mountManager() {
       if (current && sameProfileRef(item.ref, current.profile)) name.append(stateTag(t("profiles.current")));
       const detail = document.createElement("span");
       detail.textContent = t("profiles.pluginDetail", {
-        dataDirectory: dataDirectoryLabel(item.ref.dataDirectoryId),
-        kind: profileKindLabel(item.kind),
         count: item.pluginCount,
         plural: item.pluginCount === 1 ? "" : "s"
       });
@@ -2023,25 +2061,25 @@ export function mountManager() {
 
   document.getElementById("profile-migrate-close")!.addEventListener("click", () => profileMigrateDialog.close());
 
-  profileMigrate.addEventListener("click", () => void (async () => {
-    const item = managedProfileItem();
-    if (!item || item.kind === "app" || !item.exists || !item.launchable || !currentIsAppProfile() ||
-        hostStatus?.state !== "Ready" || mutationBlocked()) return;
-    migrationSource = {...item.ref};
-    migrationSubmitting = false;
-    profileMigrateTitle.textContent = t("migrate.title", {profile: profileLabel(item.ref)});
-    profileMigratePlugins.replaceChildren();
-    profileMigrateData.replaceChildren();
-    profileMigrateFeedback.textContent = "";
-    updateMigrationSubmit();
-    if (!profileMigrateDialog.open) profileMigrateDialog.showModal();
+  profileMigrateSource.addEventListener("change", () => {
+    if (!migrationSource) return;
+    const source = {home: migrationSource.home, profile: profileMigrateSource.value};
+    void analyzeMigrationSource(source);
+  });
+
+  dshImport.addEventListener("click", () => void (async () => {
+    if (!currentIsAppProfile() || hostStatus?.state !== "Ready" || mutationBlocked()) {
+      profilesFeedback(t("migrate.switchFirst"), "error");
+      return;
+    }
     try {
-      renderMigrationAnalysis(await analyzeAppProfileMigration(item.ref));
+      const start = await defaultImportDirectory();
+      const chosen = await StorageService.ChooseDirectory(start);
+      if (!chosen) return;
+      await openMigrationDialog({home: chosen, profile: ""}, t("migrate.titleFolder", {path: chosen}));
     } catch (error) {
-      profileMigrateFeedback.textContent = managerErrorMessage(error, "error.migrateAnalyze");
-      console.error("Could not analyze DSH profile migration", error);
-    } finally {
-      updateMigrationSubmit();
+      profilesFeedback(managerErrorMessage(error, "error.migrateAnalyze"), "error");
+      console.error("Could not choose DSH import folder", error);
     }
   })());
 
@@ -2053,6 +2091,8 @@ export function mountManager() {
       plugins: options.map(option => option.dataset.profileMigrationPackage).filter((name): name is string => name !== undefined),
       patch: options.some(option => option.dataset.profileMigrationKind === "patch"),
       credentials: options.some(option => option.dataset.profileMigrationKind === "credentials"),
+      sessions: options.some(option => option.dataset.profileMigrationKind === "sessions"),
+      workspaces: options.some(option => option.dataset.profileMigrationKind === "workspaces"),
     };
     migrationSubmitting = true;
     profileMigrateFeedback.textContent = "";

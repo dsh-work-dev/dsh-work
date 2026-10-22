@@ -127,6 +127,27 @@ func (s *ManagerService) ListPlugins(ctx context.Context, request dshmanager.Plu
 	return value, err
 }
 
+func (s *ManagerService) DefaultImportDirectory(ctx context.Context) (string, error) {
+	if s.Local != nil { return s.Local.DefaultImportDirectory(ctx) }
+	var value string
+	err := call(ctx, s.Client, "ManagerService", "DefaultImportDirectory", []any{}, &value)
+	return value, err
+}
+
+func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.AppProfileMigrationSource) (dshmanager.AppProfileMigrationAnalysis, error) {
+	if s.Local != nil { return s.Local.AnalyzeAppProfileMigration(ctx, source) }
+	var value dshmanager.AppProfileMigrationAnalysis
+	err := call(ctx, s.Client, "ManagerService", "AnalyzeAppProfileMigration", []any{source}, &value)
+	return value, err
+}
+
+func (s *ManagerService) MigrateToAppProfile(ctx context.Context, request dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationResult, error) {
+	if s.Local != nil { return s.Local.MigrateToAppProfile(ctx, request) }
+	var value dshmanager.AppProfileMigrationResult
+	err := call(ctx, s.Client, "ManagerService", "MigrateToAppProfile", []any{request}, &value)
+	return value, err
+}
+
 func (s *ManagerService) InstallPlugin(ctx context.Context, request dshmanager.PluginInstallRequest) (result dshmanager.PluginResult, resultErr error) {
 	if s.Local != nil { return s.Local.InstallPlugin(ctx, request) }
 	var value dshmanager.PluginResult
@@ -194,20 +215,6 @@ func (s *ManagerService) CloneProfile(ctx context.Context, request dshmanager.Pr
 	if s.Local != nil { return s.Local.CloneProfile(ctx, request) }
 	var value dshmanager.ProfileCloneResult
 	err := call(ctx, s.Client, "ManagerService", "CloneProfile", []any{request}, &value)
-	return value, err
-}
-
-func (s *ManagerService) AnalyzeAppProfileMigration(ctx context.Context, source dshmanager.ProfileRef) (dshmanager.AppProfileMigrationAnalysis, error) {
-	if s.Local != nil { return s.Local.AnalyzeAppProfileMigration(ctx, source) }
-	var value dshmanager.AppProfileMigrationAnalysis
-	err := call(ctx, s.Client, "ManagerService", "AnalyzeAppProfileMigration", []any{source}, &value)
-	return value, err
-}
-
-func (s *ManagerService) MigrateToAppProfile(ctx context.Context, request dshmanager.AppProfileMigrationRequest) (dshmanager.AppProfileMigrationResult, error) {
-	if s.Local != nil { return s.Local.MigrateToAppProfile(ctx, request) }
-	var value dshmanager.AppProfileMigrationResult
-	err := call(ctx, s.Client, "ManagerService", "MigrateToAppProfile", []any{request}, &value)
 	return value, err
 }
 

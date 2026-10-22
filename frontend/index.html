@@ -187,7 +187,7 @@
 
           <section id="manager-section-profiles" class="panel" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
             <section id="profile-list-view" class="section" aria-labelledby="profiles-all-title">
-              <div class="section-head"><h2 id="profiles-all-title" data-i18n="profiles.all">All profiles</h2><button id="backup-import" class="button" data-i18n="backup.import" type="button">Import profile</button></div>
+              <div class="section-head"><h2 id="profiles-all-title" data-i18n="profiles.all">All profiles</h2><button id="dsh-import" class="button" data-i18n="action.importFromDsh" type="button">Import from DSH…</button><button id="backup-import" class="button" data-i18n="backup.import" type="button">Import profile</button></div>
               <div class="group"><div id="manager-profiles" class="rows"></div></div>
               <p id="backup-import-feedback" class="result" role="status"></p>
             </section>
@@ -221,10 +221,6 @@
                     <div class="row-main"><strong data-i18n="action.clone">Clone</strong><p data-i18n="profiles.clone.note">Create a new profile from this one.</p></div>
                     <div class="row-trail"><button id="manager-profile-clone" class="button" data-context-mutation="true" data-i18n="action.clone" type="button">Clone</button></div>
                   </div>
-                  <div id="profile-migrate-row" class="row">
-                    <div class="row-main"><strong data-i18n="action.migrateToAppProfile">Migrate to DSH Work</strong><p data-i18n="profiles.migrate.note">Bring plugins and settings into DSH Work.</p></div>
-                    <div class="row-trail"><button id="manager-profile-migrate" class="button" data-context-mutation="true" data-i18n="action.migrateToAppProfile" type="button">Migrate to DSH Work</button></div>
-                  </div>
                   <div class="row">
                     <div class="row-main"><strong data-i18n="action.export">Export</strong><p data-i18n="profiles.export.note">Save a file you can import later.</p></div>
                     <div class="row-trail"><button id="manager-profile-export" class="button" data-i18n="action.export" type="button">Export</button></div>
@@ -257,6 +253,7 @@
                   <dialog id="profile-migrate-dialog" aria-labelledby="profile-migrate-title">
                     <header class="dialog-head"><h2 id="profile-migrate-title"></h2><button id="profile-migrate-close" class="button" data-i18n="startup.close" type="button">Close</button></header>
                     <div class="group">
+                      <label id="profile-migrate-source-row" class="row field" hidden><span data-i18n="migrate.profile">Profile</span><select id="profile-migrate-source"></select></label>
                       <div id="profile-migrate-plugins" class="rows"></div>
                       <div id="profile-migrate-data" class="rows"></div>
                       <div class="row row-foot"><button id="profile-migrate-submit" class="button button-primary" data-i18n="action.migrate" type="button">Migrate</button></div>

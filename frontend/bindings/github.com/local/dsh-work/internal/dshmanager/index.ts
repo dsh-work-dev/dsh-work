@@ -24,6 +24,7 @@ export type {
     AppProfileMigrationReport,
     AppProfileMigrationRequest,
     AppProfileMigrationResult,
+    AppProfileMigrationSource,
     DSHReleaseInfo,
     DataDirectoryInfo,
     LaunchRequest,

@@ -165,11 +165,18 @@ type ProfileRef struct {
 	Name            string `json:"name"`
 }
 
+type AppProfileMigrationSource struct {
+	Home    string `json:"home"`
+	Profile string `json:"profile"`
+}
+
 type AppProfileMigrationRequest struct {
-	Source      ProfileRef `json:"source"`
-	Plugins     []string   `json:"plugins"`
-	Patch       bool       `json:"patch"`
-	Credentials bool       `json:"credentials"`
+	Source      AppProfileMigrationSource `json:"source"`
+	Plugins     []string                  `json:"plugins"`
+	Patch       bool                      `json:"patch"`
+	Credentials bool                      `json:"credentials"`
+	Sessions    bool                      `json:"sessions"`
+	Workspaces  bool                      `json:"workspaces"`
 }
 
 type AppProfileMigrationPlugin struct {
@@ -179,18 +186,20 @@ type AppProfileMigrationPlugin struct {
 }
 
 type AppProfileMigrationData struct {
-	Kind    string `json:"kind"`
+	Kind    string `json:"kind"` // "patch", "sessions", "workspaces", or "credentials"
 	Count   int    `json:"count,omitempty"`
 	Covered bool   `json:"covered"`
 }
 
 type AppProfileMigrationAnalysis struct {
-	Plugins []AppProfileMigrationPlugin `json:"plugins"`
-	Data    []AppProfileMigrationData   `json:"data"`
+	Home     string                      `json:"home"`
+	Profiles []string                    `json:"profiles"`
+	Plugins  []AppProfileMigrationPlugin `json:"plugins"`
+	Data     []AppProfileMigrationData   `json:"data"`
 }
 
 type AppProfileMigrationFailure struct {
-	Item    string `json:"item"`
+	Item    string `json:"item"` // package name, "patch", "sessions", "workspaces", or "credentials"
 	Message string `json:"message"`
 }
 
