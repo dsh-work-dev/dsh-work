@@ -250,17 +250,17 @@
                       <p id="backup-feedback" class="result" role="status"></p>
                     </section>
                   </dialog>
-                  <dialog id="profile-migrate-dialog" aria-labelledby="profile-migrate-title">
-                    <header class="dialog-head"><h2 id="profile-migrate-title"></h2><button id="profile-migrate-close" class="button" data-i18n="startup.close" type="button">Close</button></header>
-                    <div class="group">
-                      <label id="profile-migrate-source-row" class="row field" hidden><span data-i18n="migrate.profile">Profile</span><select id="profile-migrate-source"></select></label>
-                      <div id="profile-migrate-plugins" class="rows"></div>
-                      <div id="profile-migrate-data" class="rows"></div>
-                      <div class="row row-foot"><button id="profile-migrate-submit" class="button button-primary" data-i18n="action.migrate" type="button">Migrate</button></div>
-                    </div>
-                    <p id="profile-migrate-feedback" class="result" role="status"></p>
-                  </dialog>
             </div>
+            <dialog id="profile-migrate-dialog" aria-labelledby="profile-migrate-title">
+              <header class="dialog-head"><h2 id="profile-migrate-title"></h2><button id="profile-migrate-close" class="button" data-i18n="startup.close" type="button">Close</button></header>
+              <div class="group">
+                <label id="profile-migrate-source-row" class="row field" hidden><span data-i18n="migrate.profile">Profile</span><select id="profile-migrate-source"></select></label>
+                <div id="profile-migrate-plugins" class="rows"></div>
+                <div id="profile-migrate-data" class="rows"></div>
+                <div class="row row-foot"><button id="profile-migrate-submit" class="button button-primary" data-i18n="action.import" type="button">Import</button></div>
+              </div>
+              <p id="profile-migrate-feedback" class="result" role="status"></p>
+            </dialog>
           </section>
 
           <section id="manager-section-plugins" class="panel" data-manager-panel="plugins" aria-labelledby="manager-title" hidden>

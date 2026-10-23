@@ -742,6 +742,12 @@ export function mountManager() {
       const title = document.createElement("span");
       title.textContent = label;
       main.append(title);
+      if (item.kind === "patch") {
+        const detail = document.createElement("span");
+        detail.className = "row-hint";
+        detail.textContent = t("migrate.patchHint");
+        main.append(detail);
+      }
       if (covered) {
         const detail = document.createElement("span");
         detail.className = "row-hint";
