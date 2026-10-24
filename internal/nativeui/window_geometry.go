@@ -16,7 +16,7 @@ type GeometryStore interface {
 	SetWindowGeometry(context.Context, string, settings.WindowGeometry) error
 }
 
-func RestoreWindowGeometry(options application.WebviewWindowOptions, manager GeometryStore) application.WebviewWindowOptions {
+func RestoreWindowGeometry(options application.WebviewWindowOptions, manager GeometryStore, screens func() []*application.Screen) application.WebviewWindowOptions {
 	if manager == nil {
 		return options
 	}
@@ -25,17 +25,36 @@ func RestoreWindowGeometry(options application.WebviewWindowOptions, manager Geo
 		return options
 	}
 	g := values.WorkspaceWindow
-	if g.Positioned {
-		options.InitialPosition = application.WindowXY
-		options.X, options.Y = g.X, g.Y
-	}
 	if g.Width >= options.MinWidth && g.Width <= 16384 && g.Height >= options.MinHeight && g.Height <= 16384 {
 		options.Width, options.Height = g.Width, g.Height
 		if g.Maximised {
 			options.StartState = application.WindowStateMaximised
 		}
 	}
+	if g.Positioned {
+		if screens != nil && intersectsVisibleTitlebar(g.X, g.Y, options.Width, screens()) {
+			options.InitialPosition = application.WindowXY
+			options.X, options.Y = g.X, g.Y
+		} else {
+			options.InitialPosition = application.WindowCentered
+			options.X, options.Y = 0, 0
+		}
+	}
 	return options
+}
+
+func intersectsVisibleTitlebar(x, y, width int, screens []*application.Screen) bool {
+	titlebar := application.Rect{X: x, Y: y, Width: width, Height: 40}
+	for _, screen := range screens {
+		if screen == nil {
+			continue
+		}
+		intersection := titlebar.Intersect(screen.WorkArea)
+		if intersection.Width*intersection.Height >= 100*40 {
+			return true
+		}
+	}
+	return false
 }
 
 // Capture position and dimensions on the native event thread; debounce only the settings write.

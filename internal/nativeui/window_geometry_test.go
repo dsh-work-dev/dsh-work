@@ -51,7 +51,9 @@ func TestWindowSizeSurvivesCloseAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored := RestoreWindowGeometry(options, reloaded)
+	restored := RestoreWindowGeometry(options, reloaded, func() []*application.Screen {
+		return []*application.Screen{{WorkArea: application.Rect{X: -1280, Y: 0, Width: 3000, Height: 1200}}}
+	})
 	if restored.Width != 1360 || restored.Height != 920 || restored.StartState != application.WindowStateMaximised {
 		t.Fatalf("restored window: %+v", restored)
 	}
@@ -84,7 +86,9 @@ func TestWindowPositionAtOriginSurvivesMoveAndReload(t *testing.T) {
 	if got := values.WorkspaceWindow; got.X != 0 || got.Y != 0 || !got.Positioned {
 		t.Fatalf("saved position = %+v, want positioned at (0, 0)", got)
 	}
-	restored := RestoreWindowGeometry(options, reloaded)
+	restored := RestoreWindowGeometry(options, reloaded, func() []*application.Screen {
+		return []*application.Screen{{WorkArea: application.Rect{X: 0, Y: 0, Width: 1920, Height: 1080}}}
+	})
 	if restored.InitialPosition != application.WindowXY || restored.X != 0 || restored.Y != 0 {
 		t.Fatalf("restored origin: initial=%v x=%d y=%d", restored.InitialPosition, restored.X, restored.Y)
 	}
@@ -97,8 +101,62 @@ func TestLegacyWindowGeometryKeepsCenteredStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := application.WebviewWindowOptions{Name: "workspace", Width: 1180, Height: 760, InitialPosition: application.WindowCentered}
-	restored := RestoreWindowGeometry(options, manager)
+	restored := RestoreWindowGeometry(options, manager, nil)
 	if restored.InitialPosition != application.WindowCentered {
 		t.Fatalf("legacy settings changed initial position to %v", restored.InitialPosition)
+	}
+}
+
+func TestRestoreWindowPositionRequiresVisibleTitlebarArea(t *testing.T) {
+	config := settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")}
+	manager, err := settings.New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := application.WebviewWindowOptions{
+		Name: "workspace", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480,
+		InitialPosition: application.WindowCentered,
+	}
+	tests := []struct {
+		name         string
+		geometry     settings.WindowGeometry
+		screen       application.Rect
+		wantInit     application.WindowStartPosition
+		wantX, wantY int
+	}{
+		{
+			name:     "inside screen",
+			geometry: settings.WindowGeometry{X: 100, Y: 80, Positioned: true, Width: 1250, Height: 820},
+			screen:   application.Rect{X: 0, Y: 0, Width: 1920, Height: 1080},
+			wantInit: application.WindowXY, wantX: 100, wantY: 80,
+		},
+		{
+			name:     "partly outside with 100 by 40 visible",
+			geometry: settings.WindowGeometry{X: -1080, Y: 0, Positioned: true, Width: 1250, Height: 820},
+			screen:   application.Rect{X: 0, Y: 0, Width: 1920, Height: 1080},
+			wantInit: application.WindowXY, wantX: -1080, wantY: 0,
+		},
+		{
+			name:     "fully outside",
+			geometry: settings.WindowGeometry{X: -5000, Y: -5000, Positioned: true, Width: 1250, Height: 820},
+			screen:   application.Rect{X: 0, Y: 0, Width: 1920, Height: 1080},
+			wantInit: application.WindowCentered, wantX: 0, wantY: 0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := manager.SetWindowGeometry(t.Context(), "workspace", test.geometry); err != nil {
+				t.Fatal(err)
+			}
+			got := RestoreWindowGeometry(options, manager, func() []*application.Screen {
+				return []*application.Screen{{WorkArea: test.screen}}
+			})
+			if got.InitialPosition != test.wantInit || got.X != test.wantX || got.Y != test.wantY {
+				t.Fatalf("restored position = %v (%d,%d), want %v (%d,%d)", got.InitialPosition, got.X, got.Y, test.wantInit, test.wantX, test.wantY)
+			}
+			if got.Width != 1250 || got.Height != 820 {
+				t.Fatalf("restored dimensions = %dx%d, want 1250x820", got.Width, got.Height)
+			}
+		})
 	}
 }

@@ -253,7 +253,12 @@ func runDesktopClient(identity string, resources Resources) error {
 		mu.Lock()
 		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)
 		mu.Unlock()
-		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences})
+		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences}, func() []*application.Screen {
+			if desktop == nil || desktop.Screen == nil {
+				return nil
+			}
+			return desktop.Screen.GetAll()
+		})
 	}
 	createWorkspace := func(section string) {
 		if workspace != nil {
