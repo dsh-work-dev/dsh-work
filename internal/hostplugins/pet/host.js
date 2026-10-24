@@ -257,13 +257,18 @@ export function apply(ctx, config, timers = globalThis) {
     if (req.method !== 'POST' || req.headers.origin !== `http://${req.headers.host}`) return reply(res, 403, {});
     try {
       const input = await body(req);
+      let didChange = false;
       for (const meta of Array.isArray(input.sessions) ? input.sessions.slice(0, 256) : []) {
+        const existed = rows.has(meta.id);
         const r = row(meta.id); if (!r) continue;
-        r.title = text(meta.title, 120) || r.title;
-        r.parentSessionId = text(meta.parentId, 256) || r.parentSessionId;
+        if (!existed) didChange = true;
+        const title = text(meta.title, 120), parentSessionId = text(meta.parentId, 256);
+        if (title && title !== r.title) { r.title = title; didChange = true; }
+        if (parentSessionId && parentSessionId !== r.parentSessionId) { r.parentSessionId = parentSessionId; didChange = true; }
       }
       const r = rows.get(input.current);
-      if (r && input.visible === true) r.readSeq = r.seq;
+      if (r && input.visible === true && r.readSeq !== r.seq) { r.readSeq = r.seq; didChange = true; }
+      if (didChange) changed();
       reply(res, 200, {});
     } catch { reply(res, 400, {}); }
   }}));

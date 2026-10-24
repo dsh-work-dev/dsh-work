@@ -42,7 +42,8 @@ func TestLiveDSHWorkerActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	patch, err := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development").Prepare("live-test", map[string]map[string]string{
+	overlay := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development")
+	patch, err := overlay.Prepare("live-test", map[string]map[string]string{
 		"shell": {"generation": "live-test"}, "pet": petConfig,
 	})
 	if err != nil {
@@ -73,12 +74,24 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if err = os.WriteFile(fixture, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(patch)
-	var patches []map[string]any
-	_ = json.Unmarshal(data, &patches)
-	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(fixture), "/")}).String(), "config": map[string]string{"token": b.token, "cwd": home}}}})
-	data, _ = json.Marshal(patches)
-	if err = os.WriteFile(patch, data, 0600); err != nil {
+	addFixture := func(path string) error {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var patches []map[string]any
+		if err := json.Unmarshal(data, &patches); err != nil {
+			return err
+		}
+		fixtureURL := (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(fixture), "/")}).String()
+		patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": fixtureURL, "config": map[string]string{"token": b.token, "cwd": home}}}})
+		data, err = json.Marshal(patches)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, data, 0600)
+	}
+	if err = addFixture(patch); err != nil {
 		t.Fatal(err)
 	}
 	port := 1
@@ -86,7 +99,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer carrier.Close()
+	defer func() { _ = carrier.Close() }()
 	patch, err = carrier.Prepare(filepath.Join(home, "carrier"), cli, patch)
 	if err != nil {
 		t.Fatal(err)
@@ -376,6 +389,30 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		t.Fatalf("stop first DSH Worker: %v", err)
 	}
 	<-done
+	petConfig, err = b.Begin("live-test-restarted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err = overlay.Prepare("live-test-restarted", map[string]map[string]string{
+		"shell": {"generation": "live-test-restarted"}, "pet": petConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := addFixture(patch); err != nil {
+		t.Fatal(err)
+	}
+	if err := carrier.Close(); err != nil {
+		t.Fatalf("close first Worker IPC transport: %v", err)
+	}
+	carrier, err = workeripc.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err = carrier.Prepare(filepath.Join(home, "carrier-restarted"), cli, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd = exec.CommandContext(ctx, "node", cli, "--profile", "web", "--patch", patch, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open")
 	cmd.Dir = home
 	cmd.Env = append(os.Environ(), "DSH_HOME="+filepath.Join(home, "dsh-home"))
