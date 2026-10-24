@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/supervisor"
@@ -25,6 +26,12 @@ const faultProfileManifest = `{
 `
 
 var faultBundles = []string{"@acme/widget", "@acme/other", "@acme/idle"}
+
+type faultPluginCommandRunner struct{}
+
+func (faultPluginCommandRunner) Run(context.Context, string, []string, map[string]string, string) (dshmanager.CommandResult, error) {
+	return dshmanager.CommandResult{}, nil
+}
 
 // exitingSupervisor starts Workers that exit before readiness with the given
 // captured stderr, the shape of a plugin tree that failed to load.
@@ -106,6 +113,8 @@ func newFaultTestHostWith(t *testing.T, supervisorAdapter supervisor.Adapter) (*
 		DefaultRunContext: dshmanager.RunContext{
 			RuntimeID: "dsh-test", Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
 		},
+		CommandRunner:  faultPluginCommandRunner{},
+		PluginCommands: dshadapter.NewPluginCommands(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +193,72 @@ func TestDisableFaultPluginsDeselectsEveryThirdPartyBundle(t *testing.T) {
 	}
 	if _, err := host.DisableFaultPlugin(context.Background(), "@acme/widget"); err == nil {
 		t.Fatal("disabled an already disabled plugin")
+	}
+}
+
+func TestFaultPluginChangesPublishUpdatedPluginList(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(*Host) error
+		want []lifecycle.FaultPlugin
+	}{
+		{
+			name: "disable",
+			act: func(host *Host) error {
+				_, err := host.DisableFaultPlugin(context.Background(), "@acme/widget")
+				return err
+			},
+			want: []lifecycle.FaultPlugin{
+				{Package: "@acme/widget", Enabled: false, Suspected: true},
+				{Package: "@acme/idle"},
+				{Package: "@acme/other", Enabled: true},
+			},
+		},
+		{
+			name: "remove",
+			act: func(host *Host) error {
+				_, err := host.RemoveFaultPlugin(context.Background(), "@acme/widget")
+				return err
+			},
+			want: []lifecycle.FaultPlugin{
+				{Package: "@acme/idle"},
+				{Package: "@acme/other", Enabled: true},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host, _, statuses, _ := newFaultTestHost(t, "Error: dsh: failed to apply loader entry ws (@acme/widget/workspace): boom")
+			defer host.ShutdownForApp()
+			host.Start()
+			initial := waitForStatus(t, statuses, lifecycle.StateFailed)
+			if initial.PluginFault == nil {
+				t.Fatal("failed startup did not publish the plugin list")
+			}
+			if err := test.act(host); err != nil {
+				t.Fatal(err)
+			}
+			published := waitForPublishedPluginFault(t, statuses, test.want)
+			if published.State != lifecycle.StateFailed {
+				t.Fatalf("published plugin update in state %s, want Failed", published.State)
+			}
+		})
+	}
+}
+
+func waitForPublishedPluginFault(t *testing.T, statuses <-chan lifecycle.Status, want []lifecycle.FaultPlugin) lifecycle.Status {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case status := <-statuses:
+			if status.PluginFault != nil && reflect.DeepEqual(status.PluginFault.Plugins, want) {
+				return status
+			}
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for published PluginFault %+v", want)
+		}
 	}
 }
 

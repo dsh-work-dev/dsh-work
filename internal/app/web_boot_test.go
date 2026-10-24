@@ -73,6 +73,32 @@ func TestWebBootMustCompleteBeforeSuccessPoint(t *testing.T) {
 	}
 }
 
+func TestCheckpointPublishSeesWebBootURL(t *testing.T) {
+	f := newRunContextSwitchFixture(t)
+	defer f.close()
+	f.host.config.RequireWebBoot = true
+
+	checkpointURL := make(chan string, 1)
+	f.host.SetPublish(func(status lifecycle.Status) {
+		f.statuses <- status
+		if status.Phase == lifecycle.PhaseCheckpoint {
+			checkpointURL <- f.host.WebBootURL()
+		}
+	})
+	if status := f.host.Start(); status.State != lifecycle.StateStarting {
+		t.Fatalf("Start() status = %+v", status)
+	}
+	waitForWebBootPending(t, f.host)
+	select {
+	case got := <-checkpointURL:
+		if got != "/?generation=test-session" {
+			t.Fatalf("WebBootURL at Checkpoint publish = %q, want %q", got, "/?generation=test-session")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Checkpoint status was not published")
+	}
+}
+
 func waitForWebBootPending(t *testing.T, host *Host) {
 	t.Helper()
 	deadline := time.NewTimer(3 * time.Second)

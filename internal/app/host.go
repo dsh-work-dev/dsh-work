@@ -1908,13 +1908,13 @@ func (h *Host) startChannel(run *generationRun, authURL string) (workerchannel.S
 }
 
 func (h *Host) markReady(run *generationRun, workspaceURL string) error {
+	run.mu.Lock()
+	run.readyWorkspaceURL = workspaceURL
+	run.mu.Unlock()
 	err := h.setPhase(run, lifecycle.PhaseCheckpoint)
 	if err != nil {
 		return err
 	}
-	run.mu.Lock()
-	run.readyWorkspaceURL = workspaceURL
-	run.mu.Unlock()
 	return nil
 }
 

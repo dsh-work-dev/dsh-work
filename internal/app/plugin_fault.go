@@ -153,7 +153,9 @@ func (h *Host) actOnFaultPlugins(act func(PluginFaultManager, *failedPluginStart
 	if plugins != nil {
 		updated := *record
 		updated.plugins = plugins
-		h.pluginFault.CompareAndSwap(record, &updated)
+		if h.pluginFault.CompareAndSwap(record, &updated) {
+			h.emit(h.machine.Snapshot())
+		}
 	}
 	if errors.Is(err, errFaultPluginGone) {
 		return h.Status(), h.failureFor(err, lifecycle.ErrorPluginSpecInvalid, "This plugin is no longer part of the startup failure.", false)
