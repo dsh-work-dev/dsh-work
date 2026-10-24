@@ -62,15 +62,18 @@ type Server struct {
 	// maintenance boundary. Read-only snapshots remain available while the
 	// boundary is held; all mutable service calls are rejected at this daemon
 	// authority. HostService.Quit is the one installer stop handshake.
-	Maintenance  func() bool
-	draining     atomic.Bool
-	activeMu     sync.Mutex
-	active       map[uint64]context.CancelFunc
-	activeNext   uint64
-	streamMu     sync.Mutex
-	streamCancel context.CancelFunc
-	streamID     uint64
-	streamClock  streamClock
+	Maintenance   func() bool
+	draining      atomic.Bool
+	activeMu      sync.Mutex
+	active        map[uint64]context.CancelFunc
+	activeNext    uint64
+	streamStartMu sync.Mutex
+	streamWriteMu sync.Mutex
+	streamMu      sync.Mutex
+	streamCancel  context.CancelFunc
+	streamSub     *hostevents.Subscription
+	streamID      uint64
+	streamClock   streamClock
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

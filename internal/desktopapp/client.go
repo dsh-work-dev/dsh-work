@@ -95,6 +95,15 @@ func runDesktopClient(identity string, resources Resources) error {
 	applicationStarted, protocolOpenPending := false, false
 	var applicationShuttingDown atomic.Bool
 	current := state
+	focusReports := newFocusReporter(func(surface string, focused bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := client.Call(ctx, "WindowService", "SetFocus", surface, []any{focused}, nil); err != nil {
+			attrs := append([]any{"surface", surface, "focused", focused}, logging.ErrAttrs(err, "")...)
+			logging.Module(logging.ModIPC).Warn("window focus report failed", attrs...)
+		}
+	})
+	defer focusReports.close()
 	// One frameless workbench window hosts the trusted shell document; DSH runs
 	// in a frame on its own authority (docs/architecture.md, Windows and menus).
 	var workerSurface *desktopbridge.Surface
@@ -196,7 +205,6 @@ func runDesktopClient(identity string, resources Resources) error {
 		flush := nativeui.RememberWindowGeometry(window, options, store)
 		desktop.OnShutdown(flush)
 	}
-	var reportFocus func(string, bool)
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		currentWindow := windows[name]
@@ -224,27 +232,19 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		windowMu.Unlock()
-		reportFocus(name, false)
+		focusReports.enqueue(name, false)
 		// Keep the native window and WebView alive while hidden.
 		window.Hide()
-	}
-	reportFocus = func(surface string, focused bool) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := client.Call(ctx, "WindowService", "SetFocus", surface, []any{focused}, nil); err != nil {
-			attrs := append([]any{"surface", surface, "focused", focused}, logging.ErrAttrs(err, "")...)
-			logging.Module(logging.ModIPC).Warn("window focus report failed", attrs...)
-		}
 	}
 	registerWorkspaceWindow := func(name string, window application.Window) {
 		// createWorkspace is called with windowMu held so the window pointer and
 		// its routing entry become visible as one operation.
 		windows[name] = window
 		commands.addWindow(name, wailsCommandWindow{window: window})
-		window.OnWindowEvent(events.Common.WindowFocus, func(*application.WindowEvent) { go reportFocus(name, true) })
-		window.OnWindowEvent(events.Common.WindowLostFocus, func(*application.WindowEvent) { go reportFocus(name, false) })
+		window.OnWindowEvent(events.Common.WindowFocus, func(*application.WindowEvent) { focusReports.enqueue(name, true) })
+		window.OnWindowEvent(events.Common.WindowLostFocus, func(*application.WindowEvent) { focusReports.enqueue(name, false) })
 		if window.IsFocused() {
-			go reportFocus(name, true)
+			focusReports.enqueue(name, true)
 		}
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
@@ -343,6 +343,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		applicationShuttingDown.Store(true)
 		ledger.BeginQuit()
 		stopStream()
+		focusReports.close()
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		protocolMu.Lock()

@@ -47,24 +47,54 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancel(r.Context())
+	s.streamStartMu.Lock()
+	if ctx.Err() != nil {
+		s.streamStartMu.Unlock()
+		cancel()
+		return
+	}
 	s.streamMu.Lock()
 	previous := s.streamCancel
-	s.streamID++
-	streamID := s.streamID
-	s.streamCancel = cancel
-	if previous != nil {
-		previous()
+	previousSub := s.streamSub
+	if previous != nil || previousSub != nil {
+		if previous != nil {
+			previous()
+		}
+		if previousSub != nil {
+			previousSub.Close()
+		}
 		if s.Presence != nil {
 			s.Presence.ClearAll()
 		}
 	}
 	s.streamMu.Unlock()
 
+	// Let a current write finish or be interrupted before assigning the new
+	// stream as the active writer. This keeps any in-flight old line ahead of
+	// the replacement stream and prevents the old handler from writing again.
+	s.streamWriteMu.Lock()
+	if ctx.Err() != nil {
+		s.streamWriteMu.Unlock()
+		s.streamStartMu.Unlock()
+		cancel()
+		return
+	}
+	s.streamMu.Lock()
+	s.streamID++
+	streamID := s.streamID
+	s.streamCancel = cancel
+	subscription, initial := s.Hub.Subscribe()
+	s.streamSub = &subscription
+	s.streamMu.Unlock()
+	s.streamWriteMu.Unlock()
+	s.streamStartMu.Unlock()
+
 	defer func() {
 		cancel()
 		s.streamMu.Lock()
 		if s.streamID == streamID {
 			s.streamCancel = nil
+			s.streamSub = nil
 			if s.Presence != nil {
 				s.Presence.ClearAll()
 			}
@@ -72,7 +102,6 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 		s.streamMu.Unlock()
 	}()
 
-	subscription, initial := s.Hub.Subscribe()
 	defer subscription.Close()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
@@ -93,6 +122,11 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	write := func(message hostevents.Message) error {
+		s.streamWriteMu.Lock()
+		defer s.streamWriteMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := json.NewEncoder(w).Encode(message); err != nil {
 			return err
 		}
