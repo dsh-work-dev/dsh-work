@@ -91,6 +91,32 @@ func TestStagedCommandsAreBoundedOrderedAndExpire(t *testing.T) {
 	}
 }
 
+func TestAcquisitionLogsAreNotReplayedButIdenticalLiveBatchesAreDelivered(t *testing.T) {
+	hub := New()
+	hub.SendCommand("", "acquisition-log", 10*time.Second, map[string]string{"log": "old"})
+	initialSubscription, initial := hub.Subscribe()
+	defer initialSubscription.Close()
+	if len(initial) != 0 {
+		t.Fatalf("new subscription received prior acquisition log: %+v", initial)
+	}
+
+	subscription, _ := hub.Subscribe()
+	defer subscription.Close()
+	data := map[string]string{"log": "same batch"}
+	hub.SendCommand("", "acquisition-log", 10*time.Second, data)
+	hub.SendCommand("", "acquisition-log", 10*time.Second, data)
+	for i := 0; i < 2; i++ {
+		select {
+		case message := <-subscription.Messages:
+			if message.Type != "command" || message.Name != "acquisition-log" || string(message.Data) != `{"log":"same batch"}` {
+				t.Fatalf("live acquisition batch %d = %+v", i, message)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("live acquisition batch %d was not delivered", i)
+		}
+	}
+}
+
 func TestFullSubscriberQueueClosesSubscription(t *testing.T) {
 	hub := New()
 	subscription, _ := hub.Subscribe()

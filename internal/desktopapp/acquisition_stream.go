@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/acquisition"
+	"github.com/local/dsh-work/internal/hostevents"
 )
 
 const acquisitionPublishInterval = 250 * time.Millisecond
@@ -41,4 +42,16 @@ func mergeAcquisitionLogs(previous, next string) string {
 		start += newline + 1
 	}
 	return joined[start:]
+}
+
+func publishAcquisitionStatus(hub *hostevents.Hub, status acquisition.OperationStatus, emit func(acquisition.OperationStatus)) {
+	state := status
+	state.Log = ""
+	hub.SetTopic("acquisition", state)
+	if status.Log != "" {
+		hub.SendCommand("", "acquisition-log", 10*time.Second, status)
+	}
+	if emit != nil {
+		emit(status)
+	}
 }

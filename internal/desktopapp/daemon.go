@@ -288,7 +288,6 @@ func runDaemon(identity string, resources Resources) {
 		return values.Appearance
 	})
 	var desktop *application.App
-	var publishRemote = func(string, any) {}
 	var acquisitionStreamPublisher *trailingPublisher[acquisition.OperationStatus]
 	managerService := dshworkapp.NewManagerServiceWithRuntimeProgress(manager, host, func(status acquisition.OperationStatus) {
 		if acquisitionStreamPublisher != nil && acquisitionStreamPublisher.enqueue(status, true) {
@@ -386,12 +385,12 @@ func runDaemon(identity string, resources Resources) {
 		server.AccountCallback = accountCallback
 		defer accountCallback.Close()
 	}
-	publishRemote = hub.SetTopic
 	acquisitionStreamPublisher = newTrailingPublisher(acquisitionPublishInterval, nil, func(status acquisition.OperationStatus) {
-		if desktop != nil {
-			desktop.Event.Emit("acquisition", status)
-		}
-		publishRemote("acquisition", status)
+		publishAcquisitionStatus(hub, status, func(status acquisition.OperationStatus) {
+			if desktop != nil {
+				desktop.Event.Emit("acquisition", status)
+			}
+		})
 	}, mergeAcquisitionStatus)
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)

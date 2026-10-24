@@ -125,6 +125,9 @@ func (p *streamProcessor) handle(message hostevents.Message) {
 			return
 		}
 		if p.commands != nil {
+			if message.Name == "acquisition-log" {
+				message.Name = "acquisition"
+			}
 			p.commands.dispatch(message, data)
 		}
 	}

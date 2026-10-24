@@ -114,7 +114,8 @@ func (h *Hub) SetTopic(topic string, value any) {
 }
 
 // SendCommand delivers a command once. When there is no subscriber it keeps
-// the command until the next subscription, subject to the TTL and queue cap.
+// replayable commands until the next subscription, subject to the TTL and
+// queue cap. Acquisition logs are transient and are discarded while offline.
 func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 	if h == nil || name == "" {
 		return
@@ -128,6 +129,9 @@ func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 	now := h.now()
 	message := Message{Type: "command", Name: name, Window: window, ExpiresAt: now.Add(ttl).UnixMilli(), Data: append(json.RawMessage(nil), raw...)}
 	if len(h.subscribers) == 0 {
+		if name == "acquisition-log" {
+			return
+		}
 		if len(h.commands) == commandBuffer {
 			copy(h.commands, h.commands[1:])
 			h.commands = h.commands[:len(h.commands)-1]

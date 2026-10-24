@@ -71,6 +71,37 @@ func TestStreamProcessorMapsTopicsAndEmitsOnlyPreferenceChanges(t *testing.T) {
 	}
 }
 
+func TestAcquisitionTopicAndLogCommandUseSameWailsEvent(t *testing.T) {
+	type event struct {
+		name string
+		data acquisition.OperationStatus
+	}
+	var events []event
+	dispatcher := newCommandDispatcher(func(name string, data any) {
+		events = append(events, event{name: name, data: data.(acquisition.OperationStatus)})
+	}, nil, nil)
+	processor := &streamProcessor{commands: dispatcher, emitEvent: func(name string, data any) {
+		events = append(events, event{name: name, data: data.(acquisition.OperationStatus)})
+	}}
+	state := acquisition.OperationStatus{OperationID: "op", State: acquisition.OperationActive}
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor.handle(hostevents.Message{Type: "state", Topic: "acquisition", Value: stateJSON})
+
+	logBatch := state
+	logBatch.Log = "download output"
+	logJSON, err := json.Marshal(logBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor.handle(hostevents.Message{Type: "command", Name: "acquisition-log", ExpiresAt: time.Now().Add(time.Minute).UnixMilli(), Data: logJSON})
+	if len(events) != 2 || events[0].name != "acquisition" || events[1].name != "acquisition" || events[1].data.Log != "download output" {
+		t.Fatalf("acquisition events = %+v", events)
+	}
+}
+
 type fakeClientTimer struct {
 	mu         sync.Mutex
 	channel    chan time.Time

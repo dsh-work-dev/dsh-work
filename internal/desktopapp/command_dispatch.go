@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -143,6 +144,12 @@ func commandData(name string, raw json.RawMessage) (any, bool, error) {
 	switch name {
 	case "notification-failure", "background-stopping":
 		var data bool
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return nil, true, err
+		}
+		return data, true, nil
+	case "acquisition-log":
+		var data acquisition.OperationStatus
 		if err := json.Unmarshal(raw, &data); err != nil {
 			return nil, true, err
 		}
