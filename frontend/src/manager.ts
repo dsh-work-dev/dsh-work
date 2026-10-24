@@ -1772,7 +1772,7 @@ export function mountManager() {
     const log = operationLogs[kind];
     if (status.log) {
       log.append(status.operationId, status.log);
-      return;
+      if (status.step === "output") return;
     }
     const preparation = acquisitionPreparation(status);
     let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);

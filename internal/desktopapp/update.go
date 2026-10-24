@@ -202,11 +202,12 @@ type updateRunner struct {
 	stopUI   func() error
 	publish  func(daemon.UpdateSnapshot)
 
-	busy        atomic.Bool
-	mu          sync.RWMutex
-	state       daemon.UpdateSnapshot
-	pending     *pendingRelease
-	lastPublish time.Time
+	busy           atomic.Bool
+	mu             sync.RWMutex
+	state          daemon.UpdateSnapshot
+	pending        *pendingRelease
+	publishClock   trailingClock
+	statePublisher *trailingPublisher[daemon.UpdateSnapshot]
 
 	activeCancel context.CancelFunc
 	startCancel  context.CancelFunc
@@ -231,18 +232,10 @@ func (r *updateRunner) setState(next daemon.UpdateSnapshot) {
 	r.mu.Lock()
 	changed := r.state != next
 	r.state = next
-	publish := r.publish
-	if changed && publish != nil {
-		now := time.Now()
-		if next.Phase == daemon.UpdateDownloading && !r.lastPublish.IsZero() && now.Sub(r.lastPublish) < updateProgressPublishInterval {
-			publish = nil
-		} else {
-			r.lastPublish = now
-		}
-	}
+	publisher, drain := r.queueStatePublishLocked(next, changed)
 	r.mu.Unlock()
-	if changed && publish != nil {
-		publish(next)
+	if drain {
+		publisher.drain()
 	}
 }
 
@@ -258,18 +251,34 @@ func (r *updateRunner) updateState(mutator func(*daemon.UpdateSnapshot)) {
 	}
 	changed := r.state != next
 	r.state = next
-	publish := r.publish
-	if changed && publish != nil {
-		now := time.Now()
-		if next.Phase == daemon.UpdateDownloading && !r.lastPublish.IsZero() && now.Sub(r.lastPublish) < updateProgressPublishInterval {
-			publish = nil
-		} else {
-			r.lastPublish = now
-		}
-	}
+	publisher, drain := r.queueStatePublishLocked(next, changed)
 	r.mu.Unlock()
-	if changed && publish != nil {
-		publish(next)
+	if drain {
+		publisher.drain()
+	}
+}
+
+func (r *updateRunner) queueStatePublishLocked(next daemon.UpdateSnapshot, changed bool) (*trailingPublisher[daemon.UpdateSnapshot], bool) {
+	if !changed || r.publish == nil {
+		return nil, false
+	}
+	if r.statePublisher == nil {
+		r.statePublisher = newTrailingPublisher(updateProgressPublishInterval, r.publishClock, r.publish, func(_, latest daemon.UpdateSnapshot) daemon.UpdateSnapshot {
+			return latest
+		})
+	}
+	return r.statePublisher, r.statePublisher.enqueue(next, next.Phase == daemon.UpdateDownloading)
+}
+
+func (r *updateRunner) closeStatePublisher() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	publisher := r.statePublisher
+	r.mu.Unlock()
+	if publisher != nil {
+		publisher.close()
 	}
 }
 

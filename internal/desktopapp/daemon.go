@@ -289,10 +289,10 @@ func runDaemon(identity string, resources Resources) {
 	})
 	var desktop *application.App
 	var publishRemote = func(string, any) {}
+	var acquisitionStreamPublisher *trailingPublisher[acquisition.OperationStatus]
 	managerService := dshworkapp.NewManagerServiceWithRuntimeProgress(manager, host, func(status acquisition.OperationStatus) {
-		if desktop != nil {
-			desktop.Event.Emit("acquisition", status)
-			publishRemote("acquisition", status)
+		if acquisitionStreamPublisher != nil && acquisitionStreamPublisher.enqueue(status, true) {
+			acquisitionStreamPublisher.drain()
 		}
 	})
 	dshworkapp.SetBackupFileActions(managerService,
@@ -387,6 +387,12 @@ func runDaemon(identity string, resources Resources) {
 		defer accountCallback.Close()
 	}
 	publishRemote = hub.SetTopic
+	acquisitionStreamPublisher = newTrailingPublisher(acquisitionPublishInterval, nil, func(status acquisition.OperationStatus) {
+		if desktop != nil {
+			desktop.Event.Emit("acquisition", status)
+		}
+		publishRemote("acquisition", status)
+	}, mergeAcquisitionStatus)
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)
 	server.OpenUI = launcher.Open
@@ -1027,6 +1033,8 @@ func runDaemon(identity string, resources Resources) {
 		stopPetInput()
 		applicationShuttingDown.Store(true)
 		updates.Stop()
+		updates.closeStatePublisher()
+		acquisitionStreamPublisher.close()
 		hub.SendCommand("", "background-stopping", 10*time.Second, true)
 		_ = launcher.Stop()
 		if stopPetMenuRefresh != nil {

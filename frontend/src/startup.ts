@@ -403,7 +403,10 @@ export function mountHost() {
     const kind = update.artifact.kind === "node" ? "node" : "dsh";
     if (busy && update.state === "active") acquisitionKind = kind;
     panels[kind].hidden = false;
-    if (update.log) { logs[kind].append(update.operationId, update.log); return; }
+    if (update.log) {
+      logs[kind].append(update.operationId, update.log);
+      if (update.step === "output") return;
+    }
     let text = runtimePreparationText(acquisitionPreparation(update));
     if (update.artifact.version) text += ` · ${update.artifact.version}`;
     if (update.route) text += ` · ${t(`value.${update.route}Source`)}`;
