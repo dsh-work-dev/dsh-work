@@ -232,15 +232,14 @@ func (m *Manager) SetUpdateChannel(ctx context.Context, channel UpdateChannel) (
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Update channel is not supported", "choose stable, beta or nightly")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.UpdateChannel = channel
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool) (Values, error) {
@@ -248,15 +247,14 @@ func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool)
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.AutomaticRuntimeRollback = enabled
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return next, nil
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetVerboseLogging(ctx context.Context, enabled bool) (Values, error) {
@@ -264,15 +262,14 @@ func (m *Manager) SetVerboseLogging(ctx context.Context, enabled bool) (Values, 
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.VerboseLogging = enabled
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return next, nil
+	return m.commit(next), nil
 }
 
 // Store owns persistence mechanics. Settings policy remains independent of
@@ -299,10 +296,11 @@ type Config struct {
 // Manager owns the small global preference set and serializes writes. This is
 // intentionally a versioned app-settings Module, not a second DSH catalog.
 type Manager struct {
-	mu     sync.RWMutex
-	path   string
-	store  Store
-	values Values
+	mu       sync.RWMutex
+	path     string
+	store    Store
+	values   Values
+	onChange func(Values)
 
 	// appearanceImportPending marks settings saved before dsh-work owned its
 	// appearance; see ImportAppearanceMode.
@@ -347,6 +345,27 @@ func (m *Manager) Snapshot(ctx context.Context) (Values, error) {
 	return cloneValues(m.values), nil
 }
 
+// OnChange installs the state publisher. Commit invokes it only after
+// releasing the settings lock, so subscribers can safely request a snapshot.
+func (m *Manager) OnChange(fn func(Values)) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
+}
+
+// commit stores a completed update and notifies the publisher outside the
+// lock. Callers enter with m.mu held and do not unlock after this method.
+func (m *Manager) commit(next Values) Values {
+	m.values = cloneValues(next)
+	callback := m.onChange
+	committed := cloneValues(next)
+	m.mu.Unlock()
+	if callback != nil {
+		callback(committed)
+	}
+	return cloneValues(next)
+}
+
 func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) {
 	if err := contextError(ctx); err != nil {
 		return Values{}, err
@@ -355,15 +374,14 @@ func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) 
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Language is not supported", "choose one of the available dsh-work languages")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.Locale = locale
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetNotificationPreference(ctx context.Context, key notifications.PreferenceKey, enabled bool) (Values, error) {
@@ -371,19 +389,19 @@ func (m *Manager) SetNotificationPreference(ctx context.Context, key notificatio
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	nextPreferences, ok := m.values.Notifications.Set(key, enabled)
 	if !ok {
+		m.mu.Unlock()
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Notification preference is invalid", "choose a supported notification setting")
 	}
 	next := m.values
 	next.Notifications = nextPreferences
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 // SetPetPreference persists the complete Pet preference as one atomic settings
@@ -395,15 +413,14 @@ func (m *Manager) SetPetPreference(ctx context.Context, preference PetPreference
 	}
 	preference = normalizePetPreference(preference)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.Pet = preference
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 func cloneValues(values Values) Values {

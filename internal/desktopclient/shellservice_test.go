@@ -161,9 +161,37 @@ func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestBuiltinComponentHandshakeStatesAreIsolatedByWorkspace(t *testing.T) {
+	s := &ShellService{}
+	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	second := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace-2"}))
+	if err := s.BeginBuiltinComponents(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BeginBuiltinComponents(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReportBuiltinComponent(second, "pet"); err != nil {
+		t.Fatal(err)
+	}
+	firstState, _ := s.GetBuiltinComponents(workspace)
+	secondState, _ := s.GetBuiltinComponents(second)
+	if firstState[2].State != "loading" || secondState[2].State != "loaded" {
+		t.Fatalf("pet state crossed windows: workspace=%+v workspace-2=%+v", firstState, secondState)
+	}
+	if err := s.ResetBuiltinComponents(second); err != nil {
+		t.Fatal(err)
+	}
+	reset, _ := s.GetBuiltinComponents(second)
+	firstState, _ = s.GetBuiltinComponents(workspace)
+	if reset[2].State != "inactive" || firstState[2].State != "loading" {
+		t.Fatalf("reset crossed windows: workspace=%+v workspace-2=%+v", firstState, reset)
+	}
+}
+
 func TestBuiltinComponentsThatNeverReportAreMarkedFailed(t *testing.T) {
 	published := make(chan []BuiltinComponentStatus, 8)
-	s := &ShellService{BuiltinComponentTimeout: 20 * time.Millisecond, OnBuiltinComponentsChanged: func(statuses []BuiltinComponentStatus) { published <- statuses }}
+	s := &ShellService{BuiltinComponentTimeout: 20 * time.Millisecond, OnBuiltinComponentsChanged: func(_ string, statuses []BuiltinComponentStatus) { published <- statuses }}
 	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
 	if err := s.BeginBuiltinComponents(workspace); err != nil {
 		t.Fatal(err)

@@ -23,16 +23,17 @@ type ShellService struct {
 	Pet func(ctx context.Context, visible *bool) (app.PetPanel, error)
 	// SaveZoomLevel stores the workbench zoom factor in the background settings.
 	SaveZoomLevel func(ctx context.Context, zoom float64) error
-	// OnBuiltinComponentsChanged broadcasts transient DSH Client handshake state to every window.
-	OnBuiltinComponentsChanged func([]BuiltinComponentStatus)
+	// OnBuiltinComponentsChanged reports transient DSH Client handshake state
+	// to the window that owns the frame.
+	OnBuiltinComponentsChanged func(string, []BuiltinComponentStatus)
 
 	// BuiltinComponentTimeout marks components that never report as failed;
 	// zero means defaultBuiltinComponentTimeout.
 	BuiltinComponentTimeout time.Duration
 
 	componentsMu    sync.RWMutex
-	components      map[string]string
-	componentsRound uint64
+	components      map[string]map[string]string
+	componentsRound map[string]uint64
 }
 
 // DSH loads its plugins within seconds; a cold start with many profile plugins
@@ -53,47 +54,49 @@ type ShellPet struct {
 	Visible bool `json:"visible"`
 }
 
-func workspaceWindow(ctx context.Context) error {
+// BeginBuiltinComponents marks each built-in Client as loading for the current DSH frame.
+func (s *ShellService) BeginBuiltinComponents(ctx context.Context) error {
 	window, err := trustedWindow(ctx)
 	if err != nil {
 		return err
 	}
-	if window.Name() != "workspace" {
+	surface := window.Name()
+	if !workspaceWindowName(surface) {
 		return errors.New("workspace window required")
 	}
-	return nil
-}
-
-// BeginBuiltinComponents marks each built-in Client as loading for the current DSH frame.
-func (s *ShellService) BeginBuiltinComponents(ctx context.Context) error {
-	if err := workspaceWindow(ctx); err != nil {
-		return err
-	}
 	s.componentsMu.Lock()
-	s.componentsRound++
-	round := s.componentsRound
-	s.components = make(map[string]string, len(builtinComponentIDs))
-	for _, id := range builtinComponentIDs {
-		s.components[id] = "loading"
+	if s.components == nil {
+		s.components = make(map[string]map[string]string)
 	}
+	if s.componentsRound == nil {
+		s.componentsRound = make(map[string]uint64)
+	}
+	s.componentsRound[surface]++
+	round := s.componentsRound[surface]
+	components := make(map[string]string, len(builtinComponentIDs))
+	for _, id := range builtinComponentIDs {
+		components[id] = "loading"
+	}
+	s.components[surface] = components
 	s.componentsMu.Unlock()
-	s.publishBuiltinComponents()
+	s.publishBuiltinComponents(surface)
 	timeout := s.BuiltinComponentTimeout
 	if timeout <= 0 {
 		timeout = defaultBuiltinComponentTimeout
 	}
-	time.AfterFunc(timeout, func() { s.failUnreported(round) })
+	time.AfterFunc(timeout, func() { s.failUnreported(surface, round) })
 	return nil
 }
 
 // failUnreported marks the components of one frame load that never reported.
-func (s *ShellService) failUnreported(round uint64) {
+func (s *ShellService) failUnreported(surface string, round uint64) {
 	s.componentsMu.Lock()
 	changed := false
-	if round == s.componentsRound {
-		for id, state := range s.components {
+	components := s.components[surface]
+	if round == s.componentsRound[surface] {
+		for id, state := range components {
 			if state == "loading" {
-				s.components[id] = "failed"
+				components[id] = "failed"
 				logging.Module(logging.ModPlugin).Error("host plugin did not load", "plugin", "@dsh-work/"+id, "code", string(lifecycle.ErrorHostPluginLoadFailed))
 				changed = true
 			}
@@ -101,27 +104,40 @@ func (s *ShellService) failUnreported(round uint64) {
 	}
 	s.componentsMu.Unlock()
 	if changed {
-		s.publishBuiltinComponents()
+		s.publishBuiltinComponents(surface)
 	}
 }
 
 // ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
 func (s *ShellService) ResetBuiltinComponents(ctx context.Context) error {
-	if err := workspaceWindow(ctx); err != nil {
+	window, err := trustedWindow(ctx)
+	if err != nil {
 		return err
 	}
+	surface := window.Name()
+	if !workspaceWindowName(surface) {
+		return errors.New("workspace window required")
+	}
 	s.componentsMu.Lock()
-	s.componentsRound++
-	s.components = nil
+	if s.componentsRound == nil {
+		s.componentsRound = make(map[string]uint64)
+	}
+	s.componentsRound[surface]++
+	delete(s.components, surface)
 	s.componentsMu.Unlock()
-	s.publishBuiltinComponents()
+	s.publishBuiltinComponents(surface)
 	return nil
 }
 
 // ReportBuiltinComponent accepts a readiness handshake from the framed DSH Client.
 func (s *ShellService) ReportBuiltinComponent(ctx context.Context, id string) error {
-	if err := workspaceWindow(ctx); err != nil {
+	window, err := trustedWindow(ctx)
+	if err != nil {
 		return err
+	}
+	surface := window.Name()
+	if !workspaceWindowName(surface) {
+		return errors.New("workspace window required")
 	}
 	known := false
 	for _, candidate := range builtinComponentIDs {
@@ -134,30 +150,35 @@ func (s *ShellService) ReportBuiltinComponent(ctx context.Context, id string) er
 		return fmt.Errorf("unknown built-in component %q", id)
 	}
 	s.componentsMu.Lock()
-	if s.components[id] != "loading" {
+	components := s.components[surface]
+	if components[id] != "loading" {
 		s.componentsMu.Unlock()
 		return nil
 	}
-	s.components[id] = "loaded"
+	components[id] = "loaded"
 	s.componentsMu.Unlock()
-	s.publishBuiltinComponents()
+	s.publishBuiltinComponents(surface)
 	return nil
 }
 
 // GetBuiltinComponents returns a detached status snapshot to the workbench shell.
 func (s *ShellService) GetBuiltinComponents(ctx context.Context) ([]BuiltinComponentStatus, error) {
-	if _, err := trustedWindow(ctx); err != nil {
+	window, err := trustedWindow(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return s.builtinComponentSnapshot(), nil
+	if !workspaceWindowName(window.Name()) {
+		return nil, errors.New("workspace window required")
+	}
+	return s.builtinComponentSnapshot(window.Name()), nil
 }
 
-func (s *ShellService) builtinComponentSnapshot() []BuiltinComponentStatus {
+func (s *ShellService) builtinComponentSnapshot(surface string) []BuiltinComponentStatus {
 	s.componentsMu.RLock()
 	defer s.componentsMu.RUnlock()
 	result := make([]BuiltinComponentStatus, 0, len(builtinComponentIDs))
 	for _, id := range builtinComponentIDs {
-		state := s.components[id]
+		state := s.components[surface][id]
 		if state == "" {
 			state = "inactive"
 		}
@@ -166,9 +187,9 @@ func (s *ShellService) builtinComponentSnapshot() []BuiltinComponentStatus {
 	return result
 }
 
-func (s *ShellService) publishBuiltinComponents() {
+func (s *ShellService) publishBuiltinComponents(surface string) {
 	if s.OnBuiltinComponentsChanged != nil {
-		s.OnBuiltinComponentsChanged(s.builtinComponentSnapshot())
+		s.OnBuiltinComponentsChanged(surface, s.builtinComponentSnapshot(surface))
 	}
 }
 

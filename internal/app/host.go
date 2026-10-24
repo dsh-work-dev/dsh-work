@@ -2420,6 +2420,15 @@ func (s *HostService) GetStartupOutput(ctx context.Context) StartupOutput {
 	return StartupOutput{Stdout: diagnostics.StdoutTail, Stderr: diagnostics.StderrTail}
 }
 
+// ReportWebBoot accepts the terminal boot report from the trusted workbench
+// window over the same /control service boundary as other Host operations.
+func (s *HostService) ReportWebBoot(ctx context.Context, generation, detail string) error {
+	if !s.authorized(ctx) {
+		return trustedSurfaceRequired("The Worker boot report is available only from the trusted dsh-work shell.")
+	}
+	return s.host.ReportWebBoot(generation, detail)
+}
+
 // OpenRuntimeSettings is the first-use recovery action for a missing local
 // runtime. It opens the trusted runtime-management surface but never starts an
 // acquisition itself.

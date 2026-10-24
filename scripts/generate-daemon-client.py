@@ -50,6 +50,8 @@ for service in services:
                 body += "\treturn " + ("value, " if output else "") + "err\n"
             methods.append("func (s *" + service + ") " + name + "(" + qualify(params) + ") " + qualify(result) + " {\n" + body + "}\n")
     struct = "type " + service + " struct { Client *daemon.Client; Local *app." + service
+    if service == "HostService":
+        struct += "; LocalUpdateState func() daemon.UpdateSnapshot"
     if service == "PetSettingsService":
         struct += "; Maintenance func() bool"
     struct += " }\n\n"
@@ -63,16 +65,14 @@ for service in services:
         imports["errors"] = "errors"
         methods.append(
             "func (s *HostService) GetUpdateState(ctx context.Context) (daemon.UpdateSnapshot, error) {\n"
-            "\tif s.Local != nil { return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil }\n"
-            "\tif s.Client == nil { return daemon.UpdateSnapshot{}, errors.New(\"background client unavailable\") }\n"
-            "\tvar snapshot daemon.Snapshot\n"
-            "\terr := callJSON(ctx, s.Client, \"/snapshot\", struct { Cursor uint64 `json:\"cursor\"` }{}, &snapshot)\n"
-            "\treturn snapshot.Update, err\n"
+            "\tif s.LocalUpdateState == nil { return daemon.UpdateSnapshot{}, errors.New(\"update state unavailable\") }\n"
+            "\treturn s.LocalUpdateState(), nil\n"
             "}\n\n"
-            "func (s *HostService) Update(ctx context.Context, action string) error {\n"
-            "\tif s.Local != nil { return errors.New(\"background update controls unavailable\") }\n"
-            "\tif s.Client == nil { return errors.New(\"background client unavailable\") }\n"
-            "\treturn callJSON(ctx, s.Client, \"/update/action\", struct { Action string `json:\"action\"` }{Action: action}, nil)\n"
+            "func (s *HostService) UpdateAction(ctx context.Context, action daemon.UpdateAction) (daemon.UpdateSnapshot, error) {\n"
+            "\tif s.Local != nil { return daemon.UpdateSnapshot{}, errors.New(\"background update controls unavailable\") }\n"
+            "\tvar value daemon.UpdateSnapshot\n"
+            "\terr := call(ctx, s.Client, \"HostService\", \"UpdateAction\", []any{action}, &value)\n"
+            "\treturn value, err\n"
             "}\n"
         )
     body = struct + helper + "\n".join(methods)

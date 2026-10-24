@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/presence"
 	"github.com/local/dsh-work/internal/settings"
 )
 
@@ -81,7 +82,7 @@ func TestServerBlocksMutableCallsDuringInstallerMaintenance(t *testing.T) {
 
 func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	server := &Server{Maintenance: func() bool { return true }}
-	for _, path := range []string{"/open", "/update/action", "/geometry", "/zoom", "/worker"} {
+	for _, path := range []string{"/open", "/worker"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
 		server.ServeHTTP(recorder, request)
@@ -97,23 +98,17 @@ func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 func TestServerStartsUpdateAction(t *testing.T) {
 	var called UpdateAction
 	server := &Server{
-		UpdateCommand: func(_ context.Context, action UpdateAction) error {
-			called = action
-			return nil
-		},
-		UpdateState: func() UpdateSnapshot { return UpdateSnapshot{Phase: UpdateChecking} },
+		Services: map[string]any{"HostService": &HostService{
+			UpdateCommand: func(_ context.Context, action UpdateAction) error { called = action; return nil },
+			UpdateState:   func() UpdateSnapshot { return UpdateSnapshot{Phase: UpdateChecking} },
+		}},
 	}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/update/action", strings.NewReader(`{"action":"check"}`))
-	server.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("update action status = %d, body=%q", recorder.Code, recorder.Body.String())
+	result := postCall(t, server, Call{Service: "HostService", Method: "UpdateAction", Surface: "workspace", Args: []json.RawMessage{json.RawMessage(`"check"`)}})
+	if result.Error != "" || called != UpdateActionCheck {
+		t.Fatalf("update action result=%+v called=%q", result, called)
 	}
-	if called != UpdateActionCheck {
-		t.Fatalf("update action = %q, want check", called)
-	}
-	if got := strings.TrimSpace(recorder.Body.String()); !strings.Contains(got, `"phase":"checking"`) {
-		t.Fatalf("update action body = %q, want checking state", got)
+	if !strings.Contains(string(result.Value), `"phase":"checking"`) {
+		t.Fatalf("update action value = %s, want checking state", result.Value)
 	}
 }
 
@@ -313,16 +308,102 @@ func TestServerSavesWorkspaceZoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{Settings: manager}
-	for body, want := range map[string]int{`1.2`: http.StatusOK, `0.5`: http.StatusBadRequest, `"big"`: http.StatusBadRequest} {
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/zoom", strings.NewReader(body)))
-		if recorder.Code != want {
-			t.Fatalf("zoom %s status = %d, want %d", body, recorder.Code, want)
-		}
+	service := &WindowService{Settings: manager}
+	server := &Server{Services: map[string]any{"WindowService": service}}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveZoom", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`1.2`)}}); result.Error != "" {
+		t.Fatalf("workspace-2 zoom result = %+v", result)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveZoom", Surface: "workspace", Args: []json.RawMessage{json.RawMessage(`0.5`)}}); result.Error == "" {
+		t.Fatal("invalid zoom was accepted")
 	}
 	values, err := manager.Snapshot(context.Background())
 	if err != nil || values.WorkspaceZoom != 1.2 {
 		t.Fatalf("saved zoom = %v error=%v", values.WorkspaceZoom, err)
+	}
+}
+
+func TestWindowServiceSavesGeometryOnlyForWorkspace(t *testing.T) {
+	manager, err := settings.New(settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Services: map[string]any{"WindowService": &WindowService{Settings: manager}}}
+	geometry := settings.WindowGeometry{Width: 1280, Height: 800, Maximised: true}
+	encoded, err := json.Marshal(geometry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveGeometry", Surface: "workspace-2", Args: []json.RawMessage{encoded}}); result.Error != "" {
+		t.Fatalf("non-primary geometry result = %+v", result)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil || values.WorkspaceWindow != (settings.WindowGeometry{}) {
+		t.Fatalf("non-primary window saved geometry: %+v error=%v", values.WorkspaceWindow, err)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveGeometry", Surface: "workspace", Args: []json.RawMessage{encoded}}); result.Error != "" {
+		t.Fatalf("workspace geometry result = %+v", result)
+	}
+	values, err = manager.Snapshot(context.Background())
+	if err != nil || values.WorkspaceWindow != geometry {
+		t.Fatalf("workspace geometry = %+v error=%v", values.WorkspaceWindow, err)
+	}
+}
+
+type surfaceEchoService struct{}
+
+func (surfaceEchoService) Read(ctx context.Context) string { return SurfaceFrom(ctx) }
+
+func TestInvokeAcceptsOnlyCanonicalWorkspaceNamesAndPassesSurface(t *testing.T) {
+	server := &Server{Services: map[string]any{"SurfaceEchoService": surfaceEchoService{}}}
+	for _, surface := range []string{"workspace", "workspace-2", "workspace-12"} {
+		result := postCall(t, server, Call{Service: "SurfaceEchoService", Method: "Read", Surface: surface})
+		if result.Error != "" || string(result.Value) != `"`+surface+`"` {
+			t.Fatalf("surface %q result = %+v", surface, result)
+		}
+	}
+	for _, surface := range []string{"workspace-1", "workspace-02", "worker", "workspace-x"} {
+		result := postCall(t, server, Call{Service: "SurfaceEchoService", Method: "Read", Surface: surface})
+		if result.Error == "" {
+			t.Errorf("invalid surface %q was accepted", surface)
+		}
+	}
+}
+
+type webBootReportService struct{ got string }
+
+func (s *webBootReportService) ReportWebBoot(ctx context.Context, generation, detail string) error {
+	s.got = SurfaceFrom(ctx) + ":" + generation + ":" + detail
+	return nil
+}
+
+func TestHostServiceReportWebBootAndWindowFocusAreMaintenanceAllowed(t *testing.T) {
+	tracker := presence.New()
+	report := &webBootReportService{}
+	server := &Server{
+		Services: map[string]any{
+			"HostService":   report,
+			"WindowService": &WindowService{Presence: tracker},
+		},
+		Maintenance: func() bool { return true },
+	}
+	for _, call := range []Call{
+		{Service: "HostService", Method: "ReportWebBoot", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"g1"`), json.RawMessage(`"ready"`)}},
+		{Service: "WindowService", Method: "SetFocus", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`true`)}},
+		{Service: "WindowService", Method: "Closed", Surface: "workspace-2"},
+	} {
+		if result := postCall(t, server, call); result.Error != "" {
+			t.Errorf("maintenance-allowed call %s.%s failed: %+v", call.Service, call.Method, result)
+		}
+	}
+	if report.got != "workspace-2:g1:ready" {
+		t.Fatalf("web boot report = %q", report.got)
+	}
+	if !maintenanceCallAllowed(Call{Service: "WindowService", Method: "SetFocus"}) || !maintenanceCallAllowed(Call{Service: "WindowService", Method: "Closed"}) || !maintenanceCallAllowed(Call{Service: "HostService", Method: "ReportWebBoot"}) {
+		t.Fatal("required maintenance calls are not allow-listed")
+	}
+	for _, call := range []Call{{Service: "WindowService", Method: "SaveZoom"}, {Service: "WindowService", Method: "SaveGeometry"}, {Service: "HostService", Method: "UpdateAction"}} {
+		if maintenanceCallAllowed(call) {
+			t.Errorf("unexpected maintenance allow-list entry: %s.%s", call.Service, call.Method)
+		}
 	}
 }

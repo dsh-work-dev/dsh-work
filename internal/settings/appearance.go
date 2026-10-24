@@ -113,16 +113,15 @@ func (m *Manager) SetAppearance(ctx context.Context, appearance Appearance) (Val
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Appearance is not supported", "choose one of the available themes and modes")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.Appearance = appearance
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
 	m.appearanceImportPending = false
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 // ImportAppearanceMode adopts a mode once for settings written before the
@@ -134,8 +133,8 @@ func (m *Manager) ImportAppearanceMode(ctx context.Context, mode AppearanceMode)
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if !m.appearanceImportPending {
+		m.mu.Unlock()
 		return nil
 	}
 	next := m.values
@@ -145,9 +144,10 @@ func (m *Manager) ImportAppearanceMode(ctx context.Context, mode AppearanceMode)
 	}
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return err
 	}
-	m.values = next
 	m.appearanceImportPending = false
+	m.commit(next)
 	return nil
 }

@@ -1,5 +1,6 @@
 import {Browser, Events, Window} from "@wailsio/runtime";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
 import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame, type Rgba} from "./dsh-theme";
@@ -101,7 +102,7 @@ export function mountShell() {
     checkingFromMenu = true;
     toast.show(t("about.update.checking"));
     try {
-      await HostService.Update("check");
+      await HostService.UpdateAction(UpdateAction.UpdateActionCheck);
     } catch (error) {
       checkingFromMenu = false;
       toast.show(t("about.update.error"));

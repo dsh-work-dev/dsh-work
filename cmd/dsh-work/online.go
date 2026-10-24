@@ -167,9 +167,7 @@ func runOnlineUpdate(client *daemon.Client, args []string, snapshot daemon.Snaps
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var update daemon.UpdateSnapshot
-	err := client.JSON(ctx, "/update/action", struct {
-		Action daemon.UpdateAction `json:"action"`
-	}{Action: action}, &update)
+	err := client.Call(ctx, "HostService", "UpdateAction", "workspace", []any{action}, &update)
 	if err != nil {
 		return err
 	}

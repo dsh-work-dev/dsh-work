@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -702,10 +704,31 @@ func isTrustedWindow(ctx context.Context, name string) bool {
 		return false
 	}
 	if surface, ok := ctx.Value(localClientSurfaceKey{}).(string); ok {
+		if name == "workspace" {
+			return isWorkspaceSurfaceName(surface)
+		}
 		return surface == name
 	}
 	window, ok := ctx.Value(application.WindowKey).(application.Window)
-	return ok && window != nil && window.Name() == name
+	if !ok || window == nil {
+		return false
+	}
+	if name == "workspace" {
+		return isWorkspaceSurfaceName(window.Name())
+	}
+	return window.Name() == name
+}
+
+func isWorkspaceSurfaceName(surface string) bool {
+	if surface == "workspace" {
+		return true
+	}
+	if !strings.HasPrefix(surface, "workspace-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(surface, "workspace-")
+	number, err := strconv.ParseUint(suffix, 10, 64)
+	return err == nil && number >= 2 && strconv.FormatUint(number, 10) == suffix
 }
 
 func trustedSurfaceRequired(detail string) error {
