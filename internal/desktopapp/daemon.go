@@ -474,8 +474,32 @@ func runDaemon(identity string, resources Resources) {
 	hub.SetTopic("update", updates.Snapshot())
 	hub.SetTopic("preferences", initialPreferences)
 	hub.SetTopic("acquisition", acquisition.OperationStatus{})
+	lifecyclePublisher := &serializedCurrentPublisher[lifecycleTopicValue]{
+		readCurrent: func() (lifecycleTopicValue, error) {
+			status := host.Status()
+			workerURL := ""
+			if status.State == lifecycle.StateReady {
+				workerURL = status.WorkspaceURL
+			} else if status.State == lifecycle.StateStarting {
+				workerURL = host.WebBootURL()
+			}
+			return lifecycleTopicValue{status: status, workerURL: workerURL}, nil
+		},
+		publish: func(value lifecycleTopicValue) {
+			hub.SetTopic("lifecycle", value.status)
+			hub.SetTopic("worker-url", value.workerURL)
+		},
+	}
 	if settingsManager != nil {
-		settingsManager.OnChange(func(values dshworksettings.Values) { hub.SetTopic("preferences", values) })
+		preferencesPublisher := &serializedCurrentPublisher[dshworksettings.Values]{
+			readCurrent: func() (dshworksettings.Values, error) { return settingsManager.Snapshot(context.Background()) },
+			publish:     func(values dshworksettings.Values) { hub.SetTopic("preferences", values) },
+		}
+		settingsManager.OnChange(func(dshworksettings.Values) {
+			if err := preferencesPublisher.publishCurrent(); err != nil {
+				logging.Module(logging.ModSettings).Warn("preferences publication failed", logging.ErrAttrs(err, "")...)
+			}
+		})
 	}
 	// The running updater switches before the choice is saved, so a channel the
 	// updater refuses is never persisted.
@@ -925,14 +949,9 @@ func runDaemon(identity string, resources Resources) {
 				}
 			}()
 		}
-		hub.SetTopic("lifecycle", status)
-		workerURL := ""
-		if status.State == lifecycle.StateReady {
-			workerURL = status.WorkspaceURL
-		} else if status.State == lifecycle.StateStarting {
-			workerURL = host.WebBootURL()
+		if err := lifecyclePublisher.publishCurrent(); err != nil {
+			logging.Module(logging.ModLifecycle).Warn("lifecycle publication failed", logging.ErrAttrs(err, "")...)
 		}
-		hub.SetTopic("worker-url", workerURL)
 		key := string(status.State) + "|" + string(status.Phase) + "|" + status.GenerationID
 		failureKey := ""
 		if status.Error != nil {
