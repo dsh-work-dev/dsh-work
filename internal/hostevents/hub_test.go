@@ -9,6 +9,7 @@ import (
 
 func TestMessageJSONUsesOnlyFieldsForItsRowType(t *testing.T) {
 	command := Message{Type: "command", Name: "notification-failure", Window: "", ExpiresAt: 1234, Data: json.RawMessage("true")}
+	transient := Message{Type: "command", Name: "acquisition-log", Window: "", Data: json.RawMessage(`{"log":"line"}`)}
 	state := Message{Type: "state", Topic: "worker-url", Value: json.RawMessage(`"url"`)}
 	ping := Message{Type: "ping"}
 	for _, test := range []struct {
@@ -17,6 +18,7 @@ func TestMessageJSONUsesOnlyFieldsForItsRowType(t *testing.T) {
 	}{
 		{state, []string{"type", "topic", "value"}},
 		{command, []string{"type", "name", "window", "expiresAt", "data"}},
+		{transient, []string{"type", "name", "window", "data"}},
 		{ping, []string{"type"}},
 	} {
 		data, err := json.Marshal(test.message)
@@ -93,7 +95,7 @@ func TestStagedCommandsAreBoundedOrderedAndExpire(t *testing.T) {
 
 func TestAcquisitionLogsAreNotReplayedButIdenticalLiveBatchesAreDelivered(t *testing.T) {
 	hub := New()
-	hub.SendCommand("", "acquisition-log", 10*time.Second, map[string]string{"log": "old"})
+	hub.SendTransient("", "acquisition-log", map[string]string{"log": "old"})
 	initialSubscription, initial := hub.Subscribe()
 	defer initialSubscription.Close()
 	if len(initial) != 0 {
@@ -103,8 +105,8 @@ func TestAcquisitionLogsAreNotReplayedButIdenticalLiveBatchesAreDelivered(t *tes
 	subscription, _ := hub.Subscribe()
 	defer subscription.Close()
 	data := map[string]string{"log": "same batch"}
-	hub.SendCommand("", "acquisition-log", 10*time.Second, data)
-	hub.SendCommand("", "acquisition-log", 10*time.Second, data)
+	hub.SendTransient("", "acquisition-log", data)
+	hub.SendTransient("", "acquisition-log", data)
 	for i := 0; i < 2; i++ {
 		select {
 		case message := <-subscription.Messages:
@@ -114,6 +116,37 @@ func TestAcquisitionLogsAreNotReplayedButIdenticalLiveBatchesAreDelivered(t *tes
 		case <-time.After(time.Second):
 			t.Fatalf("live acquisition batch %d was not delivered", i)
 		}
+	}
+}
+
+func TestSendTransientWithoutSubscribersIsNotStaged(t *testing.T) {
+	hub := New()
+	hub.SendTransient("workspace", "transient", "dropped")
+
+	subscription, initial := hub.Subscribe()
+	defer subscription.Close()
+	if len(initial) != 0 {
+		t.Fatalf("transient command appeared in initial subscription: %+v", initial)
+	}
+	select {
+	case message := <-subscription.Messages:
+		t.Fatalf("transient command was staged for a later subscriber: %+v", message)
+	default:
+	}
+}
+
+func TestSendTransientBroadcastsToCurrentSubscribersWithoutExpiry(t *testing.T) {
+	hub := New()
+	subscription, _ := hub.Subscribe()
+	defer subscription.Close()
+	hub.SendTransient("workspace", "transient", "now")
+	select {
+	case message := <-subscription.Messages:
+		if message.Type != "command" || message.Name != "transient" || message.Window != "workspace" || message.ExpiresAt != 0 || string(message.Data) != `"now"` {
+			t.Fatalf("transient command = %+v", message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transient command was not delivered to the current subscriber")
 	}
 }
 

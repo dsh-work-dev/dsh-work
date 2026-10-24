@@ -131,7 +131,7 @@ func (d *commandDispatcher) pruneExpiredLocked(commands []queuedCommand) []queue
 }
 
 func (d *commandDispatcher) expired(expiresAt int64) bool {
-	return expiresAt <= d.now().UnixMilli()
+	return expiresAt != 0 && expiresAt <= d.now().UnixMilli()
 }
 
 func (d *commandDispatcher) emitWindowLocked(window commandWindow, command queuedCommand) {

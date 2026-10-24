@@ -50,7 +50,7 @@ func intersectsVisibleTitlebar(x, y, width int, screens []*application.Screen) b
 			continue
 		}
 		intersection := titlebar.Intersect(screen.WorkArea)
-		if intersection.Width*intersection.Height >= 100*40 {
+		if intersection.Width >= 100 && intersection.Height >= 40 {
 			return true
 		}
 	}

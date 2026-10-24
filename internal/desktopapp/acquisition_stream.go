@@ -49,7 +49,7 @@ func publishAcquisitionStatus(hub *hostevents.Hub, status acquisition.OperationS
 	state.Log = ""
 	hub.SetTopic("acquisition", state)
 	if status.Log != "" {
-		hub.SendCommand("", "acquisition-log", 10*time.Second, status)
+		hub.SendTransient("", "acquisition-log", status)
 	}
 	if emit != nil {
 		emit(status)

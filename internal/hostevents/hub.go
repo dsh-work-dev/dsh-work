@@ -37,8 +37,12 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}
 	value := encoded{Type: m.Type, Topic: m.Topic, Value: m.Value, Name: m.Name, Data: m.Data}
 	if m.Type == "command" {
-		window, expiresAt := m.Window, m.ExpiresAt
-		value.Window, value.ExpiresAt = &window, &expiresAt
+		window := m.Window
+		value.Window = &window
+		if m.ExpiresAt != 0 {
+			expiresAt := m.ExpiresAt
+			value.ExpiresAt = &expiresAt
+		}
 	}
 	return json.Marshal(value)
 }
@@ -114,8 +118,7 @@ func (h *Hub) SetTopic(topic string, value any) {
 }
 
 // SendCommand delivers a command once. When there is no subscriber it keeps
-// replayable commands until the next subscription, subject to the TTL and
-// queue cap. Acquisition logs are transient and are discarded while offline.
+// the command until the next subscription, subject to the TTL and queue cap.
 func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 	if h == nil || name == "" {
 		return
@@ -129,9 +132,6 @@ func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 	now := h.now()
 	message := Message{Type: "command", Name: name, Window: window, ExpiresAt: now.Add(ttl).UnixMilli(), Data: append(json.RawMessage(nil), raw...)}
 	if len(h.subscribers) == 0 {
-		if name == "acquisition-log" {
-			return
-		}
 		if len(h.commands) == commandBuffer {
 			copy(h.commands, h.commands[1:])
 			h.commands = h.commands[:len(h.commands)-1]
@@ -140,6 +140,24 @@ func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 		return
 	}
 	h.broadcastLocked(message)
+}
+
+// SendTransient delivers a command only to current subscribers. It never
+// queues the command for a later subscription and carries no expiry timestamp.
+func (h *Hub) SendTransient(window, name string, data any) {
+	if h == nil || name == "" {
+		return
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.subscribers) == 0 {
+		return
+	}
+	h.broadcastLocked(Message{Type: "command", Name: name, Window: window, Data: append(json.RawMessage(nil), raw...)})
 }
 
 // Subscribe atomically snapshots topics, takes unexpired staged commands and

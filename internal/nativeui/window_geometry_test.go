@@ -131,7 +131,7 @@ func TestRestoreWindowPositionRequiresVisibleTitlebarArea(t *testing.T) {
 			wantInit: application.WindowXY, wantX: 100, wantY: 80,
 		},
 		{
-			name:     "partly outside with 100 by 40 visible",
+			name:     "partly outside with sufficient visible titlebar",
 			geometry: settings.WindowGeometry{X: -1080, Y: 0, Positioned: true, Width: 1250, Height: 820},
 			screen:   application.Rect{X: 0, Y: 0, Width: 1920, Height: 1080},
 			wantInit: application.WindowXY, wantX: -1080, wantY: 0,
@@ -158,5 +158,12 @@ func TestRestoreWindowPositionRequiresVisibleTitlebarArea(t *testing.T) {
 				t.Fatalf("restored dimensions = %dx%d, want 1250x820", got.Width, got.Height)
 			}
 		})
+	}
+}
+
+func TestRestoreWindowPositionRejectsWideButShallowIntersection(t *testing.T) {
+	screens := []*application.Screen{{WorkArea: application.Rect{X: 0, Y: 39, Width: 4000, Height: 1}}}
+	if intersectsVisibleTitlebar(0, 0, 4000, screens) {
+		t.Fatal("4000×1 titlebar intersection was treated as visible")
 	}
 }

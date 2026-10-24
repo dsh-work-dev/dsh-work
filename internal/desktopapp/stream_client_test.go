@@ -96,7 +96,7 @@ func TestAcquisitionTopicAndLogCommandUseSameWailsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor.handle(hostevents.Message{Type: "command", Name: "acquisition-log", ExpiresAt: time.Now().Add(time.Minute).UnixMilli(), Data: logJSON})
+	processor.handle(hostevents.Message{Type: "command", Name: "acquisition-log", Data: logJSON})
 	if len(events) != 2 || events[0].name != "acquisition" || events[1].name != "acquisition" || events[1].data.Log != "download output" {
 		t.Fatalf("acquisition events = %+v", events)
 	}
