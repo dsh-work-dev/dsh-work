@@ -39,8 +39,10 @@ system-wide Windows service.
 | Module | Responsibility |
 |---|---|
 | `main.go` | embedded resources and desktop entrypoint |
-| `internal/desktopapp` | daemon/client process assembly, window/menu lifetime and typed event replay |
-| `internal/daemon` | current-user IPC, control dispatch, snapshots and Worker forwarding |
+| `internal/desktopapp` | daemon/client process assembly, window/menu lifetime, the daemon stream reader and per-window command delivery |
+| `internal/daemon` | current-user IPC, control dispatch, the UI state stream and Worker forwarding |
+| `internal/hostevents` | transport-neutral daemon state topics and expiring one-shot commands |
+| `internal/presence` | per-surface focus used by notification and navigation decisions |
 | `internal/desktopclient` | typed UI service proxies to the daemon |
 | `internal/app` | Host commands, manager operations and process locks |
 | `internal/lifecycle` | window policy, quit flow and lifecycle value types |
@@ -86,10 +88,36 @@ loopback listener is the account sign-in callback described under
 [Account sign-in](#account-sign-in).
 
 The UI binds generated `internal/desktopclient` services. Native window identity
-selects the allowed role before forwarding management calls. Snapshot polling
-projects lifecycle, preferences and bounded events; event replay decodes the
-registered Go payload type before emitting to Wails. A lost or replaced daemon
-ends the connected UI client. The daemon remains the source of lifecycle truth.
+selects the allowed role before forwarding management calls. Every UI request to
+the daemon is a `/control` service call that carries the calling window as its
+surface (`workspace`, or `workspace-<n>` for further workbench windows); daemon
+services read it with `daemon.SurfaceFrom` and never take a window name from
+arguments. Window focus and closing, zoom, window geometry, Worker boot reports
+and update actions are `WindowService` and `HostService` methods.
+
+The daemon pushes to each UI process over one long-lived `GET /stream` of
+newline-delimited JSON; a new connection replaces the previous one. A line is a
+state topic (`lifecycle`, `worker-url`, `update`, `preferences`, `acquisition`),
+a one-shot command for all windows or one named window (`notification-failure`,
+`background-stopping`, `acquisition-log`), or a ping every 10 seconds. A new
+connection first receives the current value of every topic, then the commands
+staged while no UI was connected (at most 64, discarded once expired). Each
+topic publishes its source's current value, read under one lock, whenever that
+value changes; download progress is throttled to 250 ms with a trailing update.
+A connection that falls 256 messages behind is closed. The UI process emits
+topics and commands as Wails events, holds a window's commands until that
+window's `@dsh-work/pet` component is ready (16 per window, oldest dropped), and
+exits when the stream ends or stays silent for 30 seconds, so a lost or replaced
+daemon ends the connected UI client. `/snapshot` remains a one-shot read at UI
+start. The daemon remains the source of lifecycle truth.
+
+The stream replaced 350 ms snapshot polling with a replayed event ring. Polling
+delayed every change, mixed state with one-shot events in one ring, and needed a
+replay cursor although a reconnecting UI is always a new process. Topics and
+commands are defined in `internal/hostevents`, which depends on neither IPC nor
+Wails, so another authenticated transport can carry the same vocabulary. The
+local link has no version negotiation because the UI and daemon ship as one
+executable; revisit that when a remote surface consumes the stream.
 
 The Host creates a fresh authenticated named pipe before each Windows Worker
 launch. `go-winio` enforces a current-user SID ACL and rejects remote pipe
@@ -519,11 +547,15 @@ The Host does not remove or move `node_modules`. See
 
 `internal/settings` stores the workbench window geometry.
 `internal/nativeui/window_geometry.go` restores options before window creation,
-observes native resize/maximise events and debounces persistence by 300 ms.
-Close hooks and UI shutdown flush captured state through the daemon settings API. Only normal-window
+observes native move/resize/maximise events and debounces persistence by 300 ms.
+Close hooks and UI shutdown flush captured state through `WindowService.SaveGeometry`. Only normal-window
 sizes replace the saved dimensions; maximised state is stored separately and
-minimised/fullscreen observations are ignored. Position is still centred on
-creation; this feature does not persist screen coordinates.
+minimised/fullscreen observations are ignored. The screen position is saved as
+`X`/`Y` (negative values allowed) with a `Positioned` flag, so `(0, 0)` is a
+valid saved position. On creation the window opens at the saved position when
+its 40-pixel title-bar strip overlaps some screen's work area by at least
+100×40 pixels; otherwise, and for settings saved before positions existed, it
+opens centred. Only the `workspace` window's geometry is persisted.
 
 ## Confined version-file access
 

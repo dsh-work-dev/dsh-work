@@ -73,7 +73,8 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   focusing or opening the Workspace. The installer takes over the `dsh://`
   scheme and restores the previous handler on uninstall.
 - Settings persist locale, recovery, Pet and notification preferences.
-- The workbench window remembers its normal dimensions and maximised state;
+- The workbench window remembers its position, normal dimensions and maximised
+  state, and opens centred when the saved position is no longer on any screen;
   Settings opens as a panel inside it. Minimisation does not replace the saved normal dimensions;
   a missing or invalid size uses the window's defaults.
 - A per-user daemon owns the Worker, tray, Pet and notifications independently
