@@ -23,6 +23,7 @@ function label(key: string): string {const locale=getLocale();return (labels[loc
 export function activityText(a: Activity): string {
   if(a.interaction) return `${label(a.interaction.kind)}${(a.interaction.count ?? 0)>1 ? ` · ${a.interaction.count} ${label("questions")}` : ""}${a.interaction.text ? `：${a.interaction.text}` : ""}`;
   if(a.goal?.phase === "blocked") return a.goal.reason || a.goal.objective;
+  if(a.state === "ready") return `${label("ready")}${a.summary ? ` · ${a.summary}` : ""}`;
   if(a.outcome && a.state !== "running") return `${label(a.outcome)}${a.summary ? ` · ${a.summary}` : ""}`;
   if(a.state==="running" && a.workPhase) return label(a.workPhase==="working" ? a.toolActivity || "using-tool" : a.workPhase);
   return a.summary || a.goal?.objective || label(a.state);
