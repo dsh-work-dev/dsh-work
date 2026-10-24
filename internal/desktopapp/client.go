@@ -48,13 +48,16 @@ func webviewPermissions(surface string) map[application.PermissionType]applicati
 }
 
 func runDesktopClient(identity string, resources Resources) error {
-	section := ""
+	section, requestedWindow := "", "workspace"
 	if len(os.Args) > 2 && os.Args[1] == "--ui" {
 		section = os.Args[2]
+		if len(os.Args) > 4 && os.Args[3] == "--window" {
+			requestedWindow = os.Args[4]
+		}
 	}
 	existing := daemon.NewClient(identity + "-ui")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	err := existing.JSON(ctx, "/open", section, nil)
+	err := existing.JSON(ctx, "/open", uiOpenRequest{Section: section, Window: requestedWindow}, nil)
 	cancel()
 	existing.Close()
 	if err == nil {
@@ -132,7 +135,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
-	var open func(string)
+	var open func(section, window string) string
 	commands := newCommandDispatcher(func(name string, data any) {
 		if desktop != nil {
 			desktop.Event.Emit(name, data)
@@ -143,7 +146,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	}, func(window, command string) {
 		logging.Module(logging.ModIPC).Warn("pet command queue full; dropped oldest command", "window", window, "command", command)
 	})
-	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section, "workspace") }, ReportOpenedSession: func(ctx context.Context, surface, id, reportedError string) error {
+		return client.Call(ctx, "DSHPageService", "ReportSessionOpened", surface, []any{id, reportedError}, nil)
+	}, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
 		window, ok := ctx.Value(application.WindowKey).(application.Window)
 		if !ok || window == nil {
 			return app.PetPanel{}, fmt.Errorf("trusted desktop window required")
@@ -282,30 +287,38 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", workspaceWindow, event) })
 	}
-	open = func(section string) {
+	open = func(section, requestedWindow string) string {
 		if section == "__boot" {
-			return
+			return "workspace"
 		}
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
-			return
+			return ""
 		}
 		if maintenance.InstallerInProgress() {
 			maintenance.ShowInstallerBusy()
-			return
+			return ""
 		}
 		windowMu.Lock()
 		defer windowMu.Unlock()
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
-			return
+			return ""
 		}
-		created := workspace == nil
+		windowName := requestedWindow
+		if _, exists := windows[windowName]; !exists {
+			windowName = "workspace"
+		}
+		created := windowName == "workspace" && workspace == nil
 		if created {
 			createWorkspace(section)
 		}
-		if !ledger.TryShow("workspace") {
-			return
+		target := windows[windowName]
+		if target == nil {
+			return ""
 		}
-		workspace.Show().Focus()
+		if !ledger.TryShow(windowName) {
+			return ""
+		}
+		target.Show().Focus()
 		// A new workbench reads its section from the URL; a live one switches panels.
 		if !created {
 			if section == "" {
@@ -314,6 +327,7 @@ func runDesktopClient(identity string, resources Resources) error {
 				desktop.Event.Emit("settings-section", section)
 			}
 		}
+		return windowName
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if !isWorkspaceOpenURL(event.Context().URL()) {
@@ -326,7 +340,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		protocolMu.Unlock()
 		if started {
-			open("")
+			open("", "workspace")
 		}
 	})
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
@@ -365,9 +379,9 @@ func runDesktopClient(identity string, resources Resources) error {
 		windowMu.Lock()
 		createWorkspace(launchSection)
 		windowMu.Unlock()
-		open(section)
+		open(section, requestedWindow)
 		if openRequestedByProtocol {
-			open("")
+			open("", "workspace")
 		}
 		go func() { _ = ipcServer.Serve(listener) }()
 		go func() {

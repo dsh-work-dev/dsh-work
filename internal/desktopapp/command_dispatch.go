@@ -154,6 +154,12 @@ func commandData(name string, raw json.RawMessage) (any, bool, error) {
 			return nil, true, err
 		}
 		return data, true, nil
+	case "dsh-open-session":
+		var data OpenSessionCommand
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return nil, true, err
+		}
+		return data, true, nil
 	default:
 		return nil, false, nil
 	}

@@ -228,6 +228,9 @@ func maintenanceCallAllowed(call Call) bool {
 	if call.Service == "WindowService" {
 		return call.Method == "SetFocus" || call.Method == "Closed"
 	}
+	if call.Service == "DSHPageService" {
+		return call.Method == "ReportSessionOpened"
+	}
 	if call.Service == "ManagerService" {
 		switch call.Method {
 		case "GetSnapshot", "ListProfileBackups", "PreviewRestorePoint":

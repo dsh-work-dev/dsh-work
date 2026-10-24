@@ -166,6 +166,10 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/sidebar-state", open: false}), {type: "sidebar-state", open: false});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/component-ready", id: "pet"}), {type: "component-ready", id: "pet"});
   assert.equal(parseFrameMessage({type: "dsh-work/component-ready", id: "plugin.private"}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/open-session-result", id: "42", error: ""}), {type: "open-session-result", id: "42", error: ""});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/open-session-result", id: "43", error: "Conversation is unavailable"}), {type: "open-session-result", id: "43", error: "Conversation is unavailable"});
+  assert.equal(parseFrameMessage({type: "dsh-work/open-session-result", id: "", error: ""}), null);
+  assert.equal(parseFrameMessage({type: "dsh-work/open-session-result", id: "44", error: 1}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "saved"}), {type: "export-result", result: "saved"});

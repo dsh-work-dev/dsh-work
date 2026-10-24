@@ -312,11 +312,6 @@ func runDaemon(identity string, resources Resources) {
 	dshworkapp.SetVerboseLoggingChanged(settingsService, logging.SetVerbose)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
 	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
-	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
-		if showWorkspace != nil {
-			showWorkspace()
-		}
-	})
 	dshworkapp.SetPetRendererFactory(petSettingsService, func() dshworkpet.PetRenderer {
 		return dshworkpet.NewRasterRenderer()
 	})
@@ -374,6 +369,7 @@ func runDaemon(identity string, resources Resources) {
 	daemonHostService := &daemon.HostService{HostService: hostService}
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Services: map[string]any{
 		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker},
+		"DSHPageService": &daemon.DSHPageService{Activity: petActivity},
 		"ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
@@ -394,7 +390,12 @@ func runDaemon(identity string, resources Resources) {
 	}, mergeAcquisitionStatus)
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)
-	server.OpenUI = launcher.Open
+	server.OpenUI = func(section string) error {
+		_, err := launcher.Open(section, "workspace")
+		return err
+	}
+	petActivity.SetNavigation(launcher.Open, hub.SendCommand)
+	dshworkapp.SetPetActivity(petSettingsService, petActivity, tracker.LastFocused)
 	server.Media = dshworkapp.PetMediaHandler(petSettingsService, http.NotFoundHandler())
 	listener, err := daemon.Listen(identity)
 	if err != nil {
@@ -701,7 +702,7 @@ func runDaemon(identity string, resources Resources) {
 			maintenance.ShowInstallerBusy()
 			return
 		}
-		if err := launcher.Open(""); err != nil {
+		if _, err := launcher.Open("", "workspace"); err != nil {
 			logging.Module(logging.ModApp).Error("open window failed", logging.ErrAttrs(err, "")...)
 		}
 	}
@@ -933,7 +934,7 @@ func runDaemon(identity string, resources Resources) {
 			maintenance.ShowInstallerBusy()
 			return
 		}
-		if err := launcher.Open(section); err != nil {
+		if _, err := launcher.Open(section, "workspace"); err != nil {
 			attrs := append([]any{"section", section}, logging.ErrAttrs(err, "")...)
 			logging.Module(logging.ModApp).Error("open settings failed", attrs...)
 		}
@@ -943,7 +944,7 @@ func runDaemon(identity string, resources Resources) {
 	host.SetPublish(func(status lifecycle.Status) {
 		if status.State == lifecycle.StateStarting && status.Phase == lifecycle.PhaseCheckpoint {
 			go func() {
-				if err := launcher.Open("__boot"); err != nil {
+				if _, err := launcher.Open("__boot", "workspace"); err != nil {
 					logging.Module(logging.ModApp).Error("open boot window failed", logging.ErrAttrs(err, "")...)
 				}
 			}()

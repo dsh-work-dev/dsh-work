@@ -51,6 +51,14 @@ export function ReportBuiltinComponent(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * ReportSessionOpened reports the result for a daemon-issued open-session
+ * command. Window identity is taken only from the bound Wails caller.
+ */
+export function ReportSessionOpened(id: string, reportedError: string): $CancellablePromise<void> {
+    return $Call.ByID(3581872827, id, reportedError);
+}
+
+/**
  * ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
  */
 export function ResetBuiltinComponents(): $CancellablePromise<void> {

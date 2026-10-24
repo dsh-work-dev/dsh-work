@@ -3,7 +3,7 @@
 package dshactivity
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -69,6 +69,36 @@ type Snapshot struct {
 	NavigationError string     `json:"navigationError,omitempty"`
 }
 
+const (
+	activitySilenceTimeout = 45 * time.Second
+	activityRetryMinimum   = 500 * time.Millisecond
+	activityRetryMaximum   = 5 * time.Second
+	activityFrameLimit     = 1 << 20
+	openSessionTimeout     = 15 * time.Second
+)
+
+type bridgeTimer interface {
+	Chan() <-chan time.Time
+	Stop()
+	Reset(time.Duration)
+}
+
+type bridgeClock interface {
+	NewTimer(time.Duration) bridgeTimer
+}
+
+type realBridgeClock struct{}
+
+func (realBridgeClock) NewTimer(delay time.Duration) bridgeTimer {
+	return realBridgeTimer{Timer: time.NewTimer(delay)}
+}
+
+type realBridgeTimer struct{ *time.Timer }
+
+func (t realBridgeTimer) Chan() <-chan time.Time    { return t.C }
+func (t realBridgeTimer) Reset(delay time.Duration) { t.Timer.Reset(delay) }
+func (t realBridgeTimer) Stop()                     { t.Timer.Stop() }
+
 type Bridge struct {
 	lifecycleMu               sync.Mutex
 	mu                        sync.Mutex
@@ -77,9 +107,31 @@ type Bridge struct {
 	cancel                    context.CancelFunc
 	done                      chan struct{}
 	state                     Snapshot
+	clock                     bridgeClock
+	openWindow                func(section, window string) (string, error)
+	sendCommand               func(window, name string, ttl time.Duration, data any)
+	navigationSequence        uint64
+	navigationID              string
+	navigationCancel          context.CancelFunc
 }
 
-func New() *Bridge { return &Bridge{} }
+func New() *Bridge { return newWithClock(realBridgeClock{}) }
+
+func newWithClock(clock bridgeClock) *Bridge {
+	if clock == nil {
+		clock = realBridgeClock{}
+	}
+	return &Bridge{clock: clock}
+}
+
+// SetNavigation connects navigation to the UI window owner and the command
+// stream. The UI callback returns the actual window selected after fallback.
+func (b *Bridge) SetNavigation(openWindow func(section, window string) (string, error), sendCommand func(window, name string, ttl time.Duration, data any)) {
+	b.mu.Lock()
+	b.openWindow = openWindow
+	b.sendCommand = sendCommand
+	b.mu.Unlock()
+}
 
 // Begin resets the projection for a new Worker generation and returns the
 // launch configuration of the @dsh-work/pet plugin: the generation and a fresh
@@ -123,7 +175,7 @@ func (b *Bridge) Start(ctx context.Context, authURL string, transport http.Round
 	}
 	b.stop()
 	jar, _ := cookiejar.New(nil)
-	client := &http.Client{Transport: transport, Jar: jar, Timeout: 3 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	client := &http.Client{Transport: transport, Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != u.Scheme || req.URL.Host != u.Host || len(via) > 3 {
 			return errors.New("invalid Worker redirect")
 		}
@@ -147,8 +199,7 @@ func (b *Bridge) Start(ctx context.Context, authURL string, transport http.Round
 		defer b.disconnected(generation)
 		defer client.CloseIdleConnections()
 		authenticated := false
-		ticker := time.NewTicker(500 * time.Millisecond)
-		defer ticker.Stop()
+		retryDelay := activityRetryMinimum
 		for {
 			if run.Err() != nil {
 				return
@@ -163,49 +214,188 @@ func (b *Bridge) Start(ctx context.Context, authURL string, transport http.Round
 				}
 			}
 			if authenticated {
-				state, err := fetch(run, client, origin, token)
-				if err == nil && state.Generation == generation {
+				streamCtx, stopStream := context.WithCancel(run)
+				receivedFrame, _ := receiveActivity(streamCtx, client, origin, token, generation, b.clock, func(state Snapshot) {
 					b.accept(generation, state)
-				} else {
+				})
+				stopStream()
+				if run.Err() != nil {
 					b.disconnected(generation)
-					authenticated = false
+					return
+				}
+				b.disconnected(generation)
+				authenticated = false
+				if receivedFrame {
+					retryDelay = activityRetryMinimum
 				}
 			} else {
 				b.disconnected(generation)
 			}
-			select {
-			case <-run.Done():
+			if !waitBridgeTimer(run, b.clock, retryDelay) {
 				b.disconnected(generation)
 				return
-			case <-ticker.C:
 			}
+			retryDelay = min(retryDelay*2, activityRetryMaximum)
 		}
 	}()
 }
-func fetch(ctx context.Context, client *http.Client, origin, token string) (Snapshot, error) {
+
+func waitBridgeTimer(ctx context.Context, clock bridgeClock, delay time.Duration) bool {
+	timer := clock.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.Chan():
+		return true
+	}
+}
+
+type activityFrame struct {
+	event string
+	data  string
+	ping  bool
+	err   error
+}
+
+type activityResponse struct {
+	response *http.Response
+	err      error
+}
+
+func receiveActivity(ctx context.Context, client *http.Client, origin, token, generation string, clock bridgeClock, accept func(Snapshot)) (bool, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/__dshwork/pet-activity", nil)
 	req.Header.Set("X-DSH-Work-Token", token)
 	req.Header.Set("Origin", origin)
-	resp, err := client.Do(req)
-	if err != nil {
-		return Snapshot{}, err
+	req.Header.Set("Accept", "text/event-stream")
+	timer := clock.NewTimer(activitySilenceTimeout)
+	defer timer.Stop()
+	responses := make(chan activityResponse)
+	go func() {
+		resp, err := client.Do(req)
+		select {
+		case responses <- activityResponse{response: resp, err: err}:
+		case <-ctx.Done():
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+		}
+	}()
+	var response activityResponse
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-timer.Chan():
+		return false, errors.New("activity stream silent for 45 seconds")
+	case response = <-responses:
+		if response.err != nil {
+			return false, response.err
+		}
 	}
+	resp := response.response
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return Snapshot{}, fmt.Errorf("activity status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("activity status %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
-	if err != nil || len(data) > 1<<20 {
-		return Snapshot{}, errors.New("activity snapshot too large")
+	frames := make(chan activityFrame, 1)
+	readerCtx, cancelReader := context.WithCancel(ctx)
+	defer cancelReader()
+	go readActivityFrames(readerCtx, resp.Body, frames)
+	receivedFrame := false
+	for {
+		select {
+		case <-ctx.Done():
+			return receivedFrame, ctx.Err()
+		case <-timer.Chan():
+			return receivedFrame, errors.New("activity stream silent for 45 seconds")
+		case frame := <-frames:
+			if frame.err != nil {
+				return receivedFrame, frame.err
+			}
+			if frame.ping {
+				timer.Reset(activitySilenceTimeout)
+				continue
+			}
+			// Any complete SSE event keeps the transport alive. Only snapshot
+			// events update projected activity.
+			timer.Reset(activitySilenceTimeout)
+			if frame.event != "snapshot" {
+				continue
+			}
+			if len(frame.data) > activityFrameLimit {
+				return receivedFrame, errors.New("activity snapshot too large")
+			}
+			var state Snapshot
+			if err := json.Unmarshal([]byte(frame.data), &state); err != nil {
+				return receivedFrame, err
+			}
+			if state.SchemaVersion != 1 || len(state.Sessions) > 256 || state.Generation != generation || !normalize(&state) {
+				return receivedFrame, errors.New("invalid activity snapshot")
+			}
+			accept(state)
+			receivedFrame = true
+		}
 	}
-	var state Snapshot
-	if err = json.Unmarshal(data, &state); err != nil {
-		return state, err
+}
+
+func readActivityFrames(ctx context.Context, body io.Reader, frames chan<- activityFrame) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 32<<10), activityFrameLimit)
+	event := ""
+	var data strings.Builder
+	frameBytes := 0
+	write := func(frame activityFrame) bool {
+		select {
+		case frames <- frame:
+			return true
+		case <-ctx.Done():
+			return false
+		}
 	}
-	if state.SchemaVersion != 1 || len(state.Sessions) > 256 {
-		return Snapshot{}, errors.New("invalid activity snapshot")
+	for scanner.Scan() {
+		line := scanner.Text()
+		frameBytes += len(line) + 1
+		if frameBytes > activityFrameLimit {
+			write(activityFrame{err: errors.New("activity event too large")})
+			return
+		}
+		if line == "" {
+			if event != "" || data.Len() > 0 {
+				payload := strings.TrimSuffix(data.String(), "\n")
+				if !write(activityFrame{event: event, data: payload}) {
+					return
+				}
+			}
+			event = ""
+			data.Reset()
+			frameBytes = 0
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			if strings.TrimSpace(strings.TrimPrefix(line, ":")) == "ping" && !write(activityFrame{ping: true}) {
+				return
+			}
+			continue
+		}
+		field, value, found := strings.Cut(line, ":")
+		if !found {
+			field, value = line, ""
+		} else {
+			value = strings.TrimPrefix(value, " ")
+		}
+		switch field {
+		case "event":
+			event = value
+		case "data":
+			data.WriteString(value)
+			data.WriteByte('\n')
+		}
 	}
-	return state, nil
+	if err := scanner.Err(); err != nil {
+		write(activityFrame{err: fmt.Errorf("read activity stream: %w", err)})
+	} else if ctx.Err() == nil {
+		write(activityFrame{err: io.EOF})
+	}
 }
 func (b *Bridge) accept(generation string, state Snapshot) {
 	if !normalize(&state) {
@@ -218,6 +408,7 @@ func (b *Bridge) accept(generation string, state Snapshot) {
 		return
 	}
 	state.Connected = true
+	state.NavigationError = b.state.NavigationError
 	b.state = state
 	b.mu.Unlock()
 }
@@ -231,37 +422,100 @@ func (b *Bridge) disconnected(generation string) {
 	b.mu.Unlock()
 }
 func (b *Bridge) Snapshot() Snapshot { b.mu.Lock(); defer b.mu.Unlock(); return clone(b.state) }
-func (b *Bridge) Open(ctx context.Context, id string) error {
+func (b *Bridge) Open(ctx context.Context, id, window string) error {
 	b.mu.Lock()
-	client, origin, token, connected := b.client, b.origin, b.token, b.state.Connected
+	connected := b.client != nil && b.state.Connected
 	found := false
+	parentSessionID := ""
 	for _, a := range b.state.Sessions {
 		if a.SessionID == id {
 			found = true
+			parentSessionID = a.ParentSessionID
 			break
 		}
 	}
+	openWindow, sendCommand := b.openWindow, b.sendCommand
+	generation := b.generation
 	b.mu.Unlock()
-	if !connected || client == nil || !found {
+	if !connected || !found {
 		return errors.New("conversation activity is unavailable")
 	}
-	data, _ := json.Marshal(map[string]string{"sessionId": id})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/__dshwork/pet-activity", bytes.NewReader(data))
+	if openWindow == nil || sendCommand == nil {
+		return errors.New("conversation navigation is unavailable")
+	}
+	if window == "" {
+		window = "workspace"
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	actualWindow, err := openWindow("", window)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("X-DSH-Work-Token", token)
-	req.Header.Set("Origin", origin)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.New("conversation activity is unavailable")
+	if actualWindow == "" {
+		return errors.New("desktop window is unavailable")
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return errors.New("conversation is unavailable")
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	b.mu.Lock()
+	if b.navigationCancel != nil {
+		b.navigationCancel()
+	}
+	b.navigationSequence++
+	navigationID := fmt.Sprintf("%d", b.navigationSequence)
+	navigationCtx, cancelNavigation := context.WithCancel(context.Background())
+	b.navigationID = navigationID
+	b.navigationCancel = cancelNavigation
+	b.state.NavigationError = ""
+	clock := b.clock
+	if clock == nil {
+		clock = realBridgeClock{}
+	}
+	b.mu.Unlock()
+	timer := clock.NewTimer(openSessionTimeout)
+	sendCommand(actualWindow, "dsh-open-session", openSessionTimeout, map[string]string{
+		"id": navigationID, "sessionId": id, "parentSessionId": parentSessionID,
+	})
+	go func() {
+		defer timer.Stop()
+		select {
+		case <-navigationCtx.Done():
+		case <-timer.Chan():
+			b.navigationTimedOut(generation, navigationID)
+		}
+	}()
 	return nil
+}
+
+// ReportSessionOpened commits only the most recently requested navigation.
+func (b *Bridge) ReportSessionOpened(id, reportedError string) {
+	b.mu.Lock()
+	if id == "" || b.navigationID != id {
+		b.mu.Unlock()
+		return
+	}
+	cancel := b.navigationCancel
+	b.navigationCancel = nil
+	b.navigationID = ""
+	b.state.NavigationError = clean(reportedError, 160)
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (b *Bridge) navigationTimedOut(generation, id string) {
+	b.mu.Lock()
+	if b.generation != generation || b.navigationID != id {
+		b.mu.Unlock()
+		return
+	}
+	b.navigationID = ""
+	b.navigationCancel = nil
+	b.state.NavigationError = "Conversation is unavailable"
+	b.mu.Unlock()
 }
 func (b *Bridge) Close() {
 	b.lifecycleMu.Lock()
@@ -278,7 +532,13 @@ func (b *Bridge) stop() {
 	}
 	done := b.done
 	b.done = nil
+	navigationCancel := b.navigationCancel
+	b.navigationCancel = nil
+	b.navigationID = ""
 	b.mu.Unlock()
+	if navigationCancel != nil {
+		navigationCancel()
+	}
 	if done != nil {
 		<-done
 	}

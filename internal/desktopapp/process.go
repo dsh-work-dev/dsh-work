@@ -122,29 +122,48 @@ type uiLauncher struct {
 	mu       sync.Mutex
 }
 
+type uiOpenRequest struct {
+	Section string `json:"section"`
+	Window  string `json:"window"`
+}
+
+type uiOpenResult struct {
+	Window string `json:"window"`
+}
+
 func newUILauncher(identity string) *uiLauncher { return &uiLauncher{identity: identity} }
-func (l *uiLauncher) Open(section string) error {
+func (l *uiLauncher) Open(section, window string) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if window == "" {
+		window = "workspace"
+	}
 	client := daemon.NewClient(l.identity + "-ui")
 	defer client.Close()
-	open := func() error {
+	open := func() (string, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		return client.JSON(ctx, "/open", section, nil)
+		var result uiOpenResult
+		if err := client.JSON(ctx, "/open", uiOpenRequest{Section: section, Window: window}, &result); err != nil {
+			return "", err
+		}
+		if result.Window == "" {
+			return "", errors.New("desktop window is unavailable")
+		}
+		return result.Window, nil
 	}
-	if open() == nil {
-		return nil
+	if actual, err := open(); err == nil {
+		return actual, nil
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return "", err
 	}
-	cmd := exec.Command(exe, "--ui", section)
+	cmd := exec.Command(exe, "--ui", section, "--window", window)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	daemon.Detach(cmd)
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 	go func() { _ = cmd.Wait() }()
 	// The UI singleton listener, rather than process ancestry, arbitrates
@@ -156,10 +175,10 @@ func (l *uiLauncher) Open(section string) error {
 	for {
 		select {
 		case <-deadline.C:
-			return errors.New("desktop did not open")
+			return "", errors.New("desktop did not open")
 		case <-ticker.C:
-			if open() == nil {
-				return nil
+			if actual, err := open(); err == nil {
+				return actual, nil
 			}
 		}
 	}
@@ -192,7 +211,7 @@ func (l *uiLauncher) Stop() error {
 	}
 }
 
-func uiHandler(open func(string), closeWindow func(string), stop func()) http.Handler {
+func uiHandler(open func(section, window string) string, closeWindow func(string), stop func()) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != "" {
 			http.Error(w, "forbidden", 403)
@@ -200,14 +219,19 @@ func uiHandler(open func(string), closeWindow func(string), stop func()) http.Ha
 		}
 		switch r.URL.Path {
 		case "/open", "/close":
-			var section string
-			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&section) != nil {
-				http.Error(w, "invalid section", 400)
-				return
-			}
 			if r.URL.Path == "/open" {
-				open(section)
+				var request uiOpenRequest
+				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&request) != nil {
+					http.Error(w, "invalid open request", 400)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(uiOpenResult{Window: open(request.Section, request.Window)})
 			} else {
+				var section string
+				if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&section) != nil {
+					http.Error(w, "invalid section", 400)
+					return
+				}
 				go closeWindow(section)
 			}
 		case "/status":
@@ -219,6 +243,8 @@ func uiHandler(open func(string), closeWindow func(string), stop func()) http.Ha
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte("true"))
+		if r.URL.Path != "/open" {
+			_, _ = w.Write([]byte("true"))
+		}
 	})
 }

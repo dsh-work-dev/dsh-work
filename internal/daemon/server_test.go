@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/presence"
 	"github.com/local/dsh-work/internal/settings"
@@ -381,8 +382,9 @@ func TestHostServiceReportWebBootAndWindowFocusAreMaintenanceAllowed(t *testing.
 	report := &webBootReportService{}
 	server := &Server{
 		Services: map[string]any{
-			"HostService":   report,
-			"WindowService": &WindowService{Presence: tracker},
+			"HostService":    report,
+			"WindowService":  &WindowService{Presence: tracker},
+			"DSHPageService": &DSHPageService{Activity: dshactivity.New()},
 		},
 		Maintenance: func() bool { return true },
 	}
@@ -390,6 +392,7 @@ func TestHostServiceReportWebBootAndWindowFocusAreMaintenanceAllowed(t *testing.
 		{Service: "HostService", Method: "ReportWebBoot", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"g1"`), json.RawMessage(`"ready"`)}},
 		{Service: "WindowService", Method: "SetFocus", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`true`)}},
 		{Service: "WindowService", Method: "Closed", Surface: "workspace-2"},
+		{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}},
 	} {
 		if result := postCall(t, server, call); result.Error != "" {
 			t.Errorf("maintenance-allowed call %s.%s failed: %+v", call.Service, call.Method, result)
@@ -398,12 +401,22 @@ func TestHostServiceReportWebBootAndWindowFocusAreMaintenanceAllowed(t *testing.
 	if report.got != "workspace-2:g1:ready" {
 		t.Fatalf("web boot report = %q", report.got)
 	}
-	if !maintenanceCallAllowed(Call{Service: "WindowService", Method: "SetFocus"}) || !maintenanceCallAllowed(Call{Service: "WindowService", Method: "Closed"}) || !maintenanceCallAllowed(Call{Service: "HostService", Method: "ReportWebBoot"}) {
+	if !maintenanceCallAllowed(Call{Service: "WindowService", Method: "SetFocus"}) || !maintenanceCallAllowed(Call{Service: "WindowService", Method: "Closed"}) || !maintenanceCallAllowed(Call{Service: "HostService", Method: "ReportWebBoot"}) || !maintenanceCallAllowed(Call{Service: "DSHPageService", Method: "ReportSessionOpened"}) {
 		t.Fatal("required maintenance calls are not allow-listed")
 	}
 	for _, call := range []Call{{Service: "WindowService", Method: "SaveZoom"}, {Service: "WindowService", Method: "SaveGeometry"}, {Service: "HostService", Method: "UpdateAction"}} {
 		if maintenanceCallAllowed(call) {
 			t.Errorf("unexpected maintenance allow-list entry: %s.%s", call.Service, call.Method)
 		}
+	}
+}
+
+func TestDSHPageReportSessionOpenedUsesAWorkspaceSurface(t *testing.T) {
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Activity: dshactivity.New()}}}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}}); result.Error != "" {
+		t.Fatalf("workspace-2 report failed: %+v", result)
+	}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "pet", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}}); result.Error == "" {
+		t.Fatalf("pet surface report was accepted: %+v", result)
 	}
 }

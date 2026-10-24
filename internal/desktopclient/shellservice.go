@@ -17,6 +17,9 @@ import (
 // owns the windows.
 type ShellService struct {
 	Open func(section string)
+	// ReportOpenedSession forwards the DSH frame's navigation result to the
+	// daemon with the caller window selected from Wails' trusted context.
+	ReportOpenedSession func(context.Context, string, string, string) error
 	// Pet reads the pet panel, or sets its visibility when visible is not nil.
 	// The background grants pet controls to the Settings surface only, so the
 	// UI process asks on its behalf, as the native menu did.
@@ -222,6 +225,22 @@ func (s *ShellService) SaveZoom(ctx context.Context, zoom float64) error {
 		return errors.New("zoom cannot be saved")
 	}
 	return s.SaveZoomLevel(ctx, zoom)
+}
+
+// ReportSessionOpened reports the result for a daemon-issued open-session
+// command. Window identity is taken only from the bound Wails caller.
+func (s *ShellService) ReportSessionOpened(ctx context.Context, id, reportedError string) error {
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		return err
+	}
+	if !workspaceWindowName(window.Name()) {
+		return errors.New("workspace window required")
+	}
+	if s.ReportOpenedSession == nil {
+		return errors.New("DSH page reporting is unavailable")
+	}
+	return s.ReportOpenedSession(ctx, window.Name(), id, reportedError)
 }
 
 // GetPet reports whether a pet is selected and visible.

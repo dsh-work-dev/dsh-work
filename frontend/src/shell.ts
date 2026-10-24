@@ -322,6 +322,13 @@ export function mountShell() {
     eventSeen = true;
     show(String(event.data ?? ""));
   });
+  Events.On("dsh-open-session", event => {
+    const command = event.data as {id?: unknown; sessionId?: unknown; parentSessionId?: unknown} | undefined;
+    const src = frame.getAttribute("src");
+    if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
+    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
+      sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
+  });
   void fetch("/__shell/worker").then(response => response.json()).then((value: {url: string}) => {
     if (!eventSeen) show(value.url);
   }).catch(() => {});
@@ -336,6 +343,9 @@ export function mountShell() {
     else if (message.type === "component-ready") {
       void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
       if (message.id === "shell") sendAppearance();
+    }
+    else if (message.type === "open-session-result") {
+      void ShellService.ReportSessionOpened(message.id, message.error).catch(report("report opened conversation"));
     }
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "modal-mask") {

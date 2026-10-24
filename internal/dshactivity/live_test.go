@@ -318,8 +318,22 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	request("completed")
 	waitFor(func(a Activity) bool { return a.State == "ready" })
-	if err := b.Open(ctx, "pet-live-fixture"); err != nil {
+	openCommands := make(chan map[string]string, 1)
+	b.SetNavigation(func(_, window string) (string, error) { return window, nil }, func(window, name string, ttl time.Duration, data any) {
+		if window == "workspace" && name == "dsh-open-session" && ttl == 15*time.Second {
+			openCommands <- data.(map[string]string)
+		}
+	})
+	if err := b.Open(ctx, "pet-live-fixture", "workspace"); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case command := <-openCommands:
+		if command["sessionId"] != "pet-live-fixture" {
+			t.Fatalf("open command = %#v", command)
+		}
+	case <-ctx.Done():
+		t.Fatal("open command not sent")
 	}
 	clientSync := func(input any) map[string]any {
 		body, _ := json.Marshal(input)
@@ -339,11 +353,9 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		}
 		return data
 	}
-	navigation, ok := clientSync(map[string]any{})["navigation"].(map[string]any)
-	if !ok || navigation["sessionId"] != "pet-live-fixture" {
-		t.Fatal("navigation not delivered to DSH client")
+	if response := clientSync(map[string]any{"current": "pet-live-fixture", "visible": true, "sessions": []any{}}); len(response) != 0 {
+		t.Fatalf("pet activity client response = %#v", response)
 	}
-	clientSync(map[string]any{"ack": navigation["id"], "current": "pet-live-fixture", "visible": true})
 	waitFor(func(a Activity) bool { return !a.Unread && a.State == "idle" })
 	// Raw webServer routes must explicitly retain DSH's cookie trust fence.
 	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/pet-activity-client", strings.NewReader(`{}`))

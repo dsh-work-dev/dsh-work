@@ -12,10 +12,18 @@ const plain = blocks => {
   }
   return text(result);
 };
-export function apply(ctx, config) {
+export function apply(ctx, config, timers = globalThis) {
   const rows = new Map();
-  let revision = 0, requestID = 0, navigation = null, navigationError = '';
-  const changed = () => { revision++; };
+  let revision = 0, requestID = 0, snapshotTimer;
+  const streams = new Set();
+  const changed = () => {
+    revision++;
+    if (snapshotTimer !== undefined || streams.size === 0) return;
+    snapshotTimer = timers.setTimeout(() => {
+      snapshotTimer = undefined;
+      for (const stream of streams) writeSnapshot(stream);
+    }, 100);
+  };
   function row(id) {
     if (typeof id !== 'string' || !id || id.length > 256) return null;
     if (!rows.has(id)) {
@@ -127,7 +135,7 @@ export function apply(ctx, config) {
   ctx.on('api-session/error', (id, message) => { const r = row(id); if (r) { r.outcome = 'error'; r.summary = text(message); r.running = false; r.updatedAt = Date.now(); changed(); } });
   ctx.on('api-session/removed', id => { rows.delete(id); changed(); });
   // DSH exposes no paginated job query. Cache its authorized list on change so
-  // 500ms snapshots never repeatedly materialize a session's retained history.
+  // SSE snapshots do not repeatedly materialize a session's retained history.
   ctx.inject(['jobs'], jobsCtx => {
     const dirty = owner => {
       if (owner) { const r = rows.get(owner.id); if (r) r.jobsDirty = true; }
@@ -155,9 +163,6 @@ export function apply(ctx, config) {
     }, {prepend: true, global: true});
   }
   function snapshot() {
-    if (navigation && Date.now() > navigation.expiresAt) {
-      navigation = null; navigationError = 'Conversation is unavailable'; changed();
-    }
     const sessions = [];
     for (const r of rows.values()) {
       const agent = ctx.agents.get(r.sessionId);
@@ -180,7 +185,7 @@ export function apply(ctx, config) {
         steering: agent?.inbox?.nextStep?.filter(m => m.source?.kind === 'user').length ?? 0,
         jobs: jobs.slice(0, 32).map(j => ({id: text(j.id, 256), label: text(j.label, 120), status: text(j.status, 32), detail: text(j.detail, 160)}))});
     }
-    return {schemaVersion: 1, generation: config.generation, revision, sessions, navigationError};
+    return {schemaVersion: 1, generation: config.generation, revision, sessions};
   }
   function authorized(req) {
     const actual = Buffer.from(req.headers['x-dsh-work-token'] ?? '');
@@ -188,27 +193,63 @@ export function apply(ctx, config) {
     return expected.length >= 32 && actual.length === expected.length && timingSafeEqual(actual, expected);
   }
   const reply = (res, status, data) => { res.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(data)); };
+  function closeStream(stream) {
+    if (stream.closed) return;
+    stream.closed = true;
+    streams.delete(stream);
+    timers.clearInterval(stream.pingTimer);
+    if (!stream.res.destroyed && !stream.res.writableEnded) stream.res.end();
+  }
+  function writeSnapshot(stream) {
+    if (stream.closed) return;
+    try { stream.res.write(`event: snapshot\ndata: ${JSON.stringify(snapshot())}\n\n`); }
+    catch { closeStream(stream); }
+  }
+  function openStream(req, res) {
+    const stream = {req, res, closed: false, pingTimer: undefined};
+    streams.add(stream);
+    res.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store'});
+    res.flushHeaders?.();
+    stream.pingTimer = timers.setInterval(() => {
+      if (stream.closed) return;
+      try { res.write(': ping\n\n'); } catch { closeStream(stream); }
+    }, 15000);
+    writeSnapshot(stream);
+    const onRequestClose = () => {
+      // IncomingMessage can close after its request body is read; the response
+      // close event below owns the streaming lifetime in that case.
+      if (res.destroyed || res.writableEnded || !res.writable) closeStream(stream);
+    };
+    req.on?.('close', onRequestClose);
+    req.on?.('aborted', () => closeStream(stream));
+    res.on?.('close', () => closeStream(stream));
+    return stream;
+  }
   async function body(req) {
     let size = 0; const chunks = [];
     for await (const chunk of req) { size += chunk.length; if (size > 65536) throw new Error('request too large'); chunks.push(chunk); }
     return JSON.parse(Buffer.concat(chunks).toString());
   }
-  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/pet-activity', handler: async (req, res) => {
-    const rejection = ctx.connection.requestRejection(req);
-    if (rejection !== undefined) return reply(res, rejection, {});
-    if (!authorized(req)) return reply(res, 403, {});
-    try {
-      if (req.method === 'GET') return reply(res, 200, snapshot());
-      if (req.method === 'POST') {
-        const input = await body(req);
-        if (!rows.has(input.sessionId)) return reply(res, 404, {});
-        navigationError = '';
-        navigation = {id: String(++requestID), sessionId: input.sessionId, parentSessionId: rows.get(input.sessionId).parentSessionId, expiresAt: Date.now() + 15000};
-        return reply(res, 200, {});
+  ctx.effect(() => {
+    const unregister = ctx.webServer.register({kind: 'exact', path: '/__dshwork/pet-activity', handler: async (req, res) => {
+      const rejection = ctx.connection.requestRejection(req);
+      if (rejection !== undefined) return reply(res, rejection, {});
+      if (!authorized(req)) return reply(res, 403, {});
+      if (req.method !== 'GET') {
+        res.setHeader?.('Allow', 'GET');
+        return reply(res, 405, {});
       }
-      reply(res, 405, {});
-    } catch { reply(res, 400, {}); }
-  }}));
+      const accept = String(req.headers.accept ?? '').split(',').some(value => value.trim().split(';', 1)[0] === 'text/event-stream');
+      if (!accept) return reply(res, 406, {});
+      openStream(req, res);
+    }});
+    return () => {
+      if (snapshotTimer !== undefined) timers.clearTimeout(snapshotTimer);
+      snapshotTimer = undefined;
+      for (const stream of streams) closeStream(stream);
+      unregister?.();
+    };
+  });
   // This route also passes through DSH's normal authenticated web trust boundary.
   ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/pet-activity-client', handler: async (req, res) => {
     const rejection = ctx.connection.requestRejection(req);
@@ -223,8 +264,7 @@ export function apply(ctx, config) {
       }
       const r = rows.get(input.current);
       if (r && input.visible === true) r.readSeq = r.seq;
-      if (navigation && input.ack === navigation.id) { navigation = null; navigationError = text(input.error); }
-      reply(res, 200, {navigation});
+      reply(res, 200, {});
     } catch { reply(res, 400, {}); }
   }}));
 }
