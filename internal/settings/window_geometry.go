@@ -5,11 +5,16 @@ import (
 	"errors"
 )
 
+// X and Y are screen coordinates for an explicitly positioned window. Positioned
+// distinguishes a stored (0, 0) position from legacy settings that start centered.
 // Width and Height are logical normal-window dimensions, independent of maximisation.
 type WindowGeometry struct {
-	Width     int  `json:"width"`
-	Height    int  `json:"height"`
-	Maximised bool `json:"maximised"`
+	X          int  `json:"x"`
+	Y          int  `json:"y"`
+	Positioned bool `json:"positioned,omitempty"`
+	Width      int  `json:"width"`
+	Height     int  `json:"height"`
+	Maximised  bool `json:"maximised"`
 }
 
 // WebView2 accepts zoom factors up to 5; Wails keeps them at or above actual size.

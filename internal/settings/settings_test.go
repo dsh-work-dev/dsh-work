@@ -320,3 +320,26 @@ func TestSettingsPersistWorkspaceZoom(t *testing.T) {
 		t.Fatalf("reloaded zoom = %v error=%v", values.WorkspaceZoom, err)
 	}
 }
+
+func TestSettingsPersistWorkspaceWindowPosition(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := WindowGeometry{X: 0, Y: 0, Positioned: true, Width: 1180, Height: 760}
+	if err := manager.SetWindowGeometry(context.Background(), "workspace", want); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := reloaded.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values.WorkspaceWindow != want {
+		t.Fatalf("reloaded geometry = %+v, want %+v", values.WorkspaceWindow, want)
+	}
+}

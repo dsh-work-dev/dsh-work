@@ -328,7 +328,7 @@ func TestWindowServiceSavesGeometryOnlyForWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &Server{Services: map[string]any{"WindowService": &WindowService{Settings: manager}}}
-	geometry := settings.WindowGeometry{Width: 1280, Height: 800, Maximised: true}
+	geometry := settings.WindowGeometry{X: -1280, Y: 40, Positioned: true, Width: 1280, Height: 800, Maximised: true}
 	encoded, err := json.Marshal(geometry)
 	if err != nil {
 		t.Fatal(err)

@@ -150,9 +150,14 @@ export interface Values {
 }
 
 /**
+ * X and Y are screen coordinates for an explicitly positioned window. Positioned
+ * distinguishes a stored (0, 0) position from legacy settings that start centered.
  * Width and Height are logical normal-window dimensions, independent of maximisation.
  */
 export interface WindowGeometry {
+    "x": number;
+    "y": number;
+    "positioned"?: boolean;
     "width": number;
     "height": number;
     "maximised": boolean;

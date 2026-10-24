@@ -25,6 +25,10 @@ func RestoreWindowGeometry(options application.WebviewWindowOptions, manager Geo
 		return options
 	}
 	g := values.WorkspaceWindow
+	if g.Positioned {
+		options.InitialPosition = application.WindowXY
+		options.X, options.Y = g.X, g.Y
+	}
 	if g.Width >= options.MinWidth && g.Width <= 16384 && g.Height >= options.MinHeight && g.Height <= 16384 {
 		options.Width, options.Height = g.Width, g.Height
 		if g.Maximised {
@@ -34,7 +38,7 @@ func RestoreWindowGeometry(options application.WebviewWindowOptions, manager Geo
 	return options
 }
 
-// Capture dimensions on the native event thread; debounce only the settings write.
+// Capture position and dimensions on the native event thread; debounce only the settings write.
 // Closing and application shutdown flush pending changes before the window dies.
 func RememberWindowGeometry(window application.Window, options application.WebviewWindowOptions, manager GeometryStore) func() {
 	if manager == nil {
@@ -42,7 +46,10 @@ func RememberWindowGeometry(window application.Window, options application.Webvi
 	}
 	var mu sync.Mutex
 	var timer *time.Timer
-	g := settings.WindowGeometry{Width: options.Width, Height: options.Height, Maximised: options.StartState == application.WindowStateMaximised}
+	g := settings.WindowGeometry{
+		X: options.X, Y: options.Y, Positioned: options.InitialPosition == application.WindowXY,
+		Width: options.Width, Height: options.Height, Maximised: options.StartState == application.WindowStateMaximised,
+	}
 	save := func() {
 		if err := manager.SetWindowGeometry(context.Background(), options.Name, g); err != nil {
 			attrs := append([]any{"window", options.Name}, logging.ErrAttrs(err, "")...)
@@ -63,9 +70,11 @@ func RememberWindowGeometry(window application.Window, options application.Webvi
 		}
 		maximised := window.IsMaximised()
 		width, height := window.Size()
+		x, y := window.Position()
 		mu.Lock()
 		defer mu.Unlock()
 		g.Maximised = maximised
+		g.X, g.Y, g.Positioned = x, y, true
 		if !maximised && width >= options.MinWidth && height >= options.MinHeight {
 			g.Width, g.Height = width, height
 		}
@@ -74,7 +83,7 @@ func RememberWindowGeometry(window application.Window, options application.Webvi
 		}
 		timer = time.AfterFunc(300*time.Millisecond, flush)
 	}
-	for _, event := range []events.WindowEventType{events.Common.WindowDidResize, events.Common.WindowMaximise, events.Common.WindowUnMaximise} {
+	for _, event := range []events.WindowEventType{events.Common.WindowDidMove, events.Common.WindowDidResize, events.Common.WindowMaximise, events.Common.WindowUnMaximise} {
 		window.OnWindowEvent(event, record)
 	}
 	window.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) { flush() })
