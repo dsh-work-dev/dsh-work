@@ -29,7 +29,7 @@ class EventTarget {
 
 async function settle() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
 
-async function mountPetClient(fetchImpl) {
+async function mountPetClient(fetchImpl, initialStatuses = new Map()) {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const posted = [], requests = [], disposers = [];
@@ -49,6 +49,8 @@ async function mountPetClient(fetchImpl) {
   const clock = new FakeClock();
   let list = {current: 'session-1', byId: {'session-1': {id: 'session-1', displayTitle: 'A task', parentId: ''}}};
   const subscribers = new Set();
+  const statusSubscribers = new Set();
+  let statusSnapshot = initialStatuses;
   const opened = [];
   const ctx = {
     sessions: {
@@ -58,20 +60,35 @@ async function mountPetClient(fetchImpl) {
       open: async sessionId => { if (sessionId === 'missing') throw new Error('unknown session'); opened.push(['open', sessionId]); },
       openSubagent: async address => opened.push(['openSubagent', address]),
     },
+    uiSession: {sessionStatus: {
+      getSnapshot: () => statusSnapshot,
+      subscribe(listener) { statusSubscribers.add(listener); return () => statusSubscribers.delete(listener); },
+    }},
     effect(effect) { const cleanup = effect(); if (cleanup) disposers.push(cleanup); },
   };
   definition.factory(() => undefined).apply(ctx, clock);
   return {
     clock, document, window, parent, posted, requests, opened,
     setList(value, notify = true) { list = value; if (notify) for (const listener of subscribers) listener(); },
+    setStatuses(value, notify = true) { statusSnapshot = value; if (notify) for (const listener of statusSubscribers) listener(); },
     dispose() { for (const cleanup of disposers) cleanup(); Object.assign(globalThis, {window: original.window, document: original.document, fetch: original.fetch, __ModuleLoader__: original.loader}); },
   };
+}
+
+function interactionPosts(client) {
+  return client.posted.map(item => item.message).filter(message => message.type === 'dsh-work/interaction');
 }
 
 test('pet client posts only session-list changes and ignores focus changes', async () => {
   const client = await mountPetClient(async () => ({ok: true}));
   try {
-    assert.deepEqual(client.posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'pet'}, origin: 'http://wails.localhost'}]);
+    assert.deepEqual(client.posted[0], {message: {version: 1, type: 'dsh-work/component-ready', id: 'pet'}, origin: 'http://wails.localhost'});
+    const initialInteractionReport = interactionPosts(client);
+    assert.equal(initialInteractionReport.length, 1);
+    assert.equal(typeof initialInteractionReport[0].instance, 'string');
+    assert.ok(initialInteractionReport[0].instance.length > 0);
+    assert.deepEqual(initialInteractionReport[0], {version: 1, type: 'dsh-work/interaction', instance: initialInteractionReport[0].instance,
+      sessionId: '', kind: '', key: '', toolName: '', current: 'session-1', visible: true});
     await client.clock.tick(100);
     assert.equal(client.requests.length, 1);
     assert.deepEqual(client.requests[0].body, {sessions: [{id: 'session-1', title: 'A task', parentId: ''}]});
@@ -102,6 +119,96 @@ test('pet client posts only session-list changes and ignores focus changes', asy
     await client.clock.tick(100);
     assert.equal(client.requests.length, 2);
   } finally { client.dispose(); }
+});
+
+test('pet client treats the first pending-interaction snapshot as baseline', async () => {
+  const baseline = new Map([['session-1', {pendingInteraction: {kind: 'approval', key: 'old', sessionId: 'session-1', toolName: 'shell.exec'}}]]);
+  const client = await mountPetClient(async () => ({ok: true}), baseline);
+  try {
+    const reports = interactionPosts(client);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].sessionId, '');
+    assert.equal(reports[0].kind, '');
+    assert.equal(reports[0].current, 'session-1');
+    assert.equal(reports[0].visible, true);
+    await client.clock.tick(250);
+    assert.equal(interactionPosts(client).length, 1);
+  } finally { client.dispose(); }
+});
+
+test('pet client waits 250 ms and reports only the latest key for a session', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    const pending = key => new Map([['session-1', {pendingInteraction: {kind: 'approval', key, sessionId: 'session-1', toolName: 'shell.exec'}}]]);
+    client.setStatuses(pending('first'));
+    await client.clock.tick(249);
+    client.setStatuses(pending('last'));
+    await client.clock.tick(249);
+    assert.equal(interactionPosts(client).filter(message => message.sessionId).length, 0);
+    await client.clock.tick(1);
+    const reports = interactionPosts(client).filter(message => message.sessionId);
+    assert.deepEqual(reports.map(({key}) => key), ['last']);
+    assert.equal(reports[0].toolName, 'shell.exec');
+    assert.equal(client.requests.length, 1);
+    assert.deepEqual(Object.keys(client.requests[0].body), ['sessions']);
+  } finally { client.dispose(); }
+});
+
+test('pet client reports a disappeared interaction immediately', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    client.setStatuses(new Map([['session-1', {pendingInteraction: {kind: 'question', key: 'question:1', sessionId: 'session-1'}}]]));
+    await client.clock.tick(250);
+    client.setStatuses(new Map());
+    const reports = interactionPosts(client).filter(message => message.sessionId);
+    assert.deepEqual(reports.map(({kind, key}) => [kind, key]), [['question', 'question:1'], ['', '']]);
+  } finally { client.dispose(); }
+});
+
+test('pet client reports current and visibility changes without sending Worker requests', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    client.setList({current: 'session-2', byId: {'session-2': {id: 'session-2', displayTitle: 'Second', parentId: ''}}});
+    const afterCurrent = interactionPosts(client);
+    assert.equal(afterCurrent.length, 2);
+    assert.equal(afterCurrent[1].sessionId, '');
+    assert.equal(afterCurrent[1].current, 'session-2');
+
+    client.document.visibilityState = 'hidden';
+    client.document.dispatch('visibilitychange');
+    const afterVisibility = interactionPosts(client);
+    assert.equal(afterVisibility.length, 3);
+    assert.equal(afterVisibility[2].sessionId, '');
+    assert.equal(afterVisibility[2].visible, false);
+    assert.equal(client.requests.length, 0);
+  } finally { client.dispose(); }
+});
+
+test('pet client reports only approval, question, and plan-review interactions', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    client.setStatuses(new Map([
+      ['approval-session', {pendingInteraction: {kind: 'approval', key: 'approval:1', sessionId: 'approval-session', toolName: 'shell.exec'}}],
+      ['question-session', {pendingInteraction: {kind: 'question', key: 'question:1', sessionId: 'question-session'}}],
+      ['plan-session', {pendingInteraction: {kind: 'plan-review', key: 'plan:1', sessionId: 'plan-session'}}],
+      ['other-session', {pendingInteraction: {kind: 'completion', key: 'completion:1', sessionId: 'other-session'}}],
+    ]));
+    await client.clock.tick(250);
+    const reports = interactionPosts(client).filter(message => message.sessionId);
+    assert.deepEqual(reports.map(({kind, sessionId}) => [kind, sessionId]).sort(), [
+      ['approval', 'approval-session'], ['plan-review', 'plan-session'], ['question', 'question-session'],
+    ]);
+    assert.equal(reports.find(message => message.kind === 'approval').toolName, 'shell.exec');
+    assert.equal(reports.find(message => message.kind === 'question').toolName, '');
+    assert.equal(reports.find(message => message.kind === 'plan-review').toolName, '');
+  } finally { client.dispose(); }
+});
+
+test('pet client resets its page instance when disposed', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  const instance = interactionPosts(client)[0].instance;
+  client.dispose();
+  assert.deepEqual(client.posted.at(-1), {message: {version: 1, type: 'dsh-work/interaction-reset', instance}, origin: 'http://wails.localhost'});
 });
 
 test('pet client retries the latest snapshot after one second, at most three times', async () => {

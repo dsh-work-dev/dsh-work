@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/presence"
 	"github.com/local/dsh-work/internal/settings"
 )
@@ -29,8 +30,9 @@ func isWorkspaceSurface(surface string) bool {
 // WindowService owns per-window focus and routes window-specific persistence
 // through the caller surface stamped by Server.invoke.
 type WindowService struct {
-	Settings *settings.Manager
-	Presence *presence.Tracker
+	Settings     *settings.Manager
+	Presence     *presence.Tracker
+	Interactions *dshinteraction.Store
 }
 
 func (s *WindowService) SetFocus(ctx context.Context, focused bool) error {
@@ -51,6 +53,9 @@ func (s *WindowService) Closed(ctx context.Context) error {
 	}
 	if s.Presence != nil {
 		s.Presence.Clear(surface)
+	}
+	if s.Interactions != nil {
+		s.Interactions.ClearWindow(surface)
 	}
 	return nil
 }

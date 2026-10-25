@@ -20,6 +20,7 @@ import (
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/desktopprobe"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
@@ -148,6 +149,10 @@ func runDesktopClient(identity string, resources Resources) error {
 	})
 	shellService := &desktopclient.ShellService{Open: func(section string) { open(section, "workspace") }, ReportOpenedSession: func(ctx context.Context, surface, id, reportedError string) error {
 		return client.Call(ctx, "DSHPageService", "ReportSessionOpened", surface, []any{id, reportedError}, nil)
+	}, ReportPendingInteraction: func(ctx context.Context, surface string, interaction dshinteraction.Report) error {
+		return client.Call(ctx, "DSHPageService", "ReportInteraction", surface, []any{interaction}, nil)
+	}, ResetPageInteractions: func(ctx context.Context, surface, instance string) error {
+		return client.Call(ctx, "DSHPageService", "ResetInteractions", surface, []any{instance}, nil)
 	}, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
 		window, ok := ctx.Value(application.WindowKey).(application.Window)
 		if !ok || window == nil {

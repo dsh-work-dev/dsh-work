@@ -347,6 +347,12 @@ export function mountShell() {
     else if (message.type === "open-session-result") {
       void ShellService.ReportSessionOpened(message.id, message.error).catch(report("report opened conversation"));
     }
+    else if (message.type === "interaction") {
+      void ShellService.ReportInteraction(message.report).catch(report("report pending interaction"));
+    }
+    else if (message.type === "interaction-reset") {
+      void ShellService.ResetInteractions(message.instance).catch(report("reset pending interactions"));
+    }
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "modal-mask") {
       dshModal = {active: message.active, background: message.background, blur: message.blur};

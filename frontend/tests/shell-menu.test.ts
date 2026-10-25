@@ -181,6 +181,31 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.equal(parseFrameMessage({type: "dsh-work/account-signout", state: "maybe"}), null);
 });
 
+test("pending-interaction frame messages validate their version, fields, and bounded strings", () => {
+  const report = {
+    version: 1, type: "dsh-work/interaction", instance: "page-1", sessionId: "session-1",
+    kind: "approval", key: "approval:1", toolName: "shell.exec", current: "session-2", visible: true,
+  };
+  assert.deepEqual(parseFrameMessage(report), {type: "interaction", report: {
+    instance: "page-1", sessionId: "session-1", kind: "approval", key: "approval:1",
+    toolName: "shell.exec", current: "session-2", visible: true,
+  }});
+  assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/interaction-reset", instance: "page-1"}), {type: "interaction-reset", instance: "page-1"});
+
+  for (const invalid of [
+    {...report, version: 2},
+    {...report, instance: 1},
+    {...report, sessionId: "s".repeat(257)},
+    {...report, key: "k".repeat(257)},
+    {...report, toolName: "t".repeat(121)},
+    {...report, current: undefined},
+    {...report, visible: "true"},
+    Object.fromEntries(Object.entries(report).filter(([key]) => key !== "kind")),
+    {version: 1, type: "dsh-work/interaction-reset"},
+    {version: 1, type: "dsh-work/interaction-reset", instance: "i".repeat(257)},
+  ]) assert.equal(parseFrameMessage(invalid), null);
+});
+
 test("shortcut keys render as DSH shows them, without extra separators", () => {
   assert.equal(formatKeys(["Ctrl", "+", "Alt", "+", "B"]), "Ctrl+Alt+B");
   assert.equal(formatKeys(["Ctrl", "+", "/"]), "Ctrl+/");

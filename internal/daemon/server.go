@@ -19,6 +19,7 @@ import (
 
 	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
@@ -57,6 +58,7 @@ type Server struct {
 	UpdateCommand func(context.Context, UpdateAction) error
 	Hub           *hostevents.Hub
 	Presence      *presence.Tracker
+	Interactions  *dshinteraction.Store
 	Media         http.Handler
 	// Maintenance reports whether the current-user installer owns the
 	// maintenance boundary. Read-only snapshots remain available while the
@@ -229,7 +231,7 @@ func maintenanceCallAllowed(call Call) bool {
 		return call.Method == "SetFocus" || call.Method == "Closed"
 	}
 	if call.Service == "DSHPageService" {
-		return call.Method == "ReportSessionOpened"
+		return call.Method == "ReportSessionOpened" || call.Method == "ReportInteraction" || call.Method == "ResetInteractions"
 	}
 	if call.Service == "ManagerService" {
 		switch call.Method {

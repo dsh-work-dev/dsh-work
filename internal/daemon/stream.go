@@ -66,6 +66,9 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 		if s.Presence != nil {
 			s.Presence.ClearAll()
 		}
+		if s.Interactions != nil {
+			s.Interactions.ClearAll()
+		}
 	}
 	s.streamMu.Unlock()
 
@@ -97,6 +100,9 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 			s.streamSub = nil
 			if s.Presence != nil {
 				s.Presence.ClearAll()
+			}
+			if s.Interactions != nil {
+				s.Interactions.ClearAll()
 			}
 		}
 		s.streamMu.Unlock()

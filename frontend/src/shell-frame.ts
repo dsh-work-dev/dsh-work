@@ -6,6 +6,8 @@ export type FrameMessage =
   | {type: "command-result"; id: string; handled: boolean}
   | {type: "component-ready"; id: BuiltinComponentId}
   | {type: "open-session-result"; id: string; error: string}
+  | {type: "interaction"; report: InteractionReport}
+  | {type: "interaction-reset"; instance: string}
   | {type: "sidebar-state"; open: boolean}
   | {type: "window-key"; action: WindowAction}
   | {type: "export-result"; result: ExportResult}
@@ -15,6 +17,15 @@ export type FrameMessage =
 
 export type ExportResult = "saved" | "cancelled" | "error";
 export type SignOutState = "pending" | "success" | "error";
+export type InteractionReport = {
+  instance: string;
+  sessionId: string;
+  kind: string;
+  key: string;
+  toolName: string;
+  current: string;
+  visible: boolean;
+};
 const signOutStates: readonly SignOutState[] = ["pending", "success", "error"];
 const exportResults: readonly ExportResult[] = ["saved", "cancelled", "error"];
 const commandStates: readonly DshCommandState[] = ["ready", "unbound", "unavailable"];
@@ -39,6 +50,26 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   if (message.type === "dsh-work/component-ready" && typeof message.id === "string" && builtinComponentIds.includes(message.id as BuiltinComponentId)) return {type: "component-ready", id: message.id as BuiltinComponentId};
   if (message.type === "dsh-work/open-session-result" && typeof message.id === "string" && message.id.length > 0 && message.id.length <= 256 && typeof message.error === "string" && message.error.length <= 160) {
     return {type: "open-session-result", id: message.id, error: message.error};
+  }
+  if (message.version === 1 && message.type === "dsh-work/interaction" &&
+      typeof message.instance === "string" && message.instance.length <= 256 &&
+      typeof message.sessionId === "string" && message.sessionId.length <= 256 &&
+      typeof message.kind === "string" && typeof message.key === "string" && message.key.length <= 256 &&
+      typeof message.toolName === "string" && message.toolName.length <= 120 &&
+      typeof message.current === "string" && typeof message.visible === "boolean") {
+    return {type: "interaction", report: {
+      instance: message.instance,
+      sessionId: message.sessionId,
+      kind: message.kind,
+      key: message.key,
+      toolName: message.toolName,
+      current: message.current,
+      visible: message.visible,
+    }};
+  }
+  if (message.version === 1 && message.type === "dsh-work/interaction-reset" &&
+      typeof message.instance === "string" && message.instance.length <= 256) {
+    return {type: "interaction-reset", instance: message.instance};
   }
   if (message.type === "dsh-work/window-key" && keyedWindowActions.includes(message.action as WindowAction)) {
     return {type: "window-key", action: message.action as WindowAction};

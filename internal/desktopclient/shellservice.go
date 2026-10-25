@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/pet"
@@ -20,6 +21,10 @@ type ShellService struct {
 	// ReportOpenedSession forwards the DSH frame's navigation result to the
 	// daemon with the caller window selected from Wails' trusted context.
 	ReportOpenedSession func(context.Context, string, string, string) error
+	// ReportPendingInteraction forwards a DSH page report with its trusted surface.
+	ReportPendingInteraction func(context.Context, string, dshinteraction.Report) error
+	// ResetPageInteractions removes reports owned by one DSH page instance.
+	ResetPageInteractions func(context.Context, string, string) error
 	// Pet reads the pet panel, or sets its visibility when visible is not nil.
 	// The background grants pet controls to the Settings surface only, so the
 	// UI process asks on its behalf, as the native menu did.
@@ -241,6 +246,30 @@ func (s *ShellService) ReportSessionOpened(ctx context.Context, id, reportedErro
 		return errors.New("DSH page reporting is unavailable")
 	}
 	return s.ReportOpenedSession(ctx, window.Name(), id, reportedError)
+}
+
+// ReportInteraction reports pending interaction state from the framed DSH page.
+func (s *ShellService) ReportInteraction(ctx context.Context, report dshinteraction.Report) error {
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		return err
+	}
+	if s.ReportPendingInteraction == nil {
+		return errors.New("DSH interaction reporting is unavailable")
+	}
+	return s.ReportPendingInteraction(ctx, window.Name(), report)
+}
+
+// ResetInteractions removes state from a DSH page that is unloading.
+func (s *ShellService) ResetInteractions(ctx context.Context, instance string) error {
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		return err
+	}
+	if s.ResetPageInteractions == nil {
+		return errors.New("DSH interaction reporting is unavailable")
+	}
+	return s.ResetPageInteractions(ctx, window.Name(), instance)
 }
 
 // GetPet reports whether a pet is selected and visible.

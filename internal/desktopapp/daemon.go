@@ -22,6 +22,7 @@ import (
 	"github.com/local/dsh-work/internal/diagnostics"
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/hostplugins"
@@ -366,10 +367,11 @@ func runDaemon(identity string, resources Resources) {
 		func(name string) (string, error) { return nativeui.SaveDiagnosticsBundle(desktop, name) })
 	hub := hostevents.New()
 	tracker := presence.New()
+	interactions := dshinteraction.New()
 	daemonHostService := &daemon.HostService{HostService: hostService}
-	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Services: map[string]any{
-		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker},
-		"DSHPageService": &daemon.DSHPageService{Activity: petActivity},
+	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
+		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
+		"DSHPageService": &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
 		"ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/presence"
 )
@@ -260,8 +261,13 @@ func TestNewStreamClosesOldSubscriptionAndStopsMessages(t *testing.T) {
 	hub := hostevents.New()
 	hub.SetTopic("lifecycle", "ready")
 	tracker := presence.New()
+	interactions := dshinteraction.New()
+	removed := make(chan string, 4)
+	interactions.OnRemoved(func(instance, sessionID string, _ dshinteraction.Interaction) {
+		removed <- instance + ":" + sessionID
+	})
 	clock := newControlledStreamClock()
-	server := &Server{Hub: hub, Presence: tracker, streamClock: clock}
+	server := &Server{Hub: hub, Presence: tracker, Interactions: interactions, streamClock: clock}
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
 	client := httpServer.Client()
@@ -281,6 +287,9 @@ func TestNewStreamClosesOldSubscriptionAndStopsMessages(t *testing.T) {
 	if oldSubscription == nil {
 		t.Fatal("first stream has no active subscription")
 	}
+	if err := interactions.Report("workspace", dshinteraction.Report{Instance: "page-old", SessionID: "session-1", Kind: "question", Key: "question:1"}); err != nil {
+		t.Fatal(err)
+	}
 	tracker.SetFocused("workspace", true)
 	second, err := client.Get(httpServer.URL + "/stream")
 	if err != nil {
@@ -298,6 +307,17 @@ func TestNewStreamClosesOldSubscriptionAndStopsMessages(t *testing.T) {
 	}
 	if tracker.AnyFocused() {
 		t.Fatal("replacing the stream did not clear old presence")
+	}
+	if _, ok := interactions.Owner("page-old"); ok {
+		t.Fatal("replacing the stream did not clear old DSH interaction state")
+	}
+	select {
+	case got := <-removed:
+		if got != "page-old:session-1" {
+			t.Fatalf("replacement removed %q, want old page interaction", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacing the stream did not remove old DSH interactions")
 	}
 	oldLine := make(chan struct {
 		line string
@@ -340,6 +360,9 @@ func TestNewStreamClosesOldSubscriptionAndStopsMessages(t *testing.T) {
 	if newSubscription == nil {
 		t.Fatal("replacement stream has no active subscription")
 	}
+	if err := interactions.Report("workspace-2", dshinteraction.Report{Instance: "page-new", SessionID: "session-2", Kind: "approval", Key: "approval:2"}); err != nil {
+		t.Fatal(err)
+	}
 	tracker.SetFocused("workspace-2", true)
 	_ = second.Body.Close()
 	select {
@@ -353,6 +376,17 @@ func TestNewStreamClosesOldSubscriptionAndStopsMessages(t *testing.T) {
 	}
 	if tracker.AnyFocused() {
 		t.Fatal("disconnect did not clear all presence")
+	}
+	select {
+	case got := <-removed:
+		if got != "page-new:session-2" {
+			t.Fatalf("disconnect removed %q, want new page interaction", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disconnect did not clear all DSH interactions")
+	}
+	if _, ok := interactions.Owner("page-new"); ok {
+		t.Fatal("disconnect left DSH interaction state")
 	}
 	_ = first.Body.Close()
 	_ = second.Body.Close()
