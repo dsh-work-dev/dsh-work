@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -186,7 +187,7 @@ func TestRouterReportsDeliveryFailure(t *testing.T) {
 	}
 }
 
-func TestRouterDoesNotEvictRememberedEventIDs(t *testing.T) {
+func TestRouterDeduplicatesTheMostRecent1024EventIDs(t *testing.T) {
 	delivery := &recordingDelivery{}
 	router := NewRouter(delivery, func() bool { return false })
 	for index := 0; index < maxRememberedEvents; index++ {
@@ -199,13 +200,64 @@ func TestRouterDoesNotEvictRememberedEventIDs(t *testing.T) {
 		}
 	}
 	if err := router.Publish(context.Background(), Event{ID: "event-new", Class: ClassError, Title: "Error"}); err != nil {
-		t.Fatalf("Publish(new event) error = %v", err)
+		t.Fatalf("Publish(1025th event) error = %v", err)
 	}
 	if err := router.Publish(context.Background(), Event{ID: "event-0", Class: ClassError, Title: "Error"}); err != nil {
-		t.Fatalf("Publish(replayed event) error = %v", err)
+		t.Fatalf("Publish(evicted oldest event) error = %v", err)
 	}
-	if len(delivery.events) != maxRememberedEvents {
-		t.Fatalf("delivered events = %d, want %d", len(delivery.events), maxRememberedEvents)
+	if err := router.Publish(context.Background(), Event{ID: "event-new", Class: ClassError, Title: "Error"}); err != nil {
+		t.Fatalf("Publish(recent duplicate) error = %v", err)
+	}
+	if err := router.Publish(context.Background(), Event{ID: "event-1023", Class: ClassError, Title: "Error"}); err != nil {
+		t.Fatalf("Publish(recent prior event) error = %v", err)
+	}
+	if len(delivery.events) != maxRememberedEvents+2 {
+		t.Fatalf("delivered events = %d, want %d", len(delivery.events), maxRememberedEvents+2)
+	}
+	if delivery.events[len(delivery.events)-1].ID != "event-0" {
+		t.Fatalf("last delivered event = %q, want evicted event-0", delivery.events[len(delivery.events)-1].ID)
+	}
+}
+
+func TestRouterAllowsFocusedDSHInteractionsOnlyWhenMarked(t *testing.T) {
+	delivery := &recordingDelivery{}
+	router := NewRouter(delivery, func() bool { return true })
+	if err := router.Publish(context.Background(), Event{ID: "interaction-hidden", Class: ClassDSHInteraction, Title: "Answer needed"}); err != nil {
+		t.Fatalf("Publish(unmarked interaction) error = %v", err)
+	}
+	if err := router.Publish(context.Background(), Event{
+		ID: "interaction-allowed", Class: ClassDSHInteraction, Title: "Answer needed", AllowWhenWorkspaceFocused: true,
+	}); err != nil {
+		t.Fatalf("Publish(marked interaction) error = %v", err)
+	}
+	if len(delivery.events) != 1 || delivery.events[0].ID != "interaction-allowed" {
+		t.Fatalf("delivered interactions = %#v, want only marked interaction", delivery.events)
+	}
+}
+
+func TestRouterValidatesNotificationDataLimits(t *testing.T) {
+	delivery := &recordingDelivery{}
+	router := NewRouter(delivery, func() bool { return false })
+	valid := make(map[string]string, 8)
+	for index := 0; index < 8; index++ {
+		valid[strconv.Itoa(index)] = strings.Repeat("界", 256)
+	}
+	if err := router.Publish(context.Background(), Event{ID: "data-valid", Class: ClassError, Title: "Error", Data: valid}); err != nil {
+		t.Fatalf("Publish(maximum valid data) error = %v", err)
+	}
+
+	tooMany := map[string]string{}
+	for index := 0; index < 9; index++ {
+		tooMany[strconv.Itoa(index)] = "value"
+	}
+	if err := router.Publish(context.Background(), Event{ID: "data-many", Class: ClassError, Title: "Error", Data: tooMany}); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("Publish(too many data values) error = %v, want %v", err, ErrInvalidEvent)
+	}
+	if err := router.Publish(context.Background(), Event{ID: "data-long", Class: ClassError, Title: "Error", Data: map[string]string{"value": strings.Repeat("界", 257)}}); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("Publish(overlong data value) error = %v, want %v", err, ErrInvalidEvent)
+	}
+	if len(delivery.events) != 1 {
+		t.Fatalf("delivered events = %#v, want only the valid event", delivery.events)
 	}
 }
 

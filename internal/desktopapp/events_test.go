@@ -13,6 +13,7 @@ func TestOneShotCommandPayloadsSurviveWailsValidation(t *testing.T) {
 		"notification-failure": `true`,
 		"background-stopping":  `true`,
 		"dsh-open-session":     `{"id":"7","sessionId":"child","parentSessionId":"parent"}`,
+		"dsh-answer-approval":  `{"instance":"page-1","sessionId":"session-1","key":"approval:1","outcome":"allowed-once"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			data, known, err := commandData(name, json.RawMessage(raw))
@@ -26,6 +27,12 @@ func TestOneShotCommandPayloadsSurviveWailsValidation(t *testing.T) {
 				command, ok := data.(OpenSessionCommand)
 				if !ok || command.ID != "7" || command.SessionID != "child" || command.ParentSessionID != "parent" {
 					t.Fatalf("open-session command = %#v", data)
+				}
+			}
+			if name == "dsh-answer-approval" {
+				command, ok := data.(AnswerApprovalCommand)
+				if !ok || command.Instance != "page-1" || command.SessionID != "session-1" || command.Key != "approval:1" || command.Outcome != "allowed-once" {
+					t.Fatalf("answer-approval command = %#v", data)
 				}
 			}
 		})

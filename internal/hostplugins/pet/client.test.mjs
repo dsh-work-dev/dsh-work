@@ -263,3 +263,52 @@ test('pet client opens only a trusted parent message and reports child-open resu
     assert.deepEqual(client.posted.at(-1), {message: {version: 1, type: 'dsh-work/open-session-result', id: '43', error: 'Conversation is unavailable'}, origin: 'http://wails.localhost'});
   } finally { client.dispose(); }
 });
+
+
+test('pet client answers only the matching answerable approval from the trusted shell', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    const instance = interactionPosts(client)[0].instance;
+    const answerCalls = [];
+    const dispatch = async (message, source = client.parent, origin = 'http://wails.localhost') => {
+      client.window.dispatch('message', {source, origin, data: message});
+      await settle();
+    };
+    const message = overrides => ({version: 1, type: 'dsh-work/answer-approval', instance, sessionId: 'session-1', key: 'approval:1', outcome: 'allowed-once', ...overrides});
+    const pending = overrides => ({kind: 'approval', key: 'approval:1', answerable: true, answer: outcome => { answerCalls.push(outcome); return Promise.resolve(); }, ...overrides});
+
+    client.setStatuses(new Map([['session-1', {pendingInteraction: pending()}]]), false);
+    await dispatch(message({instance: 'another-page'}));
+    await dispatch(message(), {}, 'http://wails.localhost');
+    await dispatch(message(), client.parent, 'https://attacker.test');
+    await dispatch(message({outcome: 'allow'}));
+    client.setStatuses(new Map([['session-1', {pendingInteraction: pending({kind: 'question'})}]]), false);
+    await dispatch(message());
+    client.setStatuses(new Map([['session-1', {pendingInteraction: pending({key: 'approval:2'})}]]), false);
+    await dispatch(message());
+    client.setStatuses(new Map([['session-1', {pendingInteraction: pending({answerable: false})}]]), false);
+    await dispatch(message());
+    assert.deepEqual(answerCalls, []);
+
+    client.setStatuses(new Map([['session-1', {pendingInteraction: pending()}]]), false);
+    await dispatch(message());
+    assert.deepEqual(answerCalls, ['allowed-once']);
+  } finally { client.dispose(); }
+});
+
+test('pet client swallows a rejected approval answer', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    const instance = interactionPosts(client)[0].instance;
+    let calls = 0;
+    client.setStatuses(new Map([['session-1', {pendingInteraction: {
+      kind: 'approval', key: 'approval:1', answerable: true,
+      answer: async () => { calls++; throw new Error('already answered'); },
+    }}]]), false);
+    client.window.dispatch('message', {source: client.parent, origin: 'http://wails.localhost', data: {
+      version: 1, type: 'dsh-work/answer-approval', instance, sessionId: 'session-1', key: 'approval:1', outcome: 'rejected',
+    }});
+    await settle();
+    assert.equal(calls, 1);
+  } finally { client.dispose(); }
+});

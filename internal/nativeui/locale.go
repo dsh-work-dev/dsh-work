@@ -9,22 +9,28 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
-	Actions              string
-	Settings             string
-	ShowPet              string
-	OpenWorkspace        string
-	Help                 string
-	CheckUpdates         string
-	About                string
-	RestartDSH           string
-	Quit                 string
-	TrayTooltip          string
-	UpdateAvailableMenu  string
-	UpdateInProgressMenu string
-	UpdateReadyTitle     string
-	UpdateReadyMessage   string
-	PetMenuErrorTitle    string
-	PetMenuErrorMessage  string
+	Actions               string
+	Settings              string
+	ShowPet               string
+	OpenWorkspace         string
+	Help                  string
+	CheckUpdates          string
+	About                 string
+	RestartDSH            string
+	Quit                  string
+	TrayTooltip           string
+	UpdateAvailableMenu   string
+	UpdateInProgressMenu  string
+	UpdateReadyTitle      string
+	UpdateReadyMessage    string
+	ApprovalRequiredTitle string
+	ApprovalRequiredBody  string
+	AnswerNeededTitle     string
+	AnswerNeededBody      string
+	ApprovalAllowOnce     string
+	ApprovalReject        string
+	PetMenuErrorTitle     string
+	PetMenuErrorMessage   string
 
 	trayStatus            string
 	workspaceFailureTitle string
@@ -32,6 +38,7 @@ type Labels struct {
 	lifecycleTitles       map[lifecycle.State]string
 	lifecycleBodies       map[lifecycle.State]string
 	stateLabels           map[lifecycle.State]string
+	genericToolName       string
 }
 
 // NotificationCopy is localized native-notification content.
@@ -57,6 +64,13 @@ var labelsByLocale = map[settings.Locale]Labels{
 		UpdateInProgressMenu:  "Updating…",
 		UpdateReadyTitle:      "Update ready to install",
 		UpdateReadyMessage:    "Version %s is ready. Open About to install it.",
+		ApprovalRequiredTitle: "Approval required",
+		ApprovalRequiredBody:  "%s is waiting for a permission decision",
+		AnswerNeededTitle:     "Answer needed",
+		AnswerNeededBody:      "A conversation is waiting for your answer",
+		ApprovalAllowOnce:     "Allow once",
+		ApprovalReject:        "Reject",
+		genericToolName:       "A tool",
 		PetMenuErrorTitle:     "Desktop pet unavailable",
 		PetMenuErrorMessage:   "The desktop pet could not be updated. Review Pet settings and try again.",
 		workspaceFailureTitle: "Workspace needs attention",
@@ -97,6 +111,13 @@ var labelsByLocale = map[settings.Locale]Labels{
 		UpdateInProgressMenu:  "更新中…",
 		UpdateReadyTitle:      "新版本可以安装",
 		UpdateReadyMessage:    "版本 %s 已准备好。打开关于页面进行安装。",
+		ApprovalRequiredTitle: "需要批准",
+		ApprovalRequiredBody:  "%s 正在等待权限决定",
+		AnswerNeededTitle:     "需要回答",
+		AnswerNeededBody:      "一个会话正在等待你的回答",
+		ApprovalAllowOnce:     "允许一次",
+		ApprovalReject:        "拒绝",
+		genericToolName:       "一个工具",
 		PetMenuErrorTitle:     "桌面宠物不可用",
 		PetMenuErrorMessage:   "无法更新桌面宠物。请打开宠物设置再试。",
 		workspaceFailureTitle: "工作区需要处理",
@@ -137,6 +158,13 @@ var labelsByLocale = map[settings.Locale]Labels{
 		UpdateInProgressMenu:  "更新中…",
 		UpdateReadyTitle:      "更新をインストールできます",
 		UpdateReadyMessage:    "バージョン %s の準備ができました。概要を開いてインストールしてください。",
+		ApprovalRequiredTitle: "承認が必要です",
+		ApprovalRequiredBody:  "%s が権限の判断を待っています",
+		AnswerNeededTitle:     "回答が必要です",
+		AnswerNeededBody:      "会話が回答を待っています",
+		ApprovalAllowOnce:     "一度だけ許可",
+		ApprovalReject:        "拒否",
+		genericToolName:       "ツール",
 		PetMenuErrorTitle:     "デスクトップペットを利用できません",
 		PetMenuErrorMessage:   "デスクトップペットを更新できませんでした。ペット設定を確認して、もう一度お試しください。",
 		workspaceFailureTitle: "ワークスペースを確認してください",
@@ -192,4 +220,17 @@ func LifecycleNotification(locale settings.Locale, state lifecycle.State) Notifi
 func UpdateReadyNotification(locale settings.Locale, targetVersion string) NotificationCopy {
 	labels := LabelsFor(locale)
 	return NotificationCopy{Title: labels.UpdateReadyTitle, Body: strings.Replace(labels.UpdateReadyMessage, "%s", targetVersion, 1)}
+}
+
+func DSHApprovalNotification(locale settings.Locale, toolName string) NotificationCopy {
+	labels := LabelsFor(locale)
+	if toolName == "" {
+		toolName = labels.genericToolName
+	}
+	return NotificationCopy{Title: labels.ApprovalRequiredTitle, Body: strings.Replace(labels.ApprovalRequiredBody, "%s", toolName, 1)}
+}
+
+func DSHAnswerNotification(locale settings.Locale) NotificationCopy {
+	labels := LabelsFor(locale)
+	return NotificationCopy{Title: labels.AnswerNeededTitle, Body: labels.AnswerNeededBody}
 }

@@ -160,6 +160,12 @@ func commandData(name string, raw json.RawMessage) (any, bool, error) {
 			return nil, true, err
 		}
 		return data, true, nil
+	case "dsh-answer-approval":
+		var data AnswerApprovalCommand
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return nil, true, err
+		}
+		return data, true, nil
 	default:
 		return nil, false, nil
 	}

@@ -397,6 +397,29 @@ func runDaemon(identity string, resources Resources) {
 		return err
 	}
 	petActivity.SetNavigation(launcher.Open, hub.SendCommand)
+	interactionNotifications := &interactionNotifier{
+		page:        interactions.Page,
+		focused:     tracker.Focused,
+		preferences: notificationRouter.Preferences,
+		publish:     notificationRouter.Publish,
+		remove:      nativeNotification.RemoveDeliveredNotification,
+		locale:      func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) },
+		owner:       interactions.Owner,
+		sendCommand: hub.SendCommand,
+		open:        petActivity.Open,
+		showWorkspace: func() {
+			if showWorkspace != nil {
+				showWorkspace()
+			}
+		},
+	}
+	interactions.OnAdded(interactionNotifications.added)
+	interactions.OnRemoved(interactionNotifications.removed)
+	registerDSHApprovalCategory := func(locale dshworksettings.Locale) {
+		if err := nativeNotification.RegisterNotificationCategory(dshApprovalNotificationCategory(locale)); err != nil {
+			logging.Module(logging.ModNotify).Warn("approval notification category registration failed", logging.ErrAttrs(err, "")...)
+		}
+	}
 	dshworkapp.SetPetActivity(petSettingsService, petActivity, tracker.LastFocused)
 	server.Media = dshworkapp.PetMediaHandler(petSettingsService, http.NotFoundHandler())
 	listener, err := daemon.Listen(identity)
@@ -709,6 +732,9 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
+		if interactionNotifications.respond(result) {
+			return
+		}
 		if result.Error != nil {
 			logging.Module(logging.ModNotify).Warn("notification response failed", logging.ErrAttrs(result.Error, "")...)
 			return
@@ -929,6 +955,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	publishLocale = func(locale dshworksettings.Locale) {
 		updateNativeLocale(locale)
+		registerDSHApprovalCategory(locale)
 	}
 
 	openSettings = func(section string) {
@@ -1072,6 +1099,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		registerDSHApprovalCategory(loadNativeLocale(&activeLocale))
 		if nativeNotificationHost.Unavailable() {
 			desktop.Event.Emit("notification-failure", true)
 			hub.SendCommand("", "notification-failure", 10*time.Second, true)

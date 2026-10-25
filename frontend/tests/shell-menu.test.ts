@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {hasTranslationInEveryLocale} from "../src/i18n";
-import {parseFrameMessage} from "../src/shell-frame";
+import {parseAnswerApprovalCommand, parseFrameMessage} from "../src/shell-frame";
 import {buildMenus, formatKeys, stepItem, windowKeyAction, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
@@ -179,6 +179,20 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "pending"}), {type: "account-signout", state: "pending"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "error"}), {type: "account-signout", state: "error"});
   assert.equal(parseFrameMessage({type: "dsh-work/account-signout", state: "maybe"}), null);
+});
+
+test("answer-approval fields are validated before forwarding to the frame", () => {
+  const command = {instance: "page-1", sessionId: "session-1", key: "approval:1", outcome: "allowed-once"};
+  assert.deepEqual(parseAnswerApprovalCommand(command), command);
+  assert.deepEqual(parseAnswerApprovalCommand({...command, outcome: "rejected"}), {...command, outcome: "rejected"});
+  for (const invalid of [
+    {...command, instance: ""}, {...command, instance: 1},
+    {...command, sessionId: ""}, {...command, sessionId: 1},
+    {...command, key: ""}, {...command, key: 1},
+    {...command, outcome: "allow"}, {...command, outcome: ""},
+    Object.fromEntries(Object.entries(command).filter(([key]) => key !== "key")),
+    null, "approval",
+  ]) assert.equal(parseAnswerApprovalCommand(invalid), null);
 });
 
 test("pending-interaction frame messages validate their version, fields, and bounded strings", () => {

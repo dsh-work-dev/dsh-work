@@ -1,6 +1,18 @@
 import {builtinComponentIds, type BuiltinComponentId} from "./builtin-components";
 import {dshMenuCommands, keyedWindowActions, type DshCommand, type DshCommandState, type WindowAction} from "./shell-menu-model";
 
+export type AnswerApprovalCommand = {instance: string; sessionId: string; key: string; outcome: "allowed-once" | "rejected"};
+
+export function parseAnswerApprovalCommand(data: unknown): AnswerApprovalCommand | null {
+  if (!data || typeof data !== "object") return null;
+  const command = data as Record<string, unknown>;
+  if (typeof command.instance !== "string" || command.instance.length === 0 ||
+      typeof command.sessionId !== "string" || command.sessionId.length === 0 ||
+      typeof command.key !== "string" || command.key.length === 0 ||
+      (command.outcome !== "allowed-once" && command.outcome !== "rejected")) return null;
+  return {instance: command.instance, sessionId: command.sessionId, key: command.key, outcome: command.outcome};
+}
+
 export type FrameMessage =
   | {type: "catalog"; commands: Map<string, DshCommand>}
   | {type: "command-result"; id: string; handled: boolean}

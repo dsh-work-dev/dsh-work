@@ -5,7 +5,7 @@ import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
 import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
-import {parseFrameMessage} from "./shell-frame";
+import {parseAnswerApprovalCommand, parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
@@ -328,6 +328,12 @@ export function mountShell() {
     if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
     frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
       sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
+  });
+  Events.On("dsh-answer-approval", event => {
+    const command = parseAnswerApprovalCommand(event.data);
+    const src = frame.getAttribute("src");
+    if (!src || !command) return;
+    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/answer-approval", ...command}, new URL(src).origin);
   });
   void fetch("/__shell/worker").then(response => response.json()).then((value: {url: string}) => {
     if (!eventSeen) show(value.url);

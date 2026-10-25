@@ -151,6 +151,19 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       } catch { error = 'Conversation is unavailable'; }
       if (!stopped) window.parent.postMessage({version: 1, type: 'dsh-work/open-session-result', id: message.id, error}, origin);
     }
+    function answerApproval(event) {
+      if (!origin || event.source !== window.parent || event.origin !== origin) return;
+      const message = event.data;
+      if (!message || message.version !== 1 || message.type !== 'dsh-work/answer-approval' ||
+          typeof message.instance !== 'string' || message.instance.length === 0 ||
+          typeof message.sessionId !== 'string' || message.sessionId.length === 0 ||
+          typeof message.key !== 'string' || message.key.length === 0 ||
+          (message.outcome !== 'allowed-once' && message.outcome !== 'rejected') || message.instance !== instance) return;
+      const pendingInteraction = ctx.uiSession.sessionStatus.getSnapshot().get(message.sessionId)?.pendingInteraction;
+      if (!pendingInteraction || pendingInteraction.kind !== 'approval' || pendingInteraction.key !== message.key ||
+          pendingInteraction.answerable !== true || typeof pendingInteraction.answer !== 'function') return;
+      void Promise.resolve().then(() => pendingInteraction.answer(message.outcome)).catch(() => {});
+    }
     const unsubscribeSessions = ctx.sessions.list.subscribe(() => {
       scheduleSync();
       reportContextChanges();
@@ -158,6 +171,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
     const unsubscribeSessionStatus = ctx.uiSession.sessionStatus.subscribe(observeInteractions);
     document.addEventListener('visibilitychange', reportContextChanges);
     window.addEventListener('message', openSession);
+    window.addEventListener('message', answerApproval);
     // Publish the initial session list once; subsequent requests follow session changes.
     scheduleSync();
     // The first status snapshot is a baseline. Publish only page context until an interaction changes.
@@ -177,6 +191,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       unsubscribeSessionStatus?.();
       document.removeEventListener('visibilitychange', reportContextChanges);
       window.removeEventListener('message', openSession);
+      window.removeEventListener('message', answerApproval);
     });
   }
 })});
