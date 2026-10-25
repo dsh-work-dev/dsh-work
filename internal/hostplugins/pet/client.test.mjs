@@ -47,7 +47,7 @@ async function mountPetClient(fetchImpl, initialStatuses = new Map()) {
   globalThis.__ModuleLoader__ = window.__ModuleLoader__;
   new Function(source)();
   const clock = new FakeClock();
-  let list = {current: 'session-1', byId: {'session-1': {id: 'session-1', displayTitle: 'A task', parentId: ''}}};
+  let list = {byId: {'session-1': {id: 'session-1', displayTitle: 'A task', parentId: '', retainedBy: {mainView: 1}}}};
   const subscribers = new Set();
   const statusSubscribers = new Set();
   let statusSnapshot = initialStatuses;
@@ -79,7 +79,7 @@ function interactionPosts(client) {
   return client.posted.map(item => item.message).filter(message => message.type === 'dsh-work/interaction');
 }
 
-test('pet client posts only session-list changes and ignores focus changes', async () => {
+test('pet client reports the retained main-view session and ignores focus changes', async () => {
   const client = await mountPetClient(async () => ({ok: true}));
   try {
     assert.deepEqual(client.posted[0], {message: {version: 1, type: 'dsh-work/component-ready', id: 'pet'}, origin: 'http://wails.localhost'});
@@ -101,8 +101,10 @@ test('pet client posts only session-list changes and ignores focus changes', asy
     await client.clock.tick(100);
     assert.equal(client.requests.length, 1);
 
-    const latest = {current: 'session-2', byId: {'session-2': {id: 'session-2', displayTitle: 'Newest', parentId: 'parent-1'}}};
+    const latest = {byId: {'session-2': {id: 'session-2', displayTitle: 'Newest', parentId: 'parent-1', retainedBy: {mainView: 1}}}};
     client.setList(latest);
+    const currentReports = interactionPosts(client).filter(message => message.sessionId === '');
+    assert.equal(currentReports.at(-1).current, 'session-2');
     await client.clock.tick(99);
     assert.equal(client.requests.length, 1);
     await client.clock.tick(1);
@@ -168,7 +170,7 @@ test('pet client reports a disappeared interaction immediately', async () => {
 test('pet client reports current and visibility changes without sending Worker requests', async () => {
   const client = await mountPetClient(async () => ({ok: true}));
   try {
-    client.setList({current: 'session-2', byId: {'session-2': {id: 'session-2', displayTitle: 'Second', parentId: ''}}});
+    client.setList({byId: {'session-2': {id: 'session-2', displayTitle: 'Second', parentId: '', retainedBy: {mainView: 1}}}});
     const afterCurrent = interactionPosts(client);
     assert.equal(afterCurrent.length, 2);
     assert.equal(afterCurrent[1].sessionId, '');
@@ -181,6 +183,18 @@ test('pet client reports current and visibility changes without sending Worker r
     assert.equal(afterVisibility[2].sessionId, '');
     assert.equal(afterVisibility[2].visible, false);
     assert.equal(client.requests.length, 0);
+  } finally { client.dispose(); }
+});
+
+test('pet client reports an empty current session when no session is retained by the main view', async () => {
+  const client = await mountPetClient(async () => ({ok: true}));
+  try {
+    client.setList({byId: {
+      'session-1': {id: 'session-1', displayTitle: 'Background task', parentId: '', retainedBy: {mainView: 0}},
+    }});
+    const currentReports = interactionPosts(client).filter(message => message.sessionId === '');
+    assert.equal(currentReports.length, 2);
+    assert.equal(currentReports.at(-1).current, '');
   } finally { client.dispose(); }
 });
 
@@ -216,7 +230,7 @@ test('pet client retries the latest snapshot after one second, at most three tim
   try {
     await client.clock.tick(100);
     assert.equal(client.requests.length, 1);
-    client.setList({current: 'latest', byId: {'latest': {id: 'latest', displayTitle: 'Latest', parentId: ''}}}, false);
+    client.setList({byId: {'latest': {id: 'latest', displayTitle: 'Latest', parentId: '', retainedBy: {mainView: 1}}}}, false);
     await client.clock.tick(999);
     assert.equal(client.requests.length, 1);
     await client.clock.tick(1);

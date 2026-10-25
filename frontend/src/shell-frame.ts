@@ -29,7 +29,9 @@ export type InteractionReport = {
 const signOutStates: readonly SignOutState[] = ["pending", "success", "error"];
 const exportResults: readonly ExportResult[] = ["saved", "cancelled", "error"];
 const commandStates: readonly DshCommandState[] = ["ready", "unbound", "unavailable"];
+const interactionKinds = ["", "approval", "question", "plan-review"] as const;
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
+const stringLength = (value: string) => Array.from(value).length;
 
 /** Validate a message from the DSH frame; the caller has already checked source and origin. */
 export function parseFrameMessage(data: unknown): FrameMessage | null {
@@ -52,11 +54,12 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     return {type: "open-session-result", id: message.id, error: message.error};
   }
   if (message.version === 1 && message.type === "dsh-work/interaction" &&
-      typeof message.instance === "string" && message.instance.length <= 256 &&
-      typeof message.sessionId === "string" && message.sessionId.length <= 256 &&
-      typeof message.kind === "string" && typeof message.key === "string" && message.key.length <= 256 &&
-      typeof message.toolName === "string" && message.toolName.length <= 120 &&
-      typeof message.current === "string" && typeof message.visible === "boolean") {
+      typeof message.instance === "string" && message.instance.length > 0 && stringLength(message.instance) <= 256 &&
+      typeof message.sessionId === "string" && stringLength(message.sessionId) <= 256 &&
+      typeof message.kind === "string" && interactionKinds.includes(message.kind as typeof interactionKinds[number]) &&
+      typeof message.key === "string" && stringLength(message.key) <= 256 && (message.kind === "" || message.key !== "") &&
+      typeof message.toolName === "string" && stringLength(message.toolName) <= 120 &&
+      typeof message.current === "string" && stringLength(message.current) <= 256 && typeof message.visible === "boolean") {
     return {type: "interaction", report: {
       instance: message.instance,
       sessionId: message.sessionId,
@@ -68,7 +71,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     }};
   }
   if (message.version === 1 && message.type === "dsh-work/interaction-reset" &&
-      typeof message.instance === "string" && message.instance.length <= 256) {
+      typeof message.instance === "string" && message.instance.length > 0 && stringLength(message.instance) <= 256) {
     return {type: "interaction-reset", instance: message.instance};
   }
   if (message.type === "dsh-work/window-key" && keyedWindowActions.includes(message.action as WindowAction)) {

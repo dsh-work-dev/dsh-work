@@ -438,6 +438,79 @@ func TestDSHPageInteractionMethodsRequireAWorkspaceSurface(t *testing.T) {
 	}
 }
 
+func TestDSHPageInteractionValidationRejectsInvalidReportsWithoutChangingStore(t *testing.T) {
+	store := dshinteraction.New()
+	added, removed := 0, 0
+	store.OnAdded(func(string, string, string, dshinteraction.Interaction) { added++ })
+	store.OnRemoved(func(string, string, dshinteraction.Interaction) { removed++ })
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "", Current: "current-1", Visible: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "approval", Key: "approval:1", ToolName: "shell.exec"}); err != nil {
+		t.Fatal(err)
+	}
+	added, removed = 0, 0
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Interactions: store}}}
+	valid := dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "question", Key: "replacement", Current: "ignored", Visible: false}
+	cases := []struct {
+		name   string
+		mutate func(*dshinteraction.Report)
+	}{
+		{name: "empty instance", mutate: func(report *dshinteraction.Report) { report.Instance = "" }},
+		{name: "long instance", mutate: func(report *dshinteraction.Report) { report.Instance = strings.Repeat("i", 257) }},
+		{name: "long session ID", mutate: func(report *dshinteraction.Report) { report.SessionID = strings.Repeat("s", 257) }},
+		{name: "unsupported kind", mutate: func(report *dshinteraction.Report) { report.Kind = "completion" }},
+		{name: "missing key", mutate: func(report *dshinteraction.Report) { report.Key = "" }},
+		{name: "long key", mutate: func(report *dshinteraction.Report) { report.Key = strings.Repeat("k", 257) }},
+		{name: "long tool name", mutate: func(report *dshinteraction.Report) { report.ToolName = strings.Repeat("t", 121) }},
+		{name: "long current", mutate: func(report *dshinteraction.Report) {
+			report.SessionID, report.Kind, report.Key, report.Current = "", "", "", strings.Repeat("c", 257)
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			report := valid
+			test.mutate(&report)
+			encoded, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			added, removed = 0, 0
+			result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportInteraction", Surface: "workspace", Args: []json.RawMessage{encoded}})
+			if result.Error == "" {
+				t.Fatal("accepted an invalid interaction report")
+			}
+			instance, current, visible, ok := store.Page("workspace")
+			if !ok || instance != "page-1" || current != "current-1" || !visible || added != 0 || removed != 0 {
+				t.Fatalf("invalid report changed state: page=%q current=%q visible=%t ok=%t added=%d removed=%d", instance, current, visible, ok, added, removed)
+			}
+		})
+	}
+}
+
+func TestDSHPageInteractionResetValidationRejectsInvalidInstancesWithoutChangingStore(t *testing.T) {
+	store := dshinteraction.New()
+	removed := 0
+	store.OnRemoved(func(string, string, dshinteraction.Interaction) { removed++ })
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "question", Key: "question:1"}); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Interactions: store}}}
+	for _, instance := range []string{"", strings.Repeat("i", 257)} {
+		encoded, err := json.Marshal(instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := postCall(t, server, Call{Service: "DSHPageService", Method: "ResetInteractions", Surface: "workspace", Args: []json.RawMessage{encoded}})
+		if result.Error == "" {
+			t.Errorf("accepted invalid instance of length %d", len(instance))
+		}
+		if owner, ok := store.Owner("page-1"); !ok || owner != "workspace" || removed != 0 {
+			t.Fatalf("invalid reset changed state: owner=%q ok=%t removed=%d", owner, ok, removed)
+		}
+	}
+}
+
 func TestWindowClosedClearsPendingInteractions(t *testing.T) {
 	store := dshinteraction.New()
 	var removed []string

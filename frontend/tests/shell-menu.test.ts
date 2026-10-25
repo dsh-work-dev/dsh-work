@@ -191,17 +191,25 @@ test("pending-interaction frame messages validate their version, fields, and bou
     toolName: "shell.exec", current: "session-2", visible: true,
   }});
   assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/interaction-reset", instance: "page-1"}), {type: "interaction-reset", instance: "page-1"});
+  assert.notEqual(parseFrameMessage({...report, current: "界".repeat(256)}), null);
+  assert.notEqual(parseFrameMessage({...report, sessionId: "", kind: "", key: ""}), null);
 
   for (const invalid of [
     {...report, version: 2},
+    {...report, instance: ""},
     {...report, instance: 1},
+    {...report, instance: "i".repeat(257)},
     {...report, sessionId: "s".repeat(257)},
+    {...report, kind: "completion"},
+    {...report, kind: "question", key: ""},
     {...report, key: "k".repeat(257)},
     {...report, toolName: "t".repeat(121)},
+    {...report, current: "c".repeat(257)},
     {...report, current: undefined},
     {...report, visible: "true"},
     Object.fromEntries(Object.entries(report).filter(([key]) => key !== "kind")),
     {version: 1, type: "dsh-work/interaction-reset"},
+    {version: 1, type: "dsh-work/interaction-reset", instance: ""},
     {version: 1, type: "dsh-work/interaction-reset", instance: "i".repeat(257)},
   ]) assert.equal(parseFrameMessage(invalid), null);
 });

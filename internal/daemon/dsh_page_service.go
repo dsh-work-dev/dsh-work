@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"unicode/utf8"
 
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshinteraction"
@@ -32,6 +33,9 @@ func (s *DSHPageService) ReportInteraction(ctx context.Context, report dshintera
 	if !isWorkspaceSurface(surface) {
 		return errors.New("workspace surface required")
 	}
+	if err := validateInteractionReport(report); err != nil {
+		return err
+	}
 	if s == nil || s.Interactions == nil {
 		return errors.New("DSH interaction tracking is unavailable")
 	}
@@ -44,9 +48,52 @@ func (s *DSHPageService) ResetInteractions(ctx context.Context, instance string)
 	if !isWorkspaceSurface(surface) {
 		return errors.New("workspace surface required")
 	}
+	if err := validateInteractionInstance(instance); err != nil {
+		return err
+	}
 	if s == nil || s.Interactions == nil {
 		return errors.New("DSH interaction tracking is unavailable")
 	}
 	s.Interactions.Reset(surface, instance)
+	return nil
+}
+
+func validateInteractionReport(report dshinteraction.Report) error {
+	if report.Instance == "" {
+		return errors.New("interaction instance is required")
+	}
+	if utf8.RuneCountInString(report.Instance) > 256 {
+		return errors.New("interaction instance is too long")
+	}
+	if utf8.RuneCountInString(report.SessionID) > 256 {
+		return errors.New("interaction session ID is too long")
+	}
+	switch report.Kind {
+	case "", "approval", "question", "plan-review":
+	default:
+		return errors.New("interaction kind is invalid")
+	}
+	if report.Kind != "" && report.Key == "" {
+		return errors.New("interaction key is required")
+	}
+	if utf8.RuneCountInString(report.Key) > 256 {
+		return errors.New("interaction key is too long")
+	}
+	if utf8.RuneCountInString(report.ToolName) > 120 {
+		return errors.New("interaction tool name is too long")
+	}
+	if utf8.RuneCountInString(report.Current) > 256 {
+		return errors.New("current session ID is too long")
+	}
+	return nil
+}
+
+func validateInteractionInstance(instance string) error {
+	if instance == "" {
+		return errors.New("interaction instance is required")
+	}
+	if utf8.RuneCountInString(instance) > 256 {
+		return errors.New("interaction instance is too long")
+	}
 	return nil
 }

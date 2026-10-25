@@ -22,8 +22,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
     let lastCurrent = currentSession();
     let lastVisible = isVisible();
     function currentSession() {
-      const current = ctx.sessions.list.getSnapshot().current;
-      return typeof current === 'string' ? current : '';
+      return Object.values(ctx.sessions.list.getSnapshot().byId ?? {}).find(s => (s.retainedBy?.mainView ?? 0) > 0)?.id ?? '';
     }
     function isVisible() { return document.visibilityState === 'visible'; }
     function reportInteraction(sessionId = '', interaction) {
