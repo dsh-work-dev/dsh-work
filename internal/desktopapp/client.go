@@ -258,7 +258,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 	}
 	newOptions := func(name string) application.WebviewWindowOptions {
-		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
+		options := application.WebviewWindowOptions{Name: name, Title: "DSH Work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
 		options.Permissions = webviewPermissions(name)
 		mu.Lock()
 		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)

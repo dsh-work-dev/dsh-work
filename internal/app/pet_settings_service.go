@@ -1175,7 +1175,7 @@ func (s *PetSettingsService) beginOperationForSurface(ctx context.Context, surfa
 		trusted = func(candidate context.Context) bool { return isTrustedWindow(candidate, "pet") }
 	}
 	if trusted == nil || !trusted(ctx) {
-		return nil, nil, trustedSurfaceRequired("dsh-work Pet controls are available only on a trusted surface.")
+		return nil, nil, trustedSurfaceRequired("DSH Work Pet controls are available only on a trusted surface.")
 	}
 	if s.closed {
 		return nil, nil, petSettingsUnavailable()
@@ -1594,17 +1594,17 @@ func stringPointer(value string) *string {
 func petSettingsUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorSettingsUnavailable,
-		Summary:       "dsh-work Pet settings are unavailable.",
+		Summary:       "DSH Work Pet settings are unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
-		Detail:        "Restart dsh-work and try again.",
+		Detail:        "Restart DSH Work and try again.",
 	}
 }
 
 func petMaintenanceBusy() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerOperationBusy,
-		Summary:       "dsh-work is being updated.",
+		Summary:       "DSH Work is being updated.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Wait for the installer to finish, then retry the Pet action.",

@@ -637,7 +637,7 @@ export function mountManager() {
   loadState.append(loadMessage, loadRetry);
   document.querySelector(".page-head")!.after(loadState);
   loadRetry.addEventListener("click", () => void refresh());
-  document.getElementById("about-version")!.textContent = `dsh-work ${__APP_VERSION__}`;
+  document.getElementById("about-version")!.textContent = `DSH Work ${__APP_VERSION__}`;
   aboutUpdateAction.addEventListener("click", () => void performUpdateAction());
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;

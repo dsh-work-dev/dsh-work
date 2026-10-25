@@ -36,7 +36,7 @@ export function mountShell() {
   brand.className = "shell-brand";
   const mark = document.createElement("img");
   mark.src = "/branding/dsh-work-appicon.png";
-  mark.alt = "dsh-work";
+  mark.alt = "DSH Work";
   brand.append(mark);
   const drag = document.createElement("div");
   drag.className = "shell-drag";

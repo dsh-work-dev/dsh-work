@@ -11,7 +11,7 @@ func PetActivityWindowSize(width, height int) (int, int) {
 func PetWindowOptions() application.WebviewWindowOptions {
 	return application.WebviewWindowOptions{
 		Name:        "pet",
-		Title:       "dsh-work Pet",
+		Title:       "DSH Work Pet",
 		Width:       240,
 		Height:      168,
 		AlwaysOnTop: false,

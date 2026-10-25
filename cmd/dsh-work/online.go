@@ -202,7 +202,7 @@ func waitForDaemonStop(identity, root string, timeout time.Duration) error {
 		if resolveErr != nil {
 			return lifecycle.Failure{
 				Code:          lifecycle.ErrorProcessStopFailed,
-				Summary:       "dsh-work could not prove that the background stopped.",
+				Summary:       "DSH Work could not prove that the background stopped.",
 				Retryable:     true,
 				CorrelationID: lifecycle.NewCorrelationID(),
 				Detail:        "The current storage location could not be resolved safely; retry after checking the location file.",
@@ -212,7 +212,7 @@ func waitForDaemonStop(identity, root string, timeout time.Duration) error {
 	if !filepath.IsAbs(root) {
 		return lifecycle.Failure{
 			Code:          lifecycle.ErrorProcessStopFailed,
-			Summary:       "dsh-work could not prove that the background stopped.",
+			Summary:       "DSH Work could not prove that the background stopped.",
 			Retryable:     true,
 			CorrelationID: lifecycle.NewCorrelationID(),
 			Detail:        "The current storage location is not an absolute user path; retry after repairing the location file.",
@@ -262,7 +262,7 @@ func waitForDaemonStop(identity, root string, timeout time.Duration) error {
 	}
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorProcessStopFailed,
-		Summary:       "dsh-work background did not stop.",
+		Summary:       "DSH Work background did not stop.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        fmt.Sprintf("%s after %s.", lastObservation, timeout.Round(time.Second)),

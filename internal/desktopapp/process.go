@@ -72,9 +72,9 @@ func ensureDaemon(ctx context.Context, identity string) (*daemon.Client, daemon.
 	if maintenance.InstallerInProgress() {
 		return nil, daemon.Snapshot{}, lifecycle.Failure{
 			Code:      lifecycle.ErrorManagerOperationBusy,
-			Summary:   "dsh-work is being updated.",
+			Summary:   "DSH Work is being updated.",
 			Retryable: true,
-			Detail:    "Wait for the installer to finish, then reopen dsh-work.",
+			Detail:    "Wait for the installer to finish, then reopen DSH Work.",
 		}
 	}
 	client := daemon.NewClient(identity)

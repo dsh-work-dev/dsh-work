@@ -257,7 +257,7 @@ func maintenanceCallAllowed(call Call) bool {
 func maintenanceFailure() lifecycle.Failure {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerOperationBusy,
-		Summary:       "dsh-work is being updated.",
+		Summary:       "DSH Work is being updated.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Wait for the installer to finish, then retry the command.",

@@ -323,7 +323,7 @@ func New(config Config) (*Manager, error) {
 	importPending := false
 	if loaded != nil {
 		if loaded.Version != stateVersion {
-			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
+			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 		}
 		values = *loaded
 		values.Pet = normalizePetPreference(values.Pet)
@@ -371,7 +371,7 @@ func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) 
 		return Values{}, err
 	}
 	if !locale.Valid() {
-		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Language is not supported", "choose one of the available dsh-work languages")
+		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Language is not supported", "choose one of the available DSH Work languages")
 	}
 	m.mu.Lock()
 	next := m.values
@@ -441,7 +441,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be read", "the persisted settings are unavailable")
+		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
 		WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
@@ -457,7 +457,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		VerboseLogging           *bool           `json:"verboseLogging"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
-		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
+		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
 	values.WorkspaceWindow = raw.WorkspaceWindow
@@ -529,15 +529,15 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 	values.Version = stateVersion
 	data, err := json.MarshalIndent(values, "", "  ")
 	if err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be encoded", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be encoded", "the setting change could not be persisted")
 	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings directory could not be created", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings directory could not be created", "the setting change could not be persisted")
 	}
 	temporary, err := os.CreateTemp(directory, ".settings-*.tmp")
 	if err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be written", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be written", "the setting change could not be persisted")
 	}
 	temporaryPath := temporary.Name()
 	keepTemporary := false
@@ -548,16 +548,16 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be secured", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be secured", "the setting change could not be persisted")
 	}
 	if _, err := temporary.Write(data); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be written", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be written", "the setting change could not be persisted")
 	}
 	if err := temporary.Sync(); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be flushed", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be flushed", "the setting change could not be persisted")
 	}
 	if err := temporary.Close(); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be closed", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be closed", "the setting change could not be persisted")
 	}
 	var replaceErr error
 	if s.Replacer != nil {
@@ -566,7 +566,7 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 		replaceErr = os.Rename(temporaryPath, path)
 	}
 	if err := replaceErr; err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be replaced", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be replaced", "the setting change could not be persisted")
 	}
 	keepTemporary = true
 	return nil
@@ -579,7 +579,7 @@ func normalizePath(path string) (string, error) {
 		if err != nil || paths.Root == "" {
 			root, err = os.Getwd()
 			if err != nil {
-				return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is unavailable", "the settings directory could not be determined")
+				return "", failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings path is unavailable", "the settings directory could not be determined")
 			}
 			root = filepath.Join(root, ".dsh-work")
 		} else {
@@ -589,7 +589,7 @@ func normalizePath(path string) (string, error) {
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is invalid", "the settings path could not be normalized")
+		return "", failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings path is invalid", "the settings path could not be normalized")
 	}
 	return filepath.Clean(absPath), nil
 }

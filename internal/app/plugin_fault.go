@@ -138,7 +138,7 @@ func (h *Host) actOnFaultPlugins(act func(PluginFaultManager, *failedPluginStart
 	h.switchMu.Lock()
 	defer h.switchMu.Unlock()
 	if h.isShutdownRequested() || h.isSwitching() {
-		return h.Status(), h.failureFor(errors.New("dsh-work is changing its Run context"), lifecycle.ErrorManagerOperationBusy, "dsh-work is finishing the current Run context.", true)
+		return h.Status(), h.failureFor(errors.New("dsh-work is changing its Run context"), lifecycle.ErrorManagerOperationBusy, "DSH Work is finishing the current Run context.", true)
 	}
 	status := h.Status()
 	record := h.pluginFault.Load()

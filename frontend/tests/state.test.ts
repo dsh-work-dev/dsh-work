@@ -70,7 +70,7 @@ test("failed status exposes safe copy without projecting the internal error code
       correlationId: "generation"
     }
   }));
-  assert.equal(model.detail, "dsh-work could not start the local workspace.");
+  assert.equal(model.detail, "DSH Work could not start the local workspace.");
   assert.equal(model.message, "DSH did not become ready.");
   assert.equal(model.showRetry, true);
 });
@@ -88,7 +88,7 @@ const managerSnapshot = (overrides: Partial<Snapshot>): Snapshot => ({
   nodes: [],
   dataDirectories: [{
     id: "dsh-work",
-    name: "dsh-work DSH data directory",
+    name: "DSH Work DSH data directory",
     path: "dsh-data",
     ownership: DataDirectoryOwnership.DataDirectoryOwnershipDSHWork
   }],
@@ -145,7 +145,7 @@ test("overview shows the configured context when DSH is stopped", () => {
 
   assert.equal(model.current.target, null);
   assert.equal(model.configured?.runtime?.id, "dsh-current");
-  assert.equal(model.configured?.dataDirectory?.name, "dsh-work DSH data directory");
+  assert.equal(model.configured?.dataDirectory?.name, "DSH Work DSH data directory");
   assert.equal(model.configured?.target?.profile.name, "coding");
   assert.equal(model.state, "not-running");
 });

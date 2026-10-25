@@ -73,7 +73,7 @@ func main() {
 		RuntimeVerifier:   dsh,
 		ProfileCatalog:    dsh,
 		AppProfile:        dsh,
-		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
+		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "DSH Work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
 		Runtimes:          []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
 		DefaultRunContext: dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}},
 	})

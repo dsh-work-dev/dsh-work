@@ -44,8 +44,8 @@ func installerInProgress() bool {
 }
 
 func showInstallerBusy() {
-	message, messageErr := windows.UTF16PtrFromString("dsh-work is being updated. Wait for the installer to finish, then reopen dsh-work.")
-	caption, captionErr := windows.UTF16PtrFromString("dsh-work")
+	message, messageErr := windows.UTF16PtrFromString("DSH Work is being updated. Wait for the installer to finish, then reopen DSH Work.")
+	caption, captionErr := windows.UTF16PtrFromString("DSH Work")
 	if messageErr != nil || captionErr != nil {
 		return
 	}
