@@ -229,7 +229,7 @@ frame loading) or Not loaded, and offers no switches.
 |---|---|---|
 | `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, dsh-work theme, modal mask reports |
 | `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
-| `@dsh-work/pet` | Publishes the session activity snapshot and navigation routes the desktop pet uses, for one generation | Synchronizes session activity and opens the conversations the pet asks for |
+| `@dsh-work/pet` | Streams the session activity snapshot the desktop pet uses, for one generation | Reports session titles and parent sessions when the session list changes, and opens the conversations its workbench window is asked to open |
 
 `__DSH_TRANSPORT__` declares `ownsHost: true`. DSH otherwise treats the
 non-loopback `wails.localhost` page as a remote browser and keeps every setting
