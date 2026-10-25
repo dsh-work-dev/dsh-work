@@ -18,6 +18,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
+	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/storagepaths"
 )
 
@@ -118,8 +119,9 @@ func ensureDaemon(ctx context.Context, identity string) (*daemon.Client, daemon.
 }
 
 type uiLauncher struct {
-	identity string
-	mu       sync.Mutex
+	identity                  string
+	allowForegroundActivation func()
+	mu                        sync.Mutex
 }
 
 type uiOpenRequest struct {
@@ -131,12 +133,17 @@ type uiOpenResult struct {
 	Window string `json:"window"`
 }
 
-func newUILauncher(identity string) *uiLauncher { return &uiLauncher{identity: identity} }
+func newUILauncher(identity string) *uiLauncher {
+	return &uiLauncher{identity: identity, allowForegroundActivation: platform.AllowForegroundActivation}
+}
 func (l *uiLauncher) Open(section, window string) (string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if window == "" {
 		window = "workspace"
+	}
+	if l.allowForegroundActivation != nil {
+		l.allowForegroundActivation()
 	}
 	client := daemon.NewClient(l.identity + "-ui")
 	defer client.Close()

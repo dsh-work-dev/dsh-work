@@ -77,6 +77,11 @@ func (n *interactionNotifier) removed(instance, sessionID string, it dshinteract
 
 func (n *interactionNotifier) respond(result wailsnotifications.NotificationResult) bool {
 	info := result.Response.UserInfo
+	kind := ""
+	if info != nil {
+		kind, _ = info["kind"].(string)
+	}
+	logging.Module(logging.ModNotify).Debug("interaction notification response", "action", result.Response.ActionIdentifier, "kind", kind)
 	if info == nil || info["kind"] != dshInteractionNotificationKind {
 		return false
 	}

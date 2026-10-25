@@ -8,7 +8,7 @@ function reportComponentReady(id) {
 }
 
 window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
-  inject: ['sessions', 'uiSession'],
+  inject: ['sessions', 'uiSession', 'uiWorkspace'],
   apply(ctx, clock = globalThis) {
     reportComponentReady('pet');
     const origin = shellOrigin();
@@ -135,19 +135,12 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       const message = event.data;
       if (!message || message.version !== 1 || message.type !== 'dsh-work/open-session' ||
           typeof message.id !== 'string' || message.id.length === 0 || message.id.length > 256 ||
-          typeof message.sessionId !== 'string' || message.sessionId.length === 0 || message.sessionId.length > 256 ||
-          typeof message.parentSessionId !== 'string' || message.parentSessionId.length > 256) return;
+          typeof message.sessionId !== 'string' || message.sessionId.length === 0 || message.sessionId.length > 256) return;
       let error = '';
       try {
         await ctx.sessions.refresh();
-        if (message.parentSessionId) {
-          await ctx.sessions.refreshSubagents(message.parentSessionId);
-          const address = ctx.sessions.subagentAddress(message.sessionId);
-          if (!address) throw new Error('Conversation is unavailable');
-          await ctx.sessions.openSubagent(address);
-        } else {
-          await ctx.sessions.open(message.sessionId);
-        }
+        if (!ctx.sessions.list.getSnapshot().byId?.[message.sessionId]) throw new Error('Conversation is unavailable');
+        ctx.uiWorkspace.openSession(message.sessionId);
       } catch { error = 'Conversation is unavailable'; }
       if (!stopped) window.parent.postMessage({version: 1, type: 'dsh-work/open-session-result', id: message.id, error}, origin);
     }

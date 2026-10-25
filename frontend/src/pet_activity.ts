@@ -56,13 +56,17 @@ export function mountPetActivity() {
     transient=true;clearTimeout(hideTimer);
     hideTimer=setTimeout(()=>{transient=false;syncVisibility();},8000);
   }
+  function setErrorVisible(visible:boolean) {
+    error.hidden=!visible;
+    status.hidden=visible;
+  }
   surface.addEventListener("pointerenter",()=>{hovered=true;idleDismissed=false;syncVisibility();});
   surface.addEventListener("pointerleave",()=>{hovered=false;syncVisibility();});
   panel.addEventListener("focusout",()=>queueMicrotask(syncVisibility));
   surface.addEventListener("keydown",event=>{if(event.key==="Escape"){transient=false;hovered=false;(document.activeElement as HTMLElement)?.blur();signature="";render();}});
   async function open(id:string) {
-    if(opening)return;opening=true;openFailed=false;error.hidden=true;
-    try {await PetSettingsService.OpenPetActivity(id);} catch {openFailed=true;error.textContent=label("openError");error.hidden=false;}
+    if(opening)return;opening=true;openFailed=false;setErrorVisible(false);
+    try {await PetSettingsService.OpenPetActivity(id);} catch {openFailed=true;error.textContent=label("openError");setErrorVisible(true);}
     finally {opening=false;syncVisibility();}
   }
   primary.addEventListener("click",()=>{const first=latest.sessions?.[0];if(first && latest.connected)void open(first.sessionId);});
@@ -86,8 +90,9 @@ export function mountPetActivity() {
     primary.disabled=!latest.connected || !first;
     primary.setAttribute("aria-label",first ? `${first.title} · ${activityText(first)}` : label("empty"));
     primary.setAttribute("aria-description",first ? activityDetails(first) : "");
-    error.hidden=!latest.navigationError && !openFailed;
-    if(!error.hidden)error.textContent=label("openError");
+    const showError=!!latest.navigationError || openFailed;
+    setErrorVisible(showError);
+    if(showError)error.textContent=label("openError");
   }
   const unsubscribe=subscribeLocale(()=>{signature="";render();});
   window.addEventListener("unload",()=>{unsubscribe();clearTimeout(hideTimer);});render();

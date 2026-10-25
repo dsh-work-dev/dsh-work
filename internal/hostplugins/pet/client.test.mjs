@@ -55,11 +55,9 @@ async function mountPetClient(fetchImpl, initialStatuses = new Map()) {
   const ctx = {
     sessions: {
       list: {getSnapshot: () => list, subscribe(listener) { subscribers.add(listener); return () => subscribers.delete(listener); }},
-      refresh: async () => {}, refreshSubagents: async parentSessionId => opened.push(['refreshSubagents', parentSessionId]),
-      subagentAddress: sessionId => sessionId === 'session-2' ? '/sub/2' : '',
-      open: async sessionId => { if (sessionId === 'missing') throw new Error('unknown session'); opened.push(['open', sessionId]); },
-      openSubagent: async address => opened.push(['openSubagent', address]),
+      refresh: async () => opened.push(['refresh']),
     },
+    uiWorkspace: {openSession: sessionId => { opened.push(['openSession', sessionId]); if (sessionId === 'throws') throw new Error('unknown session'); }},
     uiSession: {sessionStatus: {
       getSnapshot: () => statusSnapshot,
       subscribe(listener) { statusSubscribers.add(listener); return () => statusSubscribers.delete(listener); },
@@ -247,6 +245,7 @@ test('pet client retries the latest snapshot after one second, at most three tim
 test('pet client opens only a trusted parent message and reports child-open results', async () => {
   const client = await mountPetClient(async () => ({ok: true}));
   try {
+    client.setList({byId: {'session-2': {id: 'session-2'}}}, false);
     const message = {version: 1, type: 'dsh-work/open-session', id: '42', sessionId: 'session-2', parentSessionId: 'parent-1'};
     client.window.dispatch('message', {source: {}, origin: 'http://wails.localhost', data: message});
     client.window.dispatch('message', {source: client.parent, origin: 'https://attacker.test', data: message});
@@ -255,12 +254,21 @@ test('pet client opens only a trusted parent message and reports child-open resu
 
     client.window.dispatch('message', {source: client.parent, origin: 'http://wails.localhost', data: message});
     await settle();
-    assert.deepEqual(client.opened, [['refreshSubagents', 'parent-1'], ['openSubagent', '/sub/2']]);
+    assert.deepEqual(client.opened, [['refresh'], ['openSession', 'session-2']]);
     assert.deepEqual(client.posted.at(-1), {message: {version: 1, type: 'dsh-work/open-session-result', id: '42', error: ''}, origin: 'http://wails.localhost'});
 
+    client.opened.length = 0;
     client.window.dispatch('message', {source: client.parent, origin: 'http://wails.localhost', data: {...message, id: '43', sessionId: 'missing'}});
     await settle();
+    assert.deepEqual(client.opened, [['refresh']]);
     assert.deepEqual(client.posted.at(-1), {message: {version: 1, type: 'dsh-work/open-session-result', id: '43', error: 'Conversation is unavailable'}, origin: 'http://wails.localhost'});
+
+    client.setList({byId: {throws: {id: 'throws'}}}, false);
+    client.opened.length = 0;
+    client.window.dispatch('message', {source: client.parent, origin: 'http://wails.localhost', data: {...message, id: '44', sessionId: 'throws'}});
+    await settle();
+    assert.deepEqual(client.opened, [['refresh'], ['openSession', 'throws']]);
+    assert.deepEqual(client.posted.at(-1), {message: {version: 1, type: 'dsh-work/open-session-result', id: '44', error: 'Conversation is unavailable'}, origin: 'http://wails.localhost'});
   } finally { client.dispose(); }
 });
 
