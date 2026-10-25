@@ -274,13 +274,13 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		s := b.Snapshot()
-		if len(s.Sessions) > 0 && s.Sessions[0].State == "ready" {
-			t.Log("Actual DSH Session turn/start → turn/end → authenticated Host activity: ready/unread")
+		if len(s.Sessions) > 0 && s.Sessions[0].State == "idle" && s.Sessions[0].Outcome == "completed" {
+			t.Log("Actual DSH Session turn/start → turn/end → authenticated Host activity: completed/idle")
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if len(b.Snapshot().Sessions) == 0 || b.Snapshot().Sessions[0].State != "ready" {
+	if len(b.Snapshot().Sessions) == 0 || b.Snapshot().Sessions[0].State != "idle" || b.Snapshot().Sessions[0].Outcome != "completed" {
 		t.Fatal("completion did not reach pet")
 	}
 	request := func(action string) {
@@ -327,10 +327,10 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	for _, outcome := range []string{"aborted", "blocked", "error", "max-tokens", "interrupted"} {
 		request(outcome)
-		waitFor(func(a Activity) bool { return a.Outcome == outcome && a.State != "ready" })
+		waitFor(func(a Activity) bool { return a.Outcome == outcome })
 	}
 	request("completed")
-	waitFor(func(a Activity) bool { return a.State == "ready" })
+	waitFor(func(a Activity) bool { return a.Outcome == "completed" && a.State != "running" })
 	openCommands := make(chan map[string]string, 1)
 	b.SetNavigation(func(_, window string) (string, error) { return window, nil }, func(window, name string, ttl time.Duration, data any) {
 		if window == "workspace" && name == "dsh-open-session" && ttl == 15*time.Second {
@@ -366,10 +366,9 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		}
 		return data
 	}
-	if response := clientSync(map[string]any{"current": "pet-live-fixture", "visible": true, "sessions": []any{}}); len(response) != 0 {
+	if response := clientSync(map[string]any{"sessions": []any{}}); len(response) != 0 {
 		t.Fatalf("pet activity client response = %#v", response)
 	}
-	waitFor(func(a Activity) bool { return !a.Unread && a.State == "idle" })
 	// Raw webServer routes must explicitly retain DSH's cookie trust fence.
 	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/pet-activity-client", strings.NewReader(`{}`))
 	anonymous.Header.Set("Origin", origin)

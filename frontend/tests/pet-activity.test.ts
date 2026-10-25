@@ -29,30 +29,10 @@ const activity = (overrides: Partial<Activity>): Activity => ({
   summary: "",
   queued: 0,
   steering: 0,
-  unread: false,
   ...overrides
 });
 
-test("pet activity shows unread completion with its summary", () => {
-  applyLocale("zh-CN");
-  assert.equal(activityText(activity({
-    state: "ready",
-    outcome: "completed",
-    unread: true,
-    summary: "已完成的摘要"
-  })), "已完成 · 未读 · 已完成的摘要");
-});
-
-test("pet activity shows unread completion without a summary", () => {
-  applyLocale("zh-CN");
-  assert.equal(activityText(activity({
-    state: "ready",
-    outcome: "completed",
-    unread: true
-  })), "已完成 · 未读");
-});
-
-test("pet activity keeps the ordinary completed copy after it is read", () => {
+test("pet activity shows completed outcome with its summary", () => {
   applyLocale("zh-CN");
   assert.equal(activityText(activity({
     state: "idle",
@@ -61,12 +41,11 @@ test("pet activity keeps the ordinary completed copy after it is read", () => {
   })), "已完成 · 已完成的摘要");
 });
 
-test("pet activity keeps interaction copy ahead of unread completion", () => {
+test("pet activity keeps interaction copy ahead of completed outcome", () => {
   applyLocale("zh-CN");
   assert.equal(activityText(activity({
-    state: "ready",
+    state: "idle",
     outcome: "completed",
-    unread: true,
     interaction: {kind: "question", text: "请确认"}
   })), "等你回答：请确认");
 });

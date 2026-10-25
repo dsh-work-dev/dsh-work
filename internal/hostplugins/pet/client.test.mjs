@@ -68,32 +68,39 @@ async function mountPetClient(fetchImpl) {
   };
 }
 
-test('pet client batches session and focus changes into one latest-state POST', async () => {
+test('pet client posts only session-list changes and ignores focus changes', async () => {
   const client = await mountPetClient(async () => ({ok: true}));
   try {
     assert.deepEqual(client.posted, [{message: {version: 1, type: 'dsh-work/component-ready', id: 'pet'}, origin: 'http://wails.localhost'}]);
-    const latest = {current: 'session-2', byId: {'session-2': {id: 'session-2', displayTitle: 'Newest', parentId: 'parent-1'}}};
-    client.setList(latest);
+    await client.clock.tick(100);
+    assert.equal(client.requests.length, 1);
+    assert.deepEqual(client.requests[0].body, {sessions: [{id: 'session-1', title: 'A task', parentId: ''}]});
+
     client.document.visibilityState = 'hidden';
     client.document.dispatch('visibilitychange');
-    await client.clock.tick(99);
-    assert.equal(client.requests.length, 0);
-    await client.clock.tick(1);
+    client.window.dispatch('blur');
+    client.document.visibilityState = 'visible';
+    client.window.dispatch('focus');
+    await client.clock.tick(100);
     assert.equal(client.requests.length, 1);
+
+    const latest = {current: 'session-2', byId: {'session-2': {id: 'session-2', displayTitle: 'Newest', parentId: 'parent-1'}}};
+    client.setList(latest);
+    await client.clock.tick(99);
+    assert.equal(client.requests.length, 1);
+    await client.clock.tick(1);
+    assert.equal(client.requests.length, 2);
     assert.equal(client.requests[0].input, '/__dshwork/pet-activity-client');
     assert.equal(client.requests[0].init.method, 'POST');
-    assert.deepEqual(client.requests[0].body, {current: 'session-2', visible: false, sessions: [{id: 'session-2', title: 'Newest', parentId: 'parent-1'}]});
+    assert.deepEqual(client.requests[1].body, {sessions: [{id: 'session-2', title: 'Newest', parentId: 'parent-1'}]});
+    assert.equal('current' in client.requests[1].body, false);
+    assert.equal('visible' in client.requests[1].body, false);
 
-    client.document.visibilityState = 'visible';
-    client.document.focused = false;
+    client.document.dispatch('visibilitychange');
     client.window.dispatch('blur');
-    client.document.focused = true;
     client.window.dispatch('focus');
     await client.clock.tick(100);
     assert.equal(client.requests.length, 2);
-    assert.equal(client.requests[1].body.visible, true);
-    assert.equal('ack' in client.requests[1].body, false);
-    assert.equal('error' in client.requests[1].body, false);
   } finally { client.dispose(); }
 });
 
@@ -107,7 +114,7 @@ test('pet client retries the latest snapshot after one second, at most three tim
     assert.equal(client.requests.length, 1);
     await client.clock.tick(1);
     assert.equal(client.requests.length, 2);
-    assert.equal(client.requests[1].body.current, 'latest');
+    assert.equal(client.requests[1].body.sessions[0].id, 'latest');
     await client.clock.tick(1000);
     await client.clock.tick(1000);
     assert.equal(client.requests.length, 4);

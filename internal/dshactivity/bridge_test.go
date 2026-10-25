@@ -17,15 +17,15 @@ import (
 func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 	s := Snapshot{Sessions: []Activity{
 		{SessionID: "running", Seq: 100, Running: true},
-		{SessionID: "ready", Seq: 5, Outcome: "completed", Unread: true},
+		{SessionID: "completed", Seq: 5, Outcome: "completed", UpdatedAt: 8},
 		{SessionID: "failed", Seq: 9, Outcome: "error"},
 		{SessionID: "question", Seq: 2, Running: true, Interaction: &Interaction{Key: "q1", Kind: "question", Text: "Choose a format"}},
-		{SessionID: "cancelled", Seq: 4, Outcome: "aborted"},
+		{SessionID: "cancelled", Seq: 4, Outcome: "aborted", UpdatedAt: 4},
 	}}
 	if !normalize(&s) {
 		t.Fatal("valid activities rejected")
 	}
-	for i, id := range []string{"question", "failed", "ready", "running", "cancelled"} {
+	for i, id := range []string{"question", "failed", "running", "completed", "cancelled"} {
 		if s.Sessions[i].SessionID != id {
 			t.Fatalf("priority: %+v", s.Sessions)
 		}
@@ -41,18 +41,42 @@ func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 		}
 	}
 	if got := activityState(Activity{Outcome: "completed"}); got != "idle" {
-		t.Fatal("read completion remained ready")
+		t.Fatal("completed activity should be idle")
 	}
 	if got := activityState(Activity{Running: true, Goal: &Goal{Phase: "blocked"}}); got != "blocked" {
 		t.Fatal("blocked goal lost")
 	}
-	for outcome, intent := range map[string]string{"completed": "host.ready", "aborted": "task.cancelled", "error": "task.failed", "blocked": "task.blocked", "max-tokens": "task.limited", "interrupted": "task.interrupted"} {
+	for outcome, intent := range map[string]string{"completed": "task.completed", "aborted": "task.cancelled", "error": "task.failed", "blocked": "task.blocked", "max-tokens": "task.limited", "interrupted": "task.interrupted"} {
 		a := Activity{SessionID: "terminal", Outcome: outcome}
 		a.State = activityState(a)
 		got, _ := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{a}})
 		if got != intent {
 			t.Fatalf("%s intent = %s", outcome, got)
 		}
+	}
+}
+
+func TestAnimationIntentCelebratesEachCompletedTurnOnce(t *testing.T) {
+	completed := Activity{SessionID: "session-1", Turn: 3, Outcome: "completed"}
+	completed.State = activityState(completed)
+	snapshot := Snapshot{Connected: true, Sessions: []Activity{completed}}
+	kind, key := AnimationIntent(snapshot)
+	if kind != "task.completed" || key == "" {
+		t.Fatalf("completed intent = %q %q", kind, key)
+	}
+	if repeatedKind, repeatedKey := AnimationIntent(snapshot); repeatedKind != kind || repeatedKey != key {
+		t.Fatalf("same turn changed completion intent: %q %q", repeatedKind, repeatedKey)
+	}
+	nextTurn := completed
+	nextTurn.Turn++
+	nextTurn.State = activityState(nextTurn)
+	nextKind, nextKey := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{nextTurn}})
+	if nextKind != "task.completed" || nextKey == key {
+		t.Fatalf("next turn intent = %q %q, previous key %q", nextKind, nextKey, key)
+	}
+	running := Activity{SessionID: "session-1", Turn: nextTurn.Turn, Running: true, State: "running", WorkPhase: "working"}
+	if runningKind, _ := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{running}}); runningKind != "task.working" {
+		t.Fatalf("running intent = %q", runningKind)
 	}
 }
 

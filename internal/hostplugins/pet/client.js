@@ -15,8 +15,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
     const abort = new AbortController();
     const snapshot = () => {
       const list = ctx.sessions.list.getSnapshot();
-      return {current: list.current, visible: document.visibilityState === 'visible' && document.hasFocus(),
-        sessions: Object.values(list.byId ?? {}).slice(0, 256).map(s => ({id: s.id, title: s.displayTitle, parentId: s.parentId}))};
+      return {sessions: Object.values(list.byId ?? {}).slice(0, 256).map(s => ({id: s.id, title: s.displayTitle, parentId: s.parentId}))};
     };
     async function sync() {
       if (stopped || inFlight || !pending) return;
@@ -83,12 +82,8 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       if (!stopped) window.parent.postMessage({version: 1, type: 'dsh-work/open-session-result', id: message.id, error}, origin);
     }
     const unsubscribeSessions = ctx.sessions.list.subscribe(scheduleSync);
-    document.addEventListener('visibilitychange', scheduleSync);
-    window.addEventListener('focus', scheduleSync);
-    window.addEventListener('blur', scheduleSync);
     window.addEventListener('message', openSession);
-    // Publish the initial session list once; subsequent requests follow only
-    // session, visibility and focus changes.
+    // Publish the initial session list once; subsequent requests follow session changes.
     scheduleSync();
     ctx.effect(() => () => {
       stopped = true;
@@ -96,9 +91,6 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       if (debounceTimer !== undefined) clock.clearTimeout(debounceTimer);
       if (retryTimer !== undefined) clock.clearTimeout(retryTimer);
       unsubscribeSessions?.();
-      document.removeEventListener('visibilitychange', scheduleSync);
-      window.removeEventListener('focus', scheduleSync);
-      window.removeEventListener('blur', scheduleSync);
       window.removeEventListener('message', openSession);
     });
   }

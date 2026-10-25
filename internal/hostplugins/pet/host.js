@@ -33,7 +33,7 @@ export function apply(ctx, config, timers = globalThis) {
         rows.delete(old.sessionId);
       }
       rows.set(id, {sessionId: id, title: '', parentSessionId: '', seq: -1, turn: 0, running: false,
-        workPhase: '', tools: new Map(), toolActivity: '', outcome: '', summary: '', completedSeq: -1, readSeq: -1, updatedAt: Date.now(), pending: new Map()});
+        workPhase: '', tools: new Map(), toolActivity: '', outcome: '', summary: '', updatedAt: Date.now(), pending: new Map()});
     }
     return rows.get(id);
   }
@@ -50,7 +50,6 @@ export function apply(ctx, config, timers = globalThis) {
       case 'turn/start': r.running = true; r.turn = data.turn; r.outcome = ''; r.summary = ''; r.tools.clear(); r.workPhase = 'thinking'; r.toolActivity = ''; break;
       case 'turn/end':
         r.tools.clear(); r.workPhase = ''; r.toolActivity = ''; r.running = false; r.outcome = data.reason?.kind ?? 'interrupted';
-        if (r.outcome === 'completed') r.completedSeq = event.seq;
         if (r.outcome === 'error') r.summary = text(data.reason?.error?.message);
         break;
       case 'step/start':
@@ -76,7 +75,6 @@ export function apply(ctx, config, timers = globalThis) {
       case 'session/title': r.title = text(data.title, 120); break;
       default: return;
     }
-    if (replay) r.readSeq = event.seq;
     r.updatedAt = event.time || Date.now();
     changed();
   }
@@ -177,7 +175,7 @@ export function apply(ctx, config, timers = globalThis) {
       const pending = [...r.pending.values()].at(-1);
       sessions.push({sessionId: r.sessionId, title: r.title || text(values.title?.title || values.title, 120) || r.sessionId,
         parentSessionId: r.parentSessionId, seq: r.seq, turn: r.turn, running: r.running,
-        workPhase: r.running ? r.workPhase : '', toolActivity: r.running ? r.toolActivity : '', outcome: r.outcome, summary: r.summary, unread: r.completedSeq > r.readSeq,
+        workPhase: r.running ? r.workPhase : '', toolActivity: r.running ? r.toolActivity : '', outcome: r.outcome, summary: r.summary,
         updatedAt: r.updatedAt, interaction: pending ?? null,
         goal: goal ? {phase: text(goal.phase, 32), objective: text(goal.objective), reason: text(goal.blockedReason?.message),
           rounds: values.goal.roundsStarted ?? 0, maxRounds: goal.maxGoalRounds ?? 0} : null,
@@ -266,8 +264,6 @@ export function apply(ctx, config, timers = globalThis) {
         if (title && title !== r.title) { r.title = title; didChange = true; }
         if (parentSessionId && parentSessionId !== r.parentSessionId) { r.parentSessionId = parentSessionId; didChange = true; }
       }
-      const r = rows.get(input.current);
-      if (r && input.visible === true && r.readSeq !== r.seq) { r.readSeq = r.seq; didChange = true; }
       if (didChange) changed();
       reply(res, 200, {});
     } catch { reply(res, 400, {}); }

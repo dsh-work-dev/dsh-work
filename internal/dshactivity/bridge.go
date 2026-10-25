@@ -51,7 +51,6 @@ type Activity struct {
 	Running         bool         `json:"running"`
 	Outcome         string       `json:"outcome"`
 	Summary         string       `json:"summary"`
-	Unread          bool         `json:"unread"`
 	UpdatedAt       int64        `json:"updatedAt"`
 	Interaction     *Interaction `json:"interaction,omitempty"`
 	Goal            *Goal        `json:"goal,omitempty"`
@@ -633,9 +632,6 @@ func activityState(a Activity) string {
 	if a.Running {
 		return "running"
 	}
-	if a.Unread && a.Outcome == "completed" {
-		return "ready"
-	}
 	for _, job := range a.Jobs {
 		if job.Status == "failed" {
 			return "error"
@@ -654,8 +650,6 @@ func priority(s string) int {
 		return 0
 	case "blocked", "error", "max-tokens", "interrupted":
 		return 1
-	case "ready":
-		return 2
 	case "running":
 		return 3
 	}
@@ -693,8 +687,6 @@ func AnimationIntent(s Snapshot) (kind, key string) {
 		return "task.limited", key
 	case "interrupted":
 		return "task.interrupted", key
-	case "ready":
-		return "task.completed", key
 	case "running":
 		if a.WorkPhase == "thinking" {
 			return "task.thinking", key + ":thinking"
@@ -703,6 +695,9 @@ func AnimationIntent(s Snapshot) (kind, key string) {
 			return "task.result", key + ":result"
 		}
 		return "task.working", key
+	}
+	if a.State != "running" && a.Outcome == "completed" {
+		return "task.completed", key
 	}
 	if a.Outcome == "aborted" {
 		return "task.cancelled", key

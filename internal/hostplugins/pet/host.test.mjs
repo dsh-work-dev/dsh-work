@@ -112,17 +112,16 @@ test('pet activity requires an event-stream Accept and no longer accepts navigat
   assert.equal(post.status, 405);
 });
 
-test('pet activity client pushes session metadata and read acknowledgements through SSE', async () => {
+test('pet activity client updates session metadata without read tracking', async () => {
   const {routes, listeners, clock} = setup();
   const stream = new Response();
   await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
   listeners.get('session/event')({id: 'session-1'}, {seq: 1, type: 'turn/end', time: 1, data: {reason: {kind: 'completed'}}});
   await clock.tick(100);
   let snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
-  assert.equal(snapshots.at(-1).sessions[0].unread, true);
 
   const handler = routes.get('/__dshwork/pet-activity-client');
-  const req = Readable.from([Buffer.from(JSON.stringify({current: 'session-1', visible: true, sessions: [
+  const req = Readable.from([Buffer.from(JSON.stringify({sessions: [
     {id: 'session-1', title: 'Conversation title', parentId: 'parent-session'},
   ]}))]);
   req.method = 'POST';
@@ -138,5 +137,4 @@ test('pet activity client pushes session metadata and read acknowledgements thro
   assert.equal(snapshots.length, 3);
   assert.equal(snapshots.at(-1).sessions[0].title, 'Conversation title');
   assert.equal(snapshots.at(-1).sessions[0].parentSessionId, 'parent-session');
-  assert.equal(snapshots.at(-1).sessions[0].unread, false);
 });

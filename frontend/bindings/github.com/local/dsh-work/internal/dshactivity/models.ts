@@ -12,7 +12,6 @@ export interface Activity {
     "running": boolean;
     "outcome": string;
     "summary": string;
-    "unread": boolean;
     "updatedAt": number;
     "interaction"?: Interaction | null;
     "goal"?: Goal | null;
