@@ -585,6 +585,8 @@ Section
     CreateShortcut "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     !insertmacro wails.associateFiles
     !insertmacro wails.writeUninstaller
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${DSH_WORK_DISPLAY_NAME}"
+    WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${DSH_WORK_DISPLAY_NAME}"
     Goto installDone
 packageStageFailed:
     System::Call 'kernel32::GetLastError() i.r0'
