@@ -192,7 +192,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		defer mu.Unlock()
 		return current.Update
 	}}
-	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
+	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{

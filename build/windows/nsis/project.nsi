@@ -620,6 +620,8 @@ Section "uninstall"
     !insertmacro wails.deleteUninstaller
     SetRegView 64
     DeleteRegKey HKCU "${DSH_WORK_INSTALL_REG_KEY}"
+    DeleteRegKey HKCU "Software\Classes\AppUserModelId\dsh-work"
+    DeleteRegKey HKCU "Software\Classes\CLSID\{ca84fd06-433b-4c75-84ba-c74220f1f290}"
     Goto uninstallDone
 uninstallInstallFailed:
     MessageBox MB_OK|MB_ICONSTOP "dsh-work could not remove its installation. Close dsh-work and run the uninstaller again."

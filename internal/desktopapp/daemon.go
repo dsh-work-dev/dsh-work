@@ -429,8 +429,11 @@ func runDaemon(identity string, resources Resources) {
 	ipcServer := daemon.HTTPServer(server)
 	defer ipcServer.Close()
 	defer listener.Close()
+	if err := nativeui.EnsureToastActivator(appName, toastDisplayName, toastActivatorCLSID); err != nil {
+		logging.Module(logging.ModNotify).Error("notification activation registration failed", logging.ErrAttrs(err, "")...)
+	}
 	desktop = application.New(application.Options{
-		Name:         "dsh-work",
+		Name:         appName,
 		Logger:       logging.WailsLogger(),
 		ErrorHandler: logging.WailsErrorHandler(),
 		Description:  "A local desktop shell for DSH workspaces.",
