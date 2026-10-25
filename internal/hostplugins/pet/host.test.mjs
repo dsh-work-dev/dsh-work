@@ -40,14 +40,14 @@ class Response extends EventEmitter {
   body() { return this.chunks.join(''); }
 }
 
-function setup() {
+function setup(inspectedEvents = []) {
   const routes = new Map(), listeners = new Map(), cleanups = [];
   const clock = new FakeClock();
   const ctx = {
     webServer: {register(route) { routes.set(route.path, route.handler); return () => routes.delete(route.path); }},
     connection: {requestRejection: () => undefined},
     sessions: {list: () => [], get: () => null},
-    sessionController: {inspect: async () => ({events: []}), list: async () => ({items: []})},
+    sessionController: {inspect: async () => ({events: inspectedEvents}), list: async () => ({items: []})},
     sessionProjections: {snapshot: () => ({values: {}})},
     agents: {get: () => null},
     get: () => undefined,
@@ -137,4 +137,33 @@ test('pet activity client updates session metadata without read tracking', async
   assert.equal(snapshots.length, 3);
   assert.equal(snapshots.at(-1).sessions[0].title, 'Conversation title');
   assert.equal(snapshots.at(-1).sessions[0].parentSessionId, 'parent-session');
+});
+
+test('pet celebrates only live completion events and resets at the next turn', async () => {
+  const history = [
+    {seq: 1, type: 'turn/start', time: 1, data: {turn: 1}},
+    {seq: 2, type: 'turn/end', time: 2, data: {reason: {kind: 'completed'}}},
+  ];
+  const {routes, listeners, clock} = setup(history);
+  const stream = new Response();
+  await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
+  await listeners.get('session/created')('session-replay');
+  await clock.tick(100);
+  let snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
+  assert.equal(snapshots.at(-1).sessions[0].liveCompletion, false);
+
+  listeners.get('session/event')({id: 'session-replay'}, {seq: 3, type: 'turn/start', time: 3, data: {turn: 2}});
+  await clock.tick(100);
+  snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
+  assert.equal(snapshots.at(-1).sessions[0].liveCompletion, false);
+
+  listeners.get('session/event')({id: 'session-replay'}, {seq: 4, type: 'turn/end', time: 4, data: {reason: {kind: 'completed'}}});
+  await clock.tick(100);
+  snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
+  assert.equal(snapshots.at(-1).sessions[0].liveCompletion, true);
+
+  listeners.get('session/event')({id: 'session-replay'}, {seq: 5, type: 'turn/start', time: 5, data: {turn: 3}});
+  await clock.tick(100);
+  snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
+  assert.equal(snapshots.at(-1).sessions[0].liveCompletion, false);
 });

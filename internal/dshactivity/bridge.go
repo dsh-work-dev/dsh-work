@@ -51,6 +51,7 @@ type Activity struct {
 	Running         bool         `json:"running"`
 	Outcome         string       `json:"outcome"`
 	Summary         string       `json:"summary"`
+	LiveCompletion  bool         `json:"liveCompletion"`
 	UpdatedAt       int64        `json:"updatedAt"`
 	Interaction     *Interaction `json:"interaction,omitempty"`
 	Goal            *Goal        `json:"goal,omitempty"`
@@ -696,7 +697,7 @@ func AnimationIntent(s Snapshot) (kind, key string) {
 		}
 		return "task.working", key
 	}
-	if a.State != "running" && a.Outcome == "completed" {
+	if a.State != "running" && a.Outcome == "completed" && a.LiveCompletion {
 		return "task.completed", key
 	}
 	if a.Outcome == "aborted" {

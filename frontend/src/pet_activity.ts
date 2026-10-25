@@ -3,12 +3,15 @@ import {currentLocale as getLocale, subscribeLocale} from "./i18n";
 
 export interface Activity {
   workPhase?: string; toolActivity?: string; sessionId: string; title: string; parentSessionId?: string; state: string; outcome: string;
-  summary: string; queued: number; steering: number;
+  summary: string; queued: number; steering: number; liveCompletion: boolean;
   interaction?: {kind: string; text: string; count?: number} | null;
   goal?: {phase: string; objective: string; reason: string; rounds: number; maxRounds: number} | null;
   jobs?: {label: string; status: string; detail?: string}[] | null;
 }
 export interface ActivitySnapshot {connected: boolean; sessions?: Activity[] | null; navigationError?: string; generation?: string}
+export function shouldShowActivityBriefly(connected: boolean, first?: Activity): boolean {
+  return connected && !!first && (first.state !== "idle" || (first.state === "idle" && first.outcome === "completed" && first.liveCompletion));
+}
 const labels = {
   "en": {running:"Working", "needs-input":"Needs input", blocked:"Needs attention", idle:"Ready", offline:"Connecting to DSH…", list:"Activities", close:"Close", empty:"No active conversations", approval:"Approval needed", question:"Your answer is needed", "plan-review":"Plan ready for review", completed:"Completed", aborted:"Stopped", error:"An error occurred", "max-tokens":"Output limit reached", interrupted:"Execution interrupted", paused:"Paused", active:"Active", complete:"Complete", queued:"queued", steering:"steering", jobs:"background jobs", openError:"Could not open this conversation", goal:"Goal"},
   "zh-CN": {running:"正在处理", "needs-input":"需要你的输入", blocked:"需要处理", idle:"就绪", offline:"正在连接 DSH…", list:"活动", close:"收起", empty:"暂无活动对话", approval:"需要批准", question:"等你回答", "plan-review":"计划等待确认", completed:"已完成", aborted:"已停止", error:"遇到错误", "max-tokens":"已达输出上限", interrupted:"执行已中断", paused:"已暂停", active:"进行中", complete:"已完成", queued:"项排队", steering:"项补充指令", jobs:"项背景工作", openError:"无法打开此对话", goal:"目标"},
@@ -65,10 +68,10 @@ export function mountPetActivity() {
   primary.addEventListener("click",()=>{const first=latest.sessions?.[0];if(first && latest.connected)void open(first.sessionId);});
   function render() {
     const rows=latest.sessions ?? [], first=rows[0];
-    const activityKey=JSON.stringify([latest.connected,first?.sessionId,first?.state,first?.outcome,first?.interaction,first?.summary,first && activityDetails(first)]);
+    const activityKey=JSON.stringify([latest.connected,first?.sessionId,first?.state,first?.outcome,first?.liveCompletion,first?.interaction,first?.summary,first && activityDetails(first)]);
     if(activityKey!==notificationKey){
       notificationKey=activityKey;
-      if(latest.connected && first && first.state!=="idle"){
+      if(shouldShowActivityBriefly(latest.connected, first)){
         idleDismissed=false;showBriefly();
       } else {
         transient=false;clearTimeout(hideTimer);

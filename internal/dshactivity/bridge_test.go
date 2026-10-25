@@ -47,7 +47,7 @@ func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 		t.Fatal("blocked goal lost")
 	}
 	for outcome, intent := range map[string]string{"completed": "task.completed", "aborted": "task.cancelled", "error": "task.failed", "blocked": "task.blocked", "max-tokens": "task.limited", "interrupted": "task.interrupted"} {
-		a := Activity{SessionID: "terminal", Outcome: outcome}
+		a := Activity{SessionID: "terminal", Outcome: outcome, LiveCompletion: outcome == "completed"}
 		a.State = activityState(a)
 		got, _ := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{a}})
 		if got != intent {
@@ -57,7 +57,7 @@ func TestActivityPriorityAndDistinctOutcomes(t *testing.T) {
 }
 
 func TestAnimationIntentCelebratesEachCompletedTurnOnce(t *testing.T) {
-	completed := Activity{SessionID: "session-1", Turn: 3, Outcome: "completed"}
+	completed := Activity{SessionID: "session-1", Turn: 3, Outcome: "completed", LiveCompletion: true}
 	completed.State = activityState(completed)
 	snapshot := Snapshot{Connected: true, Sessions: []Activity{completed}}
 	kind, key := AnimationIntent(snapshot)
@@ -77,6 +77,13 @@ func TestAnimationIntentCelebratesEachCompletedTurnOnce(t *testing.T) {
 	running := Activity{SessionID: "session-1", Turn: nextTurn.Turn, Running: true, State: "running", WorkPhase: "working"}
 	if runningKind, _ := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{running}}); runningKind != "task.working" {
 		t.Fatalf("running intent = %q", runningKind)
+	}
+}
+
+func TestAnimationIntentDoesNotCelebrateReplayedCompletion(t *testing.T) {
+	completed := Activity{SessionID: "session-1", Turn: 3, Outcome: "completed", State: "idle"}
+	if kind, _ := AnimationIntent(Snapshot{Connected: true, Sessions: []Activity{completed}}); kind == "task.completed" {
+		t.Fatal("replayed completion triggered a completion animation")
 	}
 }
 
