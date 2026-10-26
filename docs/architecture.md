@@ -243,79 +243,51 @@ system browser and drops same-origin new-window requests, so DSH never runs as
 an unmanaged top-level page outside the shell. Revisit this if DSH starts
 relying on same-origin pop-ups.
 
-dsh-work's appearance reaches DSH through DSH's public theme service. The
-shell turns its computed theme tokens into DSH `--dsw-*` tokens
-(`frontend/src/dsh-theme.ts`): colours, radii, shadows and the interface font,
-and posts them with the resolved light or dark mode. `@dsh-work/shell` accepts
-only `--dsw-*` names, each with a value valid for the CSS property it feeds,
-registers them as a DSH theme with that mode (`ctx.theme.register`) and
-selects it (`setTheme`). DSH stores only its built-in preferences, so this
-page-only theme never reaches DSH's `ui-theme.preference`; when DSH re-adopts
-its stored preference, the plugin selects its theme again. Each change
-registers a new theme id before releasing the previous one, so DSH never falls
-back in between. An empty row shadows DSH's own Appearance row in
-`settings.general.item`. DSH's conversation text reads its font from the
-interface font token, so the plugin pins the markdown font tokens to DSH's own
-family and only the interface changes font. Tokens without a mapping keep DSH's
-values. Every DSH surface is made opaque (a translucent theme fill is composited
-over the canvas), because DSH draws dialogs and menus over live content and
-inverts surface and text colours in places such as solid tags. Surfaces are
-chosen so the theme's text reads on them (Classic's canvas is a desktop colour,
-so DSH uses its window grey). Colours DSH also uses as text (links, active tabs,
-status labels, kind tags) are moved toward the theme's text colour until they
-reach 5:1 on DSH's base and 4.5:1 on its cards, badge fills and their own tints,
-since a theme accent is often a fill colour; success and warning keep DSH's
-hues under the same rule. Badge text is chosen for the badge fill DSH actually
-receives, and raised buttons take the theme's button fill. The shell resolves theme colours in the browser, so
-`color-mix()` and `transparent` values take part.
+dsh-work's appearance reaches DSH through DSH's public theme service, with a
+separate path for the default DSH theme and for themes that restyle DSH. The
+shell computes the title-bar frame from the workbench theme in either path.
+When `data-theme-id="dsh"`, `frontend/src/shell.ts` sends the resolved
+light/dark mode with empty tokens and returns before computing DSH theme
+tokens, decorations or control samples. The shell plugin registers that empty
+token set with the mode through `ctx.theme.register` and selects it, so DSH
+uses its native surfaces, controls and fonts. DSH's own Appearance row remains
+hidden, and its stored `ui-theme.preference` is unchanged. DSH's presenter
+controls its dark-mode attribute; the plugin does not write it directly.
 
-Decoration follows the same values. The shell derives raised, floating and
-button shadows from the theme's group, dialog and button borders and shadows
-(a border becomes a box-shadow ring of the same width, since DSH border widths
-have no token). DSH's raised shadows also edge its menus, popovers, tooltips,
-floating buttons and cards, so a theme whose groups lie flat on the page
-(no group border or shadow, as Claude and Swiss) gives them its floating frame
-instead, and DSH's composer, a text field, takes the theme's input border
-there. The theme's backdrop (`--aurora`) and surface blur (`--surface-blur`)
-come along too. DSH declares its `--dsw-elevation-*` shadows on every
-element (`body, body *`), so `@dsh-work/shell` injects one stylesheet, active
-while `body[data-dsh-work-decor]` is set, that redeclares them from those
-values and decorates DSH's semantic hooks (`data-slot`, `data-composer-card`,
-and the plugin list's `data-plugin-group` and the task manager's
-`data-testid="task-manager-page"` list, which take the theme's group border,
-shadow, radius and row divider). DSH reads `--dsw-font-mono` without defining
-it; the shell sets it to the theme's monospace stack followed by the interface
-font, so CJK in package rows does not fall back to a serif face.
-DSH controls take the look of dsh-work's own controls. The shell renders hidden
-samples of its switch (off and on), button, primary button, text field, select
-and tag, and sends what the theme resolved them to: border, radius, fill,
-background image, shadow, text colour, and the switch's track size and thumb
-position (`frontend/src/dsh-controls.ts`). Theme ornaments such as Classic's
-bevels and Neo-brutalism's hard shadows come along without per-theme DSH rules.
-The plugin restyles a `role="switch"` only in DSH's two known structures (the
-button as track with one leaf thumb, or the button wrapping a track and thumb),
-and marks buttons and fields by how DSH drew them: a labelled button with a
-visible frame or a quiet fill, a button with DSH's primary or info fill
-(including the composer's send button), a framed or filled text field or
-select. Icon buttons, navigation and selected rows, menu items and the
-composer's text buttons keep DSH's look. Native checkboxes and radios take the
-theme accent through `accent-color`, and native select option lists the theme
-surface. A chosen answer in a question card (`data-question-key`, ARIA radio or
-checkbox) takes the theme's selected fill, and its number marker the theme's
-done marker. Page titles and section headings outside the conversation take
-the theme's heading font, weight and tracking, measured from dsh-work's own
-page title and section heading. No CSS-module class is used as a hook;
-a test pins that. Themes differ only in token values; no theme has its own DSH
-stylesheet. DSH draws fixed white
-glyphs on some accent fills, so a light accent is darkened there until the
-glyph reaches 4.5:1. Rejected: toggling `data-ds-dark-theme` directly (it
-fights DSH's presenter), `overrideTokens` alone (it cannot choose the light or
-dark base palette), writing DSH's stored preference (it would change DSH outside
-dsh-work), and stylesheet injection through `webserver/index-inject` (it
-bypasses DSH's theme composition). Until the plugin loads, DSH paints its stored
-preference, so the first paint of a DSH load can differ from dsh-work's mode.
-Revisit the map when DSH renames `--dsw-*` tokens; `exportInspectTokens()`
-lists the current names.
+For other themes, the shell maps computed workbench colours, radii, shadows and
+the interface font to DSH `--dsw-*` tokens (`frontend/src/dsh-theme.ts`),
+registers them with the resolved mode and selects the page-only theme. Each
+change registers the next theme before releasing the previous one. Unmapped
+values stay native. DSH conversation text keeps DSH's font; the plugin pins its
+markdown font tokens while changing the interface font. Surfaces become opaque
+because DSH composes dialogs and menus over live content and inverts colours in
+some components. Text-bearing accents are adjusted to contrast on their actual
+surfaces. The shell resolves values in the browser, including `color-mix()` and
+transparency.
+
+Those themes also send decoration derived from their group, dialog and button
+borders and shadows: DSH has no border-width token, so a border becomes a
+box-shadow ring. The shell injects the decoration stylesheet only while
+`--dsh-work-raised` is present, overriding DSH's elevation values and styling
+its semantic surface hooks. When the token is absent, the plugin removes the
+body's `data-dsh-work-decor`, every `data-dsh-work-control` marker and that
+stylesheet. This makes switching to the empty-token DSH theme clean and keeps
+other themes' styling intact. For non-DSH themes, hidden workbench samples send
+switch, button, field, select and tag values to DSH; the plugin classifies only
+known switch structures and visibly framed/filled buttons and fields. Native
+checkboxes and radios use the theme accent, option lists use its surface, and
+question-card selections and markers follow its selection tokens. Theme checks
+cover workbench surfaces, controls, focus and selected states in both modes.
+
+The public theme service preserves DSH's stored preference while allowing the
+page to select an appearance. Directly toggling `data-ds-dark-theme` fights
+DSH's presenter; `overrideTokens` alone cannot select a light/dark base palette,
+and writing `ui-theme.preference` would change DSH outside dsh-work. Stylesheet
+injection through `webserver/index-inject` bypasses DSH's theme composition.
+Until the plugin receives the appearance, DSH paints its stored preference,
+so the first paint can differ from the workbench mode. Revisit token mappings
+when DSH changes its public `--dsw-*` names; `exportInspectTokens()` lists the
+current names.
 
 Each concern has one named, testable owner. Adapting routes by exact path
 leaves every other plugin's `fetch`, `WebSocket`, `window.open` and link clicks
