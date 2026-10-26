@@ -164,7 +164,7 @@ func (i *RuntimeInstaller) InstallWithNodes(ctx context.Context, version string,
 	}
 	storeRoot, err := managedStoreRoot(i.storeRoot)
 	if err != nil {
-		return dshmanager.RuntimeInfo{}, runtimeFailure(lifecycle.ErrorRuntimeInstallFailed, "The dsh-work runtime store is unavailable.", false)
+		return dshmanager.RuntimeInfo{}, runtimeFailure(lifecycle.ErrorRuntimeInstallFailed, "The DSH Work runtime store is unavailable.", false)
 	}
 
 	emitPreparation(observer, lifecycle.RuntimePreparation{
@@ -439,7 +439,7 @@ func (i *RuntimeInstaller) installDSH(ctx context.Context, storeRoot, version st
 
 	stagingRoot := filepath.Join(storeRoot, ".staging")
 	if err := os.MkdirAll(stagingRoot, 0o700); err != nil {
-		return dshmanager.RuntimeInfo{}, i.failPreparation(version, runtimeFailure(lifecycle.ErrorRuntimeInstallFailed, "The dsh-work runtime staging directory could not be prepared.", true), observer)
+		return dshmanager.RuntimeInfo{}, i.failPreparation(version, runtimeFailure(lifecycle.ErrorRuntimeInstallFailed, "The DSH Work runtime staging directory could not be prepared.", true), observer)
 	}
 	emitPreparation(observer, lifecycle.RuntimePreparation{
 		State:         lifecycle.RuntimePreparationAcquiringDSH,
@@ -653,7 +653,7 @@ func runtimeFailure(code lifecycle.ErrorCode, summary string, retryable bool) er
 }
 
 func runtimeCleanupFailure(original error) error {
-	const detail = "A temporary runtime artifact could not be cleaned up; retry the operation after closing dsh-work."
+	const detail = "A temporary runtime artifact could not be cleaned up; retry the operation after closing DSH Work."
 	var failureValue lifecycle.Failure
 	if errors.As(original, &failureValue) {
 		failureValue.Detail = detail

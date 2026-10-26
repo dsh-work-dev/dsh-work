@@ -19,27 +19,23 @@ import (
 
 	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshinteraction"
+	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
+	"github.com/local/dsh-work/internal/presence"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workerchannel"
 	"github.com/local/dsh-work/internal/workeripc"
 )
 
-type Event struct {
-	ID   uint64
-	Name string
-	Data json.RawMessage
-}
 type Snapshot struct {
 	Protocol, PID int
 	Root, URL     string
 	Status        lifecycle.Status
 	Preferences   settings.Values
 	Update        UpdateSnapshot
-	Events        []Event
-	Cursor        uint64
 	Diagnostics   supervisor.Diagnostics
 	// AccountCallback is the origin of the daemon's account sign-in callback
 	// listener (docs/architecture.md, Account sign-in), or empty when it is
@@ -60,35 +56,26 @@ type Server struct {
 	// provider and staging details remain inside the daemon process.
 	UpdateState   func() UpdateSnapshot
 	UpdateCommand func(context.Context, UpdateAction) error
+	Hub           *hostevents.Hub
+	Presence      *presence.Tracker
+	Interactions  *dshinteraction.Store
 	Media         http.Handler
 	// Maintenance reports whether the current-user installer owns the
 	// maintenance boundary. Read-only snapshots remain available while the
 	// boundary is held; all mutable service calls are rejected at this daemon
 	// authority. HostService.Quit is the one installer stop handshake.
-	Maintenance func() bool
-	mu          sync.Mutex
-	events      []Event
-	cursor      uint64
-	focused     bool
-	focusSeen   time.Time
-	draining    atomic.Bool
-	activeMu    sync.Mutex
-	active      map[uint64]context.CancelFunc
-	activeNext  uint64
-}
-
-func (s *Server) Publish(name string, data any) {
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cursor++
-	s.events = append(s.events, Event{ID: s.cursor, Name: name, Data: raw})
-	if len(s.events) > 256 {
-		s.events = append([]Event(nil), s.events[len(s.events)-256:]...)
-	}
+	Maintenance   func() bool
+	draining      atomic.Bool
+	activeMu      sync.Mutex
+	active        map[uint64]context.CancelFunc
+	activeNext    uint64
+	streamStartMu sync.Mutex
+	streamWriteMu sync.Mutex
+	streamMu      sync.Mutex
+	streamCancel  context.CancelFunc
+	streamSub     *hostevents.Subscription
+	streamID      uint64
+	streamClock   streamClock
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -105,32 +92,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
-	case "/web-boot":
-		var input struct {
-			Generation string
-			Detail     string
-		}
-		if r.Method != http.MethodPost || json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&input) != nil {
-			http.Error(w, "invalid web boot report", 400)
-			return
-		}
-		if err := s.Host.ReportWebBoot(input.Generation, input.Detail); err != nil {
-			http.Error(w, err.Error(), 409)
-			return
-		}
-		writeJSON(w, true)
+	case "/stream":
+		s.serveStream(w, r)
 	case "/snapshot":
-		var input struct {
-			Cursor  uint64
-			Focused *bool
-		}
-		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input)
-		if input.Focused != nil {
-			s.mu.Lock()
-			s.focused = *input.Focused
-			s.focusSeen = time.Now()
-			s.mu.Unlock()
-		}
 		state := Snapshot{Protocol: Protocol, PID: s.PID, Root: s.Root, Status: s.Host.Status(), Diagnostics: s.Host.Diagnostics(), AccountCallback: s.AccountCallback.Origin()}
 		if state.Status.State == lifecycle.StateReady {
 			state.URL = state.Status.WorkspaceURL
@@ -143,14 +107,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.UpdateState != nil {
 			state.Update = s.UpdateState()
 		}
-		s.mu.Lock()
-		state.Cursor = s.cursor
-		for _, event := range s.events {
-			if event.ID > input.Cursor {
-				state.Events = append(state.Events, event)
-			}
-		}
-		s.mu.Unlock()
 		writeJSON(w, state)
 	case "/control":
 		var call Call
@@ -193,68 +149,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, true)
-	case "/update/action":
-		if s.maintenanceBusy() {
-			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
-			return
-		}
-		if s.UpdateCommand == nil {
-			http.Error(w, "update controls unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		var input struct {
-			Action UpdateAction `json:"action"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
-			http.Error(w, "invalid update action", http.StatusBadRequest)
-			return
-		}
-		if input.Action != UpdateActionCheck && input.Action != UpdateActionDownload && input.Action != UpdateActionInstall {
-			http.Error(w, "invalid update action", http.StatusBadRequest)
-			return
-		}
-		if err := s.UpdateCommand(r.Context(), input.Action); err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		if s.UpdateState != nil {
-			writeJSON(w, s.UpdateState())
-		} else {
-			writeJSON(w, true)
-		}
-	case "/zoom":
-		if s.maintenanceBusy() {
-			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
-			return
-		}
-		var zoom float64
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64)).Decode(&zoom) != nil {
-			http.Error(w, "invalid zoom", 400)
-			return
-		}
-		if err := s.Settings.SetWorkspaceZoom(r.Context(), zoom); err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		writeJSON(w, true)
-	case "/geometry":
-		if s.maintenanceBusy() {
-			http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
-			return
-		}
-		var input struct {
-			Window   string
-			Geometry settings.WindowGeometry
-		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil || input.Window != "workspace" {
-			http.Error(w, "invalid geometry", 400)
-			return
-		}
-		if err := s.Settings.SetWindowGeometry(r.Context(), input.Window, input.Geometry); err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		writeJSON(w, true)
 	default:
 		if r.URL.Path == "/worker" {
 			if s.maintenanceBusy() {
@@ -277,7 +171,7 @@ func (s *Server) maintenanceBusy() bool {
 }
 
 func isQuitCall(call Call) bool {
-	return call.Service == "HostService" && call.Method == "Quit" && call.Surface == "workspace" && len(call.Args) == 0
+	return call.Service == "HostService" && call.Method == "Quit" && isWorkspaceSurface(call.Surface) && len(call.Args) == 0
 }
 
 func (s *Server) beginDrain() {
@@ -329,9 +223,15 @@ func (s *Server) trackCall(cancel context.CancelFunc) func() {
 func maintenanceCallAllowed(call Call) bool {
 	if call.Service == "HostService" {
 		switch call.Method {
-		case "GetStatus", "GetWorkspaceStatus", "GetAppearance", "GetLocale", "GetStartupOutput", "Quit":
+		case "GetStatus", "GetWorkspaceStatus", "GetAppearance", "GetLocale", "GetStartupOutput", "Quit", "ReportWebBoot":
 			return true
 		}
+	}
+	if call.Service == "WindowService" {
+		return call.Method == "SetFocus" || call.Method == "Closed"
+	}
+	if call.Service == "DSHPageService" {
+		return call.Method == "ReportSessionOpened" || call.Method == "ReportInteraction" || call.Method == "ResetInteractions"
 	}
 	if call.Service == "ManagerService" {
 		switch call.Method {
@@ -357,7 +257,7 @@ func maintenanceCallAllowed(call Call) bool {
 func maintenanceFailure() lifecycle.Failure {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerOperationBusy,
-		Summary:       "dsh-work is being updated.",
+		Summary:       "DSH Work is being updated.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Wait for the installer to finish, then retry the command.",
@@ -374,7 +274,7 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 			err = errors.New("background call failed")
 		}
 	}()
-	if call.Surface != "workspace" {
+	if !isWorkspaceSurface(call.Surface) {
 		return nil, errors.New("invalid client surface")
 	}
 	service, ok := s.Services[call.Service]
@@ -756,7 +656,5 @@ func HTTPServer(handler http.Handler) *http.Server {
 }
 
 func (s *Server) UIFocused() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.focused && time.Since(s.focusSeen) < 2*time.Second
+	return s.Presence != nil && s.Presence.AnyFocused()
 }

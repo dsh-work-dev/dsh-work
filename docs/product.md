@@ -6,6 +6,14 @@ dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It
 makes a versioned external DSH runtime startable, observable and recoverable
 without turning the Host into another agent runtime.
 
+The product is shown to users as **DSH Work** in every language: window and
+installer titles, tray, menus, notifications, error summaries and executable
+metadata. `dsh-work` remains the technical identifier for the repository, Go
+module, executables, CLI commands, data directories, registry keys, the
+`dsh-work://` scheme and `@dsh-work/*` plugins, so renaming the display never
+moves data or installations. Development builds name their notifications DSH
+Work Dev. The project documentation uses `dsh-work` for the codebase.
+
 ## Ownership boundary
 
 dsh-work owns:
@@ -73,13 +81,18 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   focusing or opening the Workspace. The installer takes over the `dsh://`
   scheme and restores the previous handler on uninstall.
 - Settings persist locale, recovery, Pet and notification preferences.
-- The workbench window remembers its normal dimensions and maximised state;
+- The workbench window remembers its position, normal dimensions and maximised
+  state, and opens centred when the saved position is no longer on any screen;
   Settings opens as a panel inside it. Minimisation does not replace the saved normal dimensions;
   a missing or invalid size uses the window's defaults.
 - A per-user daemon owns the Worker, tray, Pet and notifications independently
   of the desktop UI process. The tray can open or reconnect the UI.
   Completed, interaction-required and error notifications are enabled by
   default; routine lifecycle notifications are disabled.
+- A DSH question, approval or plan review raises a notification unless the
+  user is already looking at that conversation. Approval notifications offer
+  Allow once and Reject, answered through DSH; clicking a notification opens
+  the conversation in the window that holds it.
 - Routine completion delivery is suppressed while the Workspace is active.
   Notification preferences do not hide DSH-owned in-page notices. A failed
   native delivery is recorded as a diagnostic and does not change the outcome
@@ -92,9 +105,12 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   surface outside the Workspace window. Pets Settings exposes discovery,
   preview, visibility and direct 50%–300% size control.
 - Closing a desktop window hides it and retains its WebView for the next open;
-  closing or crashing the UI client leaves background tasks running. 文件 → 退出
-  in the workbench menu (“停止后台并退出” in the tray) explicitly stops the Worker
-  and its children, releases locks and exits the tray and remaining UI.
+  closing or crashing the UI client leaves background tasks running. The first
+  close explains once that running tasks continue and the window can be reopened
+  from the tray. 文件 → 退出 in the workbench menu (“停止后台并退出” in the tray)
+  explicitly stops the Worker and its children, releases locks and exits the
+  tray and remaining UI. When a task is running or a scheduled reminder is armed,
+  it first asks for confirmation and says which of them would be lost.
 - The workbench is a single window without a system title bar. DSH runs inside
   it below a dsh-work top bar that follows DSH's surface colour and holds the
   menus 文件 (new session, workspace, terminal and browser; close, quit), 视图

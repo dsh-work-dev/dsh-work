@@ -13,6 +13,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as dshinteraction$0 from "../dshinteraction/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -51,10 +55,32 @@ export function ReportBuiltinComponent(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * ReportInteraction reports pending interaction state from the framed DSH page.
+ */
+export function ReportInteraction(report: dshinteraction$0.Report): $CancellablePromise<void> {
+    return $Call.ByID(1217199542, report);
+}
+
+/**
+ * ReportSessionOpened reports the result for a daemon-issued open-session
+ * command. Window identity is taken only from the bound Wails caller.
+ */
+export function ReportSessionOpened(id: string, reportedError: string): $CancellablePromise<void> {
+    return $Call.ByID(3581872827, id, reportedError);
+}
+
+/**
  * ResetBuiltinComponents marks the DSH Clients inactive when the frame is removed.
  */
 export function ResetBuiltinComponents(): $CancellablePromise<void> {
     return $Call.ByID(2063574054);
+}
+
+/**
+ * ResetInteractions removes state from a DSH page that is unloading.
+ */
+export function ResetInteractions(instance: string): $CancellablePromise<void> {
+    return $Call.ByID(3264057878, instance);
 }
 
 /**

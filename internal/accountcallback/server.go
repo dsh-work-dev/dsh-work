@@ -146,7 +146,7 @@ func writeAccountCallbackPage(w http.ResponseWriter, status int, page string) {
 }
 
 const accountCallbackPageStart = `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>dsh-work 登录</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>DSH Work 登录</title>
 <style>
 :root{color-scheme:light dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#17191f;background:#f4f5f7}
 *{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px}
@@ -160,13 +160,13 @@ const accountCallbackPageEnd = `</main><script>history.replaceState(null,"",loca
 
 const accountCallbackReturnURL = DesktopReturnScheme + "://open"
 
-const accountCallbackWaitingPage = `<h1>等待登录回调</h1><p>请从 dsh-work 发起登录。完成账号授权后，这个页面会提示你返回应用。</p><p class="en">Start sign-in in dsh-work, then complete authorization in your browser.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">打开 dsh-work</a></div>`
+const accountCallbackWaitingPage = `<h1>等待登录回调</h1><p>请从 DSH Work 发起登录。完成账号授权后，这个页面会提示你返回应用。</p><p class="en">Start sign-in in DSH Work, then complete authorization in your browser.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">打开 DSH Work</a></div>`
 
-const accountCallbackSuccessPage = `<h1>登录流程已完成</h1><p>授权结果已返回 dsh-work。点击下方按钮回到应用查看账号状态。</p><p class="en">Authorization returned to dsh-work. Open the app to continue.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">返回 dsh-work</a></div>`
+const accountCallbackSuccessPage = `<h1>登录流程已完成</h1><p>授权结果已返回 DSH Work。点击下方按钮回到应用查看账号状态。</p><p class="en">Authorization returned to DSH Work. Open the app to continue.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">返回 DSH Work</a></div>`
 
-const accountCallbackExpiredPage = `<h1>登录会话已过期</h1><p>请回到 dsh-work 重新发起登录。</p><p class="en">This sign-in session has expired. Start a new sign-in in dsh-work.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">打开 dsh-work</a></div>`
+const accountCallbackExpiredPage = `<h1>登录会话已过期</h1><p>请回到 DSH Work 重新发起登录。</p><p class="en">This sign-in session has expired. Start a new sign-in in DSH Work.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">打开 DSH Work</a></div>`
 
-const accountCallbackErrorPage = `<h1>登录尚未完成</h1><p>请回到 dsh-work 查看状态，或重新发起登录。</p><p class="en">Sign-in did not finish. Return to dsh-work to check the status or try again.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">返回 dsh-work</a></div>`
+const accountCallbackErrorPage = `<h1>登录尚未完成</h1><p>请回到 DSH Work 查看状态，或重新发起登录。</p><p class="en">Sign-in did not finish. Return to DSH Work to check the status or try again.</p><div class="actions"><a href="` + accountCallbackReturnURL + `" rel="noreferrer">返回 DSH Work</a></div>`
 
 func loopbackRemote(address string) bool {
 	host, _, err := net.SplitHostPort(address)

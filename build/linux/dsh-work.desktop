@@ -1,6 +1,6 @@
 [Desktop Entry]
 Version=1.0
-Name=dsh-work
+Name=DSH Work
 Comment=Local-first desktop host for DeepSeek Harness
 Exec=/usr/local/bin/dsh-work %u
 Terminal=false

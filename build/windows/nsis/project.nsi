@@ -2,6 +2,7 @@ Unicode true
 
 ; The Wails macro file is generated immediately before packaging and owns the
 ; WebView2 and architecture setup. dsh-work owns dsh:// and dsh-work:// below.
+!define DSH_WORK_DISPLAY_NAME "DSH Work"
 !include "wails_tools.nsh"
 
 !ifndef CLI_EXECUTABLE
@@ -47,7 +48,7 @@ Function dshwork.initLog
     ClearErrors
     FileOpen $0 "$DshWorkLogPath" w
     IfErrors dshworkLogFileFailed
-    FileWrite $0 "dsh-work installer diagnostic log$\r$\n"
+    FileWrite $0 "${DSH_WORK_DISPLAY_NAME} installer diagnostic log$\r$\n"
     FileWrite $0 "Log path: $DshWorkLogPath$\r$\n"
     FileClose $0
     ClearErrors
@@ -130,7 +131,7 @@ dshworkRegisterProtocolValues:
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell" "" "open"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell\open" "" ""
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_PROTOCOL_KEY}\shell\open\command" "" "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
-    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}" "" "URL: dsh-work Desktop Return Link"
+    WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}" "" "URL: ${DSH_WORK_DISPLAY_NAME} Desktop Return Link"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}" "URL Protocol" ""
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\DefaultIcon" "" "$INSTDIR\${PRODUCT_EXECUTABLE},0"
     WriteRegStr SHELL_CONTEXT "${DSH_WORK_RETURN_PROTOCOL_KEY}\shell" "" "open"
@@ -192,11 +193,11 @@ FunctionEnd
 VIProductVersion "${INFO_FILE_VERSION}"
 VIFileVersion    "${INFO_FILE_VERSION}"
 VIAddVersionKey "CompanyName"     "${INFO_COMPANYNAME}"
-VIAddVersionKey "FileDescription" "${INFO_PRODUCTNAME} Installer"
+VIAddVersionKey "FileDescription" "${DSH_WORK_DISPLAY_NAME} Installer"
 VIAddVersionKey "ProductVersion"  "${INFO_RELEASE_VERSION}"
 VIAddVersionKey "FileVersion"     "${INFO_RELEASE_VERSION}"
 VIAddVersionKey "LegalCopyright"  "${INFO_COPYRIGHT}"
-VIAddVersionKey "ProductName"     "${INFO_PRODUCTNAME}"
+VIAddVersionKey "ProductName"     "${DSH_WORK_DISPLAY_NAME}"
 
 ManifestDPIAware true
 !include "MUI.nsh"
@@ -208,16 +209,16 @@ ManifestDPIAware true
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_TEXT "Open dsh-work after installation"
+!define MUI_FINISHPAGE_RUN_TEXT "Open ${DSH_WORK_DISPLAY_NAME} after installation"
 !define MUI_FINISHPAGE_RUN_FUNCTION dshwork.launch
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-Name "${INFO_PRODUCTNAME}"
+Name "${DSH_WORK_DISPLAY_NAME}"
 OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${INFO_RELEASE_VERSION}-windows-${ARCH}-installer.exe"
 !if "${WAILS_INSTALL_SCOPE}" != "user"
-    !error "dsh-work requires a per-user installer"
+    !error "${DSH_WORK_DISPLAY_NAME} requires a per-user installer"
 !endif
 InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
 ShowInstDetails show
@@ -291,15 +292,15 @@ stopExistingRequired:
     ; Stage the new CLI before replacing the old install. This keeps upgrades
     ; safe when the previous CLI predates the --wait coordination flag.
     IfSilent stopExistingContinue
-    MessageBox MB_YESNO|MB_ICONQUESTION "dsh-work will stop its background and any active task before maintenance. Continue?" IDYES stopExistingContinue
+    MessageBox MB_YESNO|MB_ICONQUESTION "${DSH_WORK_DISPLAY_NAME} will stop its background and any active task before maintenance. Continue?" IDYES stopExistingContinue
     Abort
 stopExistingContinue:
-    DetailPrint "Stopping the existing dsh-work background"
+    DetailPrint "Stopping the existing ${DSH_WORK_DISPLAY_NAME} background"
     !insertmacro dshwork.stageCliForStop
     ExecWait '"$PLUGINSDIR\dsh-work-stop\${CLI_EXECUTABLE}" stop --wait' $0
     DetailPrint "Maintenance CLI exit code: $0"
     ${If} $0 != 0
-        MessageBox MB_OK|MB_ICONSTOP "dsh-work could not stop its background process. Installation was cancelled."
+        MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not stop its background process. Installation was cancelled."
         Abort
     ${EndIf}
 stopExistingDone:
@@ -319,10 +320,10 @@ Function dshwork.acquireInstallerMutex
     Return
 alreadyRunning:
     System::Call 'kernel32::CloseHandle(p $DshWorkInstallerMutex)'
-    MessageBox MB_OK|MB_ICONSTOP "Another dsh-work installer is already running."
+    MessageBox MB_OK|MB_ICONSTOP "Another ${DSH_WORK_DISPLAY_NAME} installer is already running."
     Abort
 mutexFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not reserve its maintenance boundary."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not reserve its maintenance boundary."
     Abort
 FunctionEnd
 
@@ -340,10 +341,10 @@ Function un.dshwork.acquireInstallerMutex
     Return
 unAlreadyRunning:
     System::Call 'kernel32::CloseHandle(p $DshWorkInstallerMutex)'
-    MessageBox MB_OK|MB_ICONSTOP "Another dsh-work installer is already running."
+    MessageBox MB_OK|MB_ICONSTOP "Another ${DSH_WORK_DISPLAY_NAME} installer is already running."
     Abort
 unMutexFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not reserve its maintenance boundary."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not reserve its maintenance boundary."
     Abort
 FunctionEnd
 
@@ -380,19 +381,19 @@ recoveryCleanupFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Could not remove completed recovery directory. Win32 error $0; path=${DSH_WORK_RECOVERY_DIR}"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work finished a previous update but could not remove its recovery copy. Close dsh-work and run the installer again."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} finished a previous update but could not remove its recovery copy. Close ${DSH_WORK_DISPLAY_NAME} and run the installer again."
     Abort
 partialCleanupFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Could not remove incomplete installation. Win32 error $0; path=$INSTDIR"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work found an incomplete installation but could not remove it. Close dsh-work and run the installer again."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} found an incomplete installation but could not remove it. Close ${DSH_WORK_DISPLAY_NAME} and run the installer again."
     Abort
 recoveryFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Could not restore previous installation. Win32 error $0; source=${DSH_WORK_RECOVERY_DIR}; target=$INSTDIR"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not restore the previous installation. Close dsh-work and run the installer again."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not restore the previous installation. Close ${DSH_WORK_DISPLAY_NAME} and run the installer again."
     Abort
 recoveryDone:
 FunctionEnd
@@ -405,7 +406,7 @@ Function un.dshwork.cleanRecovery
 unCleanRecoveryDone:
     Return
 unCleanRecoveryFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not remove its recovery copy. Close dsh-work and run the uninstaller again."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not remove its recovery copy. Close ${DSH_WORK_DISPLAY_NAME} and run the uninstaller again."
     Abort
 FunctionEnd
 
@@ -447,12 +448,12 @@ oldInstallMoveFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Could not move existing installation. Win32 error $0; source=$INSTDIR; target=$DshWorkBackupDir"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not move the existing installation. Installation was cancelled."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not move the existing installation. Installation was cancelled."
     Abort
 backupConflict:
     Push "Recovery directory already contains files: $DshWorkBackupDir"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "A previous dsh-work installation needs repair. The existing installation and recovery copy were kept."
+    MessageBox MB_OK|MB_ICONSTOP "A previous ${DSH_WORK_DISPLAY_NAME} installation needs repair. The existing installation and recovery copy were kept."
     Abort
 newInstallMoveFailed:
     System::Call 'kernel32::GetLastError() i.r0'
@@ -467,13 +468,13 @@ rollbackFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Installation rollback failed. Win32 error $0; source=$DshWorkBackupDir; target=$INSTDIR"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not restore the previous installation. Use repair or reinstall from the original package."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not restore the previous installation. Use repair or reinstall from the original package."
     Abort
 replaceFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not complete the installation. The previous installation was kept."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not complete the installation. The previous installation was kept."
     Abort
 recoveryCleanupFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work was installed but could not remove its recovery copy. Run the installer again to finish repair."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} was installed but could not remove its recovery copy. Run the installer again to finish repair."
     Abort
 replaceInstallDone:
 !macroend
@@ -580,16 +581,18 @@ Section
     Call dshwork.registerProtocol
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
 
-    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortcut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    CreateShortcut "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    CreateShortcut "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     !insertmacro wails.associateFiles
     !insertmacro wails.writeUninstaller
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${DSH_WORK_DISPLAY_NAME}"
+    WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${DSH_WORK_DISPLAY_NAME}"
     Goto installDone
 packageStageFailed:
     System::Call 'kernel32::GetLastError() i.r0'
     Push "Application package failed during: $DshWorkFailureStage; Win32 last-error $0; TEMP=$TEMP; PLUGINSDIR=$PLUGINSDIR; staging=$DshWorkStagingDir; GUI=$DshWorkStagingDir\${PRODUCT_EXECUTABLE}; CLI=$DshWorkStagingDir\${CLI_EXECUTABLE}"
     Call dshwork.log
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not stage the complete application package. Installation was cancelled."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not stage the complete application package. Installation was cancelled."
     Abort
 installDone:
     Push "Installation completed successfully at: $INSTDIR"
@@ -613,16 +616,18 @@ Section "uninstall"
     ClearErrors
     RMDir /r "$INSTDIR"
     IfErrors uninstallInstallFailed
-    Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
-    Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"
+    Delete "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk"
+    Delete "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk"
     !insertmacro wails.unassociateFiles
     Call un.dshwork.restoreProtocol
     !insertmacro wails.deleteUninstaller
     SetRegView 64
     DeleteRegKey HKCU "${DSH_WORK_INSTALL_REG_KEY}"
+    DeleteRegKey HKCU "Software\Classes\AppUserModelId\dsh-work"
+    DeleteRegKey HKCU "Software\Classes\CLSID\{ca84fd06-433b-4c75-84ba-c74220f1f290}"
     Goto uninstallDone
 uninstallInstallFailed:
-    MessageBox MB_OK|MB_ICONSTOP "dsh-work could not remove its installation. Close dsh-work and run the uninstaller again."
+    MessageBox MB_OK|MB_ICONSTOP "${DSH_WORK_DISPLAY_NAME} could not remove its installation. Close ${DSH_WORK_DISPLAY_NAME} and run the uninstaller again."
     Abort
 uninstallDone:
 SectionEnd

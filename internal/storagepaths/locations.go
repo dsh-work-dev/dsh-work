@@ -34,7 +34,7 @@ type configFile struct {
 	Storage storageSection `toml:"storage"`
 }
 type storageSection struct {
-	App  string       `toml:"app" comment:"App data: runtimes, host plugins, updates and dsh-work state. Safe to delete; dsh-work rebuilds it.\nLeave empty for the default location. Editing this path does not move any files."`
+	App  string       `toml:"app" comment:"App data: runtimes, host plugins, updates and DSH Work state. Safe to delete; DSH Work rebuilds it.\nLeave empty for the default location. Editing this path does not move any files."`
 	Data string       `toml:"data" comment:"User data: the DSH home (profiles, sessions, credentials).\nLeave empty for the default location. Editing this path does not move any files."`
 	Move *storageMove `toml:"move,omitempty" comment:"Written by Settings > Storage. The move runs on the next launch, then this table is removed."`
 }

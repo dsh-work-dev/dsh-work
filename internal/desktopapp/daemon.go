@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/acquisition"
@@ -21,7 +22,9 @@ import (
 	"github.com/local/dsh-work/internal/diagnostics"
 	"github.com/local/dsh-work/internal/dshactivity"
 	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
@@ -30,6 +33,7 @@ import (
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
 	dshworkpet "github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/platform"
+	"github.com/local/dsh-work/internal/presence"
 	dshworksettings "github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/local/dsh-work/internal/supervisor"
@@ -285,11 +289,10 @@ func runDaemon(identity string, resources Resources) {
 		return values.Appearance
 	})
 	var desktop *application.App
-	var publishRemote = func(string, any) {}
+	var acquisitionStreamPublisher *trailingPublisher[acquisition.OperationStatus]
 	managerService := dshworkapp.NewManagerServiceWithRuntimeProgress(manager, host, func(status acquisition.OperationStatus) {
-		if desktop != nil {
-			desktop.Event.Emit("acquisition", status)
-			publishRemote("acquisition", status)
+		if acquisitionStreamPublisher != nil && acquisitionStreamPublisher.enqueue(status, true) {
+			acquisitionStreamPublisher.drain()
 		}
 	})
 	dshworkapp.SetBackupFileActions(managerService,
@@ -307,20 +310,9 @@ func runDaemon(identity string, resources Resources) {
 		notificationRouter.SetPreferences,
 		automaticRuntimeRollback.Store,
 	)
-	var publishAppearance func(dshworksettings.Appearance)
-	dshworkapp.SetAppearanceChanged(settingsService, func(appearance dshworksettings.Appearance) {
-		if publishAppearance != nil {
-			publishAppearance(appearance)
-		}
-	})
 	dshworkapp.SetVerboseLoggingChanged(settingsService, logging.SetVerbose)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
 	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
-	dshworkapp.SetPetActivity(petSettingsService, petActivity, func() {
-		if showWorkspace != nil {
-			showWorkspace()
-		}
-	})
 	dshworkapp.SetPetRendererFactory(petSettingsService, func() dshworkpet.PetRenderer {
 		return dshworkpet.NewRasterRenderer()
 	})
@@ -373,8 +365,14 @@ func runDaemon(identity string, resources Resources) {
 	diagnosticsService := dshworkapp.NewDiagnosticsService(diag,
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
 		func(name string) (string, error) { return nativeui.SaveDiagnosticsBundle(desktop, name) })
-	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Services: map[string]any{
-		"HostService": hostService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
+	hub := hostevents.New()
+	tracker := presence.New()
+	interactions := dshinteraction.New()
+	daemonHostService := &daemon.HostService{HostService: hostService}
+	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
+		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
+		"DSHPageService": &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
+		"ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
 		server.ServeAccountCallback(w, r, generation)
@@ -385,10 +383,44 @@ func runDaemon(identity string, resources Resources) {
 		server.AccountCallback = accountCallback
 		defer accountCallback.Close()
 	}
-	publishRemote = server.Publish
+	acquisitionStreamPublisher = newTrailingPublisher(acquisitionPublishInterval, nil, func(status acquisition.OperationStatus) {
+		publishAcquisitionStatus(hub, status, func(status acquisition.OperationStatus) {
+			if desktop != nil {
+				desktop.Event.Emit("acquisition", status)
+			}
+		})
+	}, mergeAcquisitionStatus)
 	backgroundFocused = server.UIFocused
 	launcher := newUILauncher(identity)
-	server.OpenUI = launcher.Open
+	server.OpenUI = func(section string) error {
+		_, err := launcher.Open(section, "workspace")
+		return err
+	}
+	petActivity.SetNavigation(launcher.Open, hub.SendCommand)
+	interactionNotifications := &interactionNotifier{
+		page:        interactions.Page,
+		focused:     tracker.Focused,
+		preferences: notificationRouter.Preferences,
+		publish:     notificationRouter.Publish,
+		remove:      nativeNotification.RemoveDeliveredNotification,
+		locale:      func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) },
+		owner:       interactions.Owner,
+		sendCommand: hub.SendCommand,
+		open:        petActivity.Open,
+		showWorkspace: func() {
+			if showWorkspace != nil {
+				showWorkspace()
+			}
+		},
+	}
+	interactions.OnAdded(interactionNotifications.added)
+	interactions.OnRemoved(interactionNotifications.removed)
+	registerDSHApprovalCategory := func(locale dshworksettings.Locale) {
+		if err := nativeNotification.RegisterNotificationCategory(dshApprovalNotificationCategory(locale)); err != nil {
+			logging.Module(logging.ModNotify).Warn("approval notification category registration failed", logging.ErrAttrs(err, "")...)
+		}
+	}
+	dshworkapp.SetPetActivity(petSettingsService, petActivity, tracker.LastFocused)
 	server.Media = dshworkapp.PetMediaHandler(petSettingsService, http.NotFoundHandler())
 	listener, err := daemon.Listen(identity)
 	if err != nil {
@@ -397,8 +429,11 @@ func runDaemon(identity string, resources Resources) {
 	ipcServer := daemon.HTTPServer(server)
 	defer ipcServer.Close()
 	defer listener.Close()
+	if err := nativeui.EnsureToastActivator(appName, toastDisplayName, toastActivatorCLSID); err != nil {
+		logging.Module(logging.ModNotify).Error("notification activation registration failed", logging.ErrAttrs(err, "")...)
+	}
 	desktop = application.New(application.Options{
-		Name:         "dsh-work",
+		Name:         appName,
 		Logger:       logging.WailsLogger(),
 		ErrorHandler: logging.WailsErrorHandler(),
 		Description:  "A local desktop shell for DSH workspaces.",
@@ -423,7 +458,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	updates := newUpdateRunner(filepath.Join(storage.Root, "update"), updateChannel, launcher.Stop, func(state daemon.UpdateSnapshot) {
-		server.Publish("update-state", state)
+		hub.SetTopic("update", state)
 		updateMenuStateMu.Lock()
 		updateMenuState = state
 		apply := updateMenuApply
@@ -447,6 +482,53 @@ func runDaemon(identity string, resources Resources) {
 	})
 	server.UpdateState = updates.Snapshot
 	server.UpdateCommand = updates.Action
+	daemonHostService.UpdateState = updates.Snapshot
+	daemonHostService.UpdateCommand = updates.Action
+	var initialPreferences dshworksettings.Values
+	if settingsManager != nil {
+		initialPreferences, _ = settingsManager.Snapshot(context.Background())
+	} else {
+		initialPreferences = dshworksettings.DefaultValues()
+	}
+	initialLifecycle := host.Status()
+	initialWorkerURL := ""
+	if initialLifecycle.State == lifecycle.StateReady {
+		initialWorkerURL = initialLifecycle.WorkspaceURL
+	} else if initialLifecycle.State == lifecycle.StateStarting {
+		initialWorkerURL = host.WebBootURL()
+	}
+	hub.SetTopic("lifecycle", initialLifecycle)
+	hub.SetTopic("worker-url", initialWorkerURL)
+	hub.SetTopic("update", updates.Snapshot())
+	hub.SetTopic("preferences", initialPreferences)
+	hub.SetTopic("acquisition", acquisition.OperationStatus{})
+	lifecyclePublisher := &serializedCurrentPublisher[lifecycleTopicValue]{
+		readCurrent: func() (lifecycleTopicValue, error) {
+			status := host.Status()
+			workerURL := ""
+			if status.State == lifecycle.StateReady {
+				workerURL = status.WorkspaceURL
+			} else if status.State == lifecycle.StateStarting {
+				workerURL = host.WebBootURL()
+			}
+			return lifecycleTopicValue{status: status, workerURL: workerURL}, nil
+		},
+		publish: func(value lifecycleTopicValue) {
+			hub.SetTopic("lifecycle", value.status)
+			hub.SetTopic("worker-url", value.workerURL)
+		},
+	}
+	if settingsManager != nil {
+		preferencesPublisher := &serializedCurrentPublisher[dshworksettings.Values]{
+			readCurrent: func() (dshworksettings.Values, error) { return settingsManager.Snapshot(context.Background()) },
+			publish:     func(values dshworksettings.Values) { hub.SetTopic("preferences", values) },
+		}
+		settingsManager.OnChange(func(dshworksettings.Values) {
+			if err := preferencesPublisher.publishCurrent(); err != nil {
+				logging.Module(logging.ModSettings).Warn("preferences publication failed", logging.ErrAttrs(err, "")...)
+			}
+		})
+	}
 	// The running updater switches before the choice is saved, so a channel the
 	// updater refuses is never persisted.
 	dshworkapp.SetUpdateChannelChanged(settingsService, func(ctx context.Context, channel dshworksettings.UpdateChannel) error {
@@ -633,7 +715,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	notificationRouter.SetDeliveryFailureHandler(func(dshworknotifications.Event) {
 		desktop.Event.Emit("notification-failure", true)
-		server.Publish("notification-failure", true)
+		hub.SendCommand("", "notification-failure", 10*time.Second, true)
 	})
 
 	hideBackgroundSurfaces := func() {
@@ -648,11 +730,14 @@ func runDaemon(identity string, resources Resources) {
 			maintenance.ShowInstallerBusy()
 			return
 		}
-		if err := launcher.Open(""); err != nil {
+		if _, err := launcher.Open("", "workspace"); err != nil {
 			logging.Module(logging.ModApp).Error("open window failed", logging.ErrAttrs(err, "")...)
 		}
 	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
+		if interactionNotifications.respond(result) {
+			return
+		}
 		if result.Error != nil {
 			logging.Module(logging.ModNotify).Warn("notification response failed", logging.ErrAttrs(result.Error, "")...)
 			return
@@ -705,6 +790,15 @@ func runDaemon(identity string, resources Resources) {
 			refreshLifecycleMenu()
 		}
 	}
+	quitConfirmation := &quitConfirmation{
+		inspect: petActivity.InspectQuit,
+		ask: func(inspection dshactivity.QuitInspection, complete func(bool)) {
+			message := nativeui.QuitConfirmationMessage(loadNativeLocale(&activeLocale), inspection.ActiveTasks, inspection.ScheduledTasks)
+			showQuitQuestion(desktop.Dialog.Question().SetTitle("DSH Work").SetMessage(message), complete)
+		},
+	}
+	confirmQuit := func(proceed func()) { quitConfirmation.confirm(proceed) }
+	hostService.ConfirmQuit = func(func()) { confirmQuit(quitDSHWork) }
 	trayMenu := desktop.NewMenu()
 	trayStatus := trayMenu.Add(nativeui.TrayStatus(localePreference, lifecycle.StateStarting)).SetEnabled(false)
 	trayOpenWorkspace := trayMenu.Add(initialNative.OpenWorkspace).OnClick(func(*application.Context) {
@@ -722,7 +816,7 @@ func runDaemon(identity string, resources Resources) {
 		restartDSH()
 	})
 	trayQuit := trayMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
-		quitDSHWork()
+		confirmQuit(quitDSHWork)
 	})
 	tray.SetMenu(trayMenu).OnClick(func() {
 		showWorkspace()
@@ -736,7 +830,7 @@ func runDaemon(identity string, resources Resources) {
 		restartDSH()
 	})
 	appMenuQuit := actionsMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
-		quitDSHWork()
+		confirmQuit(quitDSHWork)
 	})
 	refreshLifecycleMenu = func() {
 		enabled := !applicationShuttingDown.Load() && !quitFlow.InProgress() && !windowLedger.IsQuitting() && !restartActionBusy.Load()
@@ -873,12 +967,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	publishLocale = func(locale dshworksettings.Locale) {
 		updateNativeLocale(locale)
-		desktop.Event.Emit("locale", locale)
-		server.Publish("locale", locale)
-	}
-	publishAppearance = func(appearance dshworksettings.Appearance) {
-		desktop.Event.Emit("appearance", appearance)
-		server.Publish("appearance", appearance)
+		registerDSHApprovalCategory(locale)
 	}
 
 	openSettings = func(section string) {
@@ -886,7 +975,7 @@ func runDaemon(identity string, resources Resources) {
 			maintenance.ShowInstallerBusy()
 			return
 		}
-		if err := launcher.Open(section); err != nil {
+		if _, err := launcher.Open(section, "workspace"); err != nil {
 			attrs := append([]any{"section", section}, logging.ErrAttrs(err, "")...)
 			logging.Module(logging.ModApp).Error("open settings failed", attrs...)
 		}
@@ -896,10 +985,13 @@ func runDaemon(identity string, resources Resources) {
 	host.SetPublish(func(status lifecycle.Status) {
 		if status.State == lifecycle.StateStarting && status.Phase == lifecycle.PhaseCheckpoint {
 			go func() {
-				if err := launcher.Open("__boot"); err != nil {
+				if _, err := launcher.Open("__boot", "workspace"); err != nil {
 					logging.Module(logging.ModApp).Error("open boot window failed", logging.ErrAttrs(err, "")...)
 				}
 			}()
+		}
+		if err := lifecyclePublisher.publishCurrent(); err != nil {
+			logging.Module(logging.ModLifecycle).Warn("lifecycle publication failed", logging.ErrAttrs(err, "")...)
 		}
 		key := string(status.State) + "|" + string(status.Phase) + "|" + status.GenerationID
 		failureKey := ""
@@ -920,7 +1012,6 @@ func runDaemon(identity string, resources Resources) {
 		}
 		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
-		server.Publish("lifecycle", status)
 		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))
 		if restartActionBusy.Load() && restartSettled(status) {
 			restartActionBusy.Store(false)
@@ -1002,7 +1093,9 @@ func runDaemon(identity string, resources Resources) {
 		stopPetInput()
 		applicationShuttingDown.Store(true)
 		updates.Stop()
-		server.Publish("background-stopping", true)
+		updates.closeStatePublisher()
+		acquisitionStreamPublisher.close()
+		hub.SendCommand("", "background-stopping", 10*time.Second, true)
 		_ = launcher.Stop()
 		if stopPetMenuRefresh != nil {
 			stopPetMenuRefresh()
@@ -1018,9 +1111,10 @@ func runDaemon(identity string, resources Resources) {
 		}
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		registerDSHApprovalCategory(loadNativeLocale(&activeLocale))
 		if nativeNotificationHost.Unavailable() {
 			desktop.Event.Emit("notification-failure", true)
-			server.Publish("notification-failure", true)
+			hub.SendCommand("", "notification-failure", 10*time.Second, true)
 		}
 		if petWindow != nil {
 			nativeui.StartPetPointer(petInputContext, petWindow, func(x, y float64) bool {

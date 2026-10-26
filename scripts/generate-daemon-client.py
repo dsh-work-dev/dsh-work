@@ -24,6 +24,9 @@ for service in services:
     for source in sources:
         for m in re.finditer(r"func \(s \*" + service + r"\) ([A-Z]\w*)\((ctx context.Context[^)]*)\) ([^{\n]+) \{", source):
             name, params, result = m.groups()
+            if service == "HostService" and name == "RequestQuit":
+                continue
+            remote_name = "RequestQuit" if service == "HostService" and name == "Quit" else name
             args = []
             for param in params.split(",")[1:]:
                 args.append(param.strip().split()[0])
@@ -40,16 +43,18 @@ for service in services:
                 body += "\t\treturn s.Local." + name + "(ctx" + (", " + ", ".join(args) if args else "") + ")\n"
                 body += "\t}\n"
             else:
-                body = "\tif s.Local != nil { return s.Local." + name + "(ctx" + (", " + ", ".join(args) if args else "") + ") }\n"
+                body = "\tif s.Local != nil { return s.Local." + remote_name + "(ctx" + (", " + ", ".join(args) if args else "") + ") }\n"
             if output:
                 body += "\tvar value " + qualify(output) + "\n"
-            body += '\terr := call(ctx, s.Client, "' + service + '", "' + name + '", []any{' + ", ".join(args) + "}, " + ("&value" if output else "nil") + ")\n"
+            body += '\terr := call(ctx, s.Client, "' + service + '", "' + remote_name + '", []any{' + ", ".join(args) + "}, " + ("&value" if output else "nil") + ")\n"
             if not has_error:
                 body += "\tif err != nil { panic(err) }\n\treturn value\n"
             else:
                 body += "\treturn " + ("value, " if output else "") + "err\n"
             methods.append("func (s *" + service + ") " + name + "(" + qualify(params) + ") " + qualify(result) + " {\n" + body + "}\n")
     struct = "type " + service + " struct { Client *daemon.Client; Local *app." + service
+    if service == "HostService":
+        struct += "; LocalUpdateState func() daemon.UpdateSnapshot"
     if service == "PetSettingsService":
         struct += "; Maintenance func() bool"
     struct += " }\n\n"
@@ -63,16 +68,14 @@ for service in services:
         imports["errors"] = "errors"
         methods.append(
             "func (s *HostService) GetUpdateState(ctx context.Context) (daemon.UpdateSnapshot, error) {\n"
-            "\tif s.Local != nil { return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil }\n"
-            "\tif s.Client == nil { return daemon.UpdateSnapshot{}, errors.New(\"background client unavailable\") }\n"
-            "\tvar snapshot daemon.Snapshot\n"
-            "\terr := callJSON(ctx, s.Client, \"/snapshot\", struct { Cursor uint64 `json:\"cursor\"` }{}, &snapshot)\n"
-            "\treturn snapshot.Update, err\n"
+            "\tif s.LocalUpdateState == nil { return daemon.UpdateSnapshot{}, errors.New(\"update state unavailable\") }\n"
+            "\treturn s.LocalUpdateState(), nil\n"
             "}\n\n"
-            "func (s *HostService) Update(ctx context.Context, action string) error {\n"
-            "\tif s.Local != nil { return errors.New(\"background update controls unavailable\") }\n"
-            "\tif s.Client == nil { return errors.New(\"background client unavailable\") }\n"
-            "\treturn callJSON(ctx, s.Client, \"/update/action\", struct { Action string `json:\"action\"` }{Action: action}, nil)\n"
+            "func (s *HostService) UpdateAction(ctx context.Context, action daemon.UpdateAction) (daemon.UpdateSnapshot, error) {\n"
+            "\tif s.Local != nil { return daemon.UpdateSnapshot{}, errors.New(\"background update controls unavailable\") }\n"
+            "\tvar value daemon.UpdateSnapshot\n"
+            "\terr := call(ctx, s.Client, \"HostService\", \"UpdateAction\", []any{action}, &value)\n"
+            "\treturn value, err\n"
             "}\n"
         )
     body = struct + helper + "\n".join(methods)

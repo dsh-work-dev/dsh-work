@@ -23,7 +23,8 @@ accessibility or packaging acceptance.
   and uses a minimum width of 240 pixels; text does not scale with the sprite.
 - A compact two-line speech bubble shows the prioritized conversation title
   and activity. Activity changes reveal it for eight seconds; hover can reveal
-  it again. Returning to idle dismisses it. Clicking opens the owning DSH
+  it again. Returning to idle dismisses it, except that a turn just completed
+stays shown for its eight seconds. Clicking opens the owning DSH
   conversation. There is no conversation dropdown in the pet surface.
 - A hover drag handle moves the window. The body responds to clicks with
   available pet actions. Weighted idle variations and click actions restore
@@ -43,10 +44,24 @@ accessibility or packaging acceptance.
 
 The `@dsh-work/pet` host plugin (`internal/hostplugins/pet`, mounted by the
 core overlay in every mode) uses DSH events and projections to publish bounded
-authenticated activity snapshots; `internal/dshactivity` reads them for the
-pet. Generation-scoped credentials and cancellation isolate Worker
-replacements. The plugin's Client half handles conversation navigation and
-focused read acknowledgement.
+authenticated activity snapshots. `internal/dshactivity` keeps one
+Server-Sent Events connection to the plugin: the plugin sends a snapshot on
+connect and after changes (coalesced for 100 ms) and a ping every 15 seconds;
+the bridge reconnects after 45 seconds of silence or a closed stream, backing
+off from 500 ms to 5 seconds. Generation-scoped credentials and cancellation
+isolate Worker replacements.
+
+The plugin's Client half reports session titles and parent sessions to the
+plugin only when the session list changes. The pet reflects current state and
+keeps no read tracking: when the leading conversation finishes a turn while
+dsh-work is running, the pet plays its completion action once for that turn;
+and the bubble shows "Completed" with the summary for eight seconds. Turns
+restored from session history at startup replay neither. Opening a conversation from the pet shows the
+most recently focused workbench window and sends that window a
+`dsh-open-session` command; its shell forwards the request to the framed DSH
+page, which opens the session or subagent and reports the result back through
+`DSHPageService.ReportSessionOpened`. A missing result after 15 seconds shows
+"Conversation is unavailable".
 
 The Host aggregates sessions, pending questions/approvals/plan review, terminal
 outcomes, goals, queued/steering messages and background jobs. The compact
@@ -94,8 +109,8 @@ on selection changes. Stale asynchronous responses cannot restore an old pet.
 | `internal/pet` | Catalog, community home resolution, package adapters, cache, runtime timelines and normalized playback plans |
 | `internal/settings` | Versioned pet preferences and monitor-relative position |
 | `internal/app/pet_*.go` | Trusted Settings/pet APIs, activity projection, media capabilities and hit-region validation |
-| `internal/dshactivity` | Authenticated activity bridge and navigation requests to `@dsh-work/pet` |
-| `internal/hostplugins/pet` | The `@dsh-work/pet` DSH plugin: activity snapshot and conversation navigation inside DSH |
+| `internal/dshactivity` | Authenticated activity stream from `@dsh-work/pet` and window-addressed conversation navigation |
+| `internal/hostplugins/pet` | The `@dsh-work/pet` DSH plugin: activity snapshot stream, change-driven page reports and conversation opening inside DSH |
 | `internal/nativeui/pet_*.go` | Window options, activity sizing and platform-specific pointer sampling |
 | `internal/desktopapp/daemon.go` | Daemon-owned Pet service/window assembly and lifetime wiring |
 | `internal/desktopclient` | Settings proxies to daemon-owned Pet services |

@@ -13,7 +13,7 @@ type PetSettingsService struct { Client *daemon.Client; Local *app.PetSettingsSe
 
 func (s *PetSettingsService) localMaintenanceFailure() error {
 	if s.Maintenance == nil || !s.Maintenance() { return nil }
-	return lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: "dsh-work is being updated.", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: "Wait for the installer to finish, then retry the Pet action."}
+	return lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: "DSH Work is being updated.", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: "Wait for the installer to finish, then retry the Pet action."}
 }
 
 func (s *PetSettingsService) SetPetHitRegions(ctx context.Context, regions []app.PetHitRegion) error {

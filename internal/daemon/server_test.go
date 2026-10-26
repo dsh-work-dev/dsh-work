@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/local/dsh-work/internal/app"
 	"io"
 	"log"
 	"net/http"
@@ -14,13 +15,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/local/dsh-work/internal/dshactivity"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/presence"
 	"github.com/local/dsh-work/internal/settings"
 )
 
 type maintenanceTestService struct {
 	mutated bool
 	quit    bool
+}
+
+func TestRequestQuitDoesNotDrainAndIsBlockedDuringMaintenance(t *testing.T) {
+	host := app.NewHost(app.Dependencies{}, app.Config{})
+	service := app.NewHostService(host, nil)
+	confirmed := false
+	service.ConfirmQuit = func(func()) { confirmed = true }
+	server := &Server{Services: map[string]any{"HostService": service}}
+	call := Call{Service: "HostService", Method: "RequestQuit", Surface: "workspace"}
+	result := postCall(t, server, call)
+	if result.Error != "" || !confirmed || server.draining.Load() {
+		t.Fatalf("result=%+v confirmed=%v drain=%v", result, confirmed, server.draining.Load())
+	}
+	confirmed = false
+	server.Maintenance = func() bool { return true }
+	result = postCall(t, server, call)
+	if result.Error == "" || confirmed || server.draining.Load() {
+		t.Fatalf("maintenance result=%+v confirmed=%v drain=%v", result, confirmed, server.draining.Load())
+	}
 }
 
 type drainingTestService struct {
@@ -81,7 +104,7 @@ func TestServerBlocksMutableCallsDuringInstallerMaintenance(t *testing.T) {
 
 func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 	server := &Server{Maintenance: func() bool { return true }}
-	for _, path := range []string{"/open", "/update/action", "/geometry", "/zoom", "/worker"} {
+	for _, path := range []string{"/open", "/worker"} {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
 		server.ServeHTTP(recorder, request)
@@ -97,23 +120,17 @@ func TestServerBlocksUIAndWorkerRoutesDuringInstallerMaintenance(t *testing.T) {
 func TestServerStartsUpdateAction(t *testing.T) {
 	var called UpdateAction
 	server := &Server{
-		UpdateCommand: func(_ context.Context, action UpdateAction) error {
-			called = action
-			return nil
-		},
-		UpdateState: func() UpdateSnapshot { return UpdateSnapshot{Phase: UpdateChecking} },
+		Services: map[string]any{"HostService": &HostService{
+			UpdateCommand: func(_ context.Context, action UpdateAction) error { called = action; return nil },
+			UpdateState:   func() UpdateSnapshot { return UpdateSnapshot{Phase: UpdateChecking} },
+		}},
 	}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/update/action", strings.NewReader(`{"action":"check"}`))
-	server.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("update action status = %d, body=%q", recorder.Code, recorder.Body.String())
+	result := postCall(t, server, Call{Service: "HostService", Method: "UpdateAction", Surface: "workspace", Args: []json.RawMessage{json.RawMessage(`"check"`)}})
+	if result.Error != "" || called != UpdateActionCheck {
+		t.Fatalf("update action result=%+v called=%q", result, called)
 	}
-	if called != UpdateActionCheck {
-		t.Fatalf("update action = %q, want check", called)
-	}
-	if got := strings.TrimSpace(recorder.Body.String()); !strings.Contains(got, `"phase":"checking"`) {
-		t.Fatalf("update action body = %q, want checking state", got)
+	if !strings.Contains(string(result.Value), `"phase":"checking"`) {
+		t.Fatalf("update action value = %s, want checking state", result.Value)
 	}
 }
 
@@ -313,16 +330,231 @@ func TestServerSavesWorkspaceZoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{Settings: manager}
-	for body, want := range map[string]int{`1.2`: http.StatusOK, `0.5`: http.StatusBadRequest, `"big"`: http.StatusBadRequest} {
-		recorder := httptest.NewRecorder()
-		server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/zoom", strings.NewReader(body)))
-		if recorder.Code != want {
-			t.Fatalf("zoom %s status = %d, want %d", body, recorder.Code, want)
-		}
+	service := &WindowService{Settings: manager}
+	server := &Server{Services: map[string]any{"WindowService": service}}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveZoom", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`1.2`)}}); result.Error != "" {
+		t.Fatalf("workspace-2 zoom result = %+v", result)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveZoom", Surface: "workspace", Args: []json.RawMessage{json.RawMessage(`0.5`)}}); result.Error == "" {
+		t.Fatal("invalid zoom was accepted")
 	}
 	values, err := manager.Snapshot(context.Background())
 	if err != nil || values.WorkspaceZoom != 1.2 {
 		t.Fatalf("saved zoom = %v error=%v", values.WorkspaceZoom, err)
+	}
+}
+
+func TestWindowServiceSavesGeometryOnlyForWorkspace(t *testing.T) {
+	manager, err := settings.New(settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Services: map[string]any{"WindowService": &WindowService{Settings: manager}}}
+	geometry := settings.WindowGeometry{X: -1280, Y: 40, Positioned: true, Width: 1280, Height: 800, Maximised: true}
+	encoded, err := json.Marshal(geometry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveGeometry", Surface: "workspace-2", Args: []json.RawMessage{encoded}}); result.Error != "" {
+		t.Fatalf("non-primary geometry result = %+v", result)
+	}
+	values, err := manager.Snapshot(context.Background())
+	if err != nil || values.WorkspaceWindow != (settings.WindowGeometry{}) {
+		t.Fatalf("non-primary window saved geometry: %+v error=%v", values.WorkspaceWindow, err)
+	}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "SaveGeometry", Surface: "workspace", Args: []json.RawMessage{encoded}}); result.Error != "" {
+		t.Fatalf("workspace geometry result = %+v", result)
+	}
+	values, err = manager.Snapshot(context.Background())
+	if err != nil || values.WorkspaceWindow != geometry {
+		t.Fatalf("workspace geometry = %+v error=%v", values.WorkspaceWindow, err)
+	}
+}
+
+type surfaceEchoService struct{}
+
+func (surfaceEchoService) Read(ctx context.Context) string { return SurfaceFrom(ctx) }
+
+func TestInvokeAcceptsOnlyCanonicalWorkspaceNamesAndPassesSurface(t *testing.T) {
+	server := &Server{Services: map[string]any{"SurfaceEchoService": surfaceEchoService{}}}
+	for _, surface := range []string{"workspace", "workspace-2", "workspace-12"} {
+		result := postCall(t, server, Call{Service: "SurfaceEchoService", Method: "Read", Surface: surface})
+		if result.Error != "" || string(result.Value) != `"`+surface+`"` {
+			t.Fatalf("surface %q result = %+v", surface, result)
+		}
+	}
+	for _, surface := range []string{"workspace-1", "workspace-02", "worker", "workspace-x"} {
+		result := postCall(t, server, Call{Service: "SurfaceEchoService", Method: "Read", Surface: surface})
+		if result.Error == "" {
+			t.Errorf("invalid surface %q was accepted", surface)
+		}
+	}
+}
+
+type webBootReportService struct{ got string }
+
+func (s *webBootReportService) ReportWebBoot(ctx context.Context, generation, detail string) error {
+	s.got = SurfaceFrom(ctx) + ":" + generation + ":" + detail
+	return nil
+}
+
+func TestHostServiceReportWebBootAndWindowFocusAreMaintenanceAllowed(t *testing.T) {
+	tracker := presence.New()
+	report := &webBootReportService{}
+	server := &Server{
+		Services: map[string]any{
+			"HostService":    report,
+			"WindowService":  &WindowService{Presence: tracker},
+			"DSHPageService": &DSHPageService{Activity: dshactivity.New(), Interactions: dshinteraction.New()},
+		},
+		Maintenance: func() bool { return true },
+	}
+	for _, call := range []Call{
+		{Service: "HostService", Method: "ReportWebBoot", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"g1"`), json.RawMessage(`"ready"`)}},
+		{Service: "WindowService", Method: "SetFocus", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`true`)}},
+		{Service: "WindowService", Method: "Closed", Surface: "workspace-2"},
+		{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}},
+		{Service: "DSHPageService", Method: "ReportInteraction", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`{"instance":"page-1","sessionId":"","kind":"","key":"","toolName":"","current":"session-1","visible":true}`)}},
+		{Service: "DSHPageService", Method: "ResetInteractions", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"page-1"`)}},
+	} {
+		if result := postCall(t, server, call); result.Error != "" {
+			t.Errorf("maintenance-allowed call %s.%s failed: %+v", call.Service, call.Method, result)
+		}
+	}
+	if report.got != "workspace-2:g1:ready" {
+		t.Fatalf("web boot report = %q", report.got)
+	}
+	if !maintenanceCallAllowed(Call{Service: "WindowService", Method: "SetFocus"}) || !maintenanceCallAllowed(Call{Service: "WindowService", Method: "Closed"}) || !maintenanceCallAllowed(Call{Service: "HostService", Method: "ReportWebBoot"}) || !maintenanceCallAllowed(Call{Service: "DSHPageService", Method: "ReportSessionOpened"}) || !maintenanceCallAllowed(Call{Service: "DSHPageService", Method: "ReportInteraction"}) || !maintenanceCallAllowed(Call{Service: "DSHPageService", Method: "ResetInteractions"}) {
+		t.Fatal("required maintenance calls are not allow-listed")
+	}
+	for _, call := range []Call{{Service: "WindowService", Method: "SaveZoom"}, {Service: "WindowService", Method: "SaveGeometry"}, {Service: "HostService", Method: "UpdateAction"}} {
+		if maintenanceCallAllowed(call) {
+			t.Errorf("unexpected maintenance allow-list entry: %s.%s", call.Service, call.Method)
+		}
+	}
+}
+
+func TestDSHPageInteractionMethodsRequireAWorkspaceSurface(t *testing.T) {
+	store := dshinteraction.New()
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Interactions: store}}}
+	contextReport := `{"instance":"page-1","sessionId":"","kind":"","key":"","toolName":"","current":"session-1","visible":true}`
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportInteraction", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(contextReport)}}); result.Error != "" {
+		t.Fatalf("workspace-2 interaction report failed: %+v", result)
+	}
+	if instance, current, visible, ok := store.Page("workspace-2"); !ok || instance != "page-1" || current != "session-1" || !visible {
+		t.Fatalf("workspace-2 page = %q %q %t %t", instance, current, visible, ok)
+	}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportInteraction", Surface: "pet", Args: []json.RawMessage{json.RawMessage(contextReport)}}); result.Error == "" {
+		t.Fatal("accepted an interaction report from a non-workspace surface")
+	}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ResetInteractions", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"page-1"`)}}); result.Error != "" {
+		t.Fatalf("workspace-2 interaction reset failed: %+v", result)
+	}
+	if _, ok := store.Owner("page-1"); ok {
+		t.Fatal("page reset did not remove the reported instance")
+	}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ResetInteractions", Surface: "pet", Args: []json.RawMessage{json.RawMessage(`"page-1"`)}}); result.Error == "" {
+		t.Fatal("accepted an interaction reset from a non-workspace surface")
+	}
+}
+
+func TestDSHPageInteractionValidationRejectsInvalidReportsWithoutChangingStore(t *testing.T) {
+	store := dshinteraction.New()
+	added, removed := 0, 0
+	store.OnAdded(func(string, string, string, dshinteraction.Interaction) { added++ })
+	store.OnRemoved(func(string, string, dshinteraction.Interaction) { removed++ })
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "", Current: "current-1", Visible: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "approval", Key: "approval:1", ToolName: "shell.exec"}); err != nil {
+		t.Fatal(err)
+	}
+	added, removed = 0, 0
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Interactions: store}}}
+	valid := dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "question", Key: "replacement", Current: "ignored", Visible: false}
+	cases := []struct {
+		name   string
+		mutate func(*dshinteraction.Report)
+	}{
+		{name: "empty instance", mutate: func(report *dshinteraction.Report) { report.Instance = "" }},
+		{name: "long instance", mutate: func(report *dshinteraction.Report) { report.Instance = strings.Repeat("i", 257) }},
+		{name: "long session ID", mutate: func(report *dshinteraction.Report) { report.SessionID = strings.Repeat("s", 257) }},
+		{name: "unsupported kind", mutate: func(report *dshinteraction.Report) { report.Kind = "completion" }},
+		{name: "missing key", mutate: func(report *dshinteraction.Report) { report.Key = "" }},
+		{name: "long key", mutate: func(report *dshinteraction.Report) { report.Key = strings.Repeat("k", 257) }},
+		{name: "long tool name", mutate: func(report *dshinteraction.Report) { report.ToolName = strings.Repeat("t", 121) }},
+		{name: "long current", mutate: func(report *dshinteraction.Report) {
+			report.SessionID, report.Kind, report.Key, report.Current = "", "", "", strings.Repeat("c", 257)
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			report := valid
+			test.mutate(&report)
+			encoded, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			added, removed = 0, 0
+			result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportInteraction", Surface: "workspace", Args: []json.RawMessage{encoded}})
+			if result.Error == "" {
+				t.Fatal("accepted an invalid interaction report")
+			}
+			instance, current, visible, ok := store.Page("workspace")
+			if !ok || instance != "page-1" || current != "current-1" || !visible || added != 0 || removed != 0 {
+				t.Fatalf("invalid report changed state: page=%q current=%q visible=%t ok=%t added=%d removed=%d", instance, current, visible, ok, added, removed)
+			}
+		})
+	}
+}
+
+func TestDSHPageInteractionResetValidationRejectsInvalidInstancesWithoutChangingStore(t *testing.T) {
+	store := dshinteraction.New()
+	removed := 0
+	store.OnRemoved(func(string, string, dshinteraction.Interaction) { removed++ })
+	if err := store.Report("workspace", dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "question", Key: "question:1"}); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Interactions: store}}}
+	for _, instance := range []string{"", strings.Repeat("i", 257)} {
+		encoded, err := json.Marshal(instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := postCall(t, server, Call{Service: "DSHPageService", Method: "ResetInteractions", Surface: "workspace", Args: []json.RawMessage{encoded}})
+		if result.Error == "" {
+			t.Errorf("accepted invalid instance of length %d", len(instance))
+		}
+		if owner, ok := store.Owner("page-1"); !ok || owner != "workspace" || removed != 0 {
+			t.Fatalf("invalid reset changed state: owner=%q ok=%t removed=%d", owner, ok, removed)
+		}
+	}
+}
+
+func TestWindowClosedClearsPendingInteractions(t *testing.T) {
+	store := dshinteraction.New()
+	var removed []string
+	store.OnRemoved(func(instance, sessionID string, _ dshinteraction.Interaction) {
+		removed = append(removed, instance+":"+sessionID)
+	})
+	if err := store.Report("workspace-2", dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "question", Key: "question:1"}); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{Services: map[string]any{"WindowService": &WindowService{Interactions: store}}}
+	if result := postCall(t, server, Call{Service: "WindowService", Method: "Closed", Surface: "workspace-2"}); result.Error != "" {
+		t.Fatalf("closing workspace-2 failed: %+v", result)
+	}
+	if _, ok := store.Owner("page-1"); ok || len(removed) != 1 || removed[0] != "page-1:session-1" {
+		t.Fatalf("close cleanup owner=%t removals=%v", ok, removed)
+	}
+}
+
+func TestDSHPageReportSessionOpenedUsesAWorkspaceSurface(t *testing.T) {
+	server := &Server{Services: map[string]any{"DSHPageService": &DSHPageService{Activity: dshactivity.New()}}}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "workspace-2", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}}); result.Error != "" {
+		t.Fatalf("workspace-2 report failed: %+v", result)
+	}
+	if result := postCall(t, server, Call{Service: "DSHPageService", Method: "ReportSessionOpened", Surface: "pet", Args: []json.RawMessage{json.RawMessage(`"7"`), json.RawMessage(`""`)}}); result.Error == "" {
+		t.Fatalf("pet surface report was accepted: %+v", result)
 	}
 }

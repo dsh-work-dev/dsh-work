@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {hasTranslationInEveryLocale} from "../src/i18n";
-import {parseFrameMessage} from "../src/shell-frame";
+import {parseAnswerApprovalCommand, parseFrameMessage} from "../src/shell-frame";
 import {buildMenus, formatKeys, stepItem, windowKeyAction, type Menu, type MenuItem, type MenuState} from "../src/shell-menu-model";
 
 const t = (key: string) => key;
@@ -166,6 +166,10 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/sidebar-state", open: false}), {type: "sidebar-state", open: false});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/component-ready", id: "pet"}), {type: "component-ready", id: "pet"});
   assert.equal(parseFrameMessage({type: "dsh-work/component-ready", id: "plugin.private"}), null);
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/open-session-result", id: "42", error: ""}), {type: "open-session-result", id: "42", error: ""});
+  assert.deepEqual(parseFrameMessage({type: "dsh-work/open-session-result", id: "43", error: "Conversation is unavailable"}), {type: "open-session-result", id: "43", error: "Conversation is unavailable"});
+  assert.equal(parseFrameMessage({type: "dsh-work/open-session-result", id: "", error: ""}), null);
+  assert.equal(parseFrameMessage({type: "dsh-work/open-session-result", id: "44", error: 1}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/sidebar-state", open: "false"}), null);
   assert.equal(parseFrameMessage({type: "dsh-work/window-key", action: "close"}), null);
   assert.deepEqual(parseFrameMessage({type: "dsh-work/export-result", result: "saved"}), {type: "export-result", result: "saved"});
@@ -175,6 +179,53 @@ test("frame messages are rejected unless they match a known shape", () => {
   assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "pending"}), {type: "account-signout", state: "pending"});
   assert.deepEqual(parseFrameMessage({type: "dsh-work/account-signout", state: "error"}), {type: "account-signout", state: "error"});
   assert.equal(parseFrameMessage({type: "dsh-work/account-signout", state: "maybe"}), null);
+});
+
+test("answer-approval fields are validated before forwarding to the frame", () => {
+  const command = {instance: "page-1", sessionId: "session-1", key: "approval:1", outcome: "allowed-once"};
+  assert.deepEqual(parseAnswerApprovalCommand(command), command);
+  assert.deepEqual(parseAnswerApprovalCommand({...command, outcome: "rejected"}), {...command, outcome: "rejected"});
+  for (const invalid of [
+    {...command, instance: ""}, {...command, instance: 1},
+    {...command, sessionId: ""}, {...command, sessionId: 1},
+    {...command, key: ""}, {...command, key: 1},
+    {...command, outcome: "allow"}, {...command, outcome: ""},
+    Object.fromEntries(Object.entries(command).filter(([key]) => key !== "key")),
+    null, "approval",
+  ]) assert.equal(parseAnswerApprovalCommand(invalid), null);
+});
+
+test("pending-interaction frame messages validate their version, fields, and bounded strings", () => {
+  const report = {
+    version: 1, type: "dsh-work/interaction", instance: "page-1", sessionId: "session-1",
+    kind: "approval", key: "approval:1", toolName: "shell.exec", current: "session-2", visible: true,
+  };
+  assert.deepEqual(parseFrameMessage(report), {type: "interaction", report: {
+    instance: "page-1", sessionId: "session-1", kind: "approval", key: "approval:1",
+    toolName: "shell.exec", current: "session-2", visible: true,
+  }});
+  assert.deepEqual(parseFrameMessage({version: 1, type: "dsh-work/interaction-reset", instance: "page-1"}), {type: "interaction-reset", instance: "page-1"});
+  assert.notEqual(parseFrameMessage({...report, current: "界".repeat(256)}), null);
+  assert.notEqual(parseFrameMessage({...report, sessionId: "", kind: "", key: ""}), null);
+
+  for (const invalid of [
+    {...report, version: 2},
+    {...report, instance: ""},
+    {...report, instance: 1},
+    {...report, instance: "i".repeat(257)},
+    {...report, sessionId: "s".repeat(257)},
+    {...report, kind: "completion"},
+    {...report, kind: "question", key: ""},
+    {...report, key: "k".repeat(257)},
+    {...report, toolName: "t".repeat(121)},
+    {...report, current: "c".repeat(257)},
+    {...report, current: undefined},
+    {...report, visible: "true"},
+    Object.fromEntries(Object.entries(report).filter(([key]) => key !== "kind")),
+    {version: 1, type: "dsh-work/interaction-reset"},
+    {version: 1, type: "dsh-work/interaction-reset", instance: ""},
+    {version: 1, type: "dsh-work/interaction-reset", instance: "i".repeat(257)},
+  ]) assert.equal(parseFrameMessage(invalid), null);
 });
 
 test("shortcut keys render as DSH shows them, without extra separators", () => {

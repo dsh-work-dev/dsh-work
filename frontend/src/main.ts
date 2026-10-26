@@ -18,7 +18,7 @@ document.documentElement.dataset.surface = surface ?? "host";
 hydrateIcons(document);
 applyLocale(defaultLocale);
 mountLocale();
-document.title = surface === "pet" ? "dsh-work Pet" : "dsh-work";
+document.title = surface === "pet" ? "DSH Work Pet" : "DSH Work";
 
 if (surface === "pet") {
   document.getElementById("host-surface")?.setAttribute("hidden", "true");

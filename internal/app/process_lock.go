@@ -55,10 +55,10 @@ func acquireProcessFileLock(lockPath string) (*ProcessLock, error) {
 		if errors.Is(err, errProcessLockHeld) {
 			return nil, lifecycle.Failure{
 				Code:          lifecycle.ErrorManagerOperationBusy,
-				Summary:       "dsh-work is already running.",
+				Summary:       "DSH Work is already running.",
 				Retryable:     true,
 				CorrelationID: lifecycle.NewCorrelationID(),
-				Detail:        "Use dsh-work Settings in the running app for Run context and profile plugin changes.",
+				Detail:        "Use DSH Work Settings in the running app for Run context and profile plugin changes.",
 			}
 		}
 		return nil, fmt.Errorf("lock process boundary %q: %w", lockPath, err)

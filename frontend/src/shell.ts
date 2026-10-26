@@ -1,10 +1,11 @@
 import {Browser, Events, Window} from "@wailsio/runtime";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
 import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame, type Rgba} from "./dsh-theme";
 import {subscribeLocale, t} from "./i18n";
-import {parseFrameMessage} from "./shell-frame";
+import {parseAnswerApprovalCommand, parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
@@ -35,7 +36,7 @@ export function mountShell() {
   brand.className = "shell-brand";
   const mark = document.createElement("img");
   mark.src = "/branding/dsh-work-appicon.png";
-  mark.alt = "dsh-work";
+  mark.alt = "DSH Work";
   brand.append(mark);
   const drag = document.createElement("div");
   drag.className = "shell-drag";
@@ -101,7 +102,7 @@ export function mountShell() {
     checkingFromMenu = true;
     toast.show(t("about.update.checking"));
     try {
-      await HostService.Update("check");
+      await HostService.UpdateAction(UpdateAction.UpdateActionCheck);
     } catch (error) {
       checkingFromMenu = false;
       toast.show(t("about.update.error"));
@@ -321,6 +322,19 @@ export function mountShell() {
     eventSeen = true;
     show(String(event.data ?? ""));
   });
+  Events.On("dsh-open-session", event => {
+    const command = event.data as {id?: unknown; sessionId?: unknown; parentSessionId?: unknown} | undefined;
+    const src = frame.getAttribute("src");
+    if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
+    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
+      sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
+  });
+  Events.On("dsh-answer-approval", event => {
+    const command = parseAnswerApprovalCommand(event.data);
+    const src = frame.getAttribute("src");
+    if (!src || !command) return;
+    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/answer-approval", ...command}, new URL(src).origin);
+  });
   void fetch("/__shell/worker").then(response => response.json()).then((value: {url: string}) => {
     if (!eventSeen) show(value.url);
   }).catch(() => {});
@@ -335,6 +349,15 @@ export function mountShell() {
     else if (message.type === "component-ready") {
       void ShellService.ReportBuiltinComponent(message.id).catch(report(`component ${message.id}`));
       if (message.id === "shell") sendAppearance();
+    }
+    else if (message.type === "open-session-result") {
+      void ShellService.ReportSessionOpened(message.id, message.error).catch(report("report opened conversation"));
+    }
+    else if (message.type === "interaction") {
+      void ShellService.ReportInteraction(message.report).catch(report("report pending interaction"));
+    }
+    else if (message.type === "interaction-reset") {
+      void ShellService.ResetInteractions(message.instance).catch(report("reset pending interactions"));
     }
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "modal-mask") {

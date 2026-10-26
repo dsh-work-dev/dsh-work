@@ -161,7 +161,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if err := client.Call(context.Background(), "SettingsService", "SetNotificationPreference", "workspace", []any{"completed", false}, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitUntil(t, 10*time.Second, func() bool { return nativeWindowVisible(baseline.PID, "dsh-work Pet") })
+	waitUntil(t, 10*time.Second, func() bool { return nativeWindowVisible(baseline.PID, "DSH Work Pet") })
 	workerRequest := func(action string) []byte {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -206,7 +206,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 		if state.PID != baseline.PID || state.Diagnostics.PID != baseline.Diagnostics.PID || state.Status.GenerationID != baseline.Status.GenerationID {
 			t.Fatal("UI replaced background or Worker")
 		}
-		if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
+		if !nativeWindowVisible(baseline.PID, "DSH Work Pet") {
 			t.Fatal("UI lifecycle hid background Pet")
 		}
 		if err := client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel); err != nil {
@@ -409,7 +409,7 @@ func TestRealDaemonLifecycle(t *testing.T) {
 	if restarted.PID != baseline.PID || processAlive(int(baseline.Diagnostics.PID)) || processAlive(firstTask.Child) {
 		t.Fatal("restart ownership or child cleanup failed")
 	}
-	if !nativeWindowVisible(baseline.PID, "dsh-work Pet") {
+	if !nativeWindowVisible(baseline.PID, "DSH Work Pet") {
 		t.Fatal("restart hid Pet")
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)

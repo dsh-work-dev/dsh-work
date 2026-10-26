@@ -51,8 +51,13 @@ func (s *NotificationService) Unavailable() bool {
 	return s == nil || s.startupFailed.Load()
 }
 
+type notificationSender interface {
+	SendNotification(wailsnotifications.NotificationOptions) error
+	SendNotificationWithActions(wailsnotifications.NotificationOptions) error
+}
+
 type notificationDelivery struct {
-	service *wailsnotifications.NotificationService
+	service notificationSender
 	host    *NotificationService
 }
 
@@ -69,15 +74,32 @@ func (d notificationDelivery) Send(ctx context.Context, event notifications.Even
 	if d.service == nil || d.host.Unavailable() {
 		return notificationDeliveryFailure()
 	}
-	if err := d.service.SendNotification(wailsnotifications.NotificationOptions{
-		ID:    event.ID,
-		Title: event.Title,
-		Body:  event.Body,
-		Data:  map[string]interface{}{"target": event.Target},
-	}); err != nil {
+	options := wailsnotifications.NotificationOptions{
+		ID:         event.ID,
+		Title:      event.Title,
+		Body:       event.Body,
+		CategoryID: event.CategoryID,
+		Data:       notificationData(event),
+	}
+	var err error
+	if event.CategoryID != "" {
+		err = d.service.SendNotificationWithActions(options)
+	} else {
+		err = d.service.SendNotification(options)
+	}
+	if err != nil {
 		return notificationDeliveryFailure()
 	}
 	return nil
+}
+
+func notificationData(event notifications.Event) map[string]interface{} {
+	data := make(map[string]interface{}, len(event.Data)+1)
+	data["target"] = event.Target
+	for key, value := range event.Data {
+		data[key] = value
+	}
+	return data
 }
 
 func notificationDeliveryFailure() error {

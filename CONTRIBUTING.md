@@ -36,6 +36,9 @@ Run the Wails development loop:
 wails3 task dev
 ```
 
+To check the running UI without taking over the mouse or screen, follow
+[Verifying the running app](docs/agent-verification.md).
+
 Run the complete local verification suite before review:
 
 ```powershell

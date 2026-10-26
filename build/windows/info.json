@@ -6,10 +6,10 @@
 		"0000": {
 			"ProductVersion": "0.1.0",
 			"CompanyName": "dsh-work",
-			"FileDescription": "Local-first desktop host for DeepSeek Harness",
-			"LegalCopyright": "Copyright 2026 dsh-work",
-			"ProductName": "dsh-work",
-			"Comments": "dsh-work desktop foundation"
+			"FileDescription": "DSH Work",
+			"LegalCopyright": "Copyright 2026 DSH Work",
+			"ProductName": "DSH Work",
+			"Comments": "DSH Work desktop foundation"
 		}
 	}
 }

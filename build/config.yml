@@ -5,13 +5,13 @@ info:
   productName: "dsh-work"
   productIdentifier: "com.local.dsh-work"
   description: "Local-first desktop host for DeepSeek Harness"
-  copyright: "Copyright 2026 dsh-work"
-  comments: "dsh-work desktop foundation"
+  copyright: "Copyright 2026 DSH Work"
+  comments: "DSH Work desktop foundation"
   version: "0.1.0"
 
 protocols:
   - scheme: dsh-work
-    description: dsh-work Desktop Return Link
+    description: DSH Work Desktop Return Link
   - scheme: dsh
     description: DeepSeek Harness Desktop
 

@@ -196,7 +196,7 @@ func renderEnvironment(environment Environment) string {
 		profile = "-"
 	}
 	rows := [][2]string{
-		{"dsh-work", app},
+		{"DSH Work", app},
 		{"系统", emptyAsDash(environment.OS)},
 		{"DSH", dsh},
 		{"配置", fmt.Sprintf("%s · 插件 %d 个", profile, environment.PluginCount)},

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/pet"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -94,6 +95,48 @@ func TestShellServiceSavesZoomFromTrustedWindows(t *testing.T) {
 	}
 }
 
+func TestShellServiceReportsAndResetsInteractionsFromTrustedWindows(t *testing.T) {
+	var reported dshinteraction.Report
+	var reportSurface, resetSurface, resetInstance string
+	reportCalls, resetCalls := 0, 0
+	s := &ShellService{
+		ReportPendingInteraction: func(_ context.Context, surface string, report dshinteraction.Report) error {
+			reportCalls++
+			reportSurface, reported = surface, report
+			return nil
+		},
+		ResetPageInteractions: func(_ context.Context, surface, instance string) error {
+			resetCalls++
+			resetSurface, resetInstance = surface, instance
+			return nil
+		},
+	}
+	interaction := dshinteraction.Report{Instance: "page-1", SessionID: "session-1", Kind: "approval", Key: "approval:1", ToolName: "shell.exec", Current: "session-2", Visible: true}
+	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace-2"}))
+	worker := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "worker"}))
+	if err := s.ReportInteraction(worker, interaction); err == nil {
+		t.Fatal("accepted an interaction report from the Worker window")
+	}
+	if err := s.ResetInteractions(worker, "page-1"); err == nil {
+		t.Fatal("accepted an interaction reset from the Worker window")
+	}
+	if reportCalls != 0 || resetCalls != 0 {
+		t.Fatalf("untrusted callbacks were called: reports=%d resets=%d", reportCalls, resetCalls)
+	}
+	if err := s.ReportInteraction(workspace, interaction); err != nil {
+		t.Fatal(err)
+	}
+	if reportCalls != 1 || reportSurface != "workspace-2" || reported != interaction {
+		t.Fatalf("interaction report = %q %+v, calls=%d", reportSurface, reported, reportCalls)
+	}
+	if err := s.ResetInteractions(workspace, "page-1"); err != nil {
+		t.Fatal(err)
+	}
+	if resetCalls != 1 || resetSurface != "workspace-2" || resetInstance != "page-1" {
+		t.Fatalf("interaction reset = %q %q, calls=%d", resetSurface, resetInstance, resetCalls)
+	}
+}
+
 func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	s := &ShellService{}
 	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
@@ -161,9 +204,37 @@ func TestBuiltinComponentHandshakeStatesAreSharedAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestBuiltinComponentHandshakeStatesAreIsolatedByWorkspace(t *testing.T) {
+	s := &ShellService{}
+	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
+	second := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace-2"}))
+	if err := s.BeginBuiltinComponents(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BeginBuiltinComponents(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReportBuiltinComponent(second, "pet"); err != nil {
+		t.Fatal(err)
+	}
+	firstState, _ := s.GetBuiltinComponents(workspace)
+	secondState, _ := s.GetBuiltinComponents(second)
+	if firstState[2].State != "loading" || secondState[2].State != "loaded" {
+		t.Fatalf("pet state crossed windows: workspace=%+v workspace-2=%+v", firstState, secondState)
+	}
+	if err := s.ResetBuiltinComponents(second); err != nil {
+		t.Fatal(err)
+	}
+	reset, _ := s.GetBuiltinComponents(second)
+	firstState, _ = s.GetBuiltinComponents(workspace)
+	if reset[2].State != "inactive" || firstState[2].State != "loading" {
+		t.Fatalf("reset crossed windows: workspace=%+v workspace-2=%+v", firstState, reset)
+	}
+}
+
 func TestBuiltinComponentsThatNeverReportAreMarkedFailed(t *testing.T) {
 	published := make(chan []BuiltinComponentStatus, 8)
-	s := &ShellService{BuiltinComponentTimeout: 20 * time.Millisecond, OnBuiltinComponentsChanged: func(statuses []BuiltinComponentStatus) { published <- statuses }}
+	s := &ShellService{BuiltinComponentTimeout: 20 * time.Millisecond, OnBuiltinComponentsChanged: func(_ string, statuses []BuiltinComponentStatus) { published <- statuses }}
 	workspace := context.WithValue(context.Background(), application.WindowKey, application.Window(namedWindow{name: "workspace"}))
 	if err := s.BeginBuiltinComponents(workspace); err != nil {
 		t.Fatal(err)

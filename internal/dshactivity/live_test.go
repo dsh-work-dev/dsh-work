@@ -42,7 +42,8 @@ func TestLiveDSHWorkerActivity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	patch, err := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development").Prepare("live-test", map[string]map[string]string{
+	overlay := hostplugins.NewOverlay(filepath.Join(home, "host-plugins"), "development")
+	patch, err := overlay.Prepare("live-test", map[string]map[string]string{
 		"shell": {"generation": "live-test"}, "pet": petConfig,
 	})
 	if err != nil {
@@ -73,12 +74,24 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if err = os.WriteFile(fixture, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(patch)
-	var patches []map[string]any
-	_ = json.Unmarshal(data, &patches)
-	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(fixture), "/")}).String(), "config": map[string]string{"token": b.token, "cwd": home}}}})
-	data, _ = json.Marshal(patches)
-	if err = os.WriteFile(patch, data, 0600); err != nil {
+	addFixture := func(path string) error {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var patches []map[string]any
+		if err := json.Unmarshal(data, &patches); err != nil {
+			return err
+		}
+		fixtureURL := (&url.URL{Scheme: "file", Path: "/" + strings.TrimPrefix(filepath.ToSlash(fixture), "/")}).String()
+		patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "pet-live-fixture", "name": fixtureURL, "config": map[string]string{"token": b.token, "cwd": home}}}})
+		data, err = json.Marshal(patches)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, data, 0600)
+	}
+	if err = addFixture(patch); err != nil {
 		t.Fatal(err)
 	}
 	port := 1
@@ -86,7 +99,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer carrier.Close()
+	defer func() { _ = carrier.Close() }()
 	patch, err = carrier.Prepare(filepath.Join(home, "carrier"), cli, patch)
 	if err != nil {
 		t.Fatal(err)
@@ -261,13 +274,13 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		s := b.Snapshot()
-		if len(s.Sessions) > 0 && s.Sessions[0].State == "ready" {
-			t.Log("Actual DSH Session turn/start → turn/end → authenticated Host activity: ready/unread")
+		if len(s.Sessions) > 0 && s.Sessions[0].State == "idle" && s.Sessions[0].Outcome == "completed" {
+			t.Log("Actual DSH Session turn/start → turn/end → authenticated Host activity: completed/idle")
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if len(b.Snapshot().Sessions) == 0 || b.Snapshot().Sessions[0].State != "ready" {
+	if len(b.Snapshot().Sessions) == 0 || b.Snapshot().Sessions[0].State != "idle" || b.Snapshot().Sessions[0].Outcome != "completed" {
 		t.Fatal("completion did not reach pet")
 	}
 	request := func(action string) {
@@ -314,12 +327,26 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	for _, outcome := range []string{"aborted", "blocked", "error", "max-tokens", "interrupted"} {
 		request(outcome)
-		waitFor(func(a Activity) bool { return a.Outcome == outcome && a.State != "ready" })
+		waitFor(func(a Activity) bool { return a.Outcome == outcome })
 	}
 	request("completed")
-	waitFor(func(a Activity) bool { return a.State == "ready" })
-	if err := b.Open(ctx, "pet-live-fixture"); err != nil {
+	waitFor(func(a Activity) bool { return a.Outcome == "completed" && a.State != "running" })
+	openCommands := make(chan map[string]string, 1)
+	b.SetNavigation(func(_, window string) (string, error) { return window, nil }, func(window, name string, ttl time.Duration, data any) {
+		if window == "workspace" && name == "dsh-open-session" && ttl == 15*time.Second {
+			openCommands <- data.(map[string]string)
+		}
+	})
+	if err := b.Open(ctx, "pet-live-fixture", "workspace"); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case command := <-openCommands:
+		if command["sessionId"] != "pet-live-fixture" {
+			t.Fatalf("open command = %#v", command)
+		}
+	case <-ctx.Done():
+		t.Fatal("open command not sent")
 	}
 	clientSync := func(input any) map[string]any {
 		body, _ := json.Marshal(input)
@@ -339,12 +366,9 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		}
 		return data
 	}
-	navigation, ok := clientSync(map[string]any{})["navigation"].(map[string]any)
-	if !ok || navigation["sessionId"] != "pet-live-fixture" {
-		t.Fatal("navigation not delivered to DSH client")
+	if response := clientSync(map[string]any{"sessions": []any{}}); len(response) != 0 {
+		t.Fatalf("pet activity client response = %#v", response)
 	}
-	clientSync(map[string]any{"ack": navigation["id"], "current": "pet-live-fixture", "visible": true})
-	waitFor(func(a Activity) bool { return !a.Unread && a.State == "idle" })
 	// Raw webServer routes must explicitly retain DSH's cookie trust fence.
 	anonymous, _ := http.NewRequestWithContext(ctx, "POST", origin+"/__dshwork/pet-activity-client", strings.NewReader(`{}`))
 	anonymous.Header.Set("Origin", origin)
@@ -364,6 +388,30 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 		t.Fatalf("stop first DSH Worker: %v", err)
 	}
 	<-done
+	petConfig, err = b.Begin("live-test-restarted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err = overlay.Prepare("live-test-restarted", map[string]map[string]string{
+		"shell": {"generation": "live-test-restarted"}, "pet": petConfig,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := addFixture(patch); err != nil {
+		t.Fatal(err)
+	}
+	if err := carrier.Close(); err != nil {
+		t.Fatalf("close first Worker IPC transport: %v", err)
+	}
+	carrier, err = workeripc.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch, err = carrier.Prepare(filepath.Join(home, "carrier-restarted"), cli, patch)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cmd = exec.CommandContext(ctx, "node", cli, "--profile", "web", "--patch", patch, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open")
 	cmd.Dir = home
 	cmd.Env = append(os.Environ(), "DSH_HOME="+filepath.Join(home, "dsh-home"))

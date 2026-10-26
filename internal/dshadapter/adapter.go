@@ -168,7 +168,7 @@ func (a *Adapter) discoverPath(ctx context.Context, path string, env map[string]
 	if semver.Compare("v"+version, "v"+MinimumVersion) < 0 {
 		return Runtime{}, lifecycle.Failure{
 			Code:      lifecycle.ErrorDSHUnsupportedVersion,
-			Summary:   "This DSH version is older than dsh-work supports.",
+			Summary:   "This DSH version is older than DSH Work supports.",
 			Retryable: false,
 			Detail:    "DSH " + version + " is older than the minimum " + MinimumVersion + ".",
 		}

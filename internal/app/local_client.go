@@ -9,3 +9,13 @@ type localClientSurfaceKey struct{}
 func LocalClientContext(ctx context.Context, surface string) context.Context {
 	return context.WithValue(ctx, localClientSurfaceKey{}, surface)
 }
+
+// LocalClientSurface returns the trusted surface assigned at the native IPC
+// edge. It does not inspect page-controlled message fields.
+func LocalClientSurface(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	surface, _ := ctx.Value(localClientSurfaceKey{}).(string)
+	return surface
+}

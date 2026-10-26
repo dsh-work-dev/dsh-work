@@ -41,7 +41,7 @@ func run(args []string, stdout, stderr io.Writer) (runErr error) {
 	if maintenance.InstallerInProgress() && !(args[0] == "stop" && hasFlag(args[1:], "--wait")) {
 		return lifecycle.Failure{
 			Code:          lifecycle.ErrorManagerOperationBusy,
-			Summary:       "dsh-work is being updated.",
+			Summary:       "DSH Work is being updated.",
 			Retryable:     true,
 			CorrelationID: lifecycle.NewCorrelationID(),
 			Detail:        "Wait for the installer to finish, then retry the command.",
@@ -109,7 +109,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		_ = managerLock.Close()
 		return nil, nil, lifecycle.Failure{
 			Code:          lifecycle.ErrorManagerOperationBusy,
-			Summary:       "dsh-work storage is changing.",
+			Summary:       "DSH Work storage is changing.",
 			Retryable:     true,
 			CorrelationID: lifecycle.NewCorrelationID(),
 			Detail:        "Retry the command after the desktop finishes moving its storage location.",
@@ -144,7 +144,7 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		ProfileCatalog:    dsh,
 		AppProfile:        dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
-			ID: "dsh-work", Name: "dsh-work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
+			ID: "dsh-work", Name: "DSH Work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
 		Runtimes:          fixtureRuntimes,
 		DefaultRunContext: defaultRunContext,
@@ -462,7 +462,7 @@ func executableExists(path string) bool {
 }
 
 func printUsage(stdout io.Writer) {
-	fmt.Fprintln(stdout, "dsh-work connects to the running background, or locks offline state when stopped.")
+	fmt.Fprintln(stdout, "DSH Work connects to the running background, or locks offline state when stopped.")
 	fmt.Fprintf(stdout, "Version: %s\n", version.String())
 	fmt.Fprintln(stdout, "Online commands: status, update status|check|download|install, restart, stop [--wait].")
 	fmt.Fprintln(stdout, "")

@@ -15,6 +15,7 @@ type Class string
 const (
 	ClassActionRequired Class = "action-required"
 	ClassCompleted      Class = "completed"
+	ClassDSHInteraction Class = "dsh-interaction"
 	ClassError          Class = "error"
 	ClassLifecycle      Class = "lifecycle"
 )
@@ -22,6 +23,7 @@ const (
 var classPreferenceRules = map[Class]func(Preferences) bool{
 	ClassActionRequired: func(preferences Preferences) bool { return preferences.InteractionRequired },
 	ClassCompleted:      func(preferences Preferences) bool { return preferences.Completed },
+	ClassDSHInteraction: func(preferences Preferences) bool { return preferences.InteractionRequired },
 	ClassError:          func(preferences Preferences) bool { return preferences.Errors },
 	ClassLifecycle:      func(preferences Preferences) bool { return preferences.Lifecycle },
 }
@@ -89,6 +91,8 @@ type Event struct {
 	Title                     string
 	Body                      string
 	Target                    string
+	CategoryID                string
+	Data                      map[string]string
 	AllowWhenWorkspaceFocused bool
 }
 
@@ -114,9 +118,12 @@ type Router struct {
 	isActive    func() bool
 	onFailure   DeliveryFailureHandler
 	seen        map[string]struct{}
+	seenOrder   [maxRememberedEvents]string
+	seenNext    int
+	seenCount   int
 }
 
-const maxRememberedEvents = 512
+const maxRememberedEvents = 1024
 
 func NewRouter(delivery Delivery, isActive func() bool) *Router {
 	return &Router{
@@ -167,17 +174,10 @@ func (r *Router) Publish(ctx context.Context, event Event) error {
 	}
 
 	r.mu.Lock()
-	if _, exists := r.seen[event.ID]; exists {
+	if !r.rememberEventLocked(event.ID) {
 		r.mu.Unlock()
 		return nil
 	}
-	if len(r.seen) >= maxRememberedEvents {
-		// Fail closed rather than evicting an old ID. Eviction would allow a
-		// replayed logical event to create a second desktop delivery.
-		r.mu.Unlock()
-		return nil
-	}
-	r.seen[event.ID] = struct{}{}
 	allowed := r.preferences.Allows(event.Class)
 	isActive := r.isActive
 	delivery := r.delivery
@@ -187,7 +187,7 @@ func (r *Router) Publish(ctx context.Context, event Event) error {
 		return nil
 	}
 	if isActive != nil && isActive() &&
-		(!event.AllowWhenWorkspaceFocused || (event.Class != ClassActionRequired && event.Class != ClassError)) {
+		(!event.AllowWhenWorkspaceFocused || (event.Class != ClassActionRequired && event.Class != ClassDSHInteraction && event.Class != ClassError)) {
 		return nil
 	}
 	if delivery == nil {
@@ -203,15 +203,45 @@ func (r *Router) Publish(ctx context.Context, event Event) error {
 	return err
 }
 
+func (r *Router) rememberEventLocked(id string) bool {
+	if _, exists := r.seen[id]; exists {
+		return false
+	}
+	slot := 0
+	if r.seenCount < maxRememberedEvents {
+		slot = (r.seenNext + r.seenCount) % maxRememberedEvents
+		r.seenCount++
+	} else {
+		slot = r.seenNext
+		delete(r.seen, r.seenOrder[slot])
+		r.seenNext = (r.seenNext + 1) % maxRememberedEvents
+	}
+	r.seenOrder[slot] = id
+	r.seen[id] = struct{}{}
+	return true
+}
+
 func normalizeEvent(event Event) (Event, error) {
 	event.ID = strings.TrimSpace(event.ID)
 	event.Title = cleanText(event.Title, 120)
 	event.Body = cleanText(event.Body, 400)
 	event.Target = cleanText(event.Target, 80)
-	if event.ID == "" || utf8.RuneCountInString(event.ID) > 160 || event.Class == "" || event.Title == "" || !validClass(event.Class) {
+	if event.ID == "" || utf8.RuneCountInString(event.ID) > 160 || event.Class == "" || event.Title == "" || !validClass(event.Class) || !validData(event.Data) {
 		return Event{}, ErrInvalidEvent
 	}
 	return event, nil
+}
+
+func validData(data map[string]string) bool {
+	if len(data) > 8 {
+		return false
+	}
+	for _, value := range data {
+		if utf8.RuneCountInString(value) > 256 {
+			return false
+		}
+	}
+	return true
 }
 
 func validClass(class Class) bool {

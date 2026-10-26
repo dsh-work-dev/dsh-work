@@ -66,7 +66,7 @@ func (s *SettingsService) SetAutomaticRuntimeRollback(ctx context.Context, enabl
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -85,7 +85,7 @@ func (s *SettingsService) SetVerboseLogging(ctx context.Context, enabled bool) (
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -104,11 +104,23 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
 	return s.manager.Snapshot(ctx)
+}
+
+func (s *SettingsService) AcknowledgeBackgroundNotice(ctx context.Context) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.AcknowledgeBackgroundNotice(ctx)
 }
 
 func (s *SettingsService) SetLocale(ctx context.Context, locale string) (settings.Values, error) {
@@ -116,7 +128,7 @@ func (s *SettingsService) SetLocale(ctx context.Context, locale string) (setting
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -135,7 +147,7 @@ func (s *SettingsService) SetNotificationPreference(ctx context.Context, key str
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -156,7 +168,7 @@ func (s *SettingsService) SetAppearance(ctx context.Context, theme string, mode 
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -178,7 +190,7 @@ func (s *SettingsService) SetUpdateChannel(ctx context.Context, channel string) 
 		return settings.Values{}, settingsUnavailable()
 	}
 	if !isTrustedWindow(ctx, "workspace") {
-		return settings.Values{}, trustedSurfaceRequired("dsh-work settings are available only in dsh-work Settings.")
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
 	}
 	ctx, cancel := managerContext(ctx)
 	defer cancel()
@@ -218,9 +230,9 @@ func (s *SettingsService) SetUpdateChannel(ctx context.Context, channel string) 
 func settingsUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorSettingsUnavailable,
-		Summary:       "dsh-work settings are unavailable.",
+		Summary:       "DSH Work settings are unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
-		Detail:        "Restart dsh-work and try again.",
+		Detail:        "Restart DSH Work and try again.",
 	}
 }

@@ -84,7 +84,12 @@ try {
     New-Item -ItemType Directory -Path $generatedRoot -Force | Out-Null
     & wails3 update build-assets -name dsh-work -binaryname dsh-work -config build/config.yml -dir $generatedRoot -silent
     if ($LASTEXITCODE -ne 0) { throw "wails3 update build-assets failed with exit code $LASTEXITCODE" }
-    Copy-Item -LiteralPath (Join-Path $generatedRoot 'windows/nsis/wails_tools.nsh') -Destination (Join-Path $nsisDir 'wails_tools.nsh') -Force
+    $nsisToolsPath = Join-Path $nsisDir 'wails_tools.nsh'
+    Copy-Item -LiteralPath (Join-Path $generatedRoot 'windows/nsis/wails_tools.nsh') -Destination $nsisToolsPath -Force
+    $nsisTools = Get-Content -LiteralPath $nsisToolsPath -Raw
+    $nsisTools = $nsisTools.Replace('"DisplayName" "${INFO_PRODUCTNAME}"', '"DisplayName" "${DSH_WORK_DISPLAY_NAME}"')
+    $nsisTools = $nsisTools.Replace('"Publisher" "${INFO_COMPANYNAME}"', '"Publisher" "${DSH_WORK_DISPLAY_NAME}"')
+    [System.IO.File]::WriteAllText($nsisToolsPath, $nsisTools)
     & wails3 generate webview2bootstrapper -dir $nsisDir
     if ($LASTEXITCODE -ne 0) { throw "WebView2 bootstrapper generation failed with exit code $LASTEXITCODE" }
 

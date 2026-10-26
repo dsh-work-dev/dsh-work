@@ -12,7 +12,7 @@ export interface Activity {
     "running": boolean;
     "outcome": string;
     "summary": string;
-    "unread": boolean;
+    "liveCompletion": boolean;
     "updatedAt": number;
     "interaction"?: Interaction | null;
     "goal"?: Goal | null;

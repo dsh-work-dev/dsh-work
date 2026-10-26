@@ -16,6 +16,12 @@ import type * as app$0 from "../../../../local/dsh-work/internal/app/models.js";
 import type * as daemon$0 from "../../../../local/dsh-work/internal/daemon/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import type * as desktopapp$0 from "../../../../local/dsh-work/internal/desktopapp/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import type * as desktopclient$0 from "../../../../local/dsh-work/internal/desktopclient/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import type * as lifecycle$0 from "../../../../local/dsh-work/internal/lifecycle/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -26,6 +32,10 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "acquisition": acquisition$0.OperationStatus;
             "appearance": settings$0.Appearance;
+            "background-stopping": boolean;
+            "builtin-components": desktopclient$0.BuiltinComponentStatus[] | null;
+            "dsh-answer-approval": desktopapp$0.AnswerApprovalCommand;
+            "dsh-open-session": desktopapp$0.OpenSessionCommand;
             "lifecycle": lifecycle$0.Status;
             "locale": settings$0.Locale;
             "notification-failure": boolean;
@@ -33,6 +43,7 @@ declare module "@wailsio/runtime" {
             "settings-close": {};
             "settings-section": string;
             "update-state": daemon$0.UpdateSnapshot;
+            "worker-url": string;
         }
     }
 }

@@ -69,6 +69,10 @@ export function RemoveFaultPlugin(packageName: string): $CancellablePromise<life
     return $Call.ByID(3791506921, packageName);
 }
 
+export function ReportWebBoot(generation: string, detail: string): $CancellablePromise<void> {
+    return $Call.ByID(2229971542, generation, detail);
+}
+
 export function Restart(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(3758916889);
 }
@@ -81,6 +85,6 @@ export function StartWithWorkspace(request: workspacecontext$0.Request): $Cancel
     return $Call.ByID(666163587, request);
 }
 
-export function Update(action: string): $CancellablePromise<void> {
-    return $Call.ByID(1523896463, action);
+export function UpdateAction(action: daemon$0.UpdateAction): $CancellablePromise<daemon$0.UpdateSnapshot> {
+    return $Call.ByID(2119408981, action);
 }

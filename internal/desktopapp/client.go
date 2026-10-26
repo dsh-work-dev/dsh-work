@@ -20,6 +20,7 @@ import (
 	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/desktopprobe"
+	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
@@ -48,13 +49,16 @@ func webviewPermissions(surface string) map[application.PermissionType]applicati
 }
 
 func runDesktopClient(identity string, resources Resources) error {
-	section := ""
+	section, requestedWindow := "", "workspace"
 	if len(os.Args) > 2 && os.Args[1] == "--ui" {
 		section = os.Args[2]
+		if len(os.Args) > 4 && os.Args[3] == "--window" {
+			requestedWindow = os.Args[4]
+		}
 	}
 	existing := daemon.NewClient(identity + "-ui")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	err := existing.JSON(ctx, "/open", section, nil)
+	err := existing.JSON(ctx, "/open", uiOpenRequest{Section: section, Window: requestedWindow}, nil)
 	cancel()
 	existing.Close()
 	if err == nil {
@@ -88,12 +92,22 @@ func runDesktopClient(identity string, resources Resources) error {
 	manager := remoteManagerSnapshot{client: client}
 	var desktop *application.App
 	var workspace application.Window
+	windows := make(map[string]application.Window)
 	var windowMu sync.Mutex
 	var mu sync.Mutex
 	var protocolMu sync.Mutex
 	applicationStarted, protocolOpenPending := false, false
 	var applicationShuttingDown atomic.Bool
 	current := state
+	focusReports := newFocusReporter(func(surface string, focused bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := client.Call(ctx, "WindowService", "SetFocus", surface, []any{focused}, nil); err != nil {
+			attrs := append([]any{"surface", surface, "focused", focused}, logging.ErrAttrs(err, "")...)
+			logging.Module(logging.ModIPC).Warn("window focus report failed", attrs...)
+		}
+	})
+	defer focusReports.close()
 	// One frameless workbench window hosts the trusted shell document; DSH runs
 	// in a frame on its own authority (docs/architecture.md, Windows and menus).
 	var workerSurface *desktopbridge.Surface
@@ -112,10 +126,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			ReportBoot: func(ctx context.Context, generation, detail string) error {
 				ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 				defer cancel()
-				return client.JSON(ctx, "/web-boot", struct {
-					Generation string
-					Detail     string
-				}{generation, detail}, nil)
+				return client.Call(ctx, "HostService", "ReportWebBoot", "workspace", []any{generation, detail}, nil)
 			},
 			SaveSessionExport: func(ctx context.Context, filename string, write func(io.Writer) error) (bool, error) {
 				return nativeui.SaveSessionLogArchive(desktop, filename, write)
@@ -125,25 +136,67 @@ func runDesktopClient(identity string, resources Resources) error {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
-	var open func(string)
-	shellService := &desktopclient.ShellService{Open: func(section string) { open(section) }, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
+	var open func(section, window string) string
+	commands := newCommandDispatcher(func(name string, data any) {
+		if desktop != nil {
+			desktop.Event.Emit(name, data)
+		}
+	}, func(name string, err error) {
+		attrs := append([]any{"command", name}, logging.ErrAttrs(err, "")...)
+		logging.Module(logging.ModIPC).Warn("window command delivery failed", attrs...)
+	}, func(window, command string) {
+		logging.Module(logging.ModIPC).Warn("pet command queue full; dropped oldest command", "window", window, "command", command)
+	})
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section, "workspace") }, ReportOpenedSession: func(ctx context.Context, surface, id, reportedError string) error {
+		return client.Call(ctx, "DSHPageService", "ReportSessionOpened", surface, []any{id, reportedError}, nil)
+	}, ReportPendingInteraction: func(ctx context.Context, surface string, interaction dshinteraction.Report) error {
+		return client.Call(ctx, "DSHPageService", "ReportInteraction", surface, []any{interaction}, nil)
+	}, ResetPageInteractions: func(ctx context.Context, surface, instance string) error {
+		return client.Call(ctx, "DSHPageService", "ResetInteractions", surface, []any{instance}, nil)
+	}, Pet: func(ctx context.Context, visible *bool) (app.PetPanel, error) {
+		window, ok := ctx.Value(application.WindowKey).(application.Window)
+		if !ok || window == nil {
+			return app.PetPanel{}, fmt.Errorf("trusted desktop window required")
+		}
 		var panel app.PetPanel
 		if visible == nil {
-			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", "workspace", nil, &panel)
+			return panel, client.Call(ctx, "PetSettingsService", "GetPetPanel", window.Name(), nil, &panel)
 		}
-		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", "workspace", []any{*visible}, &panel)
+		return panel, client.Call(ctx, "PetSettingsService", "SetPetVisibility", window.Name(), []any{*visible}, &panel)
 	}, SaveZoomLevel: func(ctx context.Context, zoom float64) error {
-		return client.JSON(ctx, "/zoom", zoom, nil)
-	}, OnBuiltinComponentsChanged: func(statuses []desktopclient.BuiltinComponentStatus) {
-		if desktop != nil {
-			desktop.Event.Emit("builtin-components", statuses)
+		window, ok := ctx.Value(application.WindowKey).(application.Window)
+		if !ok || window == nil {
+			return fmt.Errorf("trusted desktop window required")
+		}
+		return client.Call(ctx, "WindowService", "SaveZoom", window.Name(), []any{zoom}, nil)
+	}, OnBuiltinComponentsChanged: func(surface string, statuses []desktopclient.BuiltinComponentStatus) {
+		ready := false
+		for _, component := range statuses {
+			if component.ID == "pet" && component.State == "loaded" {
+				ready = true
+				break
+			}
+		}
+		commands.setPetReady(surface, ready)
+		windowMu.Lock()
+		window := windows[surface]
+		windowMu.Unlock()
+		if window != nil {
+			if window.EmitEvent("builtin-components", statuses) {
+				logging.Module(logging.ModIPC).Warn("built-in component state delivery was cancelled")
+			}
 		}
 	}}
-	desktop = application.New(application.Options{Name: "dsh-work", Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
+	hostService := &desktopclient.HostService{Client: client, LocalUpdateState: func() daemon.UpdateSnapshot {
+		mu.Lock()
+		defer mu.Unlock()
+		return current.Update
+	}}
+	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
-			application.NewService(&desktopclient.HostService{Client: client}), application.NewService(&desktopclient.ManagerService{Client: client}),
+			application.NewService(hostService), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
 			application.NewService(&desktopclient.DiagnosticsService{Client: client}),
 			application.NewService(shellService),
@@ -162,29 +215,104 @@ func runDesktopClient(identity string, resources Resources) error {
 		flush := nativeui.RememberWindowGeometry(window, options, store)
 		desktop.OnShutdown(flush)
 	}
-	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
+	var backgroundNoticeBusy atomic.Bool
+	hideWindow := func(name string, window application.Window) {
 		windowMu.Lock()
-		defer windowMu.Unlock()
-		if workspace == nil || window.ID() != workspace.ID() {
+		currentWindow := windows[name]
+		if applicationShuttingDown.Load() || currentWindow == nil || currentWindow.ID() != window.ID() {
+			windowMu.Unlock()
 			return
-		}
-		if !applicationShuttingDown.Load() {
-			event.Cancel()
 		}
 		ledger.SetVisible(name, false)
-		if applicationShuttingDown.Load() {
-			return
-		}
+		windowMu.Unlock()
+		focusReports.enqueue(name, false)
 		// Keep the native window and WebView alive while hidden.
 		window.Hide()
 	}
+	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
+		windowMu.Lock()
+		currentWindow := windows[name]
+		if currentWindow == nil || window.ID() != currentWindow.ID() {
+			windowMu.Unlock()
+			return
+		}
+		shuttingDown := applicationShuttingDown.Load()
+		if !shuttingDown {
+			event.Cancel()
+		}
+		if shuttingDown {
+			ledger.SetVisible(name, false)
+			delete(windows, name)
+			if workspace != nil && window.ID() == workspace.ID() {
+				workspace = nil
+			}
+			windowMu.Unlock()
+			commands.removeWindow(name)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			if err := client.Call(ctx, "WindowService", "Closed", name, nil, nil); err != nil {
+				logging.Module(logging.ModIPC).Warn("window close report failed", logging.ErrAttrs(err, "")...)
+			}
+			cancel()
+			return
+		}
+		windowMu.Unlock()
+		mu.Lock()
+		preferences := current.Preferences
+		mu.Unlock()
+		if !preferences.BackgroundNoticeAcknowledged {
+			if !backgroundNoticeBusy.CompareAndSwap(false, true) {
+				return
+			}
+			go func() {
+				message := nativeui.LabelsFor(preferences.Locale).BackgroundNotice
+				var once sync.Once
+				complete := func() {
+					once.Do(func() {
+						go func() {
+							defer backgroundNoticeBusy.Store(false)
+							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+							var values settings.Values
+							if err := client.Call(ctx, "SettingsService", "AcknowledgeBackgroundNotice", name, nil, &values); err != nil {
+								logging.Module(logging.ModSettings).Warn("background notice acknowledgement failed", logging.ErrAttrs(err, "")...)
+							} else {
+								mu.Lock()
+								current.Preferences.BackgroundNoticeAcknowledged = values.BackgroundNoticeAcknowledged
+								mu.Unlock()
+							}
+							hideWindow(name, window)
+						}()
+					})
+				}
+				showBackgroundNotice(desktop.Dialog.Info().SetTitle("DSH Work").SetMessage(message).AttachToWindow(window), complete)
+			}()
+			return
+		}
+		hideWindow(name, window)
+	}
+	registerWorkspaceWindow := func(name string, window application.Window) {
+		// createWorkspace is called with windowMu held so the window pointer and
+		// its routing entry become visible as one operation.
+		windows[name] = window
+		commands.addWindow(name, wailsCommandWindow{window: window})
+		window.OnWindowEvent(events.Common.WindowFocus, func(*application.WindowEvent) { focusReports.enqueue(name, true) })
+		window.OnWindowEvent(events.Common.WindowLostFocus, func(*application.WindowEvent) { focusReports.enqueue(name, false) })
+		if window.IsFocused() {
+			focusReports.enqueue(name, true)
+		}
+	}
 	newOptions := func(name string) application.WebviewWindowOptions {
-		options := application.WebviewWindowOptions{Name: name, Title: "dsh-work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
+		options := application.WebviewWindowOptions{Name: name, Title: "DSH Work", Width: 1180, Height: 760, MinWidth: 720, MinHeight: 480, URL: "/", InitialPosition: application.WindowCentered, Hidden: true, BackgroundColour: application.NewRGB(31, 37, 44)}
 		options.Permissions = webviewPermissions(name)
 		mu.Lock()
 		options.Windows.Theme = hostWindowTheme(current.Preferences.Appearance.Mode)
 		mu.Unlock()
-		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences})
+		return nativeui.RestoreWindowGeometry(options, remoteGeometry{client: client, values: state.Preferences}, func() []*application.Screen {
+			if desktop == nil || desktop.Screen == nil {
+				return nil
+			}
+			return desktop.Screen.GetAll()
+		})
 	}
 	createWorkspace := func(section string) {
 		if workspace != nil {
@@ -201,36 +329,45 @@ func runDesktopClient(identity string, resources Resources) error {
 		workOptions.Zoom = state.Preferences.WorkspaceZoom
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
+		registerWorkspaceWindow("workspace", workspaceWindow)
 		remember(workspace, workOptions)
 		if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 			desktopprobe.InstallClient(desktop, workspace, report)
 		}
 		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", workspaceWindow, event) })
 	}
-	open = func(section string) {
+	open = func(section, requestedWindow string) string {
 		if section == "__boot" {
-			return
+			return "workspace"
 		}
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
-			return
+			return ""
 		}
 		if maintenance.InstallerInProgress() {
 			maintenance.ShowInstallerBusy()
-			return
+			return ""
 		}
 		windowMu.Lock()
 		defer windowMu.Unlock()
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
-			return
+			return ""
 		}
-		created := workspace == nil
+		windowName := requestedWindow
+		if _, exists := windows[windowName]; !exists {
+			windowName = "workspace"
+		}
+		created := windowName == "workspace" && workspace == nil
 		if created {
 			createWorkspace(section)
 		}
-		if !ledger.TryShow("workspace") {
-			return
+		target := windows[windowName]
+		if target == nil {
+			return ""
 		}
-		workspace.Show().Focus()
+		if !ledger.TryShow(windowName) {
+			return ""
+		}
+		target.Show().Focus()
 		// A new workbench reads its section from the URL; a live one switches panels.
 		if !created {
 			if section == "" {
@@ -239,6 +376,7 @@ func runDesktopClient(identity string, resources Resources) error {
 				desktop.Event.Emit("settings-section", section)
 			}
 		}
+		return windowName
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if !isWorkspaceOpenURL(event.Context().URL()) {
@@ -251,7 +389,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		protocolMu.Unlock()
 		if started {
-			open("")
+			open("", "workspace")
 		}
 	})
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
@@ -267,12 +405,13 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 	}, desktop.Quit))
 	defer ipcServer.Close()
-	pollCtx, stopPoll := context.WithCancel(context.Background())
-	defer stopPoll()
+	streamCtx, stopStream := context.WithCancel(context.Background())
+	defer stopStream()
 	desktop.OnShutdown(func() {
 		applicationShuttingDown.Store(true)
 		ledger.BeginQuit()
-		stopPoll()
+		stopStream()
+		focusReports.close()
 	})
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		protocolMu.Lock()
@@ -289,75 +428,27 @@ func runDesktopClient(identity string, resources Resources) error {
 		windowMu.Lock()
 		createWorkspace(launchSection)
 		windowMu.Unlock()
-		open(section)
+		open(section, requestedWindow)
 		if openRequestedByProtocol {
-			open("")
+			open("", "workspace")
 		}
 		go func() { _ = ipcServer.Serve(listener) }()
 		go func() {
-			cursor := state.Cursor
-			lastURL := state.URL
-			lastStatus, _ := json.Marshal(state.Status)
-			lastUpdate := state.Update
-			desktop.Event.Emit("update-state", state.Update)
-			ticker := time.NewTicker(350 * time.Millisecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-pollCtx.Done():
-					return
-				case <-ticker.C:
-					var next daemon.Snapshot
-					ctx, cancel := context.WithTimeout(pollCtx, 3*time.Second)
-					windowMu.Lock()
-					focused := workspace != nil && workspace.IsFocused()
-					windowMu.Unlock()
-					err := client.JSON(ctx, "/snapshot", struct {
-						Cursor  uint64
-						Focused bool
-					}{cursor, focused}, &next)
-					cancel()
-					if err != nil {
-						if pollCtx.Err() == nil {
-							logging.Module(logging.ModIPC).Warn("daemon connection lost", logging.ErrAttrs(err, "")...)
-							desktop.Quit()
-						}
-						return
-					}
-					if next.PID != state.PID || next.Protocol != daemon.Protocol {
-						desktop.Quit()
-						return
-					}
-					mu.Lock()
-					current = next
-					mu.Unlock()
-					logging.SetVerbose(next.Preferences.VerboseLogging)
-					cursor = next.Cursor
-					for _, event := range next.Events {
-						if err := replayEvent(event, func(e *application.CustomEvent) error {
-							desktop.Event.EmitEvent(e)
-							return nil
-						}); err != nil {
-							attrs := append([]any{"event", event.Name}, logging.ErrAttrs(err, "")...)
-							logging.Module(logging.ModIPC).Warn("background event decode failed", attrs...)
-						}
-					}
-					statusJSON, _ := json.Marshal(next.Status)
-					if string(statusJSON) != string(lastStatus) {
-						desktop.Event.Emit("lifecycle", next.Status)
-						lastStatus = statusJSON
-					}
-					if next.URL != lastURL {
-						// The shell swaps its frame; the native window stays put.
-						desktop.Event.Emit("worker-url", shellWorkerURL(next.URL))
-						lastURL = next.URL
-					}
-					if next.Update != lastUpdate {
-						desktop.Event.Emit("update-state", next.Update)
-						lastUpdate = next.Update
-					}
+			body, err := client.Stream(streamCtx, "/stream")
+			if err == nil {
+				processor := &streamProcessor{
+					current:   &current,
+					currentMu: &mu,
+					emitEvent: func(name string, data any) { desktop.Event.Emit(name, data) },
+					commands:  commands,
 				}
+				err = consumeDaemonStream(streamCtx, body, nil, processor.handle)
 			}
+			if streamCtx.Err() != nil || applicationShuttingDown.Load() {
+				return
+			}
+			logging.Module(logging.ModIPC).Warn("daemon stream ended", logging.ErrAttrs(err, "")...)
+			desktop.Quit()
 		}()
 	})
 	return desktop.Run()
@@ -462,8 +553,5 @@ func (s remoteGeometry) Snapshot(context.Context) (settings.Values, error) { ret
 func (s remoteGeometry) SetWindowGeometry(ctx context.Context, window string, g settings.WindowGeometry) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	return s.client.JSON(ctx, "/geometry", struct {
-		Window   string
-		Geometry settings.WindowGeometry
-	}{window, g}, nil)
+	return s.client.Call(ctx, "WindowService", "SaveGeometry", window, []any{g}, nil)
 }

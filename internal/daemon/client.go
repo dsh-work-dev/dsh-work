@@ -48,6 +48,25 @@ func (c *Client) JSON(ctx context.Context, path string, input, output any) error
 	return json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(output)
 }
 
+// Stream opens a server-driven IPC response. The caller's context, rather
+// than a per-request timeout, owns the lifetime of the returned body.
+func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, Origin+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connect background stream: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("background stream: %s", body)
+	}
+	return resp.Body, nil
+}
+
 type Call struct {
 	Service, Method, Surface string
 	Args                     []json.RawMessage

@@ -21,7 +21,7 @@ import {subscribeLocale, t} from "./i18n";
 import {icon} from "./ui/icons";
 import type {RuntimePreparation} from "./lifecycle";
 import type {Status as HostLifecycleStatus} from "../bindings/github.com/local/dsh-work/internal/lifecycle/models";
-import {UpdateInstallMode, UpdatePhase, type UpdateSnapshot} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
+import {UpdateAction, UpdateInstallMode, UpdatePhase, type UpdateSnapshot} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 import {UpdateChannel} from "../bindings/github.com/local/dsh-work/internal/settings";
 
 export type ManagerProfileRef = ProfileRef;
@@ -457,13 +457,13 @@ export function mountManager() {
     }
   }
 
-  function updateActionForState(): "check" | "download" | "install" | undefined {
+  function updateActionForState(): UpdateAction | undefined {
     switch (updateState.phase) {
-      case UpdatePhase.UpdateAvailable: return "download";
-      case UpdatePhase.UpdateReady: return "install";
+      case UpdatePhase.UpdateAvailable: return UpdateAction.UpdateActionDownload;
+      case UpdatePhase.UpdateReady: return UpdateAction.UpdateActionInstall;
       case UpdatePhase.UpdateIdle:
       case UpdatePhase.UpdateUpToDate:
-      case UpdatePhase.UpdateError: return "check";
+      case UpdatePhase.UpdateError: return UpdateAction.UpdateActionCheck;
       default: return undefined;
     }
   }
@@ -537,8 +537,8 @@ export function mountManager() {
     }
     aboutUpdateAction.textContent = state.phase === UpdatePhase.UpdateReady && state.installMode === UpdateInstallMode.UpdateInstallInstaller
       ? t("about.update.openInstaller")
-      : action === "download" ? t("about.update.download")
-        : action === "install" ? t("about.update.install")
+        : action === UpdateAction.UpdateActionDownload ? t("about.update.download")
+        : action === UpdateAction.UpdateActionInstall ? t("about.update.install")
           : state.phase === UpdatePhase.UpdateError ? t("about.update.retry") : t("about.update.check");
     aboutUpdateAction.disabled = action === undefined || state.phase === UpdatePhase.UpdateUnconfigured || state.phase === UpdatePhase.UpdateChecking || state.phase === UpdatePhase.UpdateDownloading || state.phase === UpdatePhase.UpdateVerifying || state.phase === UpdatePhase.UpdateInstalling;
   }
@@ -548,8 +548,7 @@ export function mountManager() {
     if (!action || aboutUpdateAction.disabled) return;
     aboutUpdateAction.disabled = true;
     try {
-      await HostService.Update(action);
-      updateState = await HostService.GetUpdateState() as unknown as DesktopUpdateState;
+      updateState = await HostService.UpdateAction(action) as unknown as DesktopUpdateState;
       renderUpdate();
     } catch (error) {
       console.error("Could not start application update", error);
@@ -638,7 +637,7 @@ export function mountManager() {
   loadState.append(loadMessage, loadRetry);
   document.querySelector(".page-head")!.after(loadState);
   loadRetry.addEventListener("click", () => void refresh());
-  document.getElementById("about-version")!.textContent = `dsh-work ${__APP_VERSION__}`;
+  document.getElementById("about-version")!.textContent = `DSH Work ${__APP_VERSION__}`;
   aboutUpdateAction.addEventListener("click", () => void performUpdateAction());
   document.getElementById("about-copy")!.addEventListener("click", () => void (async () => {
     const result = document.getElementById("about-result")!;
@@ -1773,7 +1772,7 @@ export function mountManager() {
     const log = operationLogs[kind];
     if (status.log) {
       log.append(status.operationId, status.log);
-      return;
+      if (status.step === "output") return;
     }
     const preparation = acquisitionPreparation(status);
     let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);

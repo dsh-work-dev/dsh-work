@@ -102,7 +102,7 @@ type PetSettingsService struct {
 	activity           *dshactivity.Bridge
 	activityRuntime    *pet.Runtime
 	activityKey        string
-	openWorkspace      func()
+	focusedWindow      func() string
 	mu                 sync.Mutex
 
 	manager             *settings.Manager
@@ -136,11 +136,11 @@ type PetSettingsService struct {
 }
 
 // SetPetActivity connects Host-owned conversation observation and navigation.
-func SetPetActivity(s *PetSettingsService, bridge *dshactivity.Bridge, openWorkspace func()) {
+func SetPetActivity(s *PetSettingsService, bridge *dshactivity.Bridge, focusedWindow func() string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activity = bridge
-	s.openWorkspace = openWorkspace
+	s.focusedWindow = focusedWindow
 }
 
 // SetPetHostMaintenance connects the native Host composition boundary to the
@@ -159,7 +159,7 @@ func SetPetHostMaintenance(s *PetSettingsService, busy func() bool) {
 func (s *PetSettingsService) OpenPetActivity(ctx context.Context, sessionID string) error {
 	s.mu.Lock()
 	operation, cancel, err := s.beginOperationForSurface(ctx, "pet")
-	bridge, open := s.activity, s.openWorkspace
+	bridge, focusedWindow := s.activity, s.focusedWindow
 	s.mu.Unlock()
 	if err != nil {
 		return err
@@ -168,13 +168,11 @@ func (s *PetSettingsService) OpenPetActivity(ctx context.Context, sessionID stri
 	if bridge == nil {
 		return errors.New("conversation activity is unavailable")
 	}
-	if err := bridge.Open(operation, sessionID); err != nil {
-		return err
+	window := "workspace"
+	if focusedWindow != nil {
+		window = focusedWindow()
 	}
-	if open != nil {
-		open()
-	}
-	return nil
+	return bridge.Open(operation, sessionID, window)
 }
 
 // AttachPetOverlayHooks connects the app service to the independently-owned
@@ -1177,7 +1175,7 @@ func (s *PetSettingsService) beginOperationForSurface(ctx context.Context, surfa
 		trusted = func(candidate context.Context) bool { return isTrustedWindow(candidate, "pet") }
 	}
 	if trusted == nil || !trusted(ctx) {
-		return nil, nil, trustedSurfaceRequired("dsh-work Pet controls are available only on a trusted surface.")
+		return nil, nil, trustedSurfaceRequired("DSH Work Pet controls are available only on a trusted surface.")
 	}
 	if s.closed {
 		return nil, nil, petSettingsUnavailable()
@@ -1596,17 +1594,17 @@ func stringPointer(value string) *string {
 func petSettingsUnavailable() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorSettingsUnavailable,
-		Summary:       "dsh-work Pet settings are unavailable.",
+		Summary:       "DSH Work Pet settings are unavailable.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
-		Detail:        "Restart dsh-work and try again.",
+		Detail:        "Restart DSH Work and try again.",
 	}
 }
 
 func petMaintenanceBusy() error {
 	return lifecycle.Failure{
 		Code:          lifecycle.ErrorManagerOperationBusy,
-		Summary:       "dsh-work is being updated.",
+		Summary:       "DSH Work is being updated.",
 		Retryable:     true,
 		CorrelationID: lifecycle.NewCorrelationID(),
 		Detail:        "Wait for the installer to finish, then retry the Pet action.",

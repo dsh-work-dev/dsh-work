@@ -202,13 +202,14 @@ type Values struct {
 	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
 	Version       int     `json:"version"`
 
-	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
-	Locale                   Locale                    `json:"locale"`
-	Notifications            notifications.Preferences `json:"notifications"`
-	Pet                      PetPreference             `json:"pet"`
-	Appearance               Appearance                `json:"appearance"`
-	UpdateChannel            UpdateChannel             `json:"updateChannel"`
-	VerboseLogging           bool                      `json:"verboseLogging"`
+	AutomaticRuntimeRollback     bool                      `json:"automaticRuntimeRollback"`
+	Locale                       Locale                    `json:"locale"`
+	Notifications                notifications.Preferences `json:"notifications"`
+	Pet                          PetPreference             `json:"pet"`
+	Appearance                   Appearance                `json:"appearance"`
+	UpdateChannel                UpdateChannel             `json:"updateChannel"`
+	VerboseLogging               bool                      `json:"verboseLogging"`
+	BackgroundNoticeAcknowledged bool                      `json:"backgroundNoticeAcknowledged"`
 }
 
 func DefaultValues() Values {
@@ -232,15 +233,14 @@ func (m *Manager) SetUpdateChannel(ctx context.Context, channel UpdateChannel) (
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Update channel is not supported", "choose stable, beta or nightly")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.UpdateChannel = channel
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool) (Values, error) {
@@ -248,15 +248,14 @@ func (m *Manager) SetAutomaticRuntimeRollback(ctx context.Context, enabled bool)
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.AutomaticRuntimeRollback = enabled
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return next, nil
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetVerboseLogging(ctx context.Context, enabled bool) (Values, error) {
@@ -264,15 +263,14 @@ func (m *Manager) SetVerboseLogging(ctx context.Context, enabled bool) (Values, 
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.VerboseLogging = enabled
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return next, nil
+	return m.commit(next), nil
 }
 
 // Store owns persistence mechanics. Settings policy remains independent of
@@ -299,10 +297,11 @@ type Config struct {
 // Manager owns the small global preference set and serializes writes. This is
 // intentionally a versioned app-settings Module, not a second DSH catalog.
 type Manager struct {
-	mu     sync.RWMutex
-	path   string
-	store  Store
-	values Values
+	mu       sync.RWMutex
+	path     string
+	store    Store
+	values   Values
+	onChange func(Values)
 
 	// appearanceImportPending marks settings saved before dsh-work owned its
 	// appearance; see ImportAppearanceMode.
@@ -325,7 +324,7 @@ func New(config Config) (*Manager, error) {
 	importPending := false
 	if loaded != nil {
 		if loaded.Version != stateVersion {
-			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
+			return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 		}
 		values = *loaded
 		values.Pet = normalizePetPreference(values.Pet)
@@ -347,23 +346,57 @@ func (m *Manager) Snapshot(ctx context.Context) (Values, error) {
 	return cloneValues(m.values), nil
 }
 
+// OnChange installs the state publisher. Commit invokes it only after
+// releasing the settings lock, so subscribers can safely request a snapshot.
+func (m *Manager) OnChange(fn func(Values)) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
+}
+
+// commit stores a completed update and notifies the publisher outside the
+// lock. Callers enter with m.mu held and do not unlock after this method.
+func (m *Manager) commit(next Values) Values {
+	m.values = cloneValues(next)
+	callback := m.onChange
+	committed := cloneValues(next)
+	m.mu.Unlock()
+	if callback != nil {
+		callback(committed)
+	}
+	return cloneValues(next)
+}
+
 func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) {
 	if err := contextError(ctx); err != nil {
 		return Values{}, err
 	}
 	if !locale.Valid() {
-		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Language is not supported", "choose one of the available dsh-work languages")
+		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Language is not supported", "choose one of the available DSH Work languages")
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.Locale = locale
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
+}
+
+func (m *Manager) AcknowledgeBackgroundNotice(ctx context.Context) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	next := m.values
+	next.BackgroundNoticeAcknowledged = true
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
+		return Values{}, err
+	}
+	return m.commit(next), nil
 }
 
 func (m *Manager) SetNotificationPreference(ctx context.Context, key notifications.PreferenceKey, enabled bool) (Values, error) {
@@ -371,19 +404,19 @@ func (m *Manager) SetNotificationPreference(ctx context.Context, key notificatio
 		return Values{}, err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	nextPreferences, ok := m.values.Notifications.Set(key, enabled)
 	if !ok {
+		m.mu.Unlock()
 		return Values{}, failure(lifecycle.ErrorSettingsStateInvalid, "Notification preference is invalid", "choose a supported notification setting")
 	}
 	next := m.values
 	next.Notifications = nextPreferences
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 // SetPetPreference persists the complete Pet preference as one atomic settings
@@ -395,15 +428,14 @@ func (m *Manager) SetPetPreference(ctx context.Context, preference PetPreference
 	}
 	preference = normalizePetPreference(preference)
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	next := m.values
 	next.Pet = preference
 	next.Version = stateVersion
 	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
 		return Values{}, err
 	}
-	m.values = next
-	return cloneValues(next), nil
+	return m.commit(next), nil
 }
 
 func cloneValues(values Values) Values {
@@ -424,25 +456,27 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be read", "the persisted settings are unavailable")
+		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be read", "the persisted settings are unavailable")
 	}
 	var raw struct {
 		WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
 		WorkspaceZoom   float64        `json:"workspaceZoom"`
 		Version         int            `json:"version"`
 
-		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
-		Locale                   *Locale         `json:"locale"`
-		Notifications            json.RawMessage `json:"notifications"`
-		Pet                      json.RawMessage `json:"pet"`
-		Appearance               *Appearance     `json:"appearance"`
-		UpdateChannel            *UpdateChannel  `json:"updateChannel"`
-		VerboseLogging           *bool           `json:"verboseLogging"`
+		AutomaticRuntimeRollback     *bool           `json:"automaticRuntimeRollback"`
+		Locale                       *Locale         `json:"locale"`
+		Notifications                json.RawMessage `json:"notifications"`
+		Pet                          json.RawMessage `json:"pet"`
+		Appearance                   *Appearance     `json:"appearance"`
+		UpdateChannel                *UpdateChannel  `json:"updateChannel"`
+		VerboseLogging               *bool           `json:"verboseLogging"`
+		BackgroundNoticeAcknowledged bool            `json:"backgroundNoticeAcknowledged"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
-		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings are invalid", "the persisted settings use an unsupported format")
+		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
+	values.BackgroundNoticeAcknowledged = raw.BackgroundNoticeAcknowledged
 	values.WorkspaceWindow = raw.WorkspaceWindow
 	if validZoom(raw.WorkspaceZoom) {
 		values.WorkspaceZoom = raw.WorkspaceZoom
@@ -512,15 +546,15 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 	values.Version = stateVersion
 	data, err := json.MarshalIndent(values, "", "  ")
 	if err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be encoded", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be encoded", "the setting change could not be persisted")
 	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings directory could not be created", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings directory could not be created", "the setting change could not be persisted")
 	}
 	temporary, err := os.CreateTemp(directory, ".settings-*.tmp")
 	if err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be written", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be written", "the setting change could not be persisted")
 	}
 	temporaryPath := temporary.Name()
 	keepTemporary := false
@@ -531,16 +565,16 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be secured", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be secured", "the setting change could not be persisted")
 	}
 	if _, err := temporary.Write(data); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be written", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be written", "the setting change could not be persisted")
 	}
 	if err := temporary.Sync(); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be flushed", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be flushed", "the setting change could not be persisted")
 	}
 	if err := temporary.Close(); err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be closed", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be closed", "the setting change could not be persisted")
 	}
 	var replaceErr error
 	if s.Replacer != nil {
@@ -549,7 +583,7 @@ func (s FileStore) Save(ctx context.Context, path string, values Values) error {
 		replaceErr = os.Rename(temporaryPath, path)
 	}
 	if err := replaceErr; err != nil {
-		return failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings could not be replaced", "the setting change could not be persisted")
+		return failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings could not be replaced", "the setting change could not be persisted")
 	}
 	keepTemporary = true
 	return nil
@@ -562,7 +596,7 @@ func normalizePath(path string) (string, error) {
 		if err != nil || paths.Root == "" {
 			root, err = os.Getwd()
 			if err != nil {
-				return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is unavailable", "the settings directory could not be determined")
+				return "", failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings path is unavailable", "the settings directory could not be determined")
 			}
 			root = filepath.Join(root, ".dsh-work")
 		} else {
@@ -572,7 +606,7 @@ func normalizePath(path string) (string, error) {
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", failure(lifecycle.ErrorSettingsStateInvalid, "dsh-work settings path is invalid", "the settings path could not be normalized")
+		return "", failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings path is invalid", "the settings path could not be normalized")
 	}
 	return filepath.Clean(absPath), nil
 }

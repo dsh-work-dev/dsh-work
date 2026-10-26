@@ -566,7 +566,7 @@ func (m *Manager) InstallRuntimeWithProgress(ctx context.Context, version string
 	belowMinimum := dshVersionBelow(version, minimumVersion)
 	m.mu.RUnlock()
 	if belowMinimum {
-		return Snapshot{}, failure(lifecycle.ErrorDSHUnsupportedVersion, "This DSH version is older than dsh-work supports", "choose DSH "+minimumVersion+" or newer")
+		return Snapshot{}, failure(lifecycle.ErrorDSHUnsupportedVersion, "This DSH version is older than DSH Work supports", "choose DSH "+minimumVersion+" or newer")
 	}
 	if !m.catalogContainsDSHVersion(version) {
 		return Snapshot{}, failure(lifecycle.ErrorDSHUnsupportedVersion, "The requested DSH runtime version is not in the refreshed catalog", "refresh releases and choose an exact published version")
@@ -722,7 +722,7 @@ func (m *Manager) finalizeRuntimeCandidate(ctx context.Context, installer Runtim
 }
 
 func candidateCleanupFailure(original error) error {
-	const detail = "The runtime candidate could not be cleaned up; retry the operation after closing dsh-work."
+	const detail = "The runtime candidate could not be cleaned up; retry the operation after closing DSH Work."
 	var failureValue lifecycle.Failure
 	if errors.As(original, &failureValue) {
 		failureValue.Detail = detail
@@ -864,7 +864,7 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 	}
 	if m.config.DataDirectories[index].Ownership == DataDirectoryOwnershipDSHWork {
 		m.mu.RUnlock()
-		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the dsh-work DSH data directory cannot be removed here", "remove the data directory through an explicit data-management flow")
+		return Snapshot{}, failure(lifecycle.ErrorProfileInUse, "the DSH Work DSH data directory cannot be removed here", "remove the data directory through an explicit data-management flow")
 	}
 	dataDirectories := cloneDataDirectories(m.config.DataDirectories)
 	state := m.stateLocked()
@@ -1691,7 +1691,7 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 		return ResolvedLaunch{}, failureWithMeta(lifecycle.ErrorDSHRuntimeNotFound, "DSH runtime was not found", "the selected runtime is not in the catalog", true, false)
 	}
 	if !runtimeInstallationPresent(runtime) {
-		return ResolvedLaunch{}, failureWithMeta(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before starting dsh-work", true, false)
+		return ResolvedLaunch{}, failureWithMeta(lifecycle.ErrorDSHRuntimeNotFound, "The selected DSH runtime is not available", "verify or install the selected runtime before starting DSH Work", true, false)
 	}
 	observed, err := verifyRuntimeWithEnvironment(ctx, config.RuntimeVerifier, runtime, resolvedNode.ChildEnvironment)
 	if err != nil {
@@ -1735,7 +1735,7 @@ func (m *Manager) SetConfigured(ctx context.Context, target RunContext) (Snapsho
 	busy := m.switching || m.current != nil
 	m.mu.RUnlock()
 	if busy {
-		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is already active", "use the managed context switch while dsh-work is running")
+		return Snapshot{}, failure(lifecycle.ErrorManagerOperationBusy, "the Run context is already active", "use the managed context switch while DSH Work is running")
 	}
 	resolved, err := m.ResolveLaunch(ctx, LaunchRequest{
 		RuntimeID: target.RuntimeID,
@@ -1922,7 +1922,7 @@ func normalizeConfig(config Config) (Config, error) {
 	if config.StatePath == "" {
 		paths, err := storagepaths.DefaultDirectories()
 		if err != nil || paths.Root == "" {
-			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "dsh-work could not resolve its per-user application data directory")
+			return Config{}, failure(lifecycle.ErrorManagerStateInvalid, "manager state directory is unavailable", "DSH Work could not resolve its per-user application data directory")
 		}
 		config.StatePath = filepath.Join(paths.Root, "manager.json")
 	}

@@ -11,7 +11,7 @@ import (
 	"errors"
 )
 
-type HostService struct { Client *daemon.Client; Local *app.HostService }
+type HostService struct { Client *daemon.Client; Local *app.HostService; LocalUpdateState func() daemon.UpdateSnapshot }
 
 func (s *HostService) GetStatus(ctx context.Context) lifecycle.Status {
 	if s.Local != nil { return s.Local.GetStatus(ctx) }
@@ -51,6 +51,12 @@ func (s *HostService) GetStartupOutput(ctx context.Context) app.StartupOutput {
 	err := call(ctx, s.Client, "HostService", "GetStartupOutput", []any{}, &value)
 	if err != nil { panic(err) }
 	return value
+}
+
+func (s *HostService) ReportWebBoot(ctx context.Context, generation, detail string) error {
+	if s.Local != nil { return s.Local.ReportWebBoot(ctx, generation, detail) }
+	err := call(ctx, s.Client, "HostService", "ReportWebBoot", []any{generation, detail}, nil)
+	return err
 }
 
 func (s *HostService) OpenRuntimeSettings(ctx context.Context) error {
@@ -113,23 +119,21 @@ func (s *HostService) DisableFaultPlugins(ctx context.Context) (lifecycle.Status
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
-	if s.Local != nil { return s.Local.Quit(ctx) }
+	if s.Local != nil { return s.Local.RequestQuit(ctx) }
 	var value lifecycle.Status
-	err := call(ctx, s.Client, "HostService", "Quit", []any{}, &value)
+	err := call(ctx, s.Client, "HostService", "RequestQuit", []any{}, &value)
 	if err != nil { panic(err) }
 	return value
 }
 
 func (s *HostService) GetUpdateState(ctx context.Context) (daemon.UpdateSnapshot, error) {
-	if s.Local != nil { return daemon.UpdateSnapshot{Phase: daemon.UpdateIdle}, nil }
-	if s.Client == nil { return daemon.UpdateSnapshot{}, errors.New("background client unavailable") }
-	var snapshot daemon.Snapshot
-	err := callJSON(ctx, s.Client, "/snapshot", struct { Cursor uint64 `json:"cursor"` }{}, &snapshot)
-	return snapshot.Update, err
+	if s.LocalUpdateState == nil { return daemon.UpdateSnapshot{}, errors.New("update state unavailable") }
+	return s.LocalUpdateState(), nil
 }
 
-func (s *HostService) Update(ctx context.Context, action string) error {
-	if s.Local != nil { return errors.New("background update controls unavailable") }
-	if s.Client == nil { return errors.New("background client unavailable") }
-	return callJSON(ctx, s.Client, "/update/action", struct { Action string `json:"action"` }{Action: action}, nil)
+func (s *HostService) UpdateAction(ctx context.Context, action daemon.UpdateAction) (daemon.UpdateSnapshot, error) {
+	if s.Local != nil { return daemon.UpdateSnapshot{}, errors.New("background update controls unavailable") }
+	var value daemon.UpdateSnapshot
+	err := call(ctx, s.Client, "HostService", "UpdateAction", []any{action}, &value)
+	return value, err
 }
