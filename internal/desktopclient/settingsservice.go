@@ -31,6 +31,13 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 	return value, err
 }
 
+func (s *SettingsService) AcknowledgeBackgroundNotice(ctx context.Context) (settings.Values, error) {
+	if s.Local != nil { return s.Local.AcknowledgeBackgroundNotice(ctx) }
+	var value settings.Values
+	err := call(ctx, s.Client, "SettingsService", "AcknowledgeBackgroundNotice", []any{}, &value)
+	return value, err
+}
+
 func (s *SettingsService) SetLocale(ctx context.Context, locale string) (settings.Values, error) {
 	if s.Local != nil { return s.Local.SetLocale(ctx, locale) }
 	var value settings.Values

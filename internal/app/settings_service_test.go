@@ -33,6 +33,30 @@ func TestSetAppearanceRequiresTheWorkbenchAndPublishesAfterSave(t *testing.T) {
 	}
 }
 
+func TestAcknowledgeBackgroundNoticeRequiresTheWorkbenchAndPublishesSavedValues(t *testing.T) {
+	values := settings.DefaultValues()
+	store := &petServiceStore{values: &values}
+	manager := newPetServiceManagerWithStore(t, store, values)
+	service := NewSettingsService(manager, nil, nil)
+	published := 0
+	manager.OnChange(func(values settings.Values) {
+		if !values.BackgroundNoticeAcknowledged || store.saves != 1 {
+			t.Error("acknowledgement published before persistence")
+		}
+		published++
+	})
+	if _, err := service.AcknowledgeBackgroundNotice(LocalClientContext(context.Background(), "worker")); err == nil {
+		t.Fatal("untrusted caller acknowledged notice")
+	}
+	if store.saves != 0 || published != 0 {
+		t.Fatal("untrusted call changed settings")
+	}
+	got, err := service.AcknowledgeBackgroundNotice(LocalClientContext(context.Background(), "workspace"))
+	if err != nil || !got.BackgroundNoticeAcknowledged || !store.values.BackgroundNoticeAcknowledged || published != 1 {
+		t.Fatalf("got=%+v published=%d err=%v", got, published, err)
+	}
+}
+
 func TestSetVerboseLoggingRequiresTheWorkbenchAndNotifies(t *testing.T) {
 	manager := newPetServiceManager(t, settings.DefaultValues())
 	service := NewSettingsService(manager, nil, nil)

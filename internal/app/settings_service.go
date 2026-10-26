@@ -111,6 +111,18 @@ func (s *SettingsService) GetSettings(ctx context.Context) (settings.Values, err
 	return s.manager.Snapshot(ctx)
 }
 
+func (s *SettingsService) AcknowledgeBackgroundNotice(ctx context.Context) (settings.Values, error) {
+	if s == nil || s.manager == nil {
+		return settings.Values{}, settingsUnavailable()
+	}
+	if !isTrustedWindow(ctx, "workspace") {
+		return settings.Values{}, trustedSurfaceRequired("DSH Work settings are available only in DSH Work Settings.")
+	}
+	ctx, cancel := managerContext(ctx)
+	defer cancel()
+	return s.manager.AcknowledgeBackgroundNotice(ctx)
+}
+
 func (s *SettingsService) SetLocale(ctx context.Context, locale string) (settings.Values, error) {
 	if s == nil || s.manager == nil {
 		return settings.Values{}, settingsUnavailable()

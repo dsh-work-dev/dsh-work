@@ -215,6 +215,20 @@ func runDesktopClient(identity string, resources Resources) error {
 		flush := nativeui.RememberWindowGeometry(window, options, store)
 		desktop.OnShutdown(flush)
 	}
+	var backgroundNoticeBusy atomic.Bool
+	hideWindow := func(name string, window application.Window) {
+		windowMu.Lock()
+		currentWindow := windows[name]
+		if applicationShuttingDown.Load() || currentWindow == nil || currentWindow.ID() != window.ID() {
+			windowMu.Unlock()
+			return
+		}
+		ledger.SetVisible(name, false)
+		windowMu.Unlock()
+		focusReports.enqueue(name, false)
+		// Keep the native window and WebView alive while hidden.
+		window.Hide()
+	}
 	closeWindow := func(name string, window application.Window, event *application.WindowEvent) {
 		windowMu.Lock()
 		currentWindow := windows[name]
@@ -226,8 +240,8 @@ func runDesktopClient(identity string, resources Resources) error {
 		if !shuttingDown {
 			event.Cancel()
 		}
-		ledger.SetVisible(name, false)
 		if shuttingDown {
+			ledger.SetVisible(name, false)
 			delete(windows, name)
 			if workspace != nil && window.ID() == workspace.ID() {
 				workspace = nil
@@ -242,9 +256,39 @@ func runDesktopClient(identity string, resources Resources) error {
 			return
 		}
 		windowMu.Unlock()
-		focusReports.enqueue(name, false)
-		// Keep the native window and WebView alive while hidden.
-		window.Hide()
+		mu.Lock()
+		preferences := current.Preferences
+		mu.Unlock()
+		if !preferences.BackgroundNoticeAcknowledged {
+			if !backgroundNoticeBusy.CompareAndSwap(false, true) {
+				return
+			}
+			go func() {
+				message := nativeui.LabelsFor(preferences.Locale).BackgroundNotice
+				var once sync.Once
+				complete := func() {
+					once.Do(func() {
+						go func() {
+							defer backgroundNoticeBusy.Store(false)
+							ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							defer cancel()
+							var values settings.Values
+							if err := client.Call(ctx, "SettingsService", "AcknowledgeBackgroundNotice", name, nil, &values); err != nil {
+								logging.Module(logging.ModSettings).Warn("background notice acknowledgement failed", logging.ErrAttrs(err, "")...)
+							} else {
+								mu.Lock()
+								current.Preferences.BackgroundNoticeAcknowledged = values.BackgroundNoticeAcknowledged
+								mu.Unlock()
+							}
+							hideWindow(name, window)
+						}()
+					})
+				}
+				showBackgroundNotice(desktop.Dialog.Info().SetTitle("DSH Work").SetMessage(message).AttachToWindow(window), complete)
+			}()
+			return
+		}
+		hideWindow(name, window)
 	}
 	registerWorkspaceWindow := func(name string, window application.Window) {
 		// createWorkspace is called with windowMu held so the window pointer and

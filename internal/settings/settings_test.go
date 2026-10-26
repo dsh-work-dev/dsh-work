@@ -22,6 +22,38 @@ func TestSettingsDefaults(t *testing.T) {
 	if !values.AutomaticRuntimeRollback || values.Version != stateVersion || values.Locale != DefaultLocale {
 		t.Fatalf("default values = %#v, want version %d, locale=%q", values, stateVersion, DefaultLocale)
 	}
+	if values.BackgroundNoticeAcknowledged {
+		t.Fatal("background notice must default to unacknowledged")
+	}
+}
+
+func TestBackgroundNoticeAcknowledgementPersistsWithoutSchemaChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version":2,"locale":"zh-CN"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := manager.Snapshot(context.Background())
+	if err != nil || initial.BackgroundNoticeAcknowledged {
+		t.Fatalf("initial=%+v err=%v", initial, err)
+	}
+	var published []Values
+	manager.OnChange(func(values Values) { published = append(published, values) })
+	saved, err := manager.AcknowledgeBackgroundNotice(context.Background())
+	if err != nil || !saved.BackgroundNoticeAcknowledged || saved.Version != initial.Version || len(published) != 1 || !published[0].BackgroundNoticeAcknowledged {
+		t.Fatalf("saved=%+v published=%+v err=%v", saved, published, err)
+	}
+	reloaded, err := New(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := reloaded.Snapshot(context.Background())
+	if err != nil || !values.BackgroundNoticeAcknowledged {
+		t.Fatalf("reloaded=%+v err=%v", values, err)
+	}
 }
 
 func TestSettingsVersionOneMigratesAutomaticRuntimeRollbackToEnabled(t *testing.T) {

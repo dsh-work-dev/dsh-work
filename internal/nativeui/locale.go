@@ -9,6 +9,7 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
+	BackgroundNotice      string
 	QuitQuestion          string
 	QuitActiveTasks       string
 	QuitScheduledTasks    string
@@ -53,6 +54,7 @@ type NotificationCopy struct {
 
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
+		BackgroundNotice:      "Running tasks will continue. You can reopen the window from the system tray.",
 		QuitQuestion:          "Quit DSH Work?",
 		QuitActiveTasks:       "Running tasks will be interrupted.",
 		QuitScheduledTasks:    "Scheduled tasks will not run while the app is closed.",
@@ -104,6 +106,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleChinese: {
+		BackgroundNotice:      "正在运行的任务不会中断，可在系统托盘中重新打开窗口",
 		QuitQuestion:          "退出 DSH Work？",
 		QuitActiveTasks:       "当前正在运行的任务将会中断",
 		QuitScheduledTasks:    "应用关闭期间，定时任务不会运行",
@@ -155,6 +158,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleJapanese: {
+		BackgroundNotice:      "実行中のタスクは続行されます。システムトレイからウィンドウを再び開けます。",
 		QuitQuestion:          "DSH Work を終了しますか？",
 		QuitActiveTasks:       "実行中のタスクは中断されます。",
 		QuitScheduledTasks:    "アプリを閉じている間、スケジュールされたタスクは実行されません。",

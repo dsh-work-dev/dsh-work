@@ -202,13 +202,14 @@ type Values struct {
 	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
 	Version       int     `json:"version"`
 
-	AutomaticRuntimeRollback bool                      `json:"automaticRuntimeRollback"`
-	Locale                   Locale                    `json:"locale"`
-	Notifications            notifications.Preferences `json:"notifications"`
-	Pet                      PetPreference             `json:"pet"`
-	Appearance               Appearance                `json:"appearance"`
-	UpdateChannel            UpdateChannel             `json:"updateChannel"`
-	VerboseLogging           bool                      `json:"verboseLogging"`
+	AutomaticRuntimeRollback     bool                      `json:"automaticRuntimeRollback"`
+	Locale                       Locale                    `json:"locale"`
+	Notifications                notifications.Preferences `json:"notifications"`
+	Pet                          PetPreference             `json:"pet"`
+	Appearance                   Appearance                `json:"appearance"`
+	UpdateChannel                UpdateChannel             `json:"updateChannel"`
+	VerboseLogging               bool                      `json:"verboseLogging"`
+	BackgroundNoticeAcknowledged bool                      `json:"backgroundNoticeAcknowledged"`
 }
 
 func DefaultValues() Values {
@@ -384,6 +385,20 @@ func (m *Manager) SetLocale(ctx context.Context, locale Locale) (Values, error) 
 	return m.commit(next), nil
 }
 
+func (m *Manager) AcknowledgeBackgroundNotice(ctx context.Context) (Values, error) {
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	next := m.values
+	next.BackgroundNoticeAcknowledged = true
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
+		return Values{}, err
+	}
+	return m.commit(next), nil
+}
+
 func (m *Manager) SetNotificationPreference(ctx context.Context, key notifications.PreferenceKey, enabled bool) (Values, error) {
 	if err := contextError(ctx); err != nil {
 		return Values{}, err
@@ -448,18 +463,20 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		WorkspaceZoom   float64        `json:"workspaceZoom"`
 		Version         int            `json:"version"`
 
-		AutomaticRuntimeRollback *bool           `json:"automaticRuntimeRollback"`
-		Locale                   *Locale         `json:"locale"`
-		Notifications            json.RawMessage `json:"notifications"`
-		Pet                      json.RawMessage `json:"pet"`
-		Appearance               *Appearance     `json:"appearance"`
-		UpdateChannel            *UpdateChannel  `json:"updateChannel"`
-		VerboseLogging           *bool           `json:"verboseLogging"`
+		AutomaticRuntimeRollback     *bool           `json:"automaticRuntimeRollback"`
+		Locale                       *Locale         `json:"locale"`
+		Notifications                json.RawMessage `json:"notifications"`
+		Pet                          json.RawMessage `json:"pet"`
+		Appearance                   *Appearance     `json:"appearance"`
+		UpdateChannel                *UpdateChannel  `json:"updateChannel"`
+		VerboseLogging               *bool           `json:"verboseLogging"`
+		BackgroundNoticeAcknowledged bool            `json:"backgroundNoticeAcknowledged"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
+	values.BackgroundNoticeAcknowledged = raw.BackgroundNoticeAcknowledged
 	values.WorkspaceWindow = raw.WorkspaceWindow
 	if validZoom(raw.WorkspaceZoom) {
 		values.WorkspaceZoom = raw.WorkspaceZoom
