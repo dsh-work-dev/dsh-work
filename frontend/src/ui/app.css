@@ -9,6 +9,7 @@
 @import "./shell.css";
 /* Themes last: their tokens are scoped by data-theme-id and their ornaments
    must win over component defaults. */
+@import "./themes/dsh.css";
 @import "./themes/chatgpt.css";
 @import "./themes/claude.css";
 @import "./themes/github.css";

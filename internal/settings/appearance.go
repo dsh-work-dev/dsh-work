@@ -11,6 +11,7 @@ import (
 type ThemeID string
 
 const (
+	ThemeDSH        ThemeID = "dsh"
 	ThemeMonochrome ThemeID = "monochrome"
 	ThemeChatGPT    ThemeID = "chatgpt"
 	ThemeClaude     ThemeID = "claude"
@@ -27,12 +28,13 @@ const (
 	ThemeBrutal     ThemeID = "brutal"
 	ThemeBauhaus    ThemeID = "bauhaus"
 	ThemeDeco       ThemeID = "deco"
-	DefaultTheme            = ThemeMonochrome
+	DefaultTheme            = ThemeDSH
 )
 
 // themeModes lists the light/dark modes each built-in theme supports. A theme
 // may support only one; "system" is allowed when it supports both.
 var themeModes = map[ThemeID][]AppearanceMode{
+	ThemeDSH:        {AppearanceSystem, AppearanceLight, AppearanceDark},
 	ThemeMonochrome: {AppearanceSystem, AppearanceLight, AppearanceDark},
 	ThemeChatGPT:    {AppearanceSystem, AppearanceLight, AppearanceDark},
 	ThemeClaude:     {AppearanceSystem, AppearanceLight, AppearanceDark},

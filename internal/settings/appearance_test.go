@@ -13,8 +13,11 @@ func TestAppearancePersistsAndRejectsUnsupportedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := manager.Snapshot(context.Background()); got.Appearance != DefaultAppearance() {
-		t.Fatalf("default appearance = %#v", got.Appearance)
+	if got, _ := manager.Snapshot(context.Background()); got.Appearance != (Appearance{Theme: DefaultTheme, Mode: AppearanceSystem}) || DefaultTheme != ThemeDSH {
+		t.Fatalf("default appearance = %#v with default theme %q, want dsh + system", got.Appearance, DefaultTheme)
+	}
+	if _, err := manager.SetAppearance(context.Background(), Appearance{Theme: ThemeDSH, Mode: AppearanceDark}); err != nil {
+		t.Fatalf("set DSH dark appearance: %v", err)
 	}
 	if _, err := manager.SetAppearance(context.Background(), Appearance{Theme: ThemeMonochrome, Mode: AppearanceDark}); err != nil {
 		t.Fatal(err)

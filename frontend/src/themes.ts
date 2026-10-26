@@ -10,6 +10,7 @@ export interface ThemeInfo {
 }
 
 export const themes: readonly ThemeInfo[] = [
+  {id: "dsh", label: "theme.dsh", modes: ["system", "light", "dark"]},
   {id: "monochrome", label: "theme.monochrome", modes: ["system", "light", "dark"]},
   {id: "chatgpt", label: "theme.chatgpt", modes: ["system", "light", "dark"]},
   {id: "claude", label: "theme.claude", modes: ["system", "light", "dark"]},

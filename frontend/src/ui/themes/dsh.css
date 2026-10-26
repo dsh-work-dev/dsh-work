@@ -1,0 +1,185 @@
+/*
+ * dsh-work's surfaces follow DSH 0.2.1-rc.3, measured in the native WebView:
+ * buttons #f5f6f7 / #353638; inputs white / #232324; provider cards
+ * #f5f6f7 / #353638; switches use a near-black track; dialogs use
+ * #fff / #2c2c2e, a 28px radius and DSH's light elevation ring.
+ * Keep DSH's blue only on its semantic accent and business badges. The light
+ * accent is slightly deepened from #4176e6 to #3e69e1 for 4.5:1 text contrast.
+ */
+:root[data-theme-id="dsh"] {
+  color-scheme: light;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei", monospace;
+  --heading-weight: 500;
+  --fs-title: 24px;
+  --fs-section: 14px;
+
+  --canvas: #ffffff;
+  --text: #0f1115;
+  --muted: #61666b;
+  --line: #0000001a;
+  --ink: #0f1115;
+  --on-ink: #ffffff;
+  --hover: #f1f3f5;
+  --wash: #f5f6f7;
+  --selection: #ebeef2;
+  --selection-fg: #0f1115;
+  --focus: #3e69e1;
+  --backdrop: #0000003d;
+  --divider: #0000001a;
+
+  --accent: #3e69e1;
+  --accent-strong: #3e69e1;
+  --on-accent: #ffffff;
+  --outline: #00000029;
+  --failed: #e20f13;
+  --on-failed: #ffffff;
+  --danger: #e20f13;
+  --button-danger-hover-bg: #ffffff;
+
+  --nav-bg: #f9fafb;
+  --nav-hover-bg: #f1f3f5;
+  --nav-active-bg: #ebeef2;
+  --nav-active-fg: var(--text);
+  --nav-active-bar: 0;
+  --nav-active-weight: 400;
+  --nav-border: 0;
+  --nav-item-h: 36px;
+  --nav-pad-x: 12px;
+  --nav-list-gap: 2px;
+  --nav-fg: var(--text);
+  --nav-weight: 400;
+  --nav-heading-fg: var(--muted);
+  --nav-heading-size: 14px;
+  --nav-heading-weight: 400;
+  --title-weight: 500;
+  --row-title-weight: 400;
+
+  --group-bg: #f5f6f7;
+  --group-border: 0 solid transparent;
+  --group-shadow: none;
+  --group-foot-bg: #f5f6f7;
+  --row-divider: 0.5px solid #0000001a;
+  --row-min-h: 56px;
+  --row-pad-y: 12px;
+  --row-pad-x: 16px;
+
+  --dialog-bg: #ffffff;
+  --dialog-radius: 28px;
+  --dialog-border: 0 solid transparent;
+  --dialog-shadow: 0 0 0 0.5px #00000029, 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
+  --popup-bg: #ffffff;
+  --popup-radius: 16px;
+  --popup-shadow: var(--dialog-shadow);
+
+  --radius-control: 12px;
+  --radius-button: 12px;
+  --radius-select: 12px;
+  --radius-group: 16px;
+  --radius-tag: 999px;
+  --radius-switch: 999px;
+  --radius-marker: 50%;
+  --control-h: 36px;
+  --input-h: 32px;
+  --button-pad-x: 14px;
+  --button-border: 0 solid transparent;
+  --button-bg: #f5f6f7;
+  --button-fg: #0f1115;
+  --button-hover-bg: #ebeef2;
+  --button-shadow: none;
+  --primary-bg: #0f1115;
+  --primary-fg: #ffffff;
+  --primary-border: 0 solid transparent;
+  --primary-shadow: none;
+  --primary-hover-bg: #353638;
+  --input-border: 0.5px solid #00000029;
+  --input-bg: #ffffff;
+  --select-bg: #f5f6f7;
+  --select-border: 0 solid transparent;
+  --select-hover-bg: #ebeef2;
+  --notice-border: 0.5px solid #e20f1359;
+  --notice-icon: #e20f13;
+  --tag-bg: transparent;
+  --switch-off-bg: #e5e5e5;
+  --switch-off-thumb: #ffffff;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --switch-w: 36px;
+  --switch-h: 20px;
+  --switch-gap: 2px;
+  --switch-on-bg: #0f1115;
+  --switch-on-thumb: #ffffff;
+  --badge-bg: #e4edfd;
+  --badge-fg: #0e3074;
+  --icon-stroke: 1.5;
+  --icon-cap: round;
+  --icon-join: round;
+}
+
+:root[data-theme-id="dsh"][data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #151517;
+  --text: #f9fafb;
+  --muted: #cfd3d6;
+  --line: #ffffff1f;
+  --ink: #f9fafb;
+  --on-ink: #151517;
+  --hover: #2c2c2e;
+  --wash: #353638;
+  --focus: #7aaaff;
+  --backdrop: #0000003d;
+  --divider: #ffffff1f;
+
+  --accent: #7aaaff;
+  --accent-strong: #7aaaff;
+  --on-accent: #0f1115;
+  --outline: #ffffff29;
+  --failed: #ff6b66;
+  --on-failed: #151517;
+  --danger: #ff716c;
+
+  --nav-bg: #1b1b1c;
+  --nav-hover-bg: #2c2c2e;
+  --nav-active-bg: #43454a;
+  --selection: #43454a;
+  --selection-fg: #f9fafb;
+  --nav-heading-fg: #adb2b8;
+
+  --group-bg: #353638;
+  --group-border: 0 solid transparent;
+  --group-shadow: none;
+  --group-foot-bg: #2c2c2e;
+  --row-divider: 0.5px solid #ffffff1f;
+
+  --dialog-bg: #2c2c2e;
+  --dialog-border: 0 solid transparent;
+  --dialog-shadow: 0 0 0 0.5px #ffffff33, 0 3px 8px 0 #0000000a, 0 0 20px 0 #0000000d;
+  --popup-bg: #2c2c2e;
+  --popup-shadow: var(--dialog-shadow);
+
+  --button-bg: #353638;
+  --button-fg: #f9fafb;
+  --button-hover-bg: #43454a;
+  --button-danger-hover-bg: #2c2c2e;
+  --primary-bg: #f9fafb;
+  --primary-fg: #0f1115;
+  --primary-border: 0 solid transparent;
+  --primary-hover-bg: #e5e7eb;
+  --input-border: 0.5px solid #ffffff33;
+  --input-bg: #232324;
+  --select-bg: #353638;
+  --select-border: 0 solid transparent;
+  --select-hover-bg: #43454a;
+  --notice-border: 0.5px solid #ff6b6659;
+  --notice-icon: #ff716c;
+  --switch-off-bg: #353638;
+  --switch-off-thumb: #cfd3d6;
+  --switch-thumb-border: 0;
+  --switch-border: 0;
+  --switch-on-bg: #f9fafb;
+  --switch-on-thumb: #151517;
+  --badge-bg: #34415b;
+  --badge-fg: #f9fafb;
+  --brand-filter: invert(1);
+}

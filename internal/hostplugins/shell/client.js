@@ -255,6 +255,11 @@ function connectShell(ctx) {
           document.head.append(decorStyle);
         }
         document.body.setAttribute('data-dsh-work-decor', '');
+      } else {
+        document.body.removeAttribute('data-dsh-work-decor');
+        for (const element of document.querySelectorAll('[data-dsh-work-control]')) element.removeAttribute?.('data-dsh-work-control');
+        decorStyle?.remove();
+        decorStyle = undefined;
       }
       try {
         active = {id, dispose: theme.register({id, colorScheme: appearance.mode, tokens})};

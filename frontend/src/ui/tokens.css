@@ -3,7 +3,7 @@
  *
  * Layout and component CSS read only these variables. A theme replaces the
  * values (and may add ornaments in its own file); it never changes structure.
- * The monochrome theme below is the default and supports light and dark.
+ * Monochrome remains the neutral token baseline; DSH is the selected default.
  */
 :root {
   /* scale — shared by every theme */
@@ -55,6 +55,11 @@
   --group-bg: var(--canvas);
   --group-border: 1px solid var(--line);
   --group-shadow: none;
+  --dialog-bg: var(--canvas);
+  --dialog-radius: var(--radius-group);
+  --popup-bg: var(--group-bg);
+  --popup-radius: var(--radius-group);
+  --popup-shadow: var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%);
   /* backdrop-filter behind translucent surfaces (glass) */
   --surface-blur: none;
   --group-foot-bg: var(--wash);
@@ -70,11 +75,13 @@
   --radius-marker: 0;
 
   --control-h: 32px;
+  --input-h: var(--control-h);
   --button-pad-x: 12px;
   --button-border: 1px solid var(--ink);
   --button-bg: var(--canvas);
   --button-fg: var(--ink);
   --button-hover-bg: var(--hover);
+  --button-danger-hover-bg: var(--button-hover-bg);
   --primary-bg: var(--ink);
   --primary-fg: var(--on-ink);
   --primary-hover-bg: #333333;
@@ -103,6 +110,7 @@
   --switch-thumb-border: 1.5px solid var(--outline);
   --switch-gap: 3px;
   --switch-border: 1px solid var(--outline);
+  --switch-on-bg: var(--accent);
   --switch-on-thumb: var(--on-accent);
   --switch-w: 38px;
   --switch-h: 22px;

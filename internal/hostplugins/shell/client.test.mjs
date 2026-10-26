@@ -5,7 +5,7 @@ import test from 'node:test';
 const SHELL = 'http://wails.localhost';
 
 // Load the DSH client plugin framed by a fake shell, with a fake shortcut catalog.
-async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false, servicesPresent = true, modals = []} = {}) {
+async function framed(entries, {status = 'ready', fixed = [], handles = () => true, publicServices = true, sidebarCollapsed = false, servicesPresent = true, modals = [], controls = []} = {}) {
   const source = await readFile(new URL('./client.js', import.meta.url), 'utf8');
   let definition;
   const listeners = {};
@@ -50,7 +50,7 @@ async function framed(entries, {status = 'ready', fixed = [], handles = () => tr
       return !event.defaultPrevented;
     }},
     documentElement: {},
-    querySelectorAll: () => modals,
+    querySelectorAll: selector => selector === '[data-dsh-work-control]' ? controls : modals,
     getElementById: id => id === 'root' ? root : null,
     querySelector: selector => root.querySelector(selector),
   };
@@ -306,6 +306,24 @@ test('redeclares DSH elevation from the dsh-work decoration values', async () =>
   assert.ok('data-dsh-work-decor' in globalThis.document.body.attributes);
   shell.emit('message', {...appearance('light', {'--dsh-work-raised': 'url(https://example.com/x)'}), source: shell.parent});
   assert.equal(shell.theme.themes.find(item => item.id === shell.theme.preference).tokens['--dsh-work-raised'], '0 0 0 3px #111111, 6px 6px 0 #111111');
+});
+
+test('removes dsh-work decoration and control marks when switching to empty tokens', async () => {
+  const controls = ['button', 'field', 'select'].map(value => ({
+    attributes: {'data-dsh-work-control': value},
+    removeAttribute(name) { delete this.attributes[name]; },
+  }));
+  const shell = await framed([], {controls});
+  shell.emit('message', {...appearance('light', {'--dsh-work-raised': '0 1px 2px #0003'}), source: shell.parent});
+  assert.equal(shell.appended.length, 1);
+  assert.equal(globalThis.document.body.attributes['data-dsh-work-decor'], '');
+  assert.ok(controls.every(element => element.attributes['data-dsh-work-control']));
+
+  shell.emit('message', {...appearance('light', {}), source: shell.parent});
+  assert.equal(globalThis.document.body.attributes['data-dsh-work-decor'], undefined);
+  assert.ok(controls.every(element => !('data-dsh-work-control' in element.attributes)));
+  assert.equal(shell.appended.length, 0, 'the injected decoration stylesheet is removed');
+  assert.deepEqual(shell.theme.themes.find(item => item.id === shell.theme.preference).tokens, {});
 });
 
 // Every CSS-module class hook is a DSH-version risk; this list changes only on purpose.
