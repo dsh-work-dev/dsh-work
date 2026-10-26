@@ -41,3 +41,15 @@
 - Describe only the current decision. When it changes, rewrite that section in
   place; do not keep the old wording or a "superseded" note. Git keeps the
   history.
+
+## Verifying the running app
+
+- Check UI behavior through the dev build's WebView2 DevTools port
+  (`DSH_WORK_WEBVIEW_DEBUG_PORT`) and `scripts/dev-cdp.mjs`, as described in
+  `docs/agent-verification.md`. Do not take over the user's mouse, keyboard or
+  screen; screen-driving tools cannot see the workbench anyway.
+- Start `wails3 task dev` from an ordinary terminal, not from inside an MSIX
+  app's package context (such as the Codex desktop app), whose registry and
+  AppData are virtualized.
+- Restore any appearance, Pet, Run context or draft changes you make while
+  checking.
