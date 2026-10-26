@@ -119,9 +119,9 @@ func (s *HostService) DisableFaultPlugins(ctx context.Context) (lifecycle.Status
 }
 
 func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
-	if s.Local != nil { return s.Local.Quit(ctx) }
+	if s.Local != nil { return s.Local.RequestQuit(ctx) }
 	var value lifecycle.Status
-	err := call(ctx, s.Client, "HostService", "Quit", []any{}, &value)
+	err := call(ctx, s.Client, "HostService", "RequestQuit", []any{}, &value)
 	if err != nil { panic(err) }
 	return value
 }

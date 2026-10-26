@@ -192,6 +192,26 @@ export function apply(ctx, config, timers = globalThis) {
     return expected.length >= 32 && actual.length === expected.length && timingSafeEqual(actual, expected);
   }
   const reply = (res, status, data) => { res.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'}); res.end(JSON.stringify(data)); };
+  ctx.effect(() => ctx.webServer.register({kind: 'exact', path: '/__dshwork/quit-inspection', handler: async (req, res) => {
+    const rejection = ctx.connection.requestRejection(req);
+    if (rejection !== undefined) return reply(res, rejection, {});
+    if (!authorized(req)) return reply(res, 403, {});
+    if (req.method !== 'GET') {
+      res.setHeader?.('Allow', 'GET');
+      return reply(res, 405, {});
+    }
+    const agents = ctx.agents.list();
+    const jobs = ctx.get('jobs');
+    const activeJob = owner => jobs?.list(owner).some(job => job.status === 'running' || job.status === 'stopping') ?? false;
+    const activeTasks = agents.some(agent => agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length)
+      || activeJob(undefined) || agents.some(agent => activeJob(agent.id));
+    let scheduledTasks = false;
+    for (const agent of agents) {
+      const activity = await ctx.waterfall('workspace/session-activity', {sessionId: agent.id}, () => Promise.resolve([]));
+      if (activity.some(item => item.kind === 'schedule')) scheduledTasks = true;
+    }
+    reply(res, 200, {activeTasks, scheduledTasks});
+  }}));
   function closeStream(stream) {
     if (stream.closed) return;
     stream.closed = true;

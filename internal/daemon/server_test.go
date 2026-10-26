@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/local/dsh-work/internal/app"
 	"io"
 	"log"
 	"net/http"
@@ -24,6 +25,25 @@ import (
 type maintenanceTestService struct {
 	mutated bool
 	quit    bool
+}
+
+func TestRequestQuitDoesNotDrainAndIsBlockedDuringMaintenance(t *testing.T) {
+	host := app.NewHost(app.Dependencies{}, app.Config{})
+	service := app.NewHostService(host, nil)
+	confirmed := false
+	service.ConfirmQuit = func(func()) { confirmed = true }
+	server := &Server{Services: map[string]any{"HostService": service}}
+	call := Call{Service: "HostService", Method: "RequestQuit", Surface: "workspace"}
+	result := postCall(t, server, call)
+	if result.Error != "" || !confirmed || server.draining.Load() {
+		t.Fatalf("result=%+v confirmed=%v drain=%v", result, confirmed, server.draining.Load())
+	}
+	confirmed = false
+	server.Maintenance = func() bool { return true }
+	result = postCall(t, server, call)
+	if result.Error == "" || confirmed || server.draining.Load() {
+		t.Fatalf("maintenance result=%+v confirmed=%v drain=%v", result, confirmed, server.draining.Load())
+	}
 }
 
 type drainingTestService struct {

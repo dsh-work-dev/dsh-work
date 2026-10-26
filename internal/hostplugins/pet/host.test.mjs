@@ -49,7 +49,8 @@ function setup(inspectedEvents = []) {
     sessions: {list: () => [], get: () => null},
     sessionController: {inspect: async () => ({events: inspectedEvents}), list: async () => ({items: []})},
     sessionProjections: {snapshot: () => ({values: {}})},
-    agents: {get: () => null},
+    agents: {get: () => null, list: () => []},
+    waterfall: async (_name, _input, fallback) => fallback(),
     get: () => undefined,
     on(name, listener) { listeners.set(name, listener); },
     effect(effect) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); },
@@ -58,7 +59,7 @@ function setup(inspectedEvents = []) {
     },
   };
   apply(ctx, {generation: 'generation-1', token: 't'.repeat(64)}, clock);
-  return {routes, listeners, cleanups, clock};
+  return {routes, listeners, cleanups, clock, ctx};
 }
 
 function request(method, accept) {
@@ -68,6 +69,51 @@ function request(method, accept) {
   if (accept !== undefined) req.headers.accept = accept;
   return req;
 }
+
+test('quit inspection checks agents, inboxes, global and agent jobs, and schedules', async () => {
+  const cases = [
+    {agents: [], active: false, scheduled: false},
+    {agents: [{id: 'a', status: 'running'}], active: true},
+    {agents: [{id: 'a', inbox: {nextTurn: [{}]}}], active: true},
+    {agents: [{id: 'a', inbox: {nextStep: [{}]}}], active: true},
+    {agents: [], jobs: [{status: 'running'}], active: true},
+    {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'stopping'}], active: true},
+    {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'completed'}], active: false},
+    {agents: [{id: 'a'}], schedule: true, active: false, scheduled: true},
+  ];
+  for (const item of cases) {
+    const {routes, ctx} = setup();
+    ctx.agents.list = () => item.agents;
+    ctx.get = () => item.jobs ? {list: owner => owner === item.owner ? item.jobs : []} : undefined;
+    ctx.waterfall = async (name, input) => {
+      assert.equal(name, 'workspace/session-activity');
+      assert.equal(input.sessionId, 'a');
+      return item.schedule ? [{kind: 'schedule'}] : [];
+    };
+    const res = new Response();
+    await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+    assert.equal(res.status, 200);
+    assert.deepEqual(JSON.parse(res.body()), {activeTasks: item.active, scheduledTasks: item.scheduled ?? false});
+  }
+});
+
+test('quit inspection preserves the authenticated route boundary', async () => {
+  const {routes, ctx} = setup();
+  const handler = routes.get('/__dshwork/quit-inspection');
+  const req = request('GET');
+  req.headers['x-dsh-work-token'] = 'wrong';
+  const denied = new Response();
+  await handler(req, denied);
+  assert.equal(denied.status, 403);
+  ctx.connection.requestRejection = () => 401;
+  const unauthenticated = new Response();
+  await handler(request('GET'), unauthenticated);
+  assert.equal(unauthenticated.status, 401);
+  ctx.connection.requestRejection = () => undefined;
+  const post = new Response();
+  await handler(request('POST'), post);
+  assert.equal(post.status, 405);
+});
 
 test('pet activity streams a snapshot, merges changes for 100 ms, pings, and stops after close', async () => {
   const {routes, listeners, clock, cleanups} = setup();

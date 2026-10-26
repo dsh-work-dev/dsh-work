@@ -9,6 +9,10 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
+	QuitQuestion          string
+	QuitActiveTasks       string
+	QuitScheduledTasks    string
+	QuitBothTasks         string
 	Actions               string
 	Settings              string
 	ShowPet               string
@@ -49,6 +53,10 @@ type NotificationCopy struct {
 
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
+		QuitQuestion:          "Quit DSH Work?",
+		QuitActiveTasks:       "Running tasks will be interrupted.",
+		QuitScheduledTasks:    "Scheduled tasks will not run while the app is closed.",
+		QuitBothTasks:         "Running tasks will be interrupted, and scheduled tasks will not run while the app is closed.",
 		Actions:               "Actions",
 		Settings:              "Settings",
 		ShowPet:               "Show desktop pet",
@@ -96,6 +104,10 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleChinese: {
+		QuitQuestion:          "退出 DSH Work？",
+		QuitActiveTasks:       "当前正在运行的任务将会中断",
+		QuitScheduledTasks:    "应用关闭期间，定时任务不会运行",
+		QuitBothTasks:         "当前正在运行的任务将会中断，且应用关闭期间，定时任务不会运行",
 		Actions:               "操作",
 		Settings:              "设置",
 		ShowPet:               "显示桌面宠物",
@@ -143,6 +155,10 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleJapanese: {
+		QuitQuestion:          "DSH Work を終了しますか？",
+		QuitActiveTasks:       "実行中のタスクは中断されます。",
+		QuitScheduledTasks:    "アプリを閉じている間、スケジュールされたタスクは実行されません。",
+		QuitBothTasks:         "実行中のタスクは中断され、アプリを閉じている間、スケジュールされたタスクは実行されません。",
 		Actions:               "操作",
 		Settings:              "設定",
 		ShowPet:               "デスクトップペットを表示",
@@ -233,4 +249,16 @@ func DSHApprovalNotification(locale settings.Locale, toolName string) Notificati
 func DSHAnswerNotification(locale settings.Locale) NotificationCopy {
 	labels := LabelsFor(locale)
 	return NotificationCopy{Title: labels.AnswerNeededTitle, Body: labels.AnswerNeededBody}
+}
+
+// QuitConfirmationMessage selects only the task consequences that apply.
+func QuitConfirmationMessage(locale settings.Locale, active, scheduled bool) string {
+	labels := LabelsFor(locale)
+	detail := labels.QuitActiveTasks
+	if active && scheduled {
+		detail = labels.QuitBothTasks
+	} else if scheduled {
+		detail = labels.QuitScheduledTasks
+	}
+	return labels.QuitQuestion + "\n" + detail
 }

@@ -24,6 +24,9 @@ for service in services:
     for source in sources:
         for m in re.finditer(r"func \(s \*" + service + r"\) ([A-Z]\w*)\((ctx context.Context[^)]*)\) ([^{\n]+) \{", source):
             name, params, result = m.groups()
+            if service == "HostService" and name == "RequestQuit":
+                continue
+            remote_name = "RequestQuit" if service == "HostService" and name == "Quit" else name
             args = []
             for param in params.split(",")[1:]:
                 args.append(param.strip().split()[0])
@@ -40,10 +43,10 @@ for service in services:
                 body += "\t\treturn s.Local." + name + "(ctx" + (", " + ", ".join(args) if args else "") + ")\n"
                 body += "\t}\n"
             else:
-                body = "\tif s.Local != nil { return s.Local." + name + "(ctx" + (", " + ", ".join(args) if args else "") + ") }\n"
+                body = "\tif s.Local != nil { return s.Local." + remote_name + "(ctx" + (", " + ", ".join(args) if args else "") + ") }\n"
             if output:
                 body += "\tvar value " + qualify(output) + "\n"
-            body += '\terr := call(ctx, s.Client, "' + service + '", "' + name + '", []any{' + ", ".join(args) + "}, " + ("&value" if output else "nil") + ")\n"
+            body += '\terr := call(ctx, s.Client, "' + service + '", "' + remote_name + '", []any{' + ", ".join(args) + "}, " + ("&value" if output else "nil") + ")\n"
             if not has_error:
                 body += "\tif err != nil { panic(err) }\n\treturn value\n"
             else:

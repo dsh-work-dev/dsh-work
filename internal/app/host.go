@@ -2341,6 +2341,7 @@ func (r *generationRun) launchPlan() supervisor.LaunchPlan {
 
 // HostService is the intentionally narrow Wails binding surface.
 type HostService struct {
+	ConfirmQuit        func(proceed func())
 	host               *Host
 	localeProvider     func() settings.Locale
 	appearanceProvider func() settings.Appearance
@@ -2509,6 +2510,18 @@ func (s *HostService) Quit(ctx context.Context) lifecycle.Status {
 		return trustedSurfaceStatus()
 	}
 	return s.host.Quit()
+}
+
+// RequestQuit is the interactive UI entry; Quit remains the direct stop RPC.
+func (s *HostService) RequestQuit(ctx context.Context) lifecycle.Status {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus()
+	}
+	if s.ConfirmQuit == nil {
+		return s.host.Quit()
+	}
+	s.ConfirmQuit(func() { s.host.Quit() })
+	return s.host.Status()
 }
 
 func (s *HostService) authorized(ctx context.Context) bool {

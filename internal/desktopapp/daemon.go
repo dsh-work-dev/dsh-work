@@ -790,6 +790,15 @@ func runDaemon(identity string, resources Resources) {
 			refreshLifecycleMenu()
 		}
 	}
+	quitConfirmation := &quitConfirmation{
+		inspect: petActivity.InspectQuit,
+		ask: func(inspection dshactivity.QuitInspection, complete func(bool)) {
+			message := nativeui.QuitConfirmationMessage(loadNativeLocale(&activeLocale), inspection.ActiveTasks, inspection.ScheduledTasks)
+			showQuitQuestion(desktop.Dialog.Question().SetTitle("DSH Work").SetMessage(message), complete)
+		},
+	}
+	confirmQuit := func(proceed func()) { quitConfirmation.confirm(proceed) }
+	hostService.ConfirmQuit = func(func()) { confirmQuit(quitDSHWork) }
 	trayMenu := desktop.NewMenu()
 	trayStatus := trayMenu.Add(nativeui.TrayStatus(localePreference, lifecycle.StateStarting)).SetEnabled(false)
 	trayOpenWorkspace := trayMenu.Add(initialNative.OpenWorkspace).OnClick(func(*application.Context) {
@@ -807,7 +816,7 @@ func runDaemon(identity string, resources Resources) {
 		restartDSH()
 	})
 	trayQuit := trayMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
-		quitDSHWork()
+		confirmQuit(quitDSHWork)
 	})
 	tray.SetMenu(trayMenu).OnClick(func() {
 		showWorkspace()
@@ -821,7 +830,7 @@ func runDaemon(identity string, resources Resources) {
 		restartDSH()
 	})
 	appMenuQuit := actionsMenu.Add(initialNative.Quit).OnClick(func(*application.Context) {
-		quitDSHWork()
+		confirmQuit(quitDSHWork)
 	})
 	refreshLifecycleMenu = func() {
 		enabled := !applicationShuttingDown.Load() && !quitFlow.InProgress() && !windowLedger.IsQuitting() && !restartActionBusy.Load()
