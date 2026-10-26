@@ -26,6 +26,7 @@ import (
 	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
+	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -56,6 +57,9 @@ func runDesktopClient(identity string, resources Resources) error {
 			requestedWindow = os.Args[4]
 		}
 	}
+	// This process holds the foreground right from the user's launch or link;
+	// pass it on so the running UI instance can bring its window forward.
+	platform.AllowForegroundActivation()
 	existing := daemon.NewClient(identity + "-ui")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	err := existing.JSON(ctx, "/open", uiOpenRequest{Section: section, Window: requestedWindow}, nil)
