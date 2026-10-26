@@ -129,6 +129,9 @@ func newFaultTestHostWith(t *testing.T, supervisorAdapter supervisor.Adapter) (*
 		EmptyTimeout:       time.Second,
 		ShutdownTimeout:    time.Second,
 	})
+	// Cleanups run last-in first-out, so the Host finishes Worker cleanup
+	// before the temporary directories above are removed.
+	t.Cleanup(func() { _ = host.ShutdownForApp() })
 	statuses := make(chan lifecycle.Status, 32)
 	host.SetPublish(func(status lifecycle.Status) { statuses <- status })
 	return host, statuses, profilePath
