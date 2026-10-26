@@ -190,6 +190,11 @@ export function mountShell() {
     };
     setFrame("--shell-page", pageFrame(read, resolveColor));
     setFrame("--shell-frame", windowFrame(read, resolveColor));
+    const mode = root.dataset.theme === "dark" ? "dark" : "light";
+    if (root.dataset.themeId === "dsh") {
+      sendFrameMessage({type: "dsh-work/appearance", mode, tokens: {}});
+      return;
+    }
     const supports = (property: string, value: string) => CSS.supports(property, value);
     const tokens = dshThemeTokens(read, supports, resolveColor);
     // A probe resolves theme borders (shorthands, nested var()) to a width and colour.
@@ -206,7 +211,7 @@ export function mountShell() {
     for (const [name, value] of Object.entries(dshDecorTokens(read, border))) if (supports(dshTokenProperty(name), value)) tokens[name] = value;
     probe.remove();
     for (const [name, value] of Object.entries(measureControls(document, read))) if (supports(controlTokenProperty(name), value)) tokens[name] = value;
-    sendFrameMessage({type: "dsh-work/appearance", mode: root.dataset.theme === "dark" ? "dark" : "light", tokens});
+    sendFrameMessage({type: "dsh-work/appearance", mode, tokens});
   };
   const updateModalMask = () => {
     const visible = dshModal.active && !settingsOpen;

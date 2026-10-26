@@ -34,14 +34,17 @@ history or dense record detail can justify a management dialog; a simple set of
 controls does not require a summary screen merely for consistency.
 
 Startup, Settings and their dialogs share one theme-neutral layout (see
-[Interface standards](standards/interface.md#visual-system)). The default theme is square and monochrome with system sans-serif
-type; monospace is limited to versions, paths and logs. Other themes may
+[Interface standards](standards/interface.md#visual-system)). The default theme, DSH, gives startup, Settings, the title
+bar and dialogs native DSH's palette, controls and shapes; monospace is limited
+to versions, paths and logs. Other themes may
 restyle the content area boldly but never change page structure, order or
 copy. General lists Theme and
 Appearance (match system, light, dark); modes a theme does not support are
-disabled. DSH follows the theme's colours, mode, corner shapes, shadows and
-interface font without a restart; its conversation text keeps DSH's font, and
-its own Appearance setting is hidden. The Theme list starts with Monochrome, then the product styles
+disabled. Under the DSH theme, DSH keeps its native look and follows only the
+mode; under any other theme it follows the theme's colours, mode, corner
+shapes, shadows and interface font without a restart, while its conversation
+text keeps DSH's font. DSH's own Appearance setting is hidden either way. The
+Theme list starts with DSH and Monochrome, then the product styles
 (ChatGPT, Claude, GitHub, LobeHub, each named after the product alone), then
 everyday themes (Soft, Swiss, Paper, Aurora glass), then retro and expressive
 ones (Ink, Classic OS, Terminal, Neon, Neo-brutalism, Bauhaus, Art deco). Technical details belong beside the relevant operation or inside

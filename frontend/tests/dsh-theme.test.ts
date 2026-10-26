@@ -112,6 +112,28 @@ test("dsh-work chooses the window frame and gives DSH's sidebar the same fill", 
   assert.equal(dshThemeTokens(read, isColor)["--dsw-specific-sidebar-fill"], chrome!.fill);
 });
 
+test("the DSH light frame follows its native sidebar and states", () => {
+  const light: Record<string, string> = {
+    "--text": "#0f1115", "--nav-bg": "#f9fafb", "--nav-fg": "#0f1115",
+    "--nav-hover-bg": "#f1f3f5", "--nav-active-bg": "#ebeef2", "--nav-active-fg": "#0f1115",
+  };
+  assert.deepEqual(windowFrame(name => light[name] ?? ""), {
+    fill: "rgb(249, 250, 251)", text: "#0f1115", hover: "rgb(241, 243, 245)",
+    active: "rgb(235, 238, 242)", activeText: "#0f1115",
+  });
+});
+
+test("the DSH dark frame follows its native sidebar and states", () => {
+  const dark: Record<string, string> = {
+    "--text": "#f9fafb", "--nav-bg": "#1b1b1c", "--nav-fg": "#f9fafb",
+    "--nav-hover-bg": "#2c2c2e", "--nav-active-bg": "#43454a", "--nav-active-fg": "#f9fafb",
+  };
+  assert.deepEqual(windowFrame(name => dark[name] ?? ""), {
+    fill: "rgb(27, 27, 28)", text: "#f9fafb", hover: "rgb(44, 44, 46)",
+    active: "rgb(67, 69, 74)", activeText: "#f9fafb",
+  });
+});
+
 test("a frame that is not the navigation fill does not take the navigation states", () => {
   const bauhaus: Record<string, string> = {"--canvas": "#f4efe6", "--text": "#111111", "--nav-bg": "#111111", "--nav-fg": "#ffffff", "--nav-hover-bg": "#2a2a2a", "--nav-active-bg": "#f5c518", "--nav-active-fg": "#121212", "--wash": "#ebe4d6", "--hover": "#e6e0d2", "--selection": "#f5c518", "--selection-fg": "#121212"};
   assert.deepEqual(windowFrame(name => bauhaus[name] ?? ""), {fill: "rgb(235, 228, 214)", text: "#111111", hover: "rgb(218, 211, 198)", active: "rgb(245, 197, 24)", activeText: "#121212"}, "a fill body text cannot read on falls to a quieter one, with the general selection; a hover that does not stand out from it becomes a tint");

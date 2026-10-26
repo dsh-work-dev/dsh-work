@@ -93,6 +93,7 @@ export enum ThemeID {
      */
     $zero = "",
 
+    ThemeDSH = "dsh",
     ThemeMonochrome = "monochrome",
     ThemeChatGPT = "chatgpt",
     ThemeClaude = "claude",
@@ -109,7 +110,7 @@ export enum ThemeID {
     ThemeBrutal = "brutal",
     ThemeBauhaus = "bauhaus",
     ThemeDeco = "deco",
-    DefaultTheme = "monochrome",
+    DefaultTheme = "dsh",
 };
 
 /**

@@ -29,6 +29,7 @@
   transition: background-color var(--motion), color var(--motion), border-color var(--motion);
 }
 .button:hover:not(:disabled) { background: var(--button-hover-bg); }
+.button-danger:hover:not(:disabled) { background: var(--button-danger-hover-bg); }
 .button-primary { border: var(--primary-border); background: var(--primary-bg); box-shadow: var(--primary-shadow); color: var(--primary-fg); }
 .button-primary:hover:not(:disabled) { background: var(--primary-hover-bg); }
 .button-quiet { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); }
@@ -43,7 +44,6 @@ select,
 input[type="text"],
 input[type="search"] {
   min-width: 0;
-  min-height: var(--control-h);
   max-width: 100%;
   padding: 0 var(--space-2);
   border: var(--input-border);
@@ -52,6 +52,8 @@ input[type="search"] {
   color: var(--text);
   font-size: var(--fs-control);
 }
+select { min-height: var(--control-h); }
+input[type="text"], input[type="search"] { min-height: var(--input-h, var(--control-h)); }
 /* the native option list cannot show a translucent control background; give it the opaque page colours */
 select option { background-color: var(--canvas); color: var(--text); }
 input::placeholder { color: var(--muted); }
@@ -94,7 +96,7 @@ select:disabled, input:disabled { opacity: .55; }
   background: var(--switch-off-thumb);
   transition: transform var(--motion);
 }
-.switch input:checked + .switch-track { border-color: var(--accent); background: var(--accent); }
+.switch input:checked + .switch-track { border-color: var(--switch-on-bg); background: var(--switch-on-bg); }
 .switch input:checked + .switch-track .switch-thumb { transform: translateX(calc(var(--switch-w) - var(--switch-h))); border-color: var(--switch-on-thumb); background: var(--switch-on-thumb); }
 .switch input:focus-visible + .switch-track { outline: 2px solid var(--focus); outline-offset: 2px; }
 .switch:has(input:disabled) { cursor: default; opacity: .45; }
@@ -202,8 +204,8 @@ dialog {
   padding: var(--space-5);
   overflow: auto;
   border: var(--dialog-border);
-  border-radius: var(--radius-group);
-  background: var(--canvas);
+  border-radius: var(--dialog-radius, var(--radius-group));
+  background: var(--dialog-bg, var(--canvas));
   box-shadow: var(--dialog-shadow);
   color: var(--text);
 }

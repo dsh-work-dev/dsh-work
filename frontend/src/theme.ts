@@ -9,7 +9,7 @@ export type AppearanceMode = "system" | "light" | "dark";
 // publishes "appearance" after every saved change. The copy in localStorage is
 // only a paint cache read by index.html before scripts load.
 const cacheKey = "dsh-work.appearance";
-let current: {theme: string; mode: AppearanceMode} = {theme: "monochrome", mode: "system"};
+let current: {theme: string; mode: AppearanceMode} = {theme: "dsh", mode: "system"};
 let systemMedia: MediaQueryList | undefined;
 let mounted = false;
 

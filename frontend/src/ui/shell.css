@@ -68,8 +68,8 @@ html[data-shell]:not([data-shell-framed]) body { background: var(--canvas); }
 }
 /* Menus and the status line are small dialogs: they take the theme's dialog frame. */
 .shell-menu {
-  position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: var(--radius-group);
-  background: var(--group-bg); color: var(--text); border: var(--dialog-border); box-shadow: var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%);
+  position: fixed; z-index: 20; min-width: 180px; padding: 4px; border-radius: var(--popup-radius, var(--radius-group));
+  background: var(--popup-bg, var(--group-bg)); color: var(--text); border: var(--dialog-border); box-shadow: var(--popup-shadow, var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%));
   backdrop-filter: blur(24px);
   font-family: var(--font-body); font-size: var(--fs-control);
 }
@@ -86,8 +86,8 @@ html[data-shell]:not([data-shell-framed]) body { background: var(--canvas); }
 .shell-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
 .shell-toast {
   position: fixed; z-index: 30; top: 48px; left: 50%; transform: translateX(-50%); max-width: min(480px, calc(100vw - 32px));
-  padding: 8px 14px; border-radius: var(--radius-group); font-family: var(--font-body); font-size: var(--fs-control);
-  background: var(--group-bg); color: var(--text); border: var(--dialog-border); box-shadow: var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%);
+  padding: 8px 14px; border-radius: var(--popup-radius, var(--radius-group)); font-family: var(--font-body); font-size: var(--fs-control);
+  background: var(--popup-bg, var(--group-bg)); color: var(--text); border: var(--dialog-border); box-shadow: var(--popup-shadow, var(--dialog-shadow), 0 8px 24px rgb(0 0 0 / 14%));
   backdrop-filter: blur(24px);
 }
 .shell-toast[hidden] { display: none; }

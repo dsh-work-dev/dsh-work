@@ -44,7 +44,7 @@
   and motion tokens instead of inventing local constants.
 - Express hierarchy primarily through alignment, spacing and typography. Layout
   and components avoid nested decorative cards, excessive shadows, gradients,
-  glow and ornamental badges; the default monochrome theme follows the same
+  glow and ornamental badges; the default DSH theme and Monochrome follow the same
   restraint.
 - A theme may restyle the content area boldly (window title bars, frosted
   panels, cut corners, patterned backgrounds, glow), provided the decoration
@@ -94,7 +94,9 @@
 - dsh-work owns the appearance of the whole workbench, DSH included
   (`settings.Appearance`: theme id and system/light/dark mode). SettingsService
   is the only writer and publishes each saved change as the `appearance`
-  event. DSH takes the theme's colours, mode, radii, shadows and interface font
+  event. Under the DSH theme, DSH receives only the mode and keeps its native
+  look, and dsh-work's own surfaces take DSH's values instead. Under every
+  other theme, DSH takes the theme's colours, mode, radii, shadows and interface font
   through `@dsh-work/shell` (`frontend/src/dsh-theme.ts` maps the tokens),
   and its cards, menus, dialogs and composer take the theme's borders, shadows,
   backdrop and `--surface-blur`;

@@ -35,7 +35,7 @@ export function mountSettings(setFeedback: Feedback) {
   }));
   const status = document.getElementById("settings-general-status") as HTMLParagraphElement;
   const controls = [rollbackToggle, localeSelect, themeSelect, appearanceSelect];
-  let savedAppearance = {theme: "monochrome", mode: "system"};
+  let savedAppearance = {theme: "dsh", mode: "system"};
   controls.forEach(control => control.disabled = true);
   let savedLocale = normalizeLocale(localeSelect.value);
 

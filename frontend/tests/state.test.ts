@@ -265,7 +265,7 @@ test("a registry observation survives a snapshot refresh", () => {
 });
 
 test("the frontend theme registry matches the Host's supported themes and modes", async () => {
-	const {themes} = await import("../src/themes");
+	const {themes, themeInfo, supportedMode} = await import("../src/themes");
 	const source = readFileSync(new URL("../../internal/settings/appearance.go", import.meta.url), "utf8");
 	const ids = Object.fromEntries(Array.from(source.matchAll(/(Theme\w+)\s+ThemeID = "([^"]+)"/g), (match) => [match[1], match[2]]));
 	const modeNames: Record<string, string> = {AppearanceSystem: "system", AppearanceLight: "light", AppearanceDark: "dark"};
@@ -275,4 +275,7 @@ test("the frontend theme registry matches the Host's supported themes and modes"
 	}));
 	assert.ok(host.length > 0);
 	assert.deepEqual(themes.map((theme) => ({id: theme.id, modes: [...theme.modes]})), host);
+	assert.equal(themes[0].id, "dsh");
+	assert.equal(themeInfo(undefined).id, "dsh");
+	assert.equal(supportedMode(undefined, undefined), "system");
 });

@@ -243,7 +243,19 @@ system browser and drops same-origin new-window requests, so DSH never runs as
 an unmanaged top-level page outside the shell. Revisit this if DSH starts
 relying on same-origin pop-ups.
 
-dsh-work's appearance reaches DSH through DSH's public theme service. The
+Under the default DSH theme, DSH keeps its native look: when
+`data-theme-id="dsh"`, the shell posts the resolved light or dark mode with
+empty tokens and skips the token map, decoration and control samples below.
+`@dsh-work/shell` registers and selects that empty theme like any other, so
+DSH renders exactly as its built-in light or dark theme (whose tokens are also
+empty). Only dsh-work's own surfaces adapt: `frontend/src/ui/themes/dsh.css`
+takes its values from native DSH, and the title-bar frame computed from it
+matches DSH's sidebar. Whenever an appearance arrives without
+`--dsh-work-raised`, the plugin removes `body[data-dsh-work-decor]`, every
+`data-dsh-work-control` mark and the decoration stylesheet, so switching from a
+decorated theme leaves nothing behind.
+
+Every other theme's appearance reaches DSH through DSH's public theme service. The
 shell turns its computed theme tokens into DSH `--dsw-*` tokens
 (`frontend/src/dsh-theme.ts`): colours, radii, shadows and the interface font,
 and posts them with the resolved light or dark mode. `@dsh-work/shell` accepts
