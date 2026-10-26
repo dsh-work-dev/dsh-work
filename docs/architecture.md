@@ -58,6 +58,7 @@ system-wide Windows service.
 | `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
 | `internal/hostplugins` | dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
 | `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
+| `internal/dshinteraction` | pending DSH questions, approvals and plan reviews reported by each workbench window's DSH page |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
@@ -99,7 +100,8 @@ The daemon pushes to each UI process over one long-lived `GET /stream` of
 newline-delimited JSON; a new connection replaces the previous one. A line is a
 state topic (`lifecycle`, `worker-url`, `update`, `preferences`, `acquisition`),
 a one-shot command for all windows or one named window (`notification-failure`,
-`background-stopping`, `acquisition-log`), or a ping every 10 seconds. A new
+`background-stopping`, `acquisition-log`, `dsh-open-session`,
+`dsh-answer-approval`), or a ping every 10 seconds. A new
 connection first receives the current value of every topic, then the commands
 staged while no UI was connected (at most 64, discarded once expired). Each
 topic publishes its source's current value, read under one lock, whenever that
@@ -579,6 +581,86 @@ supported data-only package formats; the trusted frontend only projects state
 and sends allowlisted user intent. Pet package contents cannot create Host
 capabilities.
 
+## DSH interaction notifications
+
+A DSH question, approval or plan review that waits while the user looks
+elsewhere raises a native notification. Approvals carry 允许一次 and 拒绝
+buttons; the answer is given by DSH itself.
+
+Each workbench window's DSH page reports its pending interactions through the
+Client half of `@dsh-work/pet`. It reads `ctx.uiSession.sessionStatus` (each
+session's `pendingInteraction`) and the main-view session (the session whose
+`retainedBy.mainView` is positive) and reports only changes: an interaction key
+that changes within 250 ms is reported once, a cleared interaction at once, and
+the page resets its state when it unloads. Reports go from the frame to the
+shell (`dsh-work/interaction`, `dsh-work/interaction-reset`) and on to
+`DSHPageService`, which takes the window from the authenticated `/control`
+surface. `internal/dshinteraction` keeps one page instance per window; an
+instance belongs to the window that reported it first, and a reloaded page
+replaces the old instance and withdraws its notifications.
+
+A new interaction key notifies unless the owning window is focused, its DSH
+page is visible and that page shows the waiting session. A focused window
+does not suppress an interaction held by another window. The notification
+preference is the interaction-required class, on by default. The notification
+ID is the page instance plus the interaction key, so the bounded ring in
+`internal/notifications` (1,024 IDs) sends each interaction once; a resolved
+interaction withdraws its notification. Copy names only the tool for an
+approval and nothing for a question or plan review: no reason, command,
+arguments, paths or conversation titles.
+
+An approval button sends `dsh-answer-approval` (30-second lifetime) to the
+window that owns the page instance. The page answers only when the session
+still waits on the same key and DSH marks it `answerable`, then calls
+`PendingApproval.answer()` with a one-time outcome; DSH records its own
+approval audit event. An answer already given on the card, a reloaded page or
+a restarted Worker therefore produces no second result. Clicking the body opens
+the conversation in the owning window through `dsh-open-session`; when the
+owner is unknown, the workbench is shown. Questions and plan reviews have no
+buttons. The Pet bubble and the notification alert independently, without
+deduplication, as in dsh-tauri.
+
+The answer goes through DSH's own `PendingApproval.answer()` because that is
+the client path DSH and dsh-tauri use. Holding the approval in the host's
+waterfall was rejected: the Gateway forwards waterfalls only to owner peers in
+registration order, so the host could not hold one without taking the decision
+from DSH. Polling page state was rejected for the reasons given under
+[Desktop communication](#desktop-communication). Revisit when DSH publishes a
+host-level approval API, or when a remote surface must answer approvals
+without a workbench page; with no workbench page running, no interaction
+notification is sent.
+
+### Notification identity
+
+Windows routes notification buttons through the toast activator registered for
+the app's AppUserModelID. Wails reads that CLSID from
+`HKCU\Software\Classes\AppUserModelId\<name>\CustomActivator`, generates a new
+one when it cannot read it, and points `CLSID\{…}\LocalServer32` at the running
+executable on every start. A changed CLSID breaks button callbacks, so the
+daemon writes a fixed CLSID and display name before Wails starts
+(`nativeui.EnsureToastActivator`). Identities follow the build tag:
+
+| Build | AppUserModelID | Display name | CLSID |
+|---|---|---|---|
+| Release (`production`) | `dsh-work` | DSH Work | `{ca84fd06-433b-4c75-84ba-c74220f1f290}` |
+| Development | `dsh-work-dev` | DSH Work Dev | `{2b99be78-db90-4fa9-9880-9221bd0a6cb8}` |
+
+Stable, beta and nightly share the release identity because a channel is a
+subscription inside one installation (see `docs/release-channels.md`); one
+identity per channel would leave old notifications pointing at an unregistered
+CLSID after a channel switch. Development builds use their own identity so they
+do not rewrite the installed build's activation registration. They still share
+the data directory and daemon pipe with an installed build, so the two cannot
+run at the same time. The uninstaller removes the release AppUserModelID and
+CLSID keys. When the daemon was not running, Windows starts the executable with
+`-Embedding`, which opens the workbench; the button's action is not replayed.
+
+A process started from inside another app's MSIX package context, such as the
+Codex desktop app, writes `HKCU\Software\Classes` into that package's private
+registry. Windows then accepts its notifications into history without showing
+them. Start development builds from an ordinary terminal when checking
+notifications.
+
 ## Runtime invariants
 
 1. The daemon obtains the single-instance and manager locks before exposing
@@ -677,7 +759,7 @@ window, command palette, focus mode, always on top and recent workspaces.
 | 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 刷新, 重启 DSH · 关闭窗口, 退出 |
 | 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
 | 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
-| 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 dsh-work |
+| 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 DSH Work |
 
 Host items call trusted bindings. `ShellService` runs in the UI process: it
 opens Settings at a section, and reads or sets Pet visibility on behalf of the

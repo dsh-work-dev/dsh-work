@@ -6,6 +6,14 @@ dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It
 makes a versioned external DSH runtime startable, observable and recoverable
 without turning the Host into another agent runtime.
 
+The product is shown to users as **DSH Work** in every language: window and
+installer titles, tray, menus, notifications, error summaries and executable
+metadata. `dsh-work` remains the technical identifier for the repository, Go
+module, executables, CLI commands, data directories, registry keys, the
+`dsh-work://` scheme and `@dsh-work/*` plugins, so renaming the display never
+moves data or installations. Development builds name their notifications DSH
+Work Dev. The project documentation uses `dsh-work` for the codebase.
+
 ## Ownership boundary
 
 dsh-work owns:
@@ -81,6 +89,10 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   of the desktop UI process. The tray can open or reconnect the UI.
   Completed, interaction-required and error notifications are enabled by
   default; routine lifecycle notifications are disabled.
+- A DSH question, approval or plan review raises a notification unless the
+  user is already looking at that conversation. Approval notifications offer
+  Allow once and Reject, answered through DSH; clicking a notification opens
+  the conversation in the window that holds it.
 - Routine completion delivery is suppressed while the Workspace is active.
   Notification preferences do not hide DSH-owned in-page notices. A failed
   native delivery is recorded as a diagnostic and does not change the outcome
