@@ -147,6 +147,7 @@ export interface Values {
     "appearance": Appearance;
     "updateChannel": UpdateChannel;
     "verboseLogging": boolean;
+    "backgroundNoticeAcknowledged": boolean;
 }
 
 /**

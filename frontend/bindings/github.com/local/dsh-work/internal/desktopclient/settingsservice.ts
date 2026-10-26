@@ -9,6 +9,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as settings$0 from "../settings/models.js";
 
+export function AcknowledgeBackgroundNotice(): $CancellablePromise<settings$0.Values> {
+    return $Call.ByID(1083464915);
+}
+
 export function GetSettings(): $CancellablePromise<settings$0.Values> {
     return $Call.ByID(100181646);
 }
