@@ -105,9 +105,12 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   surface outside the Workspace window. Pets Settings exposes discovery,
   preview, visibility and direct 50%–300% size control.
 - Closing a desktop window hides it and retains its WebView for the next open;
-  closing or crashing the UI client leaves background tasks running. 文件 → 退出
-  in the workbench menu (“停止后台并退出” in the tray) explicitly stops the Worker
-  and its children, releases locks and exits the tray and remaining UI.
+  closing or crashing the UI client leaves background tasks running. The first
+  close explains once that running tasks continue and the window can be reopened
+  from the tray. 文件 → 退出 in the workbench menu (“停止后台并退出” in the tray)
+  explicitly stops the Worker and its children, releases locks and exits the
+  tray and remaining UI. When a task is running or a scheduled reminder is armed,
+  it first asks for confirmation and says which of them would be lost.
 - The workbench is a single window without a system title bar. DSH runs inside
   it below a dsh-work top bar that follows DSH's surface colour and holds the
   menus 文件 (new session, workspace, terminal and browser; close, quit), 视图

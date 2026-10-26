@@ -689,10 +689,23 @@ notifications.
    keeps the healthy Worker running and retains the previous durable record.
    A failed candidate is cleaned up before policy-controlled, bounded recovery.
 8. Closing a desktop window hides it while retaining its UI client and WebView;
-   reopening reuses that window and page state. Explicit background Quit cancels
-   owned work, verifies Worker/child cleanup, closes remaining UI, releases locks
-   and exits the tray. Legacy close preferences cannot invoke it.
-9. Pet size and position changes are applied through the Host. A failed native
+   reopening reuses that window and page state. The first close shows a
+   one-time notice; its acknowledgement is the `backgroundNoticeAcknowledged`
+   setting. Explicit background Quit cancels owned work, verifies Worker/child
+   cleanup, closes remaining UI, releases locks and exits the tray. Legacy close
+   preferences cannot invoke it.
+9. Quit has two entries. `HostService.Quit` stops at once and drains the IPC
+   server on receipt; the CLI `stop` command and the installer use it.
+   `HostService.RequestQuit` is the workbench menu's entry and, with the tray
+   item, goes through a confirmation: the daemon asks `@dsh-work/pet` for
+   `/__dshwork/quit-inspection` (running agents, queued messages or live jobs;
+   armed `schedule` session activity), the same check as the official desktop
+   app. Nothing to interrupt quits at once; otherwise a native Yes/No question
+   names what would be lost, and the drain starts only after Yes. An inspection
+   that fails or takes over 2 seconds counts as running work. Wails' Windows
+   dialogs are the system message box, so the buttons follow the Windows
+   display language; a custom task dialog was not worth its native code.
+10. Pet size and position changes are applied through the Host. A failed native
    resize does not leave persisted dimensions claiming a state the native window
    did not reach.
 
