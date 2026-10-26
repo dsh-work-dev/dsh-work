@@ -44,9 +44,8 @@
   and motion tokens instead of inventing local constants.
 - Express hierarchy primarily through alignment, spacing and typography. Layout
   and components avoid nested decorative cards, excessive shadows, gradients,
-  glow and ornamental badges; the default DSH theme follows DSH's native
-  surfaces, controls and neutral palette, with blue reserved for its semantic
-  accents.
+  glow and ornamental badges; the default DSH theme and Monochrome follow the same
+  restraint.
 - A theme may restyle the content area boldly (window title bars, frosted
   panels, cut corners, patterned backgrounds, glow), provided the decoration
   carries no information, page structure and copy stay unchanged, and body
@@ -92,19 +91,21 @@
   and the search field's clear button uses the muted text colour.
 - Selection, focus, warning and failure must remain distinguishable without
   relying on color alone.
-- dsh-work owns the workbench appearance (`settings.Appearance`: theme id and
-  system/light/dark mode). SettingsService is the only writer and publishes
-  each saved change as the `appearance` event. In the DSH theme, DSH receives
-  only the resolved light/dark mode with empty tokens, so its surfaces,
-  controls, conversation and stored `ui-theme.preference` remain DSH-owned;
-  dsh-work's title bar, Settings, startup and dialogs adapt to DSH's native
-  values. Other themes map their colours, radii, shadows, interface font and
-  controls into DSH through `@dsh-work/shell` (`frontend/src/dsh-theme.ts` and
-  `frontend/src/dsh-controls.ts`). The plugin clears its decoration stylesheet
-  and control markers when switching to empty tokens. Theme checks include
-  workbench surfaces, text, focus and selected states in light and dark. The
-  native window frame takes the mode when the window is created; Wails 3 beta
-  has no runtime frame-theme switch.
+- dsh-work owns the appearance of the whole workbench, DSH included
+  (`settings.Appearance`: theme id and system/light/dark mode). SettingsService
+  is the only writer and publishes each saved change as the `appearance`
+  event. Under the DSH theme, DSH receives only the mode and keeps its native
+  look, and dsh-work's own surfaces take DSH's values instead. Under every
+  other theme, DSH takes the theme's colours, mode, radii, shadows and interface font
+  through `@dsh-work/shell` (`frontend/src/dsh-theme.ts` maps the tokens),
+  and its cards, menus, dialogs and composer take the theme's borders, shadows,
+  backdrop and `--surface-blur`;
+  DSH's conversation text keeps its own font, and DSH's stored
+  `ui-theme.preference` is left unchanged. Theme checks
+  include the DSH frame: surfaces, text, the send button and other accent
+  fills, and the dialog mask over the top bar. The native window frame takes
+  the mode when the window is created; Wails 3 beta has no runtime frame-theme
+  switch.
 - Use one maintained icon family, `lucide` (ISC, tree-shaken ES modules,
   stroke icons whose weight and caps follow tokens); only imported icons ship.
   Do not use emoji, improvised text glyphs or a hand-drawn set as production
