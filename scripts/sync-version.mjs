@@ -47,14 +47,11 @@ if (!BASE_ONLY_PATTERN.test(base)) {
   throw new Error(`build/config.yml info.version must be a plain X.Y.Z base, got ${base}`);
 }
 
-// A release version must agree with the configured base, so a package can never
-// carry a version that no configuration describes.
+// Which base a release version may use is decided once by the preflight
+// (internal/release); this script only writes the version it computed.
 const version = releaseVersion || base;
 if (!VERSION_PATTERN.test(stripV(version))) {
   throw new Error(`--release-version must be a strict semantic version, got ${version}`);
-}
-if (!stripV(version).startsWith(`${base}-`) && stripV(version) !== base) {
-  throw new Error(`release version ${version} does not belong to base ${base} from build/config.yml`);
 }
 
 // Windows file metadata: four numeric fields, so pre-release builds share the

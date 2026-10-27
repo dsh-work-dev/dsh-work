@@ -266,11 +266,11 @@ if (probe.error || probe.code !== 0) {
   const fileVersion = scriptRun([...nightly, '--run-id', '111', '--field', 'fileVersion']);
   check('--field fileVersion maps X.Y.Z to X.Y.Z.0', fileVersion.stdout === '0.4.0.0', `got ${JSON.stringify(fileVersion.stdout)}`);
 
-  const gated = scriptRun(['--channel', 'nightly', '--base', '0.3.0', '--date', '2026-10-13', '--run-id', '111', '--last-stable', '0.3.0']);
+  const moved = scriptRun(['--channel', 'nightly', '--base', '0.3.0', '--date', '2026-10-13', '--run-id', '111', '--last-stable', '0.3.0']);
   check(
-    'a nightly base must exceed the published stable base',
-    gated.code === 2 && gated.stdout === '' && gated.stderr.includes('must be higher than the last published stable base'),
-    `exit=${gated.code} stderr=${JSON.stringify(gated.stderr)}`,
+    'a nightly on the published stable base moves to the next patch',
+    moved.code === 0 && moved.stdout === '0.3.1-nightly.20261013.111',
+    `exit=${moved.code} stdout=${JSON.stringify(moved.stdout)} stderr=${JSON.stringify(moved.stderr)}`,
   );
 
   const wrongBeta = scriptRun(['--channel', 'beta', '--version', '0.3.0-rc.1', '--base', '0.3.0']);

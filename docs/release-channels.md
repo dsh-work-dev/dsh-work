@@ -16,12 +16,15 @@ and what a channel needs before it can publish.
 | beta | `X.Y.Z-beta.N` | the release tag's commit | push tag `vX.Y.Z-beta.N` |
 | nightly | `X.Y.Z-nightly.YYYYMMDD.<run id>` | `main`, or the default branch | daily schedule when `main` moved, manual dispatch |
 
-`X.Y.Z` is the base version in `build/config.yml` (`info.version`). A release
-version never invents a base: `scripts/release-version.ps1` and
-`internal/release` both refuse a version that does not belong to the configured
-base, and a nightly is refused when its base is not strictly higher than the
-highest published stable version. Raising the stable line is therefore an edit
-to `build/config.yml`, made deliberately, before the nightly that needs it.
+`X.Y.Z` is the base version in `build/config.yml` (`info.version`). The
+preflight (`scripts/release-version.mjs`, which runs `internal/release`) is the
+only place that decides a release version; the build scripts take the version
+it computed. Stable and beta versions must use exactly the config base. A
+nightly must sort above the highest published stable version, so its base is
+the config base when that is higher, and otherwise the patch after the
+published stable: once `0.1.0` is out, nightlies become `0.1.1-nightly.*`
+without any edit. Moving to a new minor or major line is an edit to
+`build/config.yml`, and nightlies follow it from the next run.
 
 The three channels do not share precedence. SemVer orders
 `X.Y.Z-nightly.*` above `X.Y.Z-beta.N` for the same base, because `beta` sorts

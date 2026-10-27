@@ -113,15 +113,15 @@ func TestRunRejectsNightlyWithoutRunID(t *testing.T) {
 	}
 }
 
-func TestRunRejectsNightlyBelowPublishedStable(t *testing.T) {
-	_, stderr, code := runInDir(t, []string{
-		"--channel", "nightly", "--base", "0.3.0", "--date", "2026-10-13", "--run-id", "1", "--last-stable", "0.3.0",
+func TestRunMovesNightlyPastPublishedStable(t *testing.T) {
+	stdout, stderr, code := runInDir(t, []string{
+		"--channel", "nightly", "--base", "0.3.0", "--date", "2026-10-13", "--run-id", "1", "--last-stable", "0.3.0", "--field", "version",
 	}, "")
-	if code != exitUsage {
-		t.Fatalf("exit code = %d, want %d (stderr = %s)", code, exitUsage, stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr = %s)", code, stderr)
 	}
-	if !strings.Contains(stderr, "must be higher than the last published stable base") {
-		t.Errorf("stderr = %q, want the base rule to be named", stderr)
+	if got := strings.TrimSpace(stdout); got != "0.3.1-nightly.20261013.1" {
+		t.Errorf("version = %q, want the patch after the published stable base", got)
 	}
 }
 
