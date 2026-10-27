@@ -38,7 +38,9 @@ func run(args []string, stdout, stderr io.Writer) (runErr error) {
 		printUsage(stdout)
 		return nil
 	}
-	if maintenance.InstallerInProgress() && !(args[0] == "stop" && hasFlag(args[1:], "--wait")) {
+	// Only the uninstaller's confirmed purge may run inside the installer
+	// boundary; an ordinary data purge must not race an install or update.
+	if maintenance.InstallerInProgress() && !(args[0] == "stop" && hasFlag(args[1:], "--wait")) && !isDataPurgeUninstallerCommand(args) {
 		return lifecycle.Failure{
 			Code:          lifecycle.ErrorManagerOperationBusy,
 			Summary:       "DSH Work is being updated.",
@@ -46,6 +48,9 @@ func run(args []string, stdout, stderr io.Writer) (runErr error) {
 			CorrelationID: lifecycle.NewCorrelationID(),
 			Detail:        "Wait for the installer to finish, then retry the command.",
 		}
+	}
+	if isDataPurgeCommand(args) {
+		return runDataPurge(args[2:], stdout)
 	}
 	if handled, err := tryOnline(args, stdout); handled {
 		return err
@@ -472,6 +477,7 @@ func printUsage(stdout io.Writer) {
 	fmt.Fprintln(stdout, "  dsh-work runtime add --id ID --version VERSION --path PATH")
 	fmt.Fprintln(stdout, "  dsh-work runtime remove --id ID    # removes catalog entry and managed files")
 	fmt.Fprintln(stdout, "  dsh-work data-directory list|add|remove ...  # removal retains files")
+	fmt.Fprintln(stdout, "  dsh-work data purge [--yes]  # list managed paths; --yes deletes them")
 	fmt.Fprintln(stdout, "  dsh-work profile list [--json]")
 	fmt.Fprintln(stdout, "  dsh-work use --runtime ID --data-directory ID --profile NAME")
 	fmt.Fprintln(stdout, "  dsh-work plugin list|add|remove --data-directory ID --profile NAME ...")

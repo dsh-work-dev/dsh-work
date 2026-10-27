@@ -34,3 +34,21 @@ func TestInstallerMutexNameUsesCurrentTokenSID(t *testing.T) {
 		t.Fatalf("mutex name changed with USERNAME: %q -> %q", name, nameAfterEnvironmentChange)
 	}
 }
+
+func TestAcquireInstallerBoundaryIsVisibleUntilReleased(t *testing.T) {
+	if InstallerInProgress() {
+		t.Skip("the current user's installer boundary is already active")
+	}
+	release, err := AcquireInstallerBoundary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !InstallerInProgress() {
+		release()
+		t.Fatal("installer boundary is not visible while acquired")
+	}
+	release()
+	if InstallerInProgress() {
+		t.Fatal("installer boundary remained after release")
+	}
+}
