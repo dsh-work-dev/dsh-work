@@ -43,6 +43,28 @@ func installerInProgress() bool {
 	return !errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
 }
 
+func acquireInstallerBoundary() (func(), error) {
+	nameString, err := installerMutexName()
+	if err != nil {
+		return nil, err
+	}
+	name, err := windows.UTF16PtrFromString(nameString)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := windows.CreateMutex(nil, false, name)
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		if handle != 0 {
+			_ = windows.CloseHandle(handle)
+		}
+		return nil, ErrInstallerBusy
+	}
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = windows.CloseHandle(handle) }, nil
+}
+
 func showInstallerBusy() {
 	message, messageErr := windows.UTF16PtrFromString("DSH Work is being updated. Wait for the installer to finish, then reopen DSH Work.")
 	caption, captionErr := windows.UTF16PtrFromString("DSH Work")

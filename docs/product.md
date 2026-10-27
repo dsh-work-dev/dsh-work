@@ -128,6 +128,9 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
 - The manager CLI shares the daemon for online operations and uses locked
   offline access when the daemon is unavailable.
 - Windows uses a Job Object to own the Worker process tree.
+- The Windows installer offers a desktop shortcut (on by default). The
+  uninstaller keeps user data unless "Delete user data" is checked;
+  `dsh-work-cli data purge` removes the same data from the command line.
 
 See [Settings and startup](settings.md) for the accepted interaction layout.
 

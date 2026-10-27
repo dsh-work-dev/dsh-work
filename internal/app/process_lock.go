@@ -37,6 +37,39 @@ func AcquireManagerProcessLock(settingsPath string) (*ProcessLock, error) {
 	return acquireProcessFileLock(lockPath)
 }
 
+// AcquireExistingManagerProcessLock acquires an existing manager boundary
+// without creating storage directories or a lock file. It is used by data
+// purge so a dry run stays read-only and a purge cannot start beside a live
+// desktop Host.
+func AcquireExistingManagerProcessLock(settingsPath string) (*ProcessLock, error) {
+	if strings.TrimSpace(settingsPath) == "" {
+		return nil, nil
+	}
+	lockPath := filepath.Join(filepath.Dir(settingsPath), "state.lock")
+	file, err := os.OpenFile(lockPath, os.O_RDWR, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open process lock %q: %w", lockPath, err)
+	}
+	unlock, err := lockProcessFile(file)
+	if err != nil {
+		_ = file.Close()
+		if errors.Is(err, errProcessLockHeld) {
+			return nil, lifecycle.Failure{
+				Code:          lifecycle.ErrorManagerOperationBusy,
+				Summary:       "DSH Work is already running.",
+				Retryable:     true,
+				CorrelationID: lifecycle.NewCorrelationID(),
+				Detail:        "Stop the DSH Work background before purging user data.",
+			}
+		}
+		return nil, fmt.Errorf("lock process boundary %q: %w", lockPath, err)
+	}
+	return &ProcessLock{file: file, unlock: unlock}, nil
+}
+
 func acquireProcessFileLock(lockPath string) (*ProcessLock, error) {
 	if strings.TrimSpace(lockPath) == "" {
 		return nil, nil

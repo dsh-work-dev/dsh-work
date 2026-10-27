@@ -25,6 +25,7 @@ Var DshWorkBackupDir
 Var DshWorkHadOld
 Var DshWorkLogPath
 Var DshWorkFailureStage
+Var DshWorkUninstallStopped
 
 Function dshwork.log
     Exch $0
@@ -207,11 +208,13 @@ ManifestDPIAware true
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Open ${DSH_WORK_DISPLAY_NAME} after installation"
 !define MUI_FINISHPAGE_RUN_FUNCTION dshwork.launch
 !insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_COMPONENTS
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
@@ -274,9 +277,9 @@ ${prefix}SIDFree:
     System::Free $4
 ${prefix}SIDClose:
     System::Call 'kernel32::CloseHandle(p r1)'
-    Return
 ${prefix}SIDFailed:
-    Return
+    ; No Return here: the macro is expanded inside the caller, and a Return
+    ; would leave the caller before it creates the installer mutex.
 !macroend
 
 !macro dshwork.stopExisting
@@ -548,7 +551,15 @@ Function un.onInit
     Call un.dshwork.acquireInstallerMutex
 FunctionEnd
 
-Section
+Function un.dshwork.stopExistingOnce
+    StrCmp $DshWorkUninstallStopped "1" unDshWorkStopExistingOnceDone
+    !insertmacro dshwork.stopExisting
+    StrCpy $DshWorkUninstallStopped "1"
+unDshWorkStopExistingOnceDone:
+FunctionEnd
+
+Section "Program files" SEC_PROGRAM_FILES
+    SectionIn RO
     !insertmacro wails.setShellContext
     Push "Installer section started. Selected install directory: $INSTDIR"
     Call dshwork.log
@@ -582,7 +593,6 @@ Section
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
 
     CreateShortcut "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortcut "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     !insertmacro wails.associateFiles
     !insertmacro wails.writeUninstaller
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${DSH_WORK_DISPLAY_NAME}"
@@ -606,9 +616,30 @@ installDone:
 dshworkSectionEnd:
 SectionEnd
 
+Section "Desktop shortcut" SEC_DESKTOP_SHORTCUT
+    CreateShortcut "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+SectionEnd
+
+Section /o "un.Delete user data" SEC_DELETE_USER_DATA
+    !insertmacro wails.setShellContext
+    Call un.dshwork.stopExistingOnce
+    IfFileExists "$INSTDIR\${CLI_EXECUTABLE}" 0 uninstallPurgeCliMissing
+    ClearErrors
+    ExecWait '"$INSTDIR\${CLI_EXECUTABLE}" data purge --yes --during-uninstall' $0
+    IfErrors uninstallPurgeStartFailed
+    DetailPrint "User data purge exit code: $0"
+    Goto uninstallPurgeDone
+uninstallPurgeCliMissing:
+    DetailPrint "User data purge could not run because the CLI executable is missing."
+    Goto uninstallPurgeDone
+uninstallPurgeStartFailed:
+    DetailPrint "User data purge could not start."
+uninstallPurgeDone:
+SectionEnd
+
 Section "uninstall"
     !insertmacro wails.setShellContext
-    !insertmacro dshwork.stopExisting
+    Call un.dshwork.stopExistingOnce
     Call un.dshwork.cleanRecovery
 
     ; Application data is owned by the current user and remains available for

@@ -420,6 +420,50 @@ App data holds what dsh-work can rebuild: runtimes and Node, host plugins, the b
 
 This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. dsh-work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
 
+## Windows installer and uninstaller
+
+The per-user NSIS installer (`build/windows/nsis/project.nsi`) shows a
+components page after the directory page. "Program files" is required;
+"Desktop shortcut" is checked by default. The Start menu shortcut is always
+created. A silent install (`/S`, the form an in-app update uses) takes the
+defaults. An unchecked desktop shortcut is only not created: an upgrade leaves
+an existing desktop shortcut alone, and the user removes it themselves.
+
+The uninstaller also has a components page with one option, "Delete user
+data", unchecked by default; a silent uninstall never deletes data. Every
+uninstall stops the background, removes the program directory, both shortcuts,
+the uninstall entry and the release AppUserModelID and CLSID keys, and restores
+the protocol registrations as described under [Account sign-in](#account-sign-in).
+Without the option, everything in [Storage layout](#storage-layout) stays, so a
+reinstall opens the same workspace. With it, the uninstaller runs
+`dsh-work-cli data purge --yes --during-uninstall` after stopping the
+background and before removing the program files. A purge failure is written
+to the uninstall details and does not stop the uninstall.
+
+`data purge` resolves the current locations from `config.toml`, including moved
+ones, and deletes the app data root, the managed user data root, the cache and
+log root, and finally `config.toml`. Data directories the user registered
+(`ownership: user` in `state.json`) are kept; a purge refuses to run when one of
+them contains a managed root, and it refuses any path that is or contains the
+user profile or the install directory. Without `--yes` it only lists the
+paths. It refuses while the manager lock is held (`MANAGER_OPERATION_BUSY`).
+
+Installer and uninstaller hold the per-user mutex
+`Global\dsh-work-installer-<user SID>` for their whole run and release it just
+before launching the workbench. While it exists, the GUI exits with a busy
+notice and the CLI returns `MANAGER_OPERATION_BUSY`, except `stop --wait` (the
+installer's stop handshake) and `data purge --yes --during-uninstall`, which is
+accepted only while the mutex exists. An ordinary `data purge --yes` creates the
+mutex itself so an installer cannot start halfway through a purge.
+
+Data removal lives in the CLI, not in NSIS `RMDir` calls on default paths. The
+locations come from `config.toml` and the registered directories from
+`state.json`, which NSIS cannot read safely; fixed default paths would miss a
+moved location and could delete a user-registered DSH home. The CLI code is
+also unit-tested. Data is kept by default because deletion cannot be undone
+and a reinstall should find the existing workspace. Revisit when macOS or
+Linux packaging gains an uninstall path.
+
 ## Runtime catalog
 
 dsh-work keeps an external catalog of DSH runtimes and explicit
