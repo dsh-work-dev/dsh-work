@@ -53,6 +53,12 @@ func acquireInstallerBoundary() (func(), error) {
 		return nil, err
 	}
 	handle, err := windows.CreateMutex(nil, false, name)
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		if handle != 0 {
+			_ = windows.CloseHandle(handle)
+		}
+		return nil, ErrInstallerBusy
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,12 @@
 // Windows installer owns the current user's application files.
 package maintenance
 
+import "errors"
+
+// ErrInstallerBusy indicates that another DSH Work installer owns the
+// per-user maintenance boundary.
+var ErrInstallerBusy = errors.New("DSH Work installer is running")
+
 // InstallerInProgress reports whether the per-user installer boundary exists.
 // Non-Windows builds return false because their installer lifecycle is not
 // implemented by this package yet.

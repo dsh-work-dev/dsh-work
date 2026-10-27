@@ -87,11 +87,26 @@ func runDataPurgeWith(args []string, stdout io.Writer, defaults storagepaths.Dir
 	settingsPath := filepath.Join(current.Root, "settings.json")
 	var lock *dshworkapp.ProcessLock
 	if *yes {
-		releaseBoundary, boundaryErr := maintenance.AcquireInstallerBoundary()
-		if boundaryErr != nil {
-			return fmt.Errorf("reserve DSH Work install boundary: %w", boundaryErr)
+		if *duringUninstall {
+			if !maintenance.InstallerInProgress() {
+				return errors.New("--during-uninstall is only valid while the DSH Work uninstaller is running")
+			}
+		} else {
+			releaseBoundary, boundaryErr := maintenance.AcquireInstallerBoundary()
+			if errors.Is(boundaryErr, maintenance.ErrInstallerBusy) {
+				return lifecycle.Failure{
+					Code:          lifecycle.ErrorManagerOperationBusy,
+					Summary:       "DSH Work is being updated.",
+					Retryable:     true,
+					CorrelationID: lifecycle.NewCorrelationID(),
+					Detail:        "Wait for the installer to finish, then retry the command.",
+				}
+			}
+			if boundaryErr != nil {
+				return fmt.Errorf("reserve DSH Work install boundary: %w", boundaryErr)
+			}
+			defer releaseBoundary()
 		}
-		defer releaseBoundary()
 
 		// Create/lock the boundary when it does not exist yet so a manager
 		// cannot start between the running-process check and the file removal.
