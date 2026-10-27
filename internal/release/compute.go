@@ -40,8 +40,8 @@ type ReleaseOptions struct {
 	// be smuggled into the version.
 	SourceSHA string
 	// LastStableVersion is the highest stable version published for this
-	// repository, used to prove that a nightly base moved forward. Empty means
-	// no stable release exists yet.
+	// repository. A nightly whose config base is not above it moves to the
+	// next patch. Empty means no stable release exists yet.
 	LastStableVersion string
 }
 
@@ -69,9 +69,9 @@ type Release struct {
 //   - a stable release has no pre-release part;
 //   - a beta version is exactly X.Y.Z-beta.N with the config base;
 //   - a nightly version is derived from the base and the UTC date and run id of
-//     the run, and its base must be strictly higher than the last published
-//     stable base, which is why a stable release is followed by raising the
-//     config base;
+//     the run. Its base is the config base when that is strictly higher than
+//     the last published stable base, and otherwise the patch after that
+//     stable base, so a stable release needs no immediate config change;
 //   - numeric components must fit the Windows file-version fields.
 func Compute(options ReleaseOptions) (Release, error) {
 	if !options.Channel.Valid() {
@@ -151,8 +151,11 @@ func Compute(options ReleaseOptions) (Release, error) {
 				return Release{}, invalidf("last stable version %q must be a plain X.Y.Z release", previous)
 			}
 			if !BaseSupersedes(base, lastStable) {
-				return Release{}, invalidf("nightly base %s must be higher than the last published stable base %s; raise info.version in build/config.yml",
-					base.Base(), lastStable.Base())
+				// The config still names a base that is already published as
+				// stable, so the next development cycle is the next patch. A
+				// config raised to a later minor or major wins over this.
+				base = MustParse(fmt.Sprintf("%d.%d.%d", lastStable.Major(), lastStable.Minor(), lastStable.Patch()+1))
+				release.Base = base.Base()
 			}
 			release.LastStableBase = lastStable.Base()
 		}

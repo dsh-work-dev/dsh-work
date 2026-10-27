@@ -63,12 +63,10 @@ function Resolve-ReleaseVersion {
         }
     }
 
-    $resolvedBase = "$major.$minor.$patch"
-    if ($resolvedBase -ne $base) {
-        throw "release version '$requested' does not belong to base $base from build/config.yml"
-    }
-
+    # Which base a release version may use is decided once by the preflight
+    # (internal/release); the build only takes the version it computed.
     $prerelease = $match.Groups['prerelease'].Value
+
     if ($prerelease.StartsWith('nightly.')) {
         $stamp = $prerelease.Split('.')[1]
         $parsedStamp = [datetime]::MinValue
@@ -85,7 +83,7 @@ function Resolve-ReleaseVersion {
 
     [pscustomobject]@{
         Version       = $requested
-        Base          = $base
+        Base          = "$major.$minor.$patch"
         FileVersion   = "$major.$minor.$patch.0"
         Prerelease    = $prerelease
     }

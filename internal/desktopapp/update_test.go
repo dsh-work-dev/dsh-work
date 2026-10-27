@@ -293,7 +293,9 @@ func TestUpdateRunnerRefusesChannelSwitchWhileInstalling(t *testing.T) {
 
 func waitForUpdate(t *testing.T, done func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	// The deadline only bounds a failing wait; a slow CI runner needs more
+	// than a second for the background update goroutines.
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if done() {
 			return

@@ -170,9 +170,10 @@ jobs:
             # input, so a retry of the same run reproduces the same version
             # and cannot publish a second identity for the same commit.
             base=$(node scripts/release-version.mjs --channel stable --config "$BASE_CONFIG" --field base)
-            # The highest published stable version gates the nightly base: a
-            # nightly may not race ahead of the stable line. No stable release
-            # yet means no gate.
+            # A nightly must sort above the highest published stable version:
+            # when the config base is not higher, the preflight moves the
+            # nightly to the patch after it. No stable release yet means the
+            # config base is used as is.
             last_stable=$(gh release list -R "$GITHUB_REPOSITORY" \
               --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""' \
               | sed 's/^v//')

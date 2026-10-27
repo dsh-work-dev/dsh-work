@@ -129,24 +129,32 @@ func TestComputeNightlyRunIDsAscendOnOneDay(t *testing.T) {
 	}
 }
 
-func TestComputeNightlyBaseMustSupersedeLastStable(t *testing.T) {
-	// The next development cycle raises build/config.yml after a stable
-	// release; a nightly below the published stable base is refused.
-	if _, err := Compute(ReleaseOptions{
-		Channel: ChannelNightly, Base: "0.3.0", Date: "2026-10-13", RunID: "1", LastStableVersion: "0.3.0",
-	}); err == nil {
-		t.Fatal("a nightly on the published stable base must be refused")
+func TestComputeNightlyBaseFollowsLastStable(t *testing.T) {
+	// A config base that is already published as stable moves to the next
+	// patch, so a stable release needs no immediate config change.
+	for _, base := range []string{"0.3.0", "0.2.0"} {
+		release, err := Compute(ReleaseOptions{
+			Channel: ChannelNightly, Base: base, Date: "2026-10-13", RunID: "1", LastStableVersion: "0.3.0",
+		})
+		if err != nil {
+			t.Fatalf("base %s: Compute returned error: %v", base, err)
+		}
+		if release.Version.String() != "0.3.1-nightly.20261013.1" || release.Base != "0.3.1" {
+			t.Errorf("base %s: version = %q, base = %q, want 0.3.1-nightly.20261013.1 on 0.3.1", base, release.Version.String(), release.Base)
+		}
+		if !IsNewer(release.Version, MustParse("0.3.0")) {
+			t.Errorf("base %s: %q must sort above the published stable 0.3.0", base, release.Version.String())
+		}
 	}
-	if _, err := Compute(ReleaseOptions{
-		Channel: ChannelNightly, Base: "0.2.0", Date: "2026-10-13", RunID: "1", LastStableVersion: "0.3.0",
-	}); err == nil {
-		t.Fatal("a nightly below the published stable base must be refused")
-	}
+	// A config base raised past the stable line wins.
 	release, err := Compute(ReleaseOptions{
 		Channel: ChannelNightly, Base: "0.4.0", Date: "2026-10-13", RunID: "1", LastStableVersion: "0.3.0",
 	})
 	if err != nil {
 		t.Fatalf("a nightly above the published stable base must be accepted: %v", err)
+	}
+	if release.Version.String() != "0.4.0-nightly.20261013.1" {
+		t.Errorf("version = %q, want the config base 0.4.0", release.Version.String())
 	}
 	if release.LastStableBase != "0.3.0" {
 		t.Errorf("LastStableBase = %q, want 0.3.0", release.LastStableBase)

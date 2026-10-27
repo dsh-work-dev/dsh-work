@@ -162,6 +162,14 @@ try {
     [System.IO.File]::WriteAllBytes($wideFile, [System.Text.Encoding]::UTF8.GetBytes('cli ' + $nightly + ' channel=beta feed=' + $script:DefaultFeedRoot + ' publisher=' + $widePublisher))
     Assert-Equal '' (Test-BinaryCarriesIdentity -Path $wideFile -Version $nightly -Channel 'beta' -Feed $script:DefaultFeedRoot -Publisher $widePublisher) 'a publisher outside ASCII is found as UTF-8 bytes'
 
+    # The build takes the version the preflight computed, including a nightly
+    # whose base is the patch after the configured one.
+    $baseConfig = Join-Path $work 'config.yml'
+    Set-Content -LiteralPath $baseConfig -Value "info:`n  version: `"0.1.0`""
+    $moved = Resolve-ReleaseVersion -ReleaseVersion '0.1.1-nightly.20261027.42' -ConfigPath $baseConfig
+    Assert-Equal '0.1.1-nightly.20261027.42' $moved.Version 'a nightly on the next patch is accepted'
+    Assert-Equal '0.1.1.0' $moved.FileVersion 'the file version follows the version, not the config base'
+
     $bytesFile = Join-Path $work 'bytes.bin'
     [System.IO.File]::WriteAllBytes($bytesFile, [byte[]](0x80, 0x41, 0x42))
     Assert-Equal 3 (Get-BinaryText -Bytes ([System.IO.File]::ReadAllBytes($bytesFile))).Length 'the byte view maps one byte to one character'

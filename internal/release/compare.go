@@ -52,9 +52,9 @@ func Equal(a, b Version) bool { return Compare(a, b) == 0 }
 func SameBase(a, b Version) bool { return !a.IsZero() && !b.IsZero() && a.Base() == b.Base() }
 
 // BaseSupersedes reports whether base is strictly higher than previous at the
-// base-version level. A nightly build uses it to prove that its base is above
-// the last published stable base, which is why the next development cycle has
-// to raise build/config.yml after a stable release.
+// base-version level. A nightly build uses it to decide whether the config base
+// is already past the last published stable base or must move to the next
+// patch.
 func BaseSupersedes(base, previous Version) bool {
 	if base.IsZero() || previous.IsZero() {
 		return false
