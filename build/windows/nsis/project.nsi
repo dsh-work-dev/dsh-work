@@ -277,9 +277,9 @@ ${prefix}SIDFree:
     System::Free $4
 ${prefix}SIDClose:
     System::Call 'kernel32::CloseHandle(p r1)'
-    Return
 ${prefix}SIDFailed:
-    Return
+    ; No Return here: the macro is expanded inside the caller, and a Return
+    ; would leave the caller before it creates the installer mutex.
 !macroend
 
 !macro dshwork.stopExisting
@@ -593,9 +593,6 @@ Section "Program files" SEC_PROGRAM_FILES
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
 
     CreateShortcut "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    ; Remove any prior shortcut before the optional section recreates it. This
-    ; makes an unchecked upgrade choice remove the existing desktop shortcut.
-    Delete "$DESKTOP\${DSH_WORK_DISPLAY_NAME}.lnk"
     !insertmacro wails.associateFiles
     !insertmacro wails.writeUninstaller
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${DSH_WORK_DISPLAY_NAME}"
