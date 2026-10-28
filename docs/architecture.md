@@ -456,6 +456,29 @@ installer's stop handshake) and `data purge --yes --during-uninstall`, which is
 accepted only while the mutex exists. An ordinary `data purge --yes` creates the
 mutex itself so an installer cannot start halfway through a purge.
 
+An install over an existing one, including an in-app update (which runs the
+new installer with `/S`), replaces the program directory as a whole. The
+installer stops the background with `stop --wait` and cancels if it cannot. It
+extracts the GUI and CLI into `<install dir>.new`, renames the old program
+directory to `<install dir>.recovery`, renames the staging directory into place
+and then deletes the recovery copy. If the second rename
+fails, the old directory is renamed back and the install is cancelled, so a
+GUI and CLI from different releases never sit side by side. If the installer
+is interrupted, the next installer run looks at the recovery copy first: a
+complete program directory (both executables present) means only cleanup was
+missed, and the copy is deleted; a partial or missing one is removed and the
+copy is renamed back. A leftover staging directory is deleted before the next
+extraction, and the uninstaller deletes both leftovers. Installs and
+updates never touch the data in [Storage layout](#storage-layout). Each run
+writes `%USERPROFILE%\dsh-work-installer-debug.log`.
+
+Directory renames are used instead of NSIS's default in-place overwrite because
+an interrupted overwrite leaves a mix of old and new files with no copy of the
+old release; a rename on one volume either happens or does not. Staging and
+recovery sit beside the install directory, not under `%TEMP%` or
+`%LOCALAPPDATA%`, because Windows cannot rename a directory across volumes and
+the user may install outside the system drive.
+
 Data removal lives in the CLI, not in NSIS `RMDir` calls on default paths. The
 locations come from `config.toml` and the registered directories from
 `state.json`, which NSIS cannot read safely; fixed default paths would miss a
