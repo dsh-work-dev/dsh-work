@@ -11,7 +11,11 @@ Unicode true
 !define TOKEN_QUERY 0x0008
 !define TokenUser 1
 !define DSH_WORK_INSTALLER_MUTEX_PREFIX "Global\dsh-work-installer-"
-!define DSH_WORK_RECOVERY_DIR "$LOCALAPPDATA\dsh-work\installer-recovery"
+; Staging and recovery directories sit next to the install directory so every
+; directory rename stays on one volume; Windows cannot rename a directory
+; across volumes, which broke installs outside the system drive.
+!define DSH_WORK_STAGING_DIR "$INSTDIR.new"
+!define DSH_WORK_RECOVERY_DIR "$INSTDIR.recovery"
 !define DSH_WORK_INSTALL_REG_KEY "Software\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !define DSH_WORK_PROTOCOL_KEY "Software\Classes\dsh"
 !define DSH_WORK_RETURN_PROTOCOL_KEY "Software\Classes\dsh-work"
@@ -373,7 +377,6 @@ discardPartialInstall:
 restoreRecovery:
     Push "Restoring previous installation from ${DSH_WORK_RECOVERY_DIR} to $INSTDIR"
     Call dshwork.log
-    CreateDirectory "$LOCALAPPDATA\Programs"
     ClearErrors
     Rename "${DSH_WORK_RECOVERY_DIR}" "$INSTDIR"
     IfErrors recoveryFailed
@@ -402,6 +405,7 @@ recoveryDone:
 FunctionEnd
 
 Function un.dshwork.cleanRecovery
+    RMDir /r "${DSH_WORK_STAGING_DIR}"
     IfFileExists "${DSH_WORK_RECOVERY_DIR}\*" 0 unCleanRecoveryDone
     ClearErrors
     RMDir /r "${DSH_WORK_RECOVERY_DIR}"
@@ -420,14 +424,13 @@ FunctionEnd
     ; SetOutPath changes the installer's current directory. Leave the staging
     ; tree before moving it, otherwise Windows can keep the directory busy.
     SetOutPath "$PLUGINSDIR"
-    StrCpy $DshWorkStagingDir "$PLUGINSDIR\dsh-work-new"
+    StrCpy $DshWorkStagingDir "${DSH_WORK_STAGING_DIR}"
     StrCpy $DshWorkBackupDir "${DSH_WORK_RECOVERY_DIR}"
     StrCpy $DshWorkHadOld "0"
     Push "Install replacement paths: temp=$PLUGINSDIR; staging=$DshWorkStagingDir; target=$INSTDIR; recovery=$DshWorkBackupDir"
     Call dshwork.log
     IfFileExists "$DshWorkBackupDir\*" backupConflict
     IfFileExists "$INSTDIR\*" 0 noOldInstall
-    CreateDirectory "$LOCALAPPDATA\dsh-work"
     ClearErrors
     Rename "$INSTDIR" "$DshWorkBackupDir"
     IfErrors oldInstallMoveFailed
@@ -435,7 +438,6 @@ FunctionEnd
     Push "Moved existing installation to recovery directory: $DshWorkBackupDir"
     Call dshwork.log
 noOldInstall:
-    CreateDirectory "$LOCALAPPDATA\Programs"
     ClearErrors
     Rename "$DshWorkStagingDir" "$INSTDIR"
     IfErrors newInstallMoveFailed
@@ -571,10 +573,11 @@ Section "Program files" SEC_PROGRAM_FILES
     Push "WebView2 runtime/bootstrapper step completed."
     Call dshwork.log
     InitPluginsDir
-    StrCpy $DshWorkStagingDir "$PLUGINSDIR\dsh-work-new"
+    StrCpy $DshWorkStagingDir "${DSH_WORK_STAGING_DIR}"
     StrCpy $DshWorkFailureStage "create staging directory $DshWorkStagingDir"
     Push "Extracting application package to: $DshWorkStagingDir"
     Call dshwork.log
+    RMDir /r "$DshWorkStagingDir"
     ClearErrors
     SetOutPath "$DshWorkStagingDir"
     IfErrors packageStageFailed
