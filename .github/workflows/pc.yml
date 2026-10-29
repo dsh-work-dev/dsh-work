@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Keep these job names stable: main branch protection requires these contexts.
   shared-contracts:
     name: Shared contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -33,7 +34,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev
 
+      # Frontend checks are platform-agnostic; run them once on Ubuntu.
       - name: Set up Node
+        if: runner.os == 'Linux'
         uses: actions/setup-node@v5
         with:
           node-version: '>=24'
@@ -41,29 +44,31 @@ jobs:
           package-manager-cache: false
 
       - name: Verify Node and npm lock
+        if: runner.os == 'Linux'
         run: node scripts/verify-node.mjs
 
       - name: Check public content
+        if: runner.os == 'Linux'
         run: node scripts/check-public-content.mjs
 
       - name: Install frontend dependencies
+        if: runner.os == 'Linux'
         run: npm ci --prefix frontend
 
-      - name: Frontend tests, typecheck and build
+      - name: Frontend tests and typecheck
+        if: runner.os == 'Linux'
         run: |
           npm run --prefix frontend test
           npm run --prefix frontend typecheck
-          npm run --prefix frontend build
 
-      - name: Shared Go contracts and build
+      - name: Go tests
         run: go test ./internal/...
-      - name: Build shared Go packages
+      - name: Build Go packages
         run: go build ./internal/...
 
   windows-build:
     name: Windows Wails build
     runs-on: windows-latest
-    needs: shared-contracts
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -117,4 +122,4 @@ jobs:
             bin/dsh-work-*-windows-amd64-installer.exe.sha256
 
       - name: Run Windows Go suite
-        run: go test . ./cmd/... ./internal/...
+        run: go test . ./cmd/...
