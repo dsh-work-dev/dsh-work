@@ -69,6 +69,8 @@ jobs:
   windows-build:
     name: Windows Wails build
     runs-on: windows-latest
+    env:
+      WAILS_CLI_VERSION: v3.0.0-beta.16
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -85,6 +87,8 @@ jobs:
         with:
           node-version: '>=24'
           check-latest: true
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
           package-manager-cache: false
 
       - name: Install frontend dependencies
@@ -93,16 +97,39 @@ jobs:
       - name: Build frontend assets
         run: npm run --prefix frontend build
 
+      - name: Cache Wails CLI
+        id: wails-cli-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/go/bin/wails3.exe
+          key: wails-cli-${{ runner.os }}-${{ runner.arch }}-go-1.25.14-${{ env.WAILS_CLI_VERSION }}
+
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+        if: steps.wails-cli-cache.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS_CLI_VERSION }}
 
       - name: Verify Wails CLI
         run: wails3 version
 
-      - name: Install NSIS
+      - name: Resolve NSIS version
+        id: nsis-version
         run: |
           $nsisVersion = (Get-Content toolchain.lock.json -Raw | ConvertFrom-Json).nsis.version
-          choco install nsis --version=$nsisVersion --yes --no-progress
+          "version=$nsisVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Cache NSIS
+        id: nsis-cache
+        uses: actions/cache@v6
+        with:
+          path: 'C:\Program Files (x86)\NSIS'
+          key: nsis-${{ runner.os }}-${{ runner.arch }}-${{ steps.nsis-version.outputs.version }}
+
+      - name: Install NSIS
+        if: steps.nsis-cache.outputs.cache-hit != 'true'
+        run: choco install nsis --version=${{ steps.nsis-version.outputs.version }} --yes --no-progress
+
+      - name: Verify NSIS
+        run: |
           $nsisBin = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
           Add-Content -Path $env:GITHUB_PATH -Value $nsisBin
           & (Join-Path $nsisBin 'makensis.exe') /VERSION
