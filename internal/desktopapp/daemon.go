@@ -16,6 +16,7 @@ import (
 	"github.com/local/dsh-work/internal/accountcallback"
 	"github.com/local/dsh-work/internal/acquisition"
 	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/desktopprobe"
@@ -125,14 +126,21 @@ func runDaemon(identity string, resources Resources) {
 	petActivity := dshactivity.New()
 	defer petActivity.Close()
 	hostPlugins := hostplugins.NewOverlay(filepath.Join(filepath.Dir(config.SettingsPath), "host-plugins"), version.String())
+	automationBridge := automation.NewBridge()
+	defer automationBridge.Stop()
 	coreOverlay := func(generation string) (string, error) {
 		petConfig, err := petActivity.Begin(generation)
 		if err != nil {
 			return "", err
 		}
+		automationConfig, err := automationBridge.Begin(generation)
+		if err != nil {
+			return "", err
+		}
 		return hostPlugins.Prepare(generation, map[string]map[string]string{
-			"shell": {"generation": generation},
-			"pet":   petConfig,
+			"automation": automationConfig,
+			"shell":      {"generation": generation},
+			"pet":        petConfig,
 		})
 	}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
@@ -152,18 +160,19 @@ func runDaemon(identity string, resources Resources) {
 		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
 	}
 	managerConfig := dshmanager.Config{
-		StatePath:         statePath,
-		MinimumDSHVersion: dshadapter.MinimumVersion,
-		CommandRunner:     managerRunner,
-		PluginCommands:    dshadapter.NewPluginCommands(),
-		RuntimeInstaller:  platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:        platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:       platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:     platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:      platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:   dsh,
-		ProfileCatalog:    dsh,
-		AppProfile:        dsh,
+		StatePath:          statePath,
+		AutomationVersions: automation.CurrentVersionInputs,
+		MinimumDSHVersion:  dshadapter.MinimumVersion,
+		CommandRunner:      managerRunner,
+		PluginCommands:     dshadapter.NewPluginCommands(),
+		RuntimeInstaller:   platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:         platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:        platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:      platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:       platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:    dsh,
+		ProfileCatalog:     dsh,
+		AppProfile:         dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
@@ -175,7 +184,10 @@ func runDaemon(identity string, resources Resources) {
 		manager = nil
 	}
 	channel := workerchannel.New()
-	channel.SetWorkerObserver(petActivity.Start)
+	channel.SetWorkerObserver(func(ctx context.Context, auth string, transport http.RoundTripper) {
+		petActivity.Start(ctx, auth, transport)
+		automationBridge.Start(ctx, auth, transport)
+	})
 	var automaticRuntimeRollback atomic.Bool
 	automaticRuntimeRollback.Store(true)
 	host := dshworkapp.NewHost(dshworkapp.Dependencies{
@@ -300,6 +312,10 @@ func runDaemon(identity string, resources Resources) {
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) })
 	dshworkapp.SetProfileExportAction(managerService, func(name string) (string, error) { return nativeui.SaveProfileArchive(desktop, name) })
 	var publishLocale func(dshworksettings.Locale)
+	automationState := automation.New(settingsManager, platform.NewAutomationPreparer(config.CacheDirectory))
+	defer automationState.Close()
+	automationBridge.Attach(automationState)
+	automationService := dshworkapp.NewAutomationService(automationState)
 	settingsService := dshworkapp.NewSettingsService(
 		settingsManager,
 		func(locale dshworksettings.Locale) {
@@ -366,13 +382,15 @@ func runDaemon(identity string, resources Resources) {
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
 		func(name string) (string, error) { return nativeui.SaveDiagnosticsBundle(desktop, name) })
 	hub := hostevents.New()
+	automationState.OnChange(func(state automation.Snapshot) { hub.SetTopic("automation", state); automationBridge.Publish() })
+	hub.SetTopic("automation", automationState.Snapshot())
 	tracker := presence.New()
 	interactions := dshinteraction.New()
 	daemonHostService := &daemon.HostService{HostService: hostService}
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
 		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
-		"DSHPageService": &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
-		"ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
+		"DSHPageService":    &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
+		"AutomationService": automationService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
 		server.ServeAccountCallback(w, r, generation)
@@ -807,6 +825,8 @@ func runDaemon(identity string, resources Resources) {
 	traySettings := trayMenu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
+	trayBrowser := trayMenu.Add(initialNative.Browser).OnClick(func(*application.Context) { openSettings("browser") })
+	trayComputer := trayMenu.Add(initialNative.Computer).OnClick(func(*application.Context) { openSettings("computer") })
 	trayMenu.AddSeparator()
 	trayCheckUpdates := trayMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
 		openSettings("about")
@@ -947,6 +967,8 @@ func runDaemon(identity string, resources Resources) {
 		trayStatus.SetLabel(nativeui.TrayStatus(locale, host.Status().State))
 		trayOpenWorkspace.SetLabel(labels.OpenWorkspace)
 		traySettings.SetLabel(labels.Settings)
+		trayBrowser.SetLabel(labels.Browser)
+		trayComputer.SetLabel(labels.Computer)
 		trayRestartDSH.SetLabel(labels.RestartDSH)
 		trayQuit.SetLabel(labels.Quit)
 		actionsMenu.SetLabel(labels.Actions)
@@ -1010,6 +1032,17 @@ func runDaemon(identity string, resources Resources) {
 		if failed {
 			lifecycleLogger.Error("lifecycle failed", "code", string(status.Error.Code), "op", status.Error.CorrelationID, "gen", status.GenerationID, "retryable", status.Error.Retryable, "summary", status.Error.Summary, "err", status.Error.Detail)
 		}
+		profile := false
+		if manager != nil {
+			if snapshot, err := manager.Snapshot(context.Background()); err == nil {
+				selection := snapshot.Current
+				if selection == nil {
+					selection = snapshot.Configured
+				}
+				profile = selection != nil && selection.Profile.DataDirectoryID == "dsh-work" && selection.Profile.Name == dshmanager.AppProfileName
+			}
+		}
+		automationState.Worker(status.GenerationID, status.State == lifecycle.StateReady, profile)
 		dshworkapp.PublishPetHostStatus(petSettingsService, status)
 		desktop.Event.Emit("lifecycle", status)
 		trayStatus.SetLabel(nativeui.TrayStatus(loadNativeLocale(&activeLocale), status.State))

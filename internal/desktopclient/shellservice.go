@@ -202,7 +202,7 @@ func (s *ShellService) publishBuiltinComponents(surface string) {
 }
 
 var shellSettingsSections = map[string]bool{
-	"overview": true, "settings": true, "notifications": true, "pets": true,
+	"overview": true, "settings": true, "notifications": true, "browser": true, "computer": true, "pets": true,
 	"runtimes": true, "profiles": true, "plugins": true, "data-directories": true, "diagnostics": true, "about": true,
 }
 

@@ -14,6 +14,8 @@ import {mountOperationLog} from "./operation-log";
 import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
 import {mountNotifications, mountSettings} from "./settings";
+import type {Snapshot as AutomationSnapshot} from "../bindings/github.com/local/dsh-work/internal/automation";
+import {mountAutomation} from "./automation";
 import {mountPets} from "./pets";
 import {mountDiagnostics} from "./diagnostics-panel";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
@@ -132,13 +134,13 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "pets" | "about";
+type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "about";
 
 type DesktopUpdateState = UpdateSnapshot;
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
-  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
+  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "about") {
     return value;
   }
   return "overview";
@@ -260,6 +262,7 @@ export function mountManager() {
   const profileDelete = document.getElementById("manager-profile-delete") as HTMLButtonElement;
   const builtinComponentList = document.getElementById("manager-builtin-components") as HTMLDivElement;
   let builtinComponentSnapshot: unknown;
+  let automationSnapshot: AutomationSnapshot | undefined;
   const renderBuiltinComponents = (value: unknown = builtinComponentSnapshot) => {
     builtinComponentSnapshot = value;
     const rows = buildBuiltinComponentViews(value).map(component => {
@@ -278,6 +281,16 @@ export function mountManager() {
       row.append(main, trail);
       return row;
     });
+    for (const capability of ["browser", "computer"] as const) {
+      const state = automationSnapshot?.[capability];
+      if (!state?.enabled) continue;
+      const row=document.createElement("div");row.className="row";
+      const main=document.createElement("div");main.className="row-main";
+      const title=document.createElement("strong");title.textContent=t(`automation.${capability}.components`);main.append(title);
+      const trail=document.createElement("div");trail.className="row-trail";
+      trail.append(stateTag(t(state.dependency === "prepared" ? "automation.prepared" : state.dependency === "failed" ? "automation.componentFailed" : "automation.unprepared")));
+      row.append(main,trail);rows.push(row);
+    }
     builtinComponentList.replaceChildren(...rows);
   };
   const pluginEmpty = document.getElementById("manager-plugin-empty") as HTMLElement;
@@ -347,6 +360,8 @@ export function mountManager() {
     "data-directories": {title: "manager.dataDirectories"},
     diagnostics: {title: "manager.diagnostics"},
     notifications: {title: "manager.notifications"},
+ browser: {title: "manager.browser"},
+ computer: {title: "manager.computer"},
     pets: {title: "manager.pets"},
     about: {title: "manager.about"}
   };
@@ -406,6 +421,7 @@ export function mountManager() {
   mountStorage();
   const notifications = mountNotifications(feedbackFor("notifications"));
   const pets = mountPets();
+ const automation = mountAutomation(state=>{automationSnapshot=state;renderBuiltinComponents();});
   const diagnosticsPanel = mountDiagnostics({
     feedback: feedbackFor("diagnostics"),
     open: section => showSection(section),
@@ -1726,7 +1742,7 @@ export function mountManager() {
       console.error("Could not read DSH manager snapshot", error);
     }
     loadRetry.disabled = false;
-    await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh()]);
+    await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh(), automation.refresh()]);
   }
 
   for (const item of navItems) {

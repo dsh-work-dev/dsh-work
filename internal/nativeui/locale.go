@@ -9,6 +9,8 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
+	Browser               string
+	Computer              string
 	BackgroundNotice      string
 	QuitQuestion          string
 	QuitActiveTasks       string
@@ -54,6 +56,7 @@ type NotificationCopy struct {
 
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
+		Browser: "Browser", Computer: "Computer",
 		BackgroundNotice:      "Running tasks will continue. You can reopen the window from the system tray.",
 		QuitQuestion:          "Quit DSH Work?",
 		QuitActiveTasks:       "Running tasks will be interrupted.",
@@ -106,6 +109,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleChinese: {
+		Browser: "浏览器", Computer: "电脑",
 		BackgroundNotice:      "正在运行的任务不会中断，可在系统托盘中重新打开窗口",
 		QuitQuestion:          "退出 DSH Work？",
 		QuitActiveTasks:       "当前正在运行的任务将会中断",
@@ -158,6 +162,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleJapanese: {
+		Browser: "ブラウザー", Computer: "コンピューター",
 		BackgroundNotice:      "実行中のタスクは続行されます。システムトレイからウィンドウを再び開けます。",
 		QuitQuestion:          "DSH Work を終了しますか？",
 		QuitActiveTasks:       "実行中のタスクは中断されます。",

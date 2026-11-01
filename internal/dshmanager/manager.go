@@ -17,6 +17,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/local/dsh-work/internal/acquisition"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/storagepaths"
 )
@@ -30,10 +31,11 @@ const (
 // manager. Workspace context is intentionally absent: it belongs to DSH's
 // session surface and is resolved per Worker generation.
 type Config struct {
-	StatePath       string
-	DataDirectories []DataDirectoryInfo
-	Runtimes        []RuntimeInfo
-	DSHReleases     []DSHReleaseInfo
+	AutomationVersions func() automation.VersionInputs
+	StatePath          string
+	DataDirectories    []DataDirectoryInfo
+	Runtimes           []RuntimeInfo
+	DSHReleases        []DSHReleaseInfo
 	// MinimumDSHVersion is the oldest DSH release this build can run. Older
 	// releases and runtimes are marked unsupported in snapshots and cannot be
 	// installed. Empty disables these checks.

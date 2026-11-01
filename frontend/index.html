@@ -79,6 +79,8 @@
           <optgroup label="Application" data-i18n-label="manager.groupApplication">
           <option value="settings" data-i18n="manager.general">General</option>
           <option value="notifications" data-i18n="manager.notifications">Notifications</option>
+          <option value="browser" data-i18n="manager.browser">Browser</option>
+          <option value="computer" data-i18n="manager.computer">Computer</option>
           <option value="pets" data-i18n="manager.pets">Pets</option>
           </optgroup>
           <optgroup label="DSH environment" data-i18n-label="manager.groupEnvironment">
@@ -98,6 +100,8 @@
             <h2 id="settings-group-application" class="nav-heading" data-i18n="manager.groupApplication">Application</h2>
             <button class="nav-item" data-manager-section="settings" type="button"><span data-i18n="manager.general">General</span></button>
             <button class="nav-item" data-manager-section="notifications" type="button"><span data-i18n="manager.notifications">Notifications</span></button>
+            <button class="nav-item" data-manager-section="browser" type="button"><span data-icon="globe"></span><span data-i18n="manager.browser">Browser</span></button>
+            <button class="nav-item" data-manager-section="computer" type="button"><span data-icon="monitor"></span><span data-i18n="manager.computer">Computer</span></button>
             <button class="nav-item" data-manager-section="pets" type="button"><span data-i18n="manager.pets">Pets</span></button>
           </div>
           <div class="nav-group" role="group" aria-labelledby="settings-group-environment">
@@ -409,6 +413,31 @@
               </section>
             </div>
             <p id="settings-general-status" class="sr-only" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="manager-section-browser" class="panel" data-manager-panel="browser" aria-labelledby="manager-title" hidden>
+            <div class="group">
+              <div data-automation-profile="browser" class="row" hidden><span data-i18n="automation.profileOnly">Available only in DSH Work</span></div>
+              <div data-setting-switch="automation-browser-enabled" data-label="automation.browser.title" data-detail="automation.browser.detail" data-status="automation-browser-status" data-disabled></div>
+              <div id="automation-default-browser-row" data-setting-switch="automation-default-browser-enabled" data-label="automation.browser.useDefault" data-disabled hidden></div>
+              <div id="automation-browser-dependency" class="row" hidden>
+                <div class="row-main"><strong data-i18n="automation.components">Components</strong><span id="automation-browser-dependency-text" class="setting-detail"></span></div>
+                <div class="row-trail"><button id="automation-browser-retry" class="button" type="button" data-i18n="common.retry" hidden>Retry</button></div>
+              </div>
+            </div>
+            <p id="automation-browser-status" class="note" role="status" aria-live="polite"></p>
+          </section>
+
+          <section id="manager-section-computer" class="panel" data-manager-panel="computer" aria-labelledby="manager-title" hidden>
+            <div class="group">
+              <div data-automation-profile="computer" class="row" hidden><span data-i18n="automation.profileOnly">Available only in DSH Work</span></div>
+              <div data-setting-switch="automation-computer-enabled" data-label="automation.computer.title" data-detail="automation.computer.detail" data-status="automation-computer-status" data-disabled></div>
+              <div id="automation-computer-dependency" class="row" hidden>
+                <div class="row-main"><strong data-i18n="automation.components">Components</strong><span id="automation-computer-dependency-text" class="setting-detail"></span></div>
+                <div class="row-trail"><button id="automation-computer-retry" class="button" type="button" data-i18n="common.retry" hidden>Retry</button></div>
+              </div>
+            </div>
+            <p id="automation-computer-status" class="note" role="status" aria-live="polite"></p>
           </section>
 
           <section id="manager-section-notifications" class="panel settings-section" data-manager-panel="notifications" aria-labelledby="manager-title" hidden>

@@ -1,5 +1,5 @@
-export type ProblemGroup = "runtime" | "start" | "plugin" | "profile" | "storage" | "update" | "other";
-export type ProblemAction = "runtimes" | "restart" | "plugins" | "profiles" | "data-directories" | "check-updates";
+export type ProblemGroup = "runtime" | "start" | "plugin" | "profile" | "storage" | "update" | "browser" | "computer" | "other";
+export type ProblemAction = "runtimes" | "restart" | "plugins" | "profiles" | "data-directories" | "check-updates" | "browser" | "computer";
 
 export const issueNewURL = "https://github.com/dsh-work-dev/dsh-work/issues/new";
 const issueTitleLimit = 120;
@@ -27,6 +27,8 @@ const updateCodes = new Set([
 ]);
 
 export function problemGroup(code: string): ProblemGroup {
+  if (code.startsWith("AUTOMATION_BROWSER_")) return "browser";
+  if (code.startsWith("AUTOMATION_COMPUTER_")) return "computer";
   if (runtimeCodes.has(code) || code.startsWith("RUNTIME_INSTALL_")) return "runtime";
   if (startCodes.has(code)) return "start";
   if (code.startsWith("PLUGIN_")) return "plugin";
@@ -44,6 +46,8 @@ export function problemActions(group: ProblemGroup): ProblemAction[] {
     case "profile": return ["profiles"];
     case "storage": return ["data-directories"];
     case "update": return ["check-updates"];
+    case "browser": return ["browser"];
+    case "computer": return ["computer"];
     case "other": return [];
   }
 }

@@ -29,6 +29,24 @@ export enum AppearanceMode {
 };
 
 /**
+ * Only implemented preferences are writable. Deferred policy fields are not
+ * serialized yet; older readers continue to ignore additive settings fields.
+ */
+export interface Automation {
+    "browser": AutomationBrowser;
+    "computer": AutomationCapability;
+}
+
+export interface AutomationBrowser {
+    "enabled": boolean;
+    "default": AutomationCapability;
+}
+
+export interface AutomationCapability {
+    "enabled": boolean;
+}
+
+/**
  * Locale is the dsh-work-owned language for its own chrome and settings copy.
  */
 export enum Locale {
@@ -134,6 +152,7 @@ export enum UpdateChannel {
  * Values is the versioned, platform-neutral dsh-work preference contract.
  */
 export interface Values {
+    "automation": Automation;
     "workspaceWindow": WindowGeometry;
 
     /**

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/lifecycle"
 )
 
@@ -29,12 +30,13 @@ type ProfileVersionAdapter interface {
 }
 
 type ProfileVersionInput struct {
-	Bundles        []string        `json:"bundles"`
-	Lock           string          `json:"lock"`
-	Workspace      string          `json:"workspace"`
-	Plugins        []VersionPlugin `json:"plugins"`
-	PackageManager string          `json:"packageManager"`
-	Unavailable    string          `json:"unavailable,omitempty"`
+	Automation     *automation.VersionInputs `json:"automation,omitempty"`
+	Bundles        []string                  `json:"bundles"`
+	Lock           string                    `json:"lock"`
+	Workspace      string                    `json:"workspace"`
+	Plugins        []VersionPlugin           `json:"plugins"`
+	PackageManager string                    `json:"packageManager"`
+	Unavailable    string                    `json:"unavailable,omitempty"`
 }
 
 type VersionPlugin struct {
@@ -158,6 +160,10 @@ func (m *Manager) readVersionPoint(ctx context.Context, launch ResolvedLaunch) (
 	input, err := a.CaptureVersions(ctx, filepath.Join(launch.DataDirectory.Path, "profiles", launch.Target.Profile.Name))
 	if err != nil {
 		return nil, err
+	}
+	if m.config.AutomationVersions != nil && isAppProfile(launch.DataDirectory, launch.Target.Profile.Name) {
+		v := m.config.AutomationVersions()
+		input.Automation = &v
 	}
 	p := &storedRestorePoint{RestorePoint: RestorePoint{Target: launch.Target, DSHVersion: launch.Runtime.Version, NodeVersion: launch.Node.Version, PackageManager: input.PackageManager, Platform: runtime.GOOS + "/" + runtime.GOARCH, Plugins: input.Plugins, Unavailable: input.Unavailable}, Input: input}
 	if input.Lock != "" {
@@ -420,6 +426,14 @@ func (m *Manager) PreviewRestorePoint(ctx context.Context, id string) (RestorePo
 	if _, ok := config.PluginCommands.(ProfileVersionAdapter); !ok || config.CommandRunner == nil {
 		return p.RestorePoint, errors.New("snapshot installation adapter is unavailable")
 	}
+	if p.Input.Automation != nil {
+		if err := p.Input.Automation.Validate(); err != nil {
+			return p.RestorePoint, err
+		}
+		if config.AutomationVersions == nil || config.AutomationVersions() != *p.Input.Automation {
+			return p.RestorePoint, errors.New("automation dependencies require the host version recorded with this point")
+		}
+	}
 	if p.Unavailable != "" {
 		return p.RestorePoint, errors.New(p.Unavailable)
 	}
@@ -555,13 +569,24 @@ func (m *Manager) RecoverVersionPoint(ctx context.Context, id string) (launch Re
 	if err != nil {
 		return launch, err
 	}
-	if actual.Digest != p.Digest {
+	if !matchesRestoredVersions(p, actual) {
 		return launch, errors.New("installed dependency versions or lockfile do not match the snapshot")
 	}
 	if err = m.setRecoveryStage(ctx, "starting", "running", ""); err != nil {
 		return launch, err
 	}
 	return launch, nil
+}
+
+// Legacy points did not record host dependencies. Compare their original
+// input shape; subsequent healthy startup records the current host inputs.
+func matchesRestoredVersions(expected, actual *storedRestorePoint) bool {
+	check := *actual
+	if expected.Input.Automation == nil {
+		check.Input.Automation = nil
+		finishVersionPoint(&check)
+	}
+	return check.Digest == expected.Digest
 }
 func (m *Manager) setRecoveryStage(ctx context.Context, stage, status, detail string) error {
 	m.mu.RLock()

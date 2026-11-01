@@ -239,6 +239,9 @@ func maintenanceCallAllowed(call Call) bool {
 			return true
 		}
 	}
+	if call.Service == "AutomationService" && call.Method == "GetAutomation" {
+		return true
+	}
 	if call.Service == "SettingsService" && call.Method == "GetSettings" {
 		return true
 	}

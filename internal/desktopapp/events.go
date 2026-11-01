@@ -3,6 +3,7 @@ package desktopapp
 import (
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -24,6 +25,7 @@ type AnswerApprovalCommand struct {
 }
 
 func init() {
+	application.RegisterEvent[automation.Snapshot]("automation")
 	application.RegisterEvent[lifecycle.Status]("lifecycle")
 	application.RegisterEvent[string]("worker-url")
 	application.RegisterEvent[string]("settings-section")

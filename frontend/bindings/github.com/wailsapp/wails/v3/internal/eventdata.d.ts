@@ -13,6 +13,9 @@ import type * as acquisition$0 from "../../../../local/dsh-work/internal/acquisi
 import type * as app$0 from "../../../../local/dsh-work/internal/app/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import type * as automation$0 from "../../../../local/dsh-work/internal/automation/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import type * as daemon$0 from "../../../../local/dsh-work/internal/daemon/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -32,6 +35,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "acquisition": acquisition$0.OperationStatus;
             "appearance": settings$0.Appearance;
+            "automation": automation$0.Snapshot;
             "background-stopping": boolean;
             "builtin-components": desktopclient$0.BuiltinComponentStatus[] | null;
             "dsh-answer-approval": desktopapp$0.AnswerApprovalCommand;

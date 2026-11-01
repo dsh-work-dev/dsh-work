@@ -30,8 +30,8 @@ func TestOverlayMountsEveryHostPluginWithItsLaunchConfig(t *testing.T) {
 		t.Fatalf("invalid launch patch: %s (%v)", content, err)
 	}
 	insert, ok := rows[0]["insert"].([]any)
-	if !ok || len(insert) != 3 {
-		t.Fatalf("launch patch did not mount three host plugins: %#v", rows)
+	if !ok || len(insert) != 4 {
+		t.Fatalf("launch patch did not mount four host plugins: %#v", rows)
 	}
 	want := []struct {
 		id     string
@@ -40,6 +40,7 @@ func TestOverlayMountsEveryHostPluginWithItsLaunchConfig(t *testing.T) {
 		{"dsh-work-shell", map[string]any{"generation": "g2"}},
 		{"dsh-work-account", map[string]any{}},
 		{"dsh-work-pet", map[string]any{"generation": "g2", "token": "secret"}},
+		{"dsh-work-automation", map[string]any{}},
 	}
 	for i, expected := range want {
 		entry, _ := insert[i].(map[string]any)

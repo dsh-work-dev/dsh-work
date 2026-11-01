@@ -20,12 +20,13 @@ type Package struct {
 	Directory string
 }
 
-var packageNames = []string{"shell", "account", "pet"}
+var packageNames = []string{"shell", "account", "pet", "automation"}
 var safeVersion = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
 var packageFiles = map[string][]string{
-	"shell":   {"package.json", "host.js", "client.js", "README.md"},
-	"account": {"package.json", "host.js", "client.js", "README.md"},
-	"pet":     {"package.json", "host.js", "client.js", "README.md"},
+	"automation": {"package.json", "host.js", "README.md"},
+	"shell":      {"package.json", "host.js", "client.js", "README.md"},
+	"account":    {"package.json", "host.js", "client.js", "README.md"},
+	"pet":        {"package.json", "host.js", "client.js", "README.md"},
 }
 
 // Install publishes embedded DSH plugins below a content-addressed application

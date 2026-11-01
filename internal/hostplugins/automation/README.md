@@ -1,0 +1,1 @@
+DSH Work automation host adapter. Normal scopes register no tools until an execution backend and authorization are integrated. Validation is an explicit private launch configuration. Host decisions travel only through the owned authenticated Worker channel.

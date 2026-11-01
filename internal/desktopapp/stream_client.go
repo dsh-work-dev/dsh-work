@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/acquisition"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -135,6 +136,11 @@ func (p *streamProcessor) handle(message hostevents.Message) {
 
 func (p *streamProcessor) handleState(message hostevents.Message) {
 	switch message.Topic {
+	case "automation":
+		var value automation.Snapshot
+		if p.decode(message, &value) == nil {
+			p.emit("automation", value)
+		}
 	case "lifecycle":
 		var value lifecycle.Status
 		if p.decode(message, &value) == nil {

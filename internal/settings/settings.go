@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/local/dsh-work/internal/lifecycle"
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/notifications"
 	"github.com/local/dsh-work/internal/storagepaths"
 )
@@ -197,6 +198,7 @@ func safePreferenceKey(value string) bool {
 
 // Values is the versioned, platform-neutral dsh-work preference contract.
 type Values struct {
+	Automation      Automation     `json:"automation"`
 	WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
 	// WorkspaceZoom is the workbench WebView zoom factor; zero means actual size.
 	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
@@ -214,7 +216,8 @@ type Values struct {
 
 func DefaultValues() Values {
 	return Values{
-		Version: stateVersion,
+		Version:    stateVersion,
+		Automation: DefaultAutomation(),
 
 		AutomaticRuntimeRollback: true,
 		Locale:                   DefaultLocale,
@@ -471,11 +474,17 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		UpdateChannel                *UpdateChannel  `json:"updateChannel"`
 		VerboseLogging               *bool           `json:"verboseLogging"`
 		BackgroundNoticeAcknowledged bool            `json:"backgroundNoticeAcknowledged"`
+		Automation                   json.RawMessage `json:"automation"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
 	}
 	values := DefaultValues()
+	if len(raw.Automation) > 0 && string(raw.Automation) != "null" {
+		if err := json.Unmarshal(raw.Automation, &values.Automation); err != nil {
+			logging.Module(logging.ModSettings).Warn("automation settings used defaults for invalid values", "code", lifecycle.ErrorSettingsStateInvalid)
+		}
+	}
 	values.BackgroundNoticeAcknowledged = raw.BackgroundNoticeAcknowledged
 	values.WorkspaceWindow = raw.WorkspaceWindow
 	if validZoom(raw.WorkspaceZoom) {

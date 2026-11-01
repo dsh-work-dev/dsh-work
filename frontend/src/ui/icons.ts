@@ -1,8 +1,10 @@
-import {Check, ChevronLeft, ChevronRight, Copy, createElement, LoaderCircle, Minus, Square, TriangleAlert, X, type IconNode} from "lucide";
+import {Globe, Monitor, Check, ChevronLeft, ChevronRight, Copy, createElement, LoaderCircle, Minus, Square, TriangleAlert, X, type IconNode} from "lucide";
 
 // One maintained icon family (lucide). Only icons in use are imported so the
 // bundle stays small; add names here rather than drawing ad-hoc glyphs.
 const icons = {
+ globe: Globe,
+ monitor: Monitor,
   check: Check,
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,

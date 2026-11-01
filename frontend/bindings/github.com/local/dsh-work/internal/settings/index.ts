@@ -11,6 +11,9 @@ export {
 
 export type {
     Appearance,
+    Automation,
+    AutomationBrowser,
+    AutomationCapability,
     PetPosition,
     PetPreference,
     Values,

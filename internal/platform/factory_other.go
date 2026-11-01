@@ -5,6 +5,7 @@ package platform
 import (
 	"errors"
 
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshmanager"
 )
 
@@ -27,3 +28,5 @@ func NewDSHReleaseCatalog(string) dshmanager.DSHReleaseCatalog { return nil }
 func NewNodeInstaller(string) dshmanager.NodeInstaller { return nil }
 
 func NewNodeResolver(string) dshmanager.NodeResolver { return nil }
+
+func NewAutomationPreparer(root string) automation.Preparer { return nil }

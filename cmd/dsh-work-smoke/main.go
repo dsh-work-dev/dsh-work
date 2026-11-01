@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -67,15 +68,16 @@ func main() {
 		fatalf("locate the development DSH fixture: %v", err)
 	}
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:         filepath.Join(root, ".task", "dsh-smoke-manager.json"),
-		PluginCommands:    dshadapter.NewPluginCommands(),
-		NodeResolver:      platform.NewNodeResolver(filepath.Join(root, ".task", "runtimes")),
-		RuntimeVerifier:   dsh,
-		ProfileCatalog:    dsh,
-		AppProfile:        dsh,
-		DataDirectories:   []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "DSH Work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
-		Runtimes:          []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
-		DefaultRunContext: dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}},
+		AutomationVersions: automation.CurrentVersionInputs,
+		StatePath:          filepath.Join(root, ".task", "dsh-smoke-manager.json"),
+		PluginCommands:     dshadapter.NewPluginCommands(),
+		NodeResolver:       platform.NewNodeResolver(filepath.Join(root, ".task", "runtimes")),
+		RuntimeVerifier:    dsh,
+		ProfileCatalog:     dsh,
+		AppProfile:         dsh,
+		DataDirectories:    []dshmanager.DataDirectoryInfo{{ID: "dsh-work", Name: "DSH Work smoke data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork}},
+		Runtimes:           []dshmanager.RuntimeInfo{{ID: dshmanager.DevelopmentFixtureRuntimeID, Version: fixture.Version, Path: fixture.Path, Source: dshmanager.RuntimeSourceDevelopmentFixture, Installed: true}},
+		DefaultRunContext:  dshmanager.RunContext{RuntimeID: dshmanager.DevelopmentFixtureRuntimeID, Node: dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, Profile: dshmanager.ProfileRef{DataDirectoryID: "dsh-work", Name: dshmanager.AppProfileName}},
 	})
 	if err != nil {
 		fatalf("create smoke launch manager: %v", err)
