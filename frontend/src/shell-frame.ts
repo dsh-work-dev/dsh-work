@@ -35,6 +35,7 @@ export type InteractionReport = {
   kind: string;
   key: string;
   toolName: string;
+  reason?: string;
   current: string;
   visible: boolean;
 };
@@ -46,7 +47,7 @@ const strings = (value: unknown): value is string[] => Array.isArray(value) && v
 const stringLength = (value: string) => Array.from(value).length;
 
 /** Validate a message from the DSH frame; the caller has already checked source and origin. */
-export function parseFrameMessage(data: unknown): FrameMessage | null {
+export function parseFrameMessage(data: unknown,locale="en"): FrameMessage | null {
   if (!data || typeof data !== "object") return null;
   const message = data as Record<string, unknown>;
   if (message.type === "dsh-work/catalog" && Array.isArray(message.commands)) {
@@ -78,6 +79,7 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       kind: message.kind,
       key: message.key,
       toolName: message.toolName,
+      ...localizedInteractionReason(message.displayReason,locale),
       current: message.current,
       visible: message.visible,
     }};
@@ -100,4 +102,10 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     return {type: "modal-mask", active: message.active, background: message.background, blur: message.blur};
   }
   return null;
+}
+
+function localizedInteractionReason(value:unknown,locale:string):{reason?:string}{
+ if(!value||typeof value!=="object")return {};
+ const map=value as Record<string,unknown>,reason=map[locale]??map.en;
+ return typeof reason==="string"&&Array.from(reason).length<=320?{reason}:{};
 }

@@ -21,6 +21,8 @@ preserve.
    accessibility rules.
 8. [Verifying the running app](agent-verification.md) — driving the dev build
    over CDP instead of taking over the desktop.
+9. [Set up browser control](browser-setup.md) — enable, install, bind, repair and
+   update the Chrome/Edge extension and its components.
 
 Design decisions live with the feature or boundary they govern: each section
 states the current choice, why it was made, what was rejected and when to

@@ -12,7 +12,7 @@ hosting, which screen-capture and click tools treat as an opaque region.
 | Workbench shell and DSH page | WebView2 DevTools Protocol (CDP) on a loopback port | script evaluation, synthetic input, page screenshots, console |
 | Daemon and runtime | `dsh-work-cli` over the daemon pipe | runtime install, Run context switch, status |
 | Notifications | Windows toast history (WinRT) | what was sent, with its payload |
-| Pet and other native windows | capture of that one window by title | pixels, without moving focus |
+| Daemon WebViews (Pet and browser permission window) | development CDP on the next port | isolated page state and rendered pixels |
 
 **CDP.** Development builds (`!production`) open WebView2's remote-debugging
 port when `DSH_WORK_WEBVIEW_DEBUG_PORT` is set
@@ -69,12 +69,21 @@ to test the page side of a flow on its own.
 5. Restore what you changed: appearance, Pet visibility, Run context, drafts,
    test files.
 
+The daemon's development WebViews use the next port: setting
+`DSH_WORK_WEBVIEW_DEBUG_PORT=9333` gives the workbench port 9333 and daemon port
+9334. For the independent browser permission window, set `DSH_WORK_CDP_PORT`
+to `9334` when running `scripts/dev-cdp.mjs`; the script skips Pet targets.
+The permission window is created only for an actual pending request. Capture
+it while visible, before answering: a hidden idle window may not produce a
+screenshot. Its bindings permit only reading and answering that permission
+panel, not general settings operations. Never answer Allow on the user's behalf
+without explicit authorization.
+
 ## Limits
 
-- The Pet window belongs to the daemon process, which has no debug port.
-  Capture it by window title with a DPI-aware window capture, and drive it with
-  real pointer input only when the user agrees. Its data bindings answer only
-  the Pet window.
+- The daemon debug port is development-only, as is the workbench's. Pet
+  bindings answer only the Pet surface; browser-permission bindings answer
+  only their own surface.
 - Toast banners are outside every WebView. Clicking a banner button needs the
   user or UI Automation while the banner is on screen. To test only the page
   half, send the same `dsh-work/answer-approval` message into the frame.

@@ -66,6 +66,11 @@ accepts at most 1,024 entries. Individual snapshot input files are limited to
 4 MiB, and all snapshot inputs together are limited to 32 MiB.
 The frontend receives summaries, not private dependency input contents.
 
+New points also carry optional automation inputs: the frozen browser and
+computer package locks, driver version/archive/digest, and extension source
+identity. These identify the component contract; they contain no browser
+profile data, connection state, permissions or installed component trees.
+
 ## Restore transaction
 
 1. Preview validates the point, content digest, platform, matching Node version,
@@ -131,3 +136,24 @@ peer configuration), and auxiliary dependency files are not promised historical
 reconstruction. Unsupported records expose a restoration restriction. A profile with plugins but no pnpm lock is marked unavailable before the Worker is stopped. The recorded Node version must match;
 this operation does not reinstall Node. Package acquisition can fail when sources
 or caches are unavailable, and saved points remain available for a later retry.
+
+### Browser components and extension compatibility
+
+An automation input set must match the running application's embedded
+contract. An incompatible point is rejected before recovery; restoring DSH and
+plugins does not downgrade DSH Work, its native host, the browser or the
+extension already loaded there. Older points without automation inputs retain
+their existing recovery contract.
+
+Browser component preparation and repair select complete immutable sets using
+a lock-derived revision and an atomic `current.json` pointer. A failed repair
+does not select a partial set; a still-valid previous set remains usable with
+the repair error shown separately. Previous component directories and the
+previous unpacked-extension directory are retained, not exposed as a
+one-click rollback control or automatically garbage-collected.
+
+After an application update, reload the unpacked extension and reconnect so
+its actual source identity can be checked. Neither version recovery nor repair
+restores conversation grants, execution permits or old generation references.
+Follow [the browser update procedure](browser-setup.md#update-without-losing-the-binding)
+for application, host-registration and extension steps.

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/workeripc"
 	"io"
@@ -24,7 +25,9 @@ import (
 
 // This fixture drives real rc.5 Agents and tools over the production authenticated
 // pipe. It has no browser, desktop input, native registration or model calls.
-func TestLiveDSHAutomationHostRoute(t *testing.T) {
+func TestLiveDSHAutomationHostRoute(t *testing.T)  { liveDSHAutomationHost(t, false) }
+func TestLiveDSHBrowserAuthorization(t *testing.T) { liveDSHAutomationHost(t, true) }
+func liveDSHAutomationHost(t *testing.T, product bool) {
 	if os.Getenv("DSH_WORK_LIVE_TEST") != "1" {
 		t.Skip("set DSH_WORK_LIVE_TEST=1 for installed rc.5 integration")
 	}
@@ -35,6 +38,16 @@ func TestLiveDSHAutomationHostRoute(t *testing.T) {
 	defer cancel()
 	s := New(managerForTest(t), prepareFunc(func(context.Context, Capability, func(Progress)) error { return nil }))
 	defer s.Close()
+	resource := &gatewayResource{element: BrowserElement{Tag: "input", Type: "text", Name: "Search"}}
+	if product {
+		s.EnableBrowserGateway(BrowserGatewayConfig{})
+		var schemas []json.RawMessage
+		for _, name := range []string{"browser_navigate", "browser_click", "browser_type"} {
+			schema, _ := json.Marshal(map[string]any{"name": name, "description": "Pinned browser gate fixture", "inputSchema": map[string]any{"type": "object", "additionalProperties": true}})
+			schemas = append(schemas, schema)
+		}
+		s.ConfigureBrowserBackend(func(context.Context, Request) (Resource, error) { return resource, nil }, schemas)
+	}
 	s.Worker("live-automation", true, true)
 	bridge := NewBridge()
 	bridge.Attach(s)
@@ -45,6 +58,9 @@ func TestLiveDSHAutomationHostRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	config["validation"] = "true"
+	if product {
+		config["validation"] = "false"
+	}
 	overlay := hostplugins.NewOverlay(filepath.Join(home, "plugins"), "development")
 	patch, err := overlay.Prepare("live-automation", map[string]map[string]string{"shell": {"generation": "live-automation"}, "automation": config})
 	if err != nil {
@@ -54,7 +70,7 @@ func TestLiveDSHAutomationHostRoute(t *testing.T) {
 	var patches []any
 	json.Unmarshal(data, &patches)
 	fixture := (&url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(filepath.Join(root, "internal/automation/testdata/worker-fixture.mjs"))}).String()
-	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "automation-fixture", "name": fixture, "config": map[string]string{"token": config["token"], "cwd": home, "cli": cli}}}})
+	patches = append(patches, map[string]any{"insert": []any{map[string]any{"id": "automation-fixture", "name": fixture, "config": map[string]string{"token": config["token"], "cwd": home, "cli": cli, "product": fmt.Sprint(product)}}}})
 	data, _ = json.Marshal(patches)
 	os.WriteFile(patch, data, 0600)
 	carrier, err := workeripc.New()
@@ -132,6 +148,11 @@ func TestLiveDSHAutomationHostRoute(t *testing.T) {
 			t.Fatalf("fixture HTTP %d: %s", resp.StatusCode, data)
 		}
 		return string(data)
+	}
+
+	if product {
+		liveProductBrowserScenario(t, ctx, s, call, resource)
+		return
 	}
 	call("create", "a", "")
 	call("create", "b", "")
@@ -236,3 +257,81 @@ func (r *routedResource) Execute(context.Context, string, map[string]any) (any, 
 	return map[string]any{"content": []any{map[string]string{"type": "text", "text": "host-routed:" + r.session}}}, nil
 }
 func (r *routedResource) Close() error { return nil }
+
+func liveProductBrowserScenario(t *testing.T, ctx context.Context, s *Service, call func(string, string, string) string, resource *gatewayResource) {
+	t.Helper()
+	call("create", "a", "")
+	connection := mustConnect(t, s, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	binding := mustBind(t, s, connection, "")
+	if err := s.SelectBrowserBinding(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetEnabled(ctx, Browser, true); err != nil {
+		t.Fatal(err)
+	}
+	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
+	until := time.Now().Add(5 * time.Second)
+	for !strings.Contains(call("schemas", "a", ""), "my_browser_navigate") {
+		if time.Now().After(until) {
+			t.Fatal("browser schema missing")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	args := func(tool string, value map[string]any) string {
+		data, _ := json.Marshal(value)
+		return "&tool=" + tool + "&args=" + url.QueryEscape(string(data))
+	}
+	done := make(chan string, 1)
+	go func() {
+		done <- call("call", "a", args("my_browser_navigate", map[string]any{"url": "http://localhost/fixture"}))
+	}()
+	var snapshot Snapshot
+	deadline := time.After(6 * time.Second)
+waiting:
+	for {
+		snapshot = s.Snapshot()
+		if len(snapshot.BrowserAccess.Requests) > 0 {
+			break waiting
+		}
+		select {
+		case result := <-done:
+			t.Fatal("browser call returned before consent", result)
+		case <-deadline:
+			t.Fatal("no browser access request")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if resource.calls.Load() != 0 {
+		t.Fatal("browser body ran before user consent")
+	}
+	if _, err := s.AnswerBrowserConsent(ctx, snapshot.BrowserAccess.Requests[0].ID, "allow"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-done; !strings.Contains(got, "ok") || resource.calls.Load() != 1 {
+		t.Fatal("authorized real DSH path failed", got)
+	}
+	resource.element = BrowserElement{Tag: "button", Name: "Buy now"}
+	if got := call("call", "a", args("my_browser_click", map[string]any{"target": "#payment"})); !strings.Contains(got, "rejected") || resource.calls.Load() != 1 {
+		t.Fatal("DSH confirmation did not return the expected rejection, or dispatched an action", got)
+	}
+	call("approval", "a", "&outcome=allowed-once")
+	if got := call("call", "a", args("my_browser_click", map[string]any{"target": "#payment"})); !strings.Contains(got, "ok") || resource.calls.Load() != 2 {
+		t.Fatal("DSH approval did not consume matching permit", got)
+	}
+	resource.element = BrowserElement{Tag: "input", Type: "password", Name: "Password"}
+	if got := call("call", "a", args("my_browser_type", map[string]any{"target": "#password", "text": "fixture-only"})); !strings.Contains(got, "SECRET_INPUT_BLOCKED") || resource.calls.Load() != 2 {
+		t.Fatal("secret input was not blocked", got)
+	}
+	snapshot = s.Snapshot()
+	if len(snapshot.BrowserAccess.Sessions) != 1 {
+		t.Fatal("active browser context missing")
+	}
+	use := snapshot.BrowserAccess.Sessions[0]
+	if err := s.StopBrowserUse(use.Session, use.Lifetime); err != nil {
+		t.Fatal(err)
+	}
+	if got := call("call", "a", args("my_browser_navigate", map[string]any{"url": "http://localhost/fixture"})); !strings.Contains(got, "BROWSER_STOPPED") || resource.calls.Load() != 2 {
+		t.Fatal("stopped context revived", got)
+	}
+	t.Log("real rc.5 ToolExecution -> authenticated Go access consent -> DSH ask reject/allow -> one-use Go permit -> owned backend; password and stop refusal passed; model calls=0; browser backend=fake")
+}

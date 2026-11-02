@@ -22,6 +22,11 @@ dev_mode:
   ignore:
     dir:
       - .git
+      - .research
+      - .evolve
+      - .evolve-support
+      - .task
+      - internal/desktopbridge/assets
       - frontend
       - tools/dsh
       - bin
@@ -32,6 +37,10 @@ dev_mode:
     watched_extension:
       - "*.go"
       - "*.ts"
+      - "*.js"
+      - "*.mjs"
+      - "*.json"
+      - "*.html"
     git_ignore: true
   executes:
     - cmd: wails3 task frontend:install

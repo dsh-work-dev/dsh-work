@@ -1,0 +1,51 @@
+Playwright extension / CDP V2 adapter
+Upstream: https://github.com/microsoft/playwright
+Commit: e8149b8257d32dcf8f72573ecc43e72439da7080
+License: Apache-2.0. Original copyrights and NOTICE retained.
+
+playwright/ contains the seven modules carried by the validated E-53/R-69 fork:
+relayConnection, connectedTabGroup, cdpRelayV2, browserModel, manualPromise,
+protocol and log. Imports are relative; unused LongStandingScope is omitted.
+The debug package is replaced by a console error sink, not another dependency.
+The debugger close/attach race fix from upstream c2298ad is retained.
+
+DSH Work changes: NativePort transport; Go-generated session route and selected
+instance ownership; reject foreign debugger/tab operations; independent local
+release on disconnect; session-title truncation and unique colors; serialized
+group creation with late-close ungrouping. Recovery queries only recorded owned
+tab IDs in storage.session, not every group by title. Debug logging is off.
+No research inspection operation, A/B route restriction or connection page.
+
+Build: install the existing frontend/package-lock.json toolchain (npm ci in
+frontend), then node browser-extension/compile.mjs to refresh embedded routes.js.
+node browser-extension/build.mjs --out <owned-or-empty-directory> recompiles the
+same source into an unpacked extension. No cache paths are overridden.
+The host embeds the checked-in routes.js plus known runtime/license files.
+MCP remains pinned at 0.0.83 / SDK 1.32.2 in automation's existing lockfile.
+
+Local source identity: dsh-work-extension/0.2.0/session-v2-r6
+Compatibility: host 0.2.0, setup 1, session wire 2. Host recovery inputs include
+this local revision and the complete upstream commit above. Update the revision
+when changing the shipped fork/transport/compatibility contract.
+
+Current step-4 evidence: real Chrome core chain and Edge selected-profile core,
+exact-total 256 KiB multi-file upload, cancellation/capability/Worker recovery
+passed. Native crash/browser restart/idle/sleep and final product acceptance are
+separate checks. Product execution is mediated by the step-5 Go authorization gateway.
+
+Revision r3: bound popup exposes the same short binding ID as the Workbench.
+Optional signed native-parent executable metadata supports an explicitly chosen
+profile launch hint. The hint never replaces confirmed instance routing or grants
+Agent execution. Legacy setup/session peers without launch metadata still work.
+
+Revision r4: linking no longer asks the user to type a profile name. The native
+host identifies the browser family, and Go generates a display label from the
+extension stable instance ID. No account/profile-reading permissions were added.
+Actual browser profile name and directory are not inferred from that label.
+
+Revision r5: formal Go access/site/risk gate and single-use execution receipts;
+fixed internal DOM metadata inspection through the locked MCP, no new Agent
+script tools or extension permissions. Session wire remains 2. Browser access,
+DSH action approval and resource ownership remain independent boundaries.
+
+r6 adds shipped-source handshake for safe update/reload detection; extension ID and wire unchanged.

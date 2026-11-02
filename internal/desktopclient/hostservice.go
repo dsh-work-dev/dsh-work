@@ -5,8 +5,8 @@ import (
 	"context"
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
-	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/workspacecontext"
 	"errors"
 )

@@ -16,6 +16,8 @@ Per-user daemon (Go + Wails, same executable)
   |-- Host and runtime manager --> Supervisor --> DSH Worker
   |-- Worker forwarding --> authenticated generation pipe --> DSH routes
   |-- tray and desktop notifications
+  |-- Go automation owner --> per-conversation MCP/CDP --> native host/extension
+  |-- independent browser permission window
   `-- Pet catalog/runtime/renderer --> native Pet overlay
 ```
 
@@ -60,6 +62,10 @@ system-wide Windows service.
 | `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
 | `internal/dshinteraction` | pending DSH questions, approvals and plan reviews reported by each workbench window's DSH page |
 | `internal/settings` | versioned Host preferences and persistence contract |
+| `internal/automation` | capability state, browser bindings, consent/policy, one-use execution permits and resource lifetime |
+| `internal/automation/browserruntime` | owned Playwright MCP process, private CDP adapter and locked tool-contract projection |
+| `internal/automation/browsernative` | bounded native frames over the authenticated daemon channel |
+| `internal/browserhost` | native-host registration, trusted browser-parent admission and owned extension-directory publication |
 | `internal/notifications` | notification vocabulary, preference evaluation, routing and bounded deduplication |
 | `internal/nativeui` | native menus, notifications and window-geometry persistence wiring |
 | `internal/pet` | data-only Pet catalog adapters, bounded cache, runtime, renderer and overlay projection |
@@ -84,9 +90,11 @@ the existing client, while reopening after UI exit creates a fresh client of
 the same daemon. Both endpoints use go-winio with a current-user SID ACL and
 remote-client rejection. The daemon protocol marker is checked before use.
 The online CLI uses the same control endpoint; offline access still requires
-the manager lock. These local endpoints open no TCP or UDP listener. The only
-loopback listener is the account sign-in callback described under
-[Account sign-in](#account-sign-in).
+the manager lock. These local control endpoints open no TCP or UDP listener.
+Account sign-in uses the callback listener described under
+[Account sign-in](#account-sign-in). Each active browser resource also owns a
+loopback CDP WebSocket endpoint with a random path, one accepted connection and
+Origin rejection; it is private to that resource's MCP process.
 
 The UI binds generated `internal/desktopclient` services. Native window identity
 selects the allowed role before forwarding management calls. Every UI request to
@@ -212,10 +220,10 @@ layers:
 | Layer | What | Loaded |
 |---|---|---|
 | Transport core | The pipe carrier and the carriers above | Always |
-| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet` | Always |
+| Host plugins | `@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`, `@dsh-work/automation` | Always; automation tools follow Go capability state |
 | Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile |
 
-The host plugins are ordinary DSH plugins (a Host half and a Client half each).
+The host plugins are ordinary DSH plugins; automation needs only a Host half.
 They are embedded in dsh-work, written below a directory named by application
 version and content digest, and inserted by a per-launch `--patch` core overlay
 rather than installed into a profile, so profile switches, version recovery and
@@ -232,6 +240,7 @@ frame loading) or Not loaded, and offers no switches.
 | `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, dsh-work theme, modal mask reports |
 | `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
 | `@dsh-work/pet` | Streams the session activity snapshot the desktop pet uses, for one generation | Reports session titles and parent sessions when the session list changes, and opens the conversations its workbench window is asked to open |
+| `@dsh-work/automation` | Resolves real ToolExecution agents to their top-level session and forwards browser authorization/execution through the authenticated Host channel | None |
 
 `__DSH_TRANSPORT__` declares `ownsHost: true`. DSH otherwise treats the
 non-loopback `wails.localhost` page as a remote browser and keeps every setting
@@ -417,6 +426,14 @@ dsh-work keeps app data and user data in separate places. `config.toml` records 
 The user data folder is dsh-work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. dsh-work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only dsh-work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
 
 App data holds what dsh-work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
+
+Browser native-host manifests, ownership markers and the stable unpacked
+extension directory live under app data's `browser-native/`. Cache
+`automation/<capability>/current.json` selects an immutable component directory
+under `releases/<lock-revision>/set-*`; an existing validated legacy directory
+may be adopted without modifying it. Browser session adapters and artifacts
+use `automation/browser-sessions/`. Browser bindings and policy are Host
+preferences; browser profile files and extension storage remain browser-owned.
 
 This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. dsh-work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
 
@@ -615,6 +632,62 @@ reach, such as a broken profile manifest or home patch.
 Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
 unload semantics as they change. The cost is that activation changes need a
 running Worker, apart from the startup-failure path.
+
+## Browser authority, components and updates
+
+`internal/automation.Service` owns browser state. The DSH Host plugin resolves
+the actual `exec.agent` through DSH's registries to the top-level session;
+tool arguments cannot select a session, lifetime, route or browser binding.
+Each top-level session owns one MCP resource, CDP endpoint and extension route;
+child agents share it. The extension multiplexes those routes over the
+selected profile's native connection and keeps each route in its own tab group.
+The browser starts the same dsh-work executable as a native host, before normal
+UI/logging startup. Its stdout contains frames only. Parent-process admission,
+exact extension origin and the current-user authenticated daemon channel
+replace a separate TCP bearer broker or user-managed connection key.
+
+The Go gateway owns access/site/risk decisions and permits bound to the exact
+call, generation, capability epoch, top-level lifetime, round, binding and policy
+revision. A permit is consumed once; stale references are refused. Fixed
+internal target inspection supports policy checks without exposing arbitrary
+evaluation tools to agents. Cancellation remains managed until the operation
+settles or the owned resource closes. Stop releases that conversation's routes
+and processes while retaining and ungrouping its browser tabs.
+
+The daemon lazily creates a separate native `browser-permission` WebView for
+pending access, website or risk decisions. It displays the current queued
+request, defaults focus to Reject and rejects on close. Its native surface
+can only read/answer the permission panel, not call general settings APIs.
+Go retains the queue and expiry. This separate window keeps browser decisions
+visible outside the DSH/workbench surface; an embedded DSH approval card is
+not the product's browser-consent channel. Revisit this presentation if the
+application gains a different native interaction surface, while retaining Go
+authority and the narrow answer contract.
+
+Preparation uses the selected Run context's validated Node/npm and environment,
+the application's frozen package lock and existing acquisition/staging and
+file-replacement adapters. A lock-derived identity separates component sets
+from DSH's version. Complete new sets publish through an atomic selection
+pointer; failed repair retains a still-valid old set and exposes `repairFailure`.
+Maintenance is refused while browser resources, pending decisions or permits
+exist; a Go maintenance lease excludes new execution during extension publication.
+This avoids a second package manager or replacing files used by an active MCP.
+
+The unpacked extension publishes a complete staged directory at its stable
+path. The two directory renames retain a previous backup and attempt rollback
+on switch failure; they are not a single atomic directory exchange. The
+extension's hello reports its loaded source identity, checked against the
+application's expected source in addition to protocol/version compatibility.
+Reload is required when these differ. Stable paths and unchanged extension
+identity/storage preserve bindings; disk contents alone never establish that
+the browser loaded the update. Old complete sets/backups are retained; there
+is no automatic reclamation or user rollback selector yet. Revisit this policy
+when a reference-aware retention mechanism is introduced.
+
+Windows Chrome/Edge are the native-host backends. Registration and cleanup act
+only on owned objects. MSIX package-context registration is explicitly
+unsupported by this backend. User procedures and recovery actions live in
+[Set up browser control](browser-setup.md).
 
 ## Version recovery and window geometry
 

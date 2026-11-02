@@ -6,9 +6,24 @@ import (
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/automation"
+	"github.com/local/dsh-work/internal/settings"
 )
 
 type AutomationService struct { Client *daemon.Client; Local *app.AutomationService }
+
+func (s *AutomationService) GetBrowserPermission(ctx context.Context) (app.BrowserPermissionPanel, error) {
+	if s.Local != nil { return s.Local.GetBrowserPermission(ctx) }
+	var value app.BrowserPermissionPanel
+	err := call(ctx, s.Client, "AutomationService", "GetBrowserPermission", []any{}, &value)
+	return value, err
+}
+
+func (s *AutomationService) AnswerBrowserPermission(ctx context.Context, id, choice string) (app.BrowserPermissionPanel, error) {
+	if s.Local != nil { return s.Local.AnswerBrowserPermission(ctx, id, choice) }
+	var value app.BrowserPermissionPanel
+	err := call(ctx, s.Client, "AutomationService", "AnswerBrowserPermission", []any{id, choice}, &value)
+	return value, err
+}
 
 func (s *AutomationService) GetAutomation(ctx context.Context) (automation.Snapshot, error) {
 	if s.Local != nil { return s.Local.GetAutomation(ctx) }
@@ -31,9 +46,112 @@ func (s *AutomationService) RetryAutomation(ctx context.Context, capability stri
 	return value, err
 }
 
+func (s *AutomationService) RepairAutomation(ctx context.Context, capability string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.RepairAutomation(ctx, capability) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "RepairAutomation", []any{capability}, &value)
+	return value, err
+}
+
 func (s *AutomationService) SetDefaultBrowserEnabled(ctx context.Context, enabled bool) (automation.Snapshot, error) {
 	if s.Local != nil { return s.Local.SetDefaultBrowserEnabled(ctx, enabled) }
 	var value automation.Snapshot
 	err := call(ctx, s.Client, "AutomationService", "SetDefaultBrowserEnabled", []any{enabled}, &value)
 	return value, err
+}
+
+func (s *AutomationService) PrepareBrowserConnection(ctx context.Context) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.PrepareBrowserConnection(ctx) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "PrepareBrowserConnection", []any{}, &value)
+	return value, err
+}
+
+func (s *AutomationService) ConfirmBrowserBinding(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.ConfirmBrowserBinding(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "ConfirmBrowserBinding", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) CancelBrowserBinding(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.CancelBrowserBinding(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "CancelBrowserBinding", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) SelectBrowserBinding(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.SelectBrowserBinding(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "SelectBrowserBinding", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) ForgetBrowserBinding(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.ForgetBrowserBinding(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "ForgetBrowserBinding", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) RenameBrowserBinding(ctx context.Context, id, name string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.RenameBrowserBinding(ctx, id, name) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "RenameBrowserBinding", []any{id, name}, &value)
+	return value, err
+}
+
+func (s *AutomationService) OpenBrowserExtensionFolder(ctx context.Context) error {
+	if s.Local != nil { return s.Local.OpenBrowserExtensionFolder(ctx) }
+	err := call(ctx, s.Client, "AutomationService", "OpenBrowserExtensionFolder", []any{}, nil)
+	return err
+}
+
+func (s *AutomationService) ConfigureBrowserLaunch(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.ConfigureBrowserLaunch(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "ConfigureBrowserLaunch", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) ClearBrowserLaunch(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.ClearBrowserLaunch(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "ClearBrowserLaunch", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) OpenBrowserProfile(ctx context.Context, id string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.OpenBrowserProfile(ctx, id) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "OpenBrowserProfile", []any{id}, &value)
+	return value, err
+}
+
+func (s *AutomationService) AnswerBrowserConsent(ctx context.Context, id, choice string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.AnswerBrowserConsent(ctx, id, choice) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "AnswerBrowserConsent", []any{id, choice}, &value)
+	return value, err
+}
+
+func (s *AutomationService) SetBrowserPolicy(ctx context.Context, revision uint64, policy settings.BrowserPolicy) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.SetBrowserPolicy(ctx, revision, policy) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "SetBrowserPolicy", []any{revision, policy}, &value)
+	return value, err
+}
+
+func (s *AutomationService) StopBrowserUse(ctx context.Context, session, lifetime string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.StopBrowserUse(ctx, session, lifetime) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "StopBrowserUse", []any{session, lifetime}, &value)
+	return value, err
+}
+
+func (s *AutomationService) OpenBrowserConversation(ctx context.Context, session string) error {
+	if s.Local != nil { return s.Local.OpenBrowserConversation(ctx, session) }
+	err := call(ctx, s.Client, "AutomationService", "OpenBrowserConversation", []any{session}, nil)
+	return err
 }

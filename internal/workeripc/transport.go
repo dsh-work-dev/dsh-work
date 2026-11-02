@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -51,6 +50,18 @@ func New() (*Transport, error) {
 	t.HTTP = &http.Transport{Proxy: nil, DialContext: t.dial, MaxConnsPerHost: 16, MaxIdleConnsPerHost: 16, IdleConnTimeout: 30 * time.Second, DisableCompression: true}
 	go t.accept()
 	return t, nil
+}
+
+// ChildEnvironment carries one launch's authenticated pipe identity to an owned
+// child. Callers merge it into an explicit child environment, never logs/UI.
+func (t *Transport) ChildEnvironment() map[string]string {
+	return map[string]string{"DSH_WORK_BRIDGE_PIPE": t.path, "DSH_WORK_BRIDGE_TOKEN": t.token}
+}
+
+// Connect returns one authenticated child connection for a non-HTTP adapter.
+// It retains the same SID ACL, admission limits and mutual HMAC as Workers.
+func (t *Transport) Connect(ctx context.Context) (net.Conn, error) {
+	return t.dial(ctx, "pipe", "127.0.0.1:1")
 }
 
 func (t *Transport) dial(ctx context.Context, network, address string) (net.Conn, error) {
@@ -113,6 +124,12 @@ func (t *Transport) admit(c net.Conn) {
 }
 
 func (t *Transport) authenticate(c net.Conn) error {
+	return AuthenticateServer(c, t.token)
+}
+
+// AuthenticateServer reuses the generation pipe's bounded mutual-HMAC handshake.
+// Its caller supplies a per-connection secret over an already trusted transport.
+func AuthenticateServer(c net.Conn, token string) error {
 	c.SetDeadline(time.Now().Add(3 * time.Second))
 	defer c.SetDeadline(time.Time{})
 	nonce := make([]byte, 32)
@@ -123,10 +140,7 @@ func (t *Transport) authenticate(c net.Conn) error {
 		return err
 	}
 	mac := func(role string) []byte {
-		h := hmac.New(sha256.New, []byte(t.token))
-		h.Write([]byte(role))
-		h.Write(nonce)
-		return h.Sum(nil)
+		return handshakeMAC(token, role, nonce)
 	}
 	answer := make([]byte, 32)
 	if _, err := io.ReadFull(c, answer); err != nil {

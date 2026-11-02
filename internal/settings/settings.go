@@ -198,8 +198,9 @@ func safePreferenceKey(value string) bool {
 
 // Values is the versioned, platform-neutral dsh-work preference contract.
 type Values struct {
-	Automation      Automation     `json:"automation"`
-	WorkspaceWindow WindowGeometry `json:"workspaceWindow"`
+	Automation      Automation       `json:"automation"`
+	BrowserProfiles *BrowserProfiles `json:"browserProfiles,omitempty"`
+	WorkspaceWindow WindowGeometry   `json:"workspaceWindow"`
 	// WorkspaceZoom is the workbench WebView zoom factor; zero means actual size.
 	WorkspaceZoom float64 `json:"workspaceZoom,omitempty"`
 	Version       int     `json:"version"`
@@ -443,6 +444,11 @@ func (m *Manager) SetPetPreference(ctx context.Context, preference PetPreference
 
 func cloneValues(values Values) Values {
 	values.Pet = clonePetPreference(values.Pet)
+	if values.Automation.Browser.Policy != nil {
+		p := NormalizeBrowserPolicy(values.Automation.Browser.Policy)
+		values.Automation.Browser.Policy = &p
+	}
+	values.BrowserProfiles = cloneBrowserProfiles(values.BrowserProfiles)
 	return values
 }
 
@@ -475,6 +481,7 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 		VerboseLogging               *bool           `json:"verboseLogging"`
 		BackgroundNoticeAcknowledged bool            `json:"backgroundNoticeAcknowledged"`
 		Automation                   json.RawMessage `json:"automation"`
+		BrowserProfiles              json.RawMessage `json:"browserProfiles"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil || (raw.Version != 1 && raw.Version != stateVersion) {
 		return nil, failure(lifecycle.ErrorSettingsStateInvalid, "DSH Work settings are invalid", "the persisted settings use an unsupported format")
@@ -483,6 +490,22 @@ func (FileStore) Load(ctx context.Context, path string) (*Values, error) {
 	if len(raw.Automation) > 0 && string(raw.Automation) != "null" {
 		if err := json.Unmarshal(raw.Automation, &values.Automation); err != nil {
 			logging.Module(logging.ModSettings).Warn("automation settings used defaults for invalid values", "code", lifecycle.ErrorSettingsStateInvalid)
+		}
+	}
+	if len(raw.BrowserProfiles) > 0 && string(raw.BrowserProfiles) != "null" {
+		var profiles BrowserProfiles
+		if json.Unmarshal(raw.BrowserProfiles, &profiles) == nil {
+			// A broken optional hint must not erase a previously valid binding.
+			for i := range profiles.Bindings {
+				if h := profiles.Bindings[i].Launch; h != nil && !h.Valid() {
+					profiles.Bindings[i].Launch = nil
+				}
+			}
+			if profiles.Validate() == nil {
+				values.BrowserProfiles = cloneBrowserProfiles(&profiles)
+			}
+		} else {
+			logging.Module(logging.ModSettings).Warn("browser bindings are invalid; reconnect the browser", "code", lifecycle.ErrorSettingsStateInvalid)
 		}
 	}
 	values.BackgroundNoticeAcknowledged = raw.BackgroundNoticeAcknowledged

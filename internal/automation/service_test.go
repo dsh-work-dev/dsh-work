@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/local/dsh-work/internal/settings"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,144 @@ func awaitState(t *testing.T, s *Service, predicate func(Snapshot) bool) Snapsho
 	t.Fatalf("state did not converge: %+v", s.Snapshot())
 	return Snapshot{}
 }
+
+func TestConfiguredBrowserBackendDoesNotAuthorizeProduct(t *testing.T) {
+	s := New(managerForTest(t), prepareFunc(func(context.Context, Capability, func(Progress)) error { return nil }))
+	defer s.Close()
+	var called atomic.Int32
+	s.ConfigureBrowserBackend(func(context.Context, Request) (Resource, error) { called.Add(1); return nil, nil }, nil)
+	s.Worker("product", true, true)
+	if _, err := s.SetEnabled(context.Background(), Browser, true); err != nil {
+		t.Fatal(err)
+	}
+	v := awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
+	s.Gateway("product", true)
+	if _, err := s.Execute(context.Background(), Request{Generation: "product", Epoch: v.Browser.Epoch, Capability: Browser, Session: "top", Lifetime: "one", Operation: "browser", Tool: "browser_navigate"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatal(err)
+	}
+	if called.Load() != 0 || len(s.Snapshot().BrowserTools) != 0 {
+		t.Fatal("backend registration opened product execution")
+	}
+}
+
+func developmentServiceForTest(t *testing.T) *Service {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "browser-acceptance-owner.txt"), []byte("dsh-work-browser-acceptance-v1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := NewDevelopmentAcceptance(root, prepareFunc(func(context.Context, Capability, func(Progress)) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+	s.Worker("dev", true, true)
+	if _, err = s.SetEnabled(context.Background(), Browser, true); err != nil {
+		t.Fatal(err)
+	}
+	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
+	s.Gateway("dev", true)
+	return s
+}
+func TestBrowserCreationLastWaiterCancellationRollsBackBeforeRetry(t *testing.T) {
+	s := developmentServiceForTest(t)
+	old, next := &fixtureResource{}, &fixtureResource{}
+	entered, late := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	defer release.Do(func() { close(late) })
+	var creates atomic.Int32
+	s.ConfigureBrowserBackend(func(ctx context.Context, _ Request) (Resource, error) {
+		if creates.Add(1) == 1 {
+			close(entered)
+			<-ctx.Done()
+			<-late
+			return old, nil
+		}
+		if old.closed.Load() != 1 {
+			return nil, errors.New("retried before old partial resource closed")
+		}
+		return next, nil
+	}, nil)
+	r := Request{Generation: "dev", Epoch: s.Snapshot().Browser.Epoch, Capability: Browser, Session: "A", Lifetime: "one", Operation: "browser", Tool: "browser_snapshot"}
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { _, err := s.Execute(ctx, r); first <- err }()
+	<-entered
+	cancel()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	retry := make(chan error, 1)
+	bounded, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	go func() { _, err := s.Execute(bounded, r); retry <- err }()
+	release.Do(func() { close(late) })
+	if err := <-retry; err != nil {
+		t.Fatal(err)
+	}
+	if creates.Load() != 2 || old.closed.Load() != 1 || next.closed.Load() != 0 {
+		t.Fatal("late creation revived or closed the replacement")
+	}
+	s.StopSession("dev", "A", "one")
+	if next.closed.Load() != 1 {
+		t.Fatal("replacement did not retain normal stop contract")
+	}
+}
+func TestBrowserCreationOneCancelledWaiterKeepsSharedInitialization(t *testing.T) {
+	s := developmentServiceForTest(t)
+	resource := &fixtureResource{}
+	entered, finish := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(finish) })
+	var creates atomic.Int32
+	s.ConfigureBrowserBackend(func(ctx context.Context, _ Request) (Resource, error) {
+		creates.Add(1)
+		close(entered)
+		select {
+		case <-finish:
+			return resource, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}, nil)
+	r := Request{Generation: "dev", Epoch: s.Snapshot().Browser.Epoch, Capability: Browser, Session: "A", Lifetime: "one", Operation: "browser", Tool: "browser_snapshot"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() { _, err := s.Execute(ctx, r); first <- err }()
+	<-entered
+	bounded, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	go func() { _, err := s.Execute(bounded, r); second <- err }()
+	for {
+		s.mu.Lock()
+		waiters := 0
+		for _, e := range s.entries {
+			waiters += e.waiters
+		}
+		s.mu.Unlock()
+		if waiters == 2 {
+			break
+		}
+		select {
+		case <-bounded.Done():
+			t.Fatal("second waiter did not join shared creation")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	once.Do(func() { close(finish) })
+	if err := <-second; err != nil {
+		t.Fatal("other caller lost shared initialization", err)
+	}
+	if creates.Load() != 1 || resource.closed.Load() != 0 {
+		t.Fatal("one cancellation destroyed shared creation")
+	}
+}
+
 func TestPreparationIntentRetryCancelAndRestart(t *testing.T) {
 	ctx := context.Background()
 	m := managerForTest(t)

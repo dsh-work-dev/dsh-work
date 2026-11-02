@@ -3,6 +3,9 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as automation$0 from "../automation/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as dshactivity$0 from "../dshactivity/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -10,6 +13,12 @@ import * as pet$0 from "../pet/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as settings$0 from "../settings/models.js";
+
+export interface BrowserPermissionPanel {
+    "request": automation$0.BrowserConsent | null;
+    "locale": settings$0.Locale;
+    "appearance": settings$0.Appearance;
+}
 
 export interface PetHitRegion {
     "x": number;

@@ -81,165 +81,210 @@ func (b *Bridge) Start(ctx context.Context, auth string, transport http.RoundTri
 	go func() {
 		defer close(done)
 		defer cancel()
-		jar, _ := cookiejar.New(nil)
-		client := &http.Client{Transport: transport, Jar: jar, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			if r.URL.Scheme != u.Scheme || r.URL.Host != u.Host || len(via) > 3 {
-				return errors.New("Worker redirect escaped authority")
-			}
-			return nil
-		}}
-		defer client.CloseIdleConnections()
-		origin := u.Scheme + "://" + u.Host
-		request := func(ctx context.Context, method, path string, value any) (*http.Response, error) {
-			var body io.Reader
-			if value != nil {
-				data, _ := json.Marshal(value)
-				body = bytes.NewReader(data)
-			}
-			req, e := http.NewRequestWithContext(ctx, method, origin+path, body)
-			if e != nil {
-				return nil, e
-			}
-			req.Header.Set("X-DSH-Work-Token", token)
-			req.Header.Set("Content-Type", "application/json")
-			return client.Do(req)
-		}
-		post := func(path string, value any) error {
-			bounded, stop := context.WithTimeout(run, 5*time.Second)
-			defer stop()
-			resp, e := request(bounded, "POST", path, value)
-			if e != nil {
-				return e
-			}
-			defer resp.Body.Close()
-			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-			if resp.StatusCode != 200 {
-				return errors.New("automation host exchange rejected")
-			}
-			return nil
-		}
-		authCtx, authCancel := context.WithTimeout(run, 5*time.Second)
-		defer authCancel()
-		authReq, _ := http.NewRequestWithContext(authCtx, "GET", auth, nil)
-		resp, e := client.Do(authReq)
-		if e != nil {
-			return
-		}
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return
-		}
-		state := service.Snapshot()
-		if state.Generation != generation {
-			return
-		}
-		if post("/__dshwork/automation/state", state) != nil {
-			return
-		}
-		var wg sync.WaitGroup
-		defer func() {
-			cancel()
-			wg.Wait()
-			current := service.Snapshot()
-			if current.Generation == generation {
-				service.Gateway(generation, false)
-			}
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-run.Done():
-					return
-				case <-b.wake:
-					if post("/__dshwork/automation/state", service.Snapshot()) != nil {
-						cancel()
-						return
-					}
-				}
-			}
-		}()
-		resp, e = request(run, "GET", "/__dshwork/automation/events", nil)
-		if e != nil {
-			return
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return
-		}
-		service.Gateway(generation, true)
-		silence := time.AfterFunc(45*time.Second, cancel)
-		defer silence.Stop()
-		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 4096), 65536)
-		pending := map[string]context.CancelFunc{}
-		var pendingMu sync.Mutex
-		for scanner.Scan() {
-			silence.Reset(45 * time.Second)
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			var message struct {
-				ID      string  `json:"id"`
-				Kind    string  `json:"kind"`
-				Request Request `json:"request"`
-			}
-			if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &message) != nil {
+		delay := 250 * time.Millisecond
+		observedGeneration := false
+		for run.Err() == nil {
+			if service.Snapshot().Generation == generation {
+				observedGeneration = true
+				b.connect(run, auth, u, transport, service, generation, token)
+			} else if observedGeneration {
 				return
 			}
-			r := message.Request
-			if r.Generation != generation {
+			timer := time.NewTimer(delay)
+			select {
+			case <-run.Done():
+				timer.Stop()
 				return
+			case <-timer.C:
 			}
-			switch message.Kind {
-			case "stop":
-				service.StopSession(generation, r.Session, r.Lifetime)
-			case "cancel":
-				pendingMu.Lock()
-				if c := pending[message.ID]; c != nil {
-					c()
+			if delay < 5*time.Second {
+				delay *= 2
+				if delay > 5*time.Second {
+					delay = 5 * time.Second
 				}
-				pendingMu.Unlock()
-			case "call":
-				pendingMu.Lock()
-				if len(pending) >= 64 || pending[message.ID] != nil {
-					pendingMu.Unlock()
-					return
-				}
-				callCtx, stop := context.WithTimeout(run, 15*time.Second)
-				pending[message.ID] = stop
-				pendingMu.Unlock()
-				wg.Add(1)
-				go func(id string, r Request) {
-					defer wg.Done()
-					defer stop()
-					value, err := service.Execute(callCtx, r)
-					code := ""
-					if err != nil {
-						code = "AUTOMATION_CALL_FAILED"
-						if errors.Is(err, ErrRevoked) {
-							code = "AUTOMATION_REVOKED"
-						}
-						if errors.Is(err, ErrUnavailable) {
-							code = "AUTOMATION_BACKEND_UNAVAILABLE"
-						}
-						if errors.Is(err, context.Canceled) {
-							code = "AUTOMATION_CANCELLED"
-						}
-					}
-					if post("/__dshwork/automation/reply", map[string]any{"id": id, "generation": generation, "value": value, "error": code}) != nil {
-						cancel()
-					}
-					pendingMu.Lock()
-					delete(pending, id)
-					pendingMu.Unlock()
-				}(message.ID, r)
-			default:
-				return
 			}
 		}
 	}()
+}
+
+// Each attempt has its own cancellation root. The outer Worker generation owns
+// retries; a silence timeout cancels this connection, not future recovery.
+func (b *Bridge) connect(parent context.Context, auth string, u *url.URL, transport http.RoundTripper, service *Service, generation, token string) {
+	run, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Transport: transport, Jar: jar, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		if r.URL.Scheme != u.Scheme || r.URL.Host != u.Host || len(via) > 3 {
+			return errors.New("Worker redirect escaped authority")
+		}
+		return nil
+	}}
+	defer client.CloseIdleConnections()
+	origin := u.Scheme + "://" + u.Host
+	request := func(ctx context.Context, method, path string, value any) (*http.Response, error) {
+		var body io.Reader
+		if value != nil {
+			data, _ := json.Marshal(value)
+			body = bytes.NewReader(data)
+		}
+		req, e := http.NewRequestWithContext(ctx, method, origin+path, body)
+		if e != nil {
+			return nil, e
+		}
+		req.Header.Set("X-DSH-Work-Token", token)
+		req.Header.Set("Content-Type", "application/json")
+		return client.Do(req)
+	}
+	post := func(path string, value any) error {
+		bounded, stop := context.WithTimeout(run, 5*time.Second)
+		defer stop()
+		resp, e := request(bounded, "POST", path, value)
+		if e != nil {
+			return e
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode != 200 {
+			return errors.New("automation host exchange rejected")
+		}
+		return nil
+	}
+	authCtx, authCancel := context.WithTimeout(run, 5*time.Second)
+	defer authCancel()
+	authReq, _ := http.NewRequestWithContext(authCtx, "GET", auth, nil)
+	resp, e := client.Do(authReq)
+	if e != nil {
+		return
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return
+	}
+	state := service.Snapshot()
+	if state.Generation != generation {
+		return
+	}
+	if post("/__dshwork/automation/state", state) != nil {
+		return
+	}
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		current := service.Snapshot()
+		if current.Generation == generation {
+			service.Gateway(generation, false)
+		}
+		wg.Wait()
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-run.Done():
+				return
+			case <-b.wake:
+				if post("/__dshwork/automation/state", service.Snapshot()) != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	resp, e = request(run, "GET", "/__dshwork/automation/events", nil)
+	if e != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return
+	}
+	service.Gateway(generation, true)
+	silence := time.AfterFunc(45*time.Second, cancel)
+	defer silence.Stop()
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 4096), 512<<10)
+	pending := map[string]context.CancelFunc{}
+	var pendingMu sync.Mutex
+	for scanner.Scan() {
+		silence.Reset(45 * time.Second)
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var message struct {
+			ID      string  `json:"id"`
+			Kind    string  `json:"kind"`
+			Request Request `json:"request"`
+		}
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &message) != nil {
+			return
+		}
+		r := message.Request
+		if r.Generation != generation {
+			return
+		}
+		switch message.Kind {
+		case "turn":
+			_, _ = service.BrowserTurn(r)
+		case "discard":
+			service.DiscardBrowserPermit(r)
+		case "stop":
+			service.StopSession(generation, r.Session, r.Lifetime)
+		case "cancel":
+			pendingMu.Lock()
+			if c := pending[message.ID]; c != nil {
+				c()
+			}
+			pendingMu.Unlock()
+		case "call":
+			pendingMu.Lock()
+			if len(pending) >= 64 || pending[message.ID] != nil {
+				pendingMu.Unlock()
+				return
+			}
+			timeout := 15 * time.Second
+			if r.Operation == "browser" {
+				timeout = 80 * time.Second
+			}
+			if r.Operation == "authorize" {
+				timeout = 300 * time.Second
+			}
+			callCtx, stop := context.WithTimeout(run, timeout)
+			pending[message.ID] = stop
+			pendingMu.Unlock()
+			wg.Add(1)
+			go func(id string, r Request) {
+				defer wg.Done()
+				defer stop()
+				value, err := service.Execute(callCtx, r)
+				code := ""
+				if err != nil {
+					code = "AUTOMATION_CALL_FAILED"
+					if errors.Is(err, ErrRevoked) {
+						code = "AUTOMATION_REVOKED"
+					}
+					if errors.Is(err, ErrUnavailable) {
+						code = "AUTOMATION_BACKEND_UNAVAILABLE"
+					}
+					if errors.Is(err, context.Canceled) {
+						code = "AUTOMATION_CANCELLED"
+					}
+					if strings.HasPrefix(err.Error(), "BROWSER_") {
+						code = err.Error()
+					}
+				}
+				if post("/__dshwork/automation/reply", map[string]any{"id": id, "generation": generation, "value": value, "error": code}) != nil {
+					cancel()
+				}
+				pendingMu.Lock()
+				delete(pending, id)
+				pendingMu.Unlock()
+			}(message.ID, r)
+		default:
+			return
+		}
+	}
 }

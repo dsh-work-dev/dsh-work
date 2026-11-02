@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import {browserSetupStage} from "../src/browser-setup";
+import type {BrowserProfilesSnapshot} from "../bindings/github.com/local/dsh-work/internal/automation";
 import {readFileSync} from "node:fs";
 import test from "node:test";
 
@@ -278,4 +280,23 @@ test("the frontend theme registry matches the Host's supported themes and modes"
 	assert.equal(themes[0].id, "dsh");
 	assert.equal(themeInfo(undefined).id, "dsh");
 	assert.equal(supportedMode(undefined, undefined), "system");
+});
+
+
+test("browser setup guides binding before use without selecting an instance", () => {
+  const profiles = {selected:"",bindings:[],pending:[],registration:null} as BrowserProfilesSnapshot;
+  assert.equal(browserSetupStage(profiles,1000),"install");
+  profiles.pending=[{id:"candidate",connection:"connection",browser:"chrome",name:"Work",expires:new Date(2000).toISOString()}];
+  assert.equal(browserSetupStage(profiles,1000),"confirm");
+  assert.equal(browserSetupStage(profiles,3000),"install");
+  profiles.pending=[];
+  profiles.bindings=[{id:"binding",browser:"chrome",name:"Work",status:"connected"}];
+  assert.equal(browserSetupStage(profiles),"choose");
+  assert.equal(profiles.selected,"");
+  profiles.selected="binding";
+  assert.equal(browserSetupStage(profiles),"connected");
+  for(const status of ["offline","conflict"]){profiles.bindings[0].status=status;assert.equal(browserSetupStage(profiles),status);}
+  for(const stage of ["install","confirm","choose","offline","conflict"]){
+    for(const part of ["title","detail"])assert.equal(hasTranslationInEveryLocale(`automation.browser.guide.${stage}.${part}`),true);
+  }
 });

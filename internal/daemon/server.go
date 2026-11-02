@@ -60,6 +60,7 @@ type Server struct {
 	Presence      *presence.Tracker
 	Interactions  *dshinteraction.Store
 	Media         http.Handler
+	BrowserNative http.Handler
 	// Maintenance reports whether the current-user installer owns the
 	// maintenance boundary. Read-only snapshots remain available while the
 	// boundary is held; all mutable service calls are rejected at this daemon
@@ -150,6 +151,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, true)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/browser-native/") {
+			if s.maintenanceBusy() {
+				http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)
+				return
+			}
+			if s.BrowserNative != nil {
+				s.BrowserNative.ServeHTTP(w, r)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path == "/worker" {
 			if s.maintenanceBusy() {
 				http.Error(w, maintenanceFailure().Error(), http.StatusServiceUnavailable)

@@ -593,6 +593,16 @@ Section "Program files" SEC_PROGRAM_FILES
     StrCpy $DshWorkFailureStage "move staged install into $INSTDIR"
     !insertmacro dshwork.replaceInstall
     Call dshwork.registerProtocol
+    ; Refresh only previously configured, owned native host manifests. A normal
+    ; first install does not register or enable browser automation.
+    ClearErrors
+    ExecWait '"$INSTDIR\${PRODUCT_EXECUTABLE}" browser-host-refresh' $0
+    IfErrors nativeRefreshWarning
+    StrCmp $0 0 nativeRefreshDone
+nativeRefreshWarning:
+    Push "Browser native host refresh did not complete; the app can retry setup. Exit code: $0"
+    Call dshwork.log
+nativeRefreshDone:
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
 
     CreateShortcut "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -644,6 +654,17 @@ Section "uninstall"
     !insertmacro wails.setShellContext
     Call un.dshwork.stopExistingOnce
     Call un.dshwork.cleanRecovery
+
+    ; Remove only registrations/manifests still owned by this executable. An
+    ; optional browser cleanup failure is visible, not a new prerequisite that
+    ; prevents uninstalling an otherwise usable legacy installation.
+    ClearErrors
+    ExecWait '"$INSTDIR\${PRODUCT_EXECUTABLE}" browser-host-remove' $0
+    IfErrors uninstallNativeWarning
+    StrCmp $0 0 uninstallNativeDone
+uninstallNativeWarning:
+    DetailPrint "Browser connection cleanup did not complete (exit $0). Its registration may require cleanup from an ordinary terminal."
+uninstallNativeDone:
 
     ; Application data is owned by the current user and remains available for
     ; a later reinstall. WebView2 is shared and is never removed here.

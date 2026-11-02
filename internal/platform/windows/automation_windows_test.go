@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"context"
 	"github.com/local/dsh-work/internal/automation"
+	"github.com/local/dsh-work/internal/dshmanager"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,11 @@ func TestLiveAutomationDependencyPreparation(t *testing.T) {
 		t.Skip("explicit network preparation test")
 	}
 	i := NewAutomationPreparer(t.TempDir())
+	resolved, err := NewRunNodeResolver(NewCommandExecutor(), "").Resolve(context.Background(), dshmanager.NodeSelection{Kind: dshmanager.NodeSelectionSystem}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i.ConfigureToolchain(func(context.Context) (dshmanager.ResolvedNode, error) { return resolved, nil })
 	for _, c := range []automation.Capability{automation.Browser, automation.Computer} {
 		t.Run(string(c), func(t *testing.T) {
 			report := func(p automation.Progress) {

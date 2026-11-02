@@ -13,6 +13,7 @@ type Interaction struct {
 	Kind     string
 	Key      string
 	ToolName string
+	Reason   string
 }
 
 // Report is the state sent by one DSH page to the trusted shell.
@@ -22,6 +23,7 @@ type Report struct {
 	Kind      string `json:"kind"`
 	Key       string `json:"key"`
 	ToolName  string `json:"toolName"`
+	Reason    string `json:"reason,omitempty"`
 	Current   string `json:"current"`
 	Visible   bool   `json:"visible"`
 }
@@ -100,7 +102,7 @@ func (s *Store) Report(surface string, report Report) error {
 	} else if report.Kind == "" {
 		s.removeInteractionLocked(current, report.Instance, report.SessionID)
 	} else {
-		interaction := Interaction{Kind: report.Kind, Key: report.Key, ToolName: report.ToolName}
+		interaction := Interaction{Kind: report.Kind, Key: report.Key, ToolName: report.ToolName, Reason: report.Reason}
 		previous, exists := current.interactions[report.SessionID]
 		current.interactions[report.SessionID] = interaction
 		if !exists || previous.Key != interaction.Key {

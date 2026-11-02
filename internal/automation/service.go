@@ -4,6 +4,7 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,24 +25,28 @@ const (
 func (c Capability) Valid() bool { return c == Browser || c == Computer }
 
 type State struct {
+	RepairFailure string `json:"repairFailure,omitempty"`
 	Enabled       bool   `json:"enabled"`
 	Dependency    string `json:"dependency"` // unprepared, preparing, prepared, failed
 	Step          string `json:"step,omitempty"`
 	Failure       string `json:"failure,omitempty"`
-	Availability  string `json:"availability"` // disabled, preparing, unavailable
+	Availability  string `json:"availability"` // disabled, preparing, unavailable, available
 	Epoch         uint64 `json:"epoch"`
 	ReceivedBytes int64  `json:"receivedBytes"`
 	TotalBytes    int64  `json:"totalBytes"`
 }
 type Snapshot struct {
-	GatewayConnected      bool   `json:"gatewayConnected"`
-	DefaultBrowserEnabled bool   `json:"defaultBrowserEnabled"`
-	Revision              uint64 `json:"revision"`
-	Generation            string `json:"generation"`
-	AvailableProfile      bool   `json:"availableProfile"`
-	CanChange             bool   `json:"canChange"`
-	Browser               State  `json:"browser"`
-	Computer              State  `json:"computer"`
+	GatewayConnected      bool                    `json:"gatewayConnected"`
+	DefaultBrowserEnabled bool                    `json:"defaultBrowserEnabled"`
+	Revision              uint64                  `json:"revision"`
+	Generation            string                  `json:"generation"`
+	AvailableProfile      bool                    `json:"availableProfile"`
+	CanChange             bool                    `json:"canChange"`
+	Browser               State                   `json:"browser"`
+	Computer              State                   `json:"computer"`
+	Profiles              BrowserProfilesSnapshot `json:"profiles"`
+	BrowserAccess         *BrowserGatewaySnapshot `json:"browserAccess,omitempty"`
+	BrowserTools          []json.RawMessage       `json:"browserTools,omitempty"`
 }
 type Progress struct {
 	Step                      string
@@ -56,27 +61,35 @@ type Resource interface {
 }
 type Factory func(context.Context, Request) (Resource, error)
 type Request struct {
-	Generation string         `json:"generation"`
-	Epoch      uint64         `json:"epoch"`
-	Capability Capability     `json:"capability"`
-	Session    string         `json:"session"`
-	Lifetime   string         `json:"lifetime"`
-	Operation  string         `json:"operation"`
-	Tool       string         `json:"tool"`
-	Arguments  map[string]any `json:"arguments"`
+	Generation       string         `json:"generation"`
+	Epoch            uint64         `json:"epoch"`
+	Capability       Capability     `json:"capability"`
+	Session          string         `json:"session"`
+	Lifetime         string         `json:"lifetime"`
+	Operation        string         `json:"operation"`
+	Tool             string         `json:"tool"`
+	Arguments        map[string]any `json:"arguments"`
+	Title            string         `json:"title,omitempty"`
+	WorkingDirectory string         `json:"workingDirectory,omitempty"`
+	Turn             string         `json:"turn,omitempty"`
+	Permit           string         `json:"permit,omitempty"`
+	PreviousLifetime string         `json:"previousLifetime,omitempty"`
 }
 type entry struct {
-	call     sync.Mutex
-	ctx      context.Context
-	ready    chan struct{}
-	cancel   context.CancelFunc
-	resource Resource
-	err      error
-	revoked  bool
-	once     sync.Once
-	closed   chan struct{}
+	call                   sync.Mutex
+	ctx                    context.Context
+	ready                  chan struct{}
+	cancel                 context.CancelFunc
+	resource               Resource
+	err                    error
+	revoked                bool
+	once                   sync.Once
+	closed                 chan struct{}
+	waiters                int
+	initializationCanceled bool
 }
 type slot struct {
+	repair       bool
 	lastProgress time.Time
 	preparation  uint64
 	state        State
@@ -84,18 +97,24 @@ type slot struct {
 	done         chan struct{}
 }
 type Service struct {
-	op      sync.Mutex
-	mu      sync.Mutex
-	manager *settings.Manager
-	prepare Preparer
-	root    context.Context
-	cancel  context.CancelFunc
-	state   Snapshot
-	slots   map[Capability]*slot
-	entries map[string]*entry
-	stopped map[string]bool
-	factory Factory // nil in product: real execution is not integrated yet
-	changed func(Snapshot)
+	op                 sync.Mutex
+	mu                 sync.Mutex
+	manager            *settings.Manager
+	prepare            Preparer
+	root               context.Context
+	cancel             context.CancelFunc
+	state              Snapshot
+	slots              map[Capability]*slot
+	entries            map[string]*entry
+	stopped            map[string]bool
+	factory            Factory // validation probes only; browser execution uses its own backend
+	changed            func(Snapshot)
+	profiles           profileState
+	browserFactory     Factory
+	browserSchemas     []json.RawMessage
+	gate               *browserGateway
+	development        bool
+	browserMaintenance bool
 }
 
 var ErrRevoked = errors.New("AUTOMATION_REVOKED")
@@ -111,6 +130,7 @@ func New(manager *settings.Manager, prepare Preparer) *Service {
 		}
 	}
 	s.state.DefaultBrowserEnabled = values.Automation.Browser.Default.Enabled
+	s.profiles = newProfileState(values.BrowserProfiles)
 	for _, c := range []Capability{Browser, Computer} {
 		enabled := values.Automation.Browser.Enabled
 		if c == Computer {
@@ -129,6 +149,19 @@ func (s *Service) snapshotLocked() Snapshot {
 	v := s.state
 	v.Browser = s.slots[Browser].state
 	v.Computer = s.slots[Computer].state
+	v.Profiles = s.profileSnapshotLocked()
+	v.BrowserAccess = s.browserGatewaySnapshotLocked()
+	if !s.browserMaintenance && s.gate != nil && s.browserFactory != nil && s.state.CanChange && s.state.GatewayConnected && v.Browser.Enabled && v.Browser.Dependency == "prepared" && s.state.DefaultBrowserEnabled {
+		if id, e := s.selectedConnectionLocked(); e == nil && (s.gate.config.ExtensionSource == "" || s.profiles.connections[id].hello.Source == s.gate.config.ExtensionSource) {
+			v.Browser.Availability = "available"
+		}
+	}
+
+	if s.development || s.gate != nil {
+		for _, schema := range s.browserSchemas {
+			v.BrowserTools = append(v.BrowserTools, append(json.RawMessage(nil), schema...))
+		}
+	}
 	return v
 }
 func (s *Service) Snapshot() Snapshot { s.mu.Lock(); defer s.mu.Unlock(); return s.snapshotLocked() }
@@ -170,6 +203,9 @@ func (s *Service) SetEnabled(ctx context.Context, c Capability, enabled bool) (S
 		slot.cancel()
 	}
 	if !enabled {
+		if c == Browser {
+			s.cancelBrowserOpeningLocked()
+		}
 		slot.state.Availability = "disabled"
 		slot.state.Step = ""
 		if slot.state.Dependency == "preparing" {
@@ -209,6 +245,9 @@ func (s *Service) SetDefaultBrowser(ctx context.Context, enabled bool) (Snapshot
 	}
 	s.mu.Lock()
 	s.state.DefaultBrowserEnabled = enabled
+	if !enabled {
+		s.cancelBrowserOpeningLocked()
+	}
 	slot := s.slots[Browser]
 	slot.state.Epoch++
 	if slot.cancel != nil {
@@ -246,6 +285,69 @@ func (s *Service) Retry(c Capability) (Snapshot, error) {
 	}
 	return s.snapshotLocked(), nil
 }
+
+// Repair stages a replacement without deleting any published set. Active
+// browser work must be stopped explicitly rather than disrupted by maintenance.
+func (s *Service) Repair(c Capability) (Snapshot, error) {
+	s.op.Lock()
+	defer s.op.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v := s.slots[c]
+	if v == nil || !s.state.CanChange || !v.state.Enabled {
+		return s.snapshotLocked(), ErrRevoked
+	}
+	if v.state.Dependency == "preparing" {
+		return s.snapshotLocked(), errors.New("AUTOMATION_PREPARATION_BUSY")
+	}
+	if c == Browser && s.browserWorkLocked() {
+		return s.snapshotLocked(), errors.New("BROWSER_UPDATE_BUSY: stop browser use before repairing components")
+	}
+	v.repair = true
+	v.state.Dependency = "unprepared"
+	s.startLocked(c)
+	s.publishLocked()
+	return s.snapshotLocked(), nil
+}
+
+func (s *Service) browserWorkLocked() bool {
+	if s.browserMaintenance {
+		return true
+	}
+	if s.gate != nil {
+		for id, p := range s.gate.permits {
+			if time.Now().After(p.expires) {
+				delete(s.gate.permits, id)
+			}
+		}
+	}
+	for k := range s.entries {
+		if strings.HasPrefix(k, "browser/") {
+			return true
+		}
+	}
+	return s.gate != nil && (len(s.gate.pending) > 0 || len(s.gate.permits) > 0)
+}
+func (s *Service) BrowserMaintenanceBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.browserWorkLocked()
+}
+
+func (s *Service) BeginBrowserMaintenance() (func(), error) {
+	s.mu.Lock()
+	if s.browserWorkLocked() {
+		s.mu.Unlock()
+		return nil, errors.New("BROWSER_UPDATE_BUSY")
+	}
+	s.browserMaintenance = true
+	s.publishLocked()
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() { s.mu.Lock(); s.browserMaintenance = false; s.publishLocked(); s.mu.Unlock() })
+	}, nil
+}
 func (s *Service) startLocked(c Capability) {
 	slot := s.slots[c]
 	if !slot.state.Enabled || !s.state.CanChange || slot.state.Dependency == "preparing" {
@@ -265,10 +367,13 @@ func (s *Service) startLocked(c Capability) {
 	slot.cancel = cancel
 	slot.preparation++
 	preparation := slot.preparation
+	repair := slot.repair
+	slot.repair = false
 	slot.state.Dependency = "preparing"
 	slot.state.Availability = "preparing"
 	slot.state.Step = "download"
 	slot.state.Failure = ""
+	slot.state.RepairFailure = ""
 	slot.state.ReceivedBytes = 0
 	slot.state.TotalBytes = 0
 	done := make(chan struct{})
@@ -285,7 +390,15 @@ func (s *Service) startLocked(c Capability) {
 		if s.prepare == nil {
 			err = ErrUnavailable
 		} else {
-			err = s.prepare.Prepare(ctx, c, func(p Progress) {
+			runPrepare := s.prepare.Prepare
+			if repair {
+				if r, ok := s.prepare.(interface {
+					Repair(context.Context, Capability, func(Progress)) error
+				}); ok {
+					runPrepare = r.Repair
+				}
+			}
+			err = runPrepare(ctx, c, func(p Progress) {
 				s.mu.Lock()
 				defer s.mu.Unlock()
 				if slot.preparation != preparation || ctx.Err() != nil {
@@ -311,6 +424,15 @@ func (s *Service) startLocked(c Capability) {
 		slot.state.Step = ""
 		slot.state.Availability = "unavailable"
 		if err != nil {
+			if repair {
+				if checker, ok := s.prepare.(interface{ Ready(Capability) bool }); ok && checker.Ready(c) {
+					slot.state.Dependency = "prepared"
+					slot.state.Failure = ""
+					slot.state.RepairFailure = FailureCode(err)
+					s.publishLocked()
+					return
+				}
+			}
 			slot.state.Dependency = "failed"
 			slot.state.Failure = FailureCode(err)
 			detail := err
@@ -345,6 +467,12 @@ func (s *Service) Worker(generation string, ready, profile bool) {
 	}
 	if s.state.Generation != generation || !ready {
 		s.state.GatewayConnected = false
+	}
+	if s.state.Generation != generation || !ready || !profile {
+		s.cancelBrowserOpeningLocked()
+	}
+	if s.gate != nil && s.state.Generation != generation {
+		s.gate.sessions = map[string]*browserConversation{}
 	}
 	s.state.Generation = generation
 	s.state.CanChange = ready && profile
@@ -394,14 +522,45 @@ func (s *Service) Gateway(generation string, connected bool) {
 	s.release(old)
 }
 func (s *Service) validLocked(r Request) bool {
+	if r.Capability == Browser && s.browserMaintenance {
+		return false
+	}
+	if s.gate != nil && r.Capability == Browser && (r.Operation == "browser" || r.Operation == "authorize") {
+		c := s.gate.sessions[r.Session]
+		if c == nil || c.life != r.Lifetime || c.turn != r.Turn || c.stopped {
+			return false
+		}
+	}
 	v := s.slots[r.Capability]
 	return v != nil && (r.Capability != Browser || s.state.DefaultBrowserEnabled) && s.state.CanChange && s.state.GatewayConnected && s.state.Generation == r.Generation && v.state.Enabled && v.state.Epoch == r.Epoch && v.state.Dependency == "prepared" && r.Session != "" && r.Lifetime != "" && !s.stopped[revocationKey(r)]
 }
 func revocationKey(r Request) string {
 	return fmt.Sprintf("%s/%d/%s/%s", r.Capability, r.Epoch, r.Session, r.Lifetime)
 }
-func key(r Request) string { return string(r.Capability) + "/" + r.Session + "/" + r.Lifetime }
+func key(r Request) string {
+	return string(r.Capability) + "/" + r.Operation + "/" + r.Session + "/" + r.Lifetime
+}
 func (s *Service) Execute(ctx context.Context, r Request) (any, error) {
+	if r.Capability == Browser {
+		s.mu.Lock()
+		product := s.gate != nil
+		s.mu.Unlock()
+		if product {
+			if r.Operation == "turn" {
+				return s.BrowserTurn(r)
+			}
+			if r.Operation == "authorize" {
+				r.Operation = "browser"
+				return s.AuthorizeBrowser(ctx, r)
+			}
+			if r.Operation == "browser" {
+				return s.executeBrowserPermit(ctx, r)
+			}
+		}
+	}
+	return s.executeOwned(ctx, r)
+}
+func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -410,33 +569,79 @@ func (s *Service) Execute(ctx context.Context, r Request) (any, error) {
 		s.mu.Unlock()
 		return nil, ErrRevoked
 	}
-	if s.factory == nil || r.Operation != "probe" {
+	f := s.factory
+	if r.Operation != "probe" {
+		f = nil
+		if (s.development || s.gate != nil) && r.Capability == Browser && r.Operation == "browser" {
+			f = s.browserFactory
+		}
+	}
+	if f == nil {
 		s.mu.Unlock()
 		return nil, ErrUnavailable
 	}
 	e := s.entries[key(r)]
+	if r.Operation == "browser" && e != nil && e.initializationCanceled {
+		select {
+		case <-e.closed:
+			delete(s.entries, key(r))
+			e = nil
+		default:
+			done := e.closed
+			s.mu.Unlock()
+			select {
+			case <-done:
+				return s.Execute(ctx, r)
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
 	if e == nil {
 		create, cancel := context.WithCancel(s.root)
 		e = &entry{ctx: create, ready: make(chan struct{}), closed: make(chan struct{}), cancel: cancel}
 		s.entries[key(r)] = e
-		f := s.factory
 		go func() {
 			resource, err := f(create, r)
 			s.mu.Lock()
+			if r.Operation == "browser" && create.Err() != nil && err == nil {
+				err = create.Err()
+			}
 			e.resource, e.err = resource, err
 			close(e.ready)
+			if s.gate != nil && r.Operation == "browser" && err == nil {
+				if c := s.gate.sessions[r.Session]; c != nil && c.life == r.Lifetime {
+					c.active = true
+					s.publishLocked()
+				}
+			}
 			s.mu.Unlock()
 			if err != nil {
 				s.closeEntry(e)
 			}
 		}()
 	}
+	e.waiters++
 	s.mu.Unlock()
 	select {
 	case <-ctx.Done():
+		s.mu.Lock()
+		e.waiters--
+		if r.Operation == "browser" && e.waiters == 0 {
+			select {
+			case <-e.ready:
+			default:
+				e.initializationCanceled = true
+				e.cancel()
+			}
+		}
+		s.mu.Unlock()
 		return nil, ctx.Err()
 	case <-e.ready:
 	}
+	s.mu.Lock()
+	e.waiters--
+	s.mu.Unlock()
 	e.call.Lock()
 	defer e.call.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -450,6 +655,7 @@ func (s *Service) Execute(ctx context.Context, r Request) (any, error) {
 		return nil, ErrRevoked
 	}
 	if err != nil {
+		s.failOwnedBrowserEntry(r, e)
 		return nil, err
 	}
 	if resource == nil {
@@ -460,6 +666,13 @@ func (s *Service) Execute(ctx context.Context, r Request) (any, error) {
 	defer stop()
 	defer cancel()
 	value, err := resource.Execute(callCtx, r.Tool, r.Arguments)
+	if err != nil {
+		if terminal, ok := resource.(interface{ AutomationTerminal() bool }); ok && terminal.AutomationTerminal() {
+			if s.failOwnedBrowserEntry(r, e) {
+				return nil, err
+			}
+		}
+	}
 	s.mu.Lock()
 	valid = s.validLocked(r) && !e.revoked
 	s.mu.Unlock()
@@ -477,11 +690,21 @@ func (s *Service) StopSession(generation, session, lifetime string) {
 	for _, c := range []Capability{Browser, Computer} {
 		s.stopped[revocationKey(Request{Capability: c, Epoch: s.slots[c].state.Epoch, Session: session, Lifetime: lifetime})] = true
 	}
+	if s.gate != nil {
+		if c := s.gate.sessions[session]; c != nil && c.life == lifetime {
+			c.stopped = true
+		}
+	}
 	old := s.revokeLocked("", session+"/"+lifetime)
+	if s.gate != nil {
+		s.browserActivityLocked(Request{Session: session}, "", "", "stopped")
+		s.publishLocked()
+	}
 	s.mu.Unlock()
 	s.release(old)
 }
 func (s *Service) revokeLocked(c Capability, session string) []*entry {
+	s.revokeBrowserGrantsLocked(c, session)
 	var old []*entry
 	for k, e := range s.entries {
 		if (c == "" || strings.HasPrefix(k, string(c)+"/")) && (session == "" || strings.HasSuffix(k, "/"+session)) {
@@ -527,4 +750,20 @@ func (s *Service) Close() {
 	for _, d := range done {
 		<-d
 	}
+	if s.gate != nil {
+		s.gate.auditWG.Wait()
+	}
+}
+
+func (s *Service) failOwnedBrowserEntry(r Request, e *entry) bool {
+	s.mu.Lock()
+	if s.gate == nil || r.Operation != "browser" || s.entries[key(r)] != e {
+		s.mu.Unlock()
+		return false
+	}
+	old := s.revokeLocked(Browser, r.Session+"/"+r.Lifetime)
+	s.publishLocked()
+	s.mu.Unlock()
+	s.release(old)
+	return true
 }

@@ -76,3 +76,14 @@ func TestLegacyRestoreComparisonDoesNotRequireNewHostMetadata(t *testing.T) {
 		t.Fatal("legacy compatibility hid a real dependency change")
 	}
 }
+
+func TestSetupOnlyHostRecoverySourceIsNotSilentlyUpgraded(t *testing.T) {
+	input := automation.CurrentVersionInputs()
+	if input.ExtensionSource == "not-integrated" {
+		t.Fatal("formal extension source absent")
+	}
+	input.ExtensionSource = "not-integrated"
+	if input.Validate() == nil {
+		t.Fatal("step-3 recovery point silently changed to current extension contract")
+	}
+}

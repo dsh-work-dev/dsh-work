@@ -420,12 +420,40 @@
               <div data-automation-profile="browser" class="row" hidden><span data-i18n="automation.profileOnly">Available only in DSH Work</span></div>
               <div data-setting-switch="automation-browser-enabled" data-label="automation.browser.title" data-detail="automation.browser.detail" data-status="automation-browser-status" data-disabled></div>
               <div id="automation-default-browser-row" data-setting-switch="automation-default-browser-enabled" data-label="automation.browser.useDefault" data-disabled hidden></div>
+              <div id="automation-browser-setup-row" class="row" hidden role="status" aria-live="polite">
+                <div class="row-main"><strong id="automation-browser-setup-title"></strong><span id="automation-browser-setup-detail" class="setting-detail"></span>
+                  <ol id="automation-browser-setup-steps" class="setting-detail" hidden>
+                    <li data-i18n="automation.browser.guide.step1">Open the extension folder below.</li>
+                    <li><span data-i18n="automation.browser.guide.step2">In your chosen profile, open the extensions page, enable Developer mode and load the unpacked extension.</span> <code>chrome://extensions</code> / <code>edge://extensions</code></li>
+                    <li data-i18n="automation.browser.guide.step3">Choose Connect to DSH Work in the extension, then confirm the matching code here.</li>
+                  </ol>
+                </div>
+              </div>
+              <div id="automation-browser-extension-row" class="row" hidden>
+                <div class="row-main"><strong data-i18n="automation.browser.extension">DSH Work extension</strong><span id="automation-browser-extension-detail" class="setting-detail">Load the extension in the profile you want to use, then choose Connect to DSH Work.</span></div>
+                <div class="row-trail"><button id="automation-browser-extension-folder" class="button" type="button" data-i18n="automation.browser.extensionFolder">Open extension folder</button><button id="automation-browser-check" class="button" type="button" data-i18n="automation.browser.check">Check again</button></div>
+              </div>
+              <div id="automation-browser-candidates"></div>
+              <div id="automation-browser-profile-row" class="row" hidden>
+                <div class="row-main"><strong data-i18n="automation.browser.profile">Browser and profile</strong></div>
+                <div class="row-trail"><select id="automation-browser-profile" aria-label="Browser and profile" data-i18n-aria-label="automation.browser.profile"></select><button id="automation-browser-rename" class="button" type="button" data-i18n="automation.browser.rename">Rename</button><button id="automation-browser-forget" class="button" type="button" data-i18n="automation.browser.forget">Unlink</button></div>
+              </div>
               <div id="automation-browser-dependency" class="row" hidden>
                 <div class="row-main"><strong data-i18n="automation.components">Components</strong><span id="automation-browser-dependency-text" class="setting-detail"></span></div>
-                <div class="row-trail"><button id="automation-browser-retry" class="button" type="button" data-i18n="common.retry" hidden>Retry</button></div>
+                <div class="row-trail"><button id="automation-browser-retry" class="button" type="button" data-i18n="common.retry" hidden>Retry</button><button id="automation-browser-repair" class="button" type="button" data-i18n="automation.browser.repair">Repair components</button><button id="automation-browser-runtime" class="button" type="button" data-i18n="automation.browser.openRuntimes" hidden>Open Runtimes</button></div>
               </div>
+              <div id="automation-browser-name-row" class="row" hidden>
+                <div class="row-main"><label for="automation-browser-name" data-i18n="automation.browser.rename">Rename</label><input id="automation-browser-name" maxlength="120" /></div>
+                <div class="row-trail"><button id="automation-browser-name-save" class="button" type="button" data-i18n="automation.browser.save">Save</button><button id="automation-browser-name-cancel" class="button" type="button" data-i18n="automation.browser.cancel">Cancel</button></div>
+              </div>
+              <div id="automation-browser-launch-row" class="row" hidden>
+                <div class="row-main"><strong data-i18n="automation.browser.launchDirectory">Profile folder</strong><span id="automation-browser-launch-path" class="setting-detail" style="overflow-wrap:anywhere"></span></div>
+                <div class="row-trail"><button id="automation-browser-launch-set" class="button" type="button" data-i18n="automation.browser.launchSet">Choose folder</button><button id="automation-browser-launch-clear" class="button" type="button" data-i18n="automation.browser.launchClear">Clear</button><button id="automation-browser-launch-open" class="button" type="button" data-i18n="automation.browser.launchOpen">Open profile</button></div>
+              </div>
+              <p id="automation-browser-discovery" class="note" hidden></p>
             </div>
             <p id="automation-browser-status" class="note" role="status" aria-live="polite"></p>
+            <div id="automation-browser-policy" hidden></div>
           </section>
 
           <section id="manager-section-computer" class="panel" data-manager-panel="computer" aria-labelledby="manager-title" hidden>

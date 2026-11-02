@@ -3,6 +3,7 @@ package automation
 import (
 	"embed"
 	"errors"
+	browserextension "github.com/local/dsh-work/browser-extension"
 )
 
 const DSHVersion = "0.2.1-rc.5"
@@ -46,7 +47,7 @@ type VersionInputs struct {
 func CurrentVersionInputs() VersionInputs {
 	browser, _ := DependencyFiles(Browser)
 	computer, _ := DependencyFiles(Computer)
-	return VersionInputs{1, string(browser["package-lock.json"]), string(computer["package-lock.json"]), DriverVersion, DriverArchive, DriverSHA256, "not-integrated"}
+	return VersionInputs{1, string(browser["package-lock.json"]), string(computer["package-lock.json"]), DriverVersion, DriverArchive, DriverSHA256, browserextension.SourceIdentity}
 }
 func (v VersionInputs) Validate() error {
 	if v != CurrentVersionInputs() {

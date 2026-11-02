@@ -14,6 +14,7 @@ type AutomationCapability struct {
 type AutomationBrowser struct {
 	Enabled bool                 `json:"enabled"`
 	Default AutomationCapability `json:"default"`
+	Policy  *BrowserPolicy       `json:"policy,omitempty"`
 }
 
 func DefaultAutomation() Automation {

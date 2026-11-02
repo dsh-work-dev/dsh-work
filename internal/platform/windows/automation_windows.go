@@ -12,6 +12,7 @@ import (
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/selfupdate"
 	"io"
 	"os"
@@ -35,6 +36,7 @@ type AutomationPreparer struct {
 	executor   dshadapter.CommandExecutor
 	downloader artifactDownloader
 	signature  func(string, string) error
+	resolve    func(context.Context) (dshmanager.ResolvedNode, error)
 }
 
 func NewAutomationPreparer(root string) *AutomationPreparer {
@@ -47,7 +49,7 @@ func (i *AutomationPreparer) Prepare(ctx context.Context, c automation.Capabilit
 	if c == automation.Computer && runtime.GOARCH != "amd64" {
 		return automationFailure{"other", errors.New("computer preparation is currently Windows amd64 only")}
 	}
-	report(automation.Progress{Step: "download"})
+	report(automation.Progress{Step: "verify"})
 	if err := i.packages(ctx, c, report); err != nil {
 		return err
 	}
@@ -56,51 +58,157 @@ func (i *AutomationPreparer) Prepare(ctx context.Context, c automation.Capabilit
 	}
 	return nil
 }
+
+// ConfigureToolchain binds preparation to the already validated Run context.
+func (i *AutomationPreparer) ConfigureToolchain(resolve func(context.Context) (dshmanager.ResolvedNode, error)) {
+	i.resolve = resolve
+}
+func (i *AutomationPreparer) Ready(c automation.Capability) bool {
+	dir, e := automation.PublishedPackage(i.root, c)
+	if e != nil {
+		return false
+	}
+	files, e := automation.DependencyFiles(c)
+	if e != nil {
+		return false
+	}
+	for name, want := range files {
+		got, e := os.ReadFile(filepath.Join(dir, name))
+		if e != nil || string(got) != string(want) {
+			return false
+		}
+	}
+	return validateAutomationPackages(dir, c) == nil
+}
+func (i *AutomationPreparer) Repair(ctx context.Context, c automation.Capability, report func(automation.Progress)) error {
+	if err := i.preparePackages(ctx, c, report, true); err != nil {
+		return err
+	}
+	if c == automation.Computer {
+		return i.driver(ctx, report)
+	}
+	return nil
+}
 func (i *AutomationPreparer) packages(ctx context.Context, c automation.Capability, report func(automation.Progress)) error {
+	return i.preparePackages(ctx, c, report, false)
+}
+func (i *AutomationPreparer) preparePackages(ctx context.Context, c automation.Capability, report func(automation.Progress), force bool) error {
 	files, err := automation.DependencyFiles(c)
 	if err != nil {
 		return err
 	}
-	destination := filepath.Join(i.root, "automation", string(c), automation.DSHVersion)
-	valid := func() bool {
+	valid := func(dir string) bool {
 		for name, want := range files {
-			got, e := os.ReadFile(filepath.Join(destination, name))
+			got, e := os.ReadFile(filepath.Join(dir, name))
 			if e != nil || string(got) != string(want) {
 				return false
 			}
 		}
-		return validateAutomationPackages(destination, c) == nil
+		return validateAutomationPackages(dir, c) == nil
 	}
-	if valid() {
-		report(automation.Progress{Step: "verify"})
-		return nil
+	publish := func(dir string) error {
+		root := automation.PackageRoot(i.root, c)
+		if err := os.MkdirAll(root, 0700); err != nil {
+			return err
+		}
+		rel, e := filepath.Rel(root, dir)
+		if e != nil {
+			return e
+		}
+		b, e := json.Marshal(automation.PackagePublication{Revision: automation.PackageRevision(c), Directory: rel})
+		if e != nil {
+			return e
+		}
+		f, e := os.CreateTemp(root, "current-*.tmp")
+		if e != nil {
+			return e
+		}
+		defer os.Remove(f.Name())
+		defer f.Close()
+		if _, e = f.Write(b); e != nil {
+			return e
+		}
+		if e = f.Sync(); e != nil {
+			return e
+		}
+		if e = f.Close(); e != nil {
+			return e
+		}
+		return NewFileReplacer().Replace(f.Name(), automation.PackagePointer(i.root, c))
+	}
+	if !force {
+		if dir, e := automation.PublishedPackage(i.root, c); e == nil && valid(dir) {
+			report(automation.Progress{Step: "verify"})
+			return nil
+		}
+		// Adopt the old valid directory without mutating it; running jobs may own it.
+		legacy := filepath.Join(automation.PackageRoot(i.root, c), automation.DSHVersion)
+		if valid(legacy) {
+			report(automation.Progress{Step: "verify"})
+			return publish(legacy)
+		}
+	}
+	var command string
+	var args []string
+	var env map[string]string
+	if i.resolve != nil {
+		node, e := i.resolve(ctx)
+		if e != nil {
+			return automationFailure{"toolchain", e}
+		}
+		cli := filepath.Join(filepath.Dir(node.NodePath), "node_modules", "npm", "bin", "npm-cli.js")
+		if info, e := os.Stat(cli); e == nil && !info.IsDir() {
+			command = node.NodePath
+			args = []string{cli}
+		} else if node.NPMPath != "" {
+			command = node.NPMPath
+		} else {
+			return automationFailure{"toolchain", errors.New("selected Node installation has no npm; install or repair Node in Runtimes")}
+		}
+		env = node.ChildEnvironment
+	} else {
+		command, err = exec.LookPath("npm.cmd")
+		if err != nil {
+			return automationFailure{"toolchain", err}
+		}
 	}
 	stageRoot := filepath.Join(i.root, ".staging")
-	if err := os.MkdirAll(stageRoot, 0700); err != nil {
+	if err = os.MkdirAll(stageRoot, 0700); err != nil {
 		return err
 	}
-	result, err := acquisition.Acquire(ctx, acquisition.Request{OperationID: "automation-" + string(c), Identity: acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "dsh-work-" + string(c), Version: automation.DSHVersion}, Candidates: []acquisition.SourceCandidate{{Route: acquisition.RouteOfficial, Location: "https://registry.npmjs.org/"}}, StagingRoot: stageRoot, StagePrefix: "automation-"}, automationPackageAdapter{i.executor, files}, nil)
+	adapter := automationPackageAdapter{executor: i.executor, files: files, command: command, args: args, environment: env}
+	report(automation.Progress{Step: "download"})
+	result, err := acquisition.Acquire(ctx, acquisition.Request{OperationID: "automation-" + string(c), Identity: acquisition.ArtifactIdentity{Kind: acquisition.ArtifactPlugin, Name: "dsh-work-" + string(c), Version: automation.PackageRevision(c)}, Candidates: []acquisition.SourceCandidate{{Route: acquisition.RouteOfficial, Location: "https://registry.npmjs.org/"}}, StagingRoot: stageRoot, StagePrefix: "automation-"}, adapter, nil)
 	if err != nil {
 		return preparationError(err)
 	}
 	defer os.RemoveAll(result.StagingPath)
 	report(automation.Progress{Step: "verify"})
-	if err := validateAutomationPackages(result.PayloadPath, c); err != nil {
+	if err = validateAutomationPackages(result.PayloadPath, c); err != nil {
 		return automationFailure{"verify", err}
 	}
-	if err := ctx.Err(); err != nil {
+	if err = ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+	releases := filepath.Join(automation.PackageRoot(i.root, c), "releases", automation.PackageRevision(c))
+	if err = os.MkdirAll(releases, 0700); err != nil {
 		return err
 	}
-	if !valid() {
-		if err := os.RemoveAll(destination); err != nil {
-			return err
-		}
+	// Every publication is immutable, including a repair of the same lock.
+	destination, err := os.MkdirTemp(releases, "set-")
+	if err != nil {
+		return err
 	}
-	return os.Rename(result.PayloadPath, destination)
+	if err = os.Remove(destination); err != nil {
+		return err
+	}
+	if err = os.Rename(result.PayloadPath, destination); err != nil {
+		return err
+	}
+	// A failed pointer replacement leaves the previous complete set selected.
+	return publish(destination)
 }
+
 func preparationError(err error) error {
 	var f acquisition.Failure
 	if errors.As(err, &f) {
@@ -115,8 +223,11 @@ func preparationError(err error) error {
 }
 
 type automationPackageAdapter struct {
-	executor dshadapter.CommandExecutor
-	files    map[string][]byte
+	executor    dshadapter.CommandExecutor
+	files       map[string][]byte
+	command     string
+	args        []string
+	environment map[string]string
 }
 
 func (a automationPackageAdapter) Attempt(ctx context.Context, r acquisition.AttemptRequest) (acquisition.AttemptResult, error) {
@@ -125,11 +236,16 @@ func (a automationPackageAdapter) Attempt(ctx context.Context, r acquisition.Att
 			return acquisition.AttemptResult{}, err
 		}
 	}
-	npm, err := exec.LookPath("npm.cmd")
-	if err != nil {
-		return acquisition.AttemptResult{}, err
+	command := a.command
+	var err error
+	if command == "" {
+		command, err = exec.LookPath("npm.cmd")
+		if err != nil {
+			return acquisition.AttemptResult{}, err
+		}
 	}
-	result, err := a.executor.Run(ctx, npm, []string{"ci", "--ignore-scripts", "--no-audit", "--no-fund"}, nil, r.StagingPath)
+	args := append(append([]string{}, a.args...), "ci", "--ignore-scripts", "--no-audit", "--no-fund")
+	result, err := a.executor.Run(ctx, command, args, a.environment, r.StagingPath)
 	if err != nil {
 		return acquisition.AttemptResult{}, classifyPackageManagerFailure(result, err)
 	}

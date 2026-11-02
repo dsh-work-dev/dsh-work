@@ -1,0 +1,9 @@
+[
+ {"category":"payment","words":["pay","checkout","purchase","buy","place order","subscribe","donate","支付","付款","购买","下单","结算","订阅","充值","支払","購入","注文","決済","申し込"]},
+ {"category":"send","words":["send","reply","post","comment","tweet","发送","回复","评论","发帖","送信","返信","投稿","コメント"]},
+ {"category":"publish","words":["publish","share","release","deploy","merge","发布","分享","公开","部署","合并","公開","共有","リリース","デプロイ","マージ"]},
+ {"category":"delete","words":["delete","remove","discard","erase","trash","empty","删除","移除","清空","丢弃","削除","消去","破棄","ゴミ箱"]},
+ {"category":"install","words":["install","uninstall","update now","安装","卸载","立即更新","インストール","アンインストール"]},
+ {"category":"settings","words":["change password","permission","allow","grant","修改密码","权限","授权","允许","保存设置","パスワード変更","権限","許可","設定を保存"]},
+ {"category":"submit","words":["submit","confirm","sign up","register","apply","book","reserve","accept","agree","transfer","提交","确认","注册","申请","预订","同意","转账","送信する","確定","登録","申請","予約","同意","振込"]}
+]

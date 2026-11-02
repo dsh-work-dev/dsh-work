@@ -40,10 +40,53 @@ export interface Automation {
 export interface AutomationBrowser {
     "enabled": boolean;
     "default": AutomationCapability;
+    "policy"?: BrowserPolicy | null;
 }
 
 export interface AutomationCapability {
     "enabled": boolean;
+}
+
+export interface BrowserBinding {
+    "id": string;
+    "browser": string;
+    "extensionId": string;
+    "instance": string;
+    "name": string;
+    "launch"?: BrowserLaunchHint | null;
+}
+
+/**
+ * A user-confirmed launch hint is not proof of directory-to-instance identity.
+ * The authenticated instance is still required before any browser route opens.
+ */
+export interface BrowserLaunchHint {
+    "executable": string;
+    "userDataDirectory": string;
+    "profileDirectory": string;
+}
+
+export interface BrowserPolicy {
+    "askEachConversation": boolean;
+    "newSites": string;
+    "sites": BrowserSiteRule[] | null;
+    "confirm": { [_ in string]?: string } | null;
+    "grantLasts": string;
+}
+
+/**
+ * BrowserProfiles contains local setup identities, never execution grants or
+ * native-channel credentials. Profile directories are not routing identities.
+ */
+export interface BrowserProfiles {
+    "schemaVersion": number;
+    "selected"?: string;
+    "bindings": BrowserBinding[] | null;
+}
+
+export interface BrowserSiteRule {
+    "host": string;
+    "rule": string;
 }
 
 /**
@@ -153,6 +196,7 @@ export enum UpdateChannel {
  */
 export interface Values {
     "automation": Automation;
+    "browserProfiles"?: BrowserProfiles | null;
     "workspaceWindow": WindowGeometry;
 
     /**

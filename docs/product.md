@@ -20,6 +20,8 @@ dsh-work owns:
 
 - application windows, tray behavior and explicit Quit;
 - trusted settings and native desktop integrations;
+- browser bindings, operation policy, independent permission windows and
+  conversation-scoped browser resources;
 - the installed-runtime catalog and selected Run context;
 - Worker process ownership, readiness, restart and cleanup;
 - the authenticated IPC channel between the Workspace WebView and DSH;
@@ -44,6 +46,11 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
 
 ## Current capabilities
 
+- Windows Chrome/Edge browser control uses an explicitly bound and selected
+  profile, with one tab group per top-level conversation. Settings guides
+  unpacked-extension installation and component preparation/repair. Browser
+  access, website and risk decisions use DSH Work's independent permission
+  window. See [Set up browser control](browser-setup.md).
 - The Host starts one selected DSH runtime through an authenticated local
   channel and exposes the Workspace only after readiness validation.
 - Runtime, DSH data-directory and profile switches are serialized. A candidate
@@ -136,6 +143,18 @@ See [Settings and startup](settings.md) for the accepted interaction layout.
 
 ## Current limitations
 
+- Browser extension distribution currently uses developer-mode directory
+  loading. Signed CRX packages, third-party Chromium native-host adapters and
+  store distribution are not delivered. MSIX-context native-host registration
+  is unsupported by the current backend. Embedded-browser and computer-control
+  delivery remain separate from this Chrome/Edge capability.
+- Clean-Windows installation and complete install/update/path-move/uninstall
+  qualification remain open, together with physical sleep/long-idle recovery,
+  complete native-host/browser fault cleanup and oversized-response qualification.
+  The independent access window has been exercised; live website/risk-window
+  interaction qualification remains open.
+  Browser component versions follow the application; there is no independent
+  latest-version update or four-way application/extension/browser/runtime rollback.
 - Normal startup requires a compatible runtime already registered locally.
   Snapshot recovery may download recorded packages.
 - Recoverable plugin snapshots currently target registry dependencies managed
