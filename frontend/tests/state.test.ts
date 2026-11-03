@@ -300,3 +300,17 @@ test("browser setup guides binding before use without selecting an instance", ()
     for(const part of ["title","detail"])assert.equal(hasTranslationInEveryLocale(`automation.browser.guide.${stage}.${part}`),true);
   }
 });
+
+
+test("empty acquisition snapshot does not invent a DSH download", async () => {
+  const {acquisitionPreparation} = await import("../src/acquisition-view");
+  const {ArtifactKind, OperationState} = await import("../bindings/github.com/local/dsh-work/internal/acquisition/models");
+  // Exact zero-value snapshot seeded by the daemon before any operation.
+  const empty = {operationId: "", artifact: {kind: ArtifactKind.$zero, name: ""}, state: OperationState.$zero, step: "", hasTotal: false, canCancel: false};
+  assert.equal(acquisitionPreparation(empty), undefined);
+  const active = {...empty, operationId: "install-1", artifact: {kind: ArtifactKind.ArtifactDSH, name: "@deepseek-ai/dsh", version: "2.4.6"}, state: OperationState.OperationActive, step: "install-dsh"};
+  assert.equal(acquisitionPreparation(active)?.state, "acquiring-dsh");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationSucceeded})?.state, "installed");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationFailed})?.state, "failed");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationCanceled})?.state, "cancelled");
+});

@@ -399,6 +399,8 @@ export function mountHost() {
   })());
   const offAcquisition = Events.On("acquisition", event => {
     const update = event.data as OperationStatus;
+    const preparation = acquisitionPreparation(update);
+    if (!preparation) return;
     if (update.artifact.kind === "plugin") return;
     const kind = update.artifact.kind === "node" ? "node" : "dsh";
     if (busy && update.state === "active") acquisitionKind = kind;
@@ -407,7 +409,7 @@ export function mountHost() {
       logs[kind].append(update.operationId, update.log);
       if (update.step === "output") return;
     }
-    let text = runtimePreparationText(acquisitionPreparation(update));
+    let text = runtimePreparationText(preparation);
     if (update.artifact.version) text += ` · ${update.artifact.version}`;
     if (update.route) text += ` · ${t(`value.${update.route}Source`)}`;
     if (update.receivedBytes) text += ` · ${formatRuntimeBytes(update.receivedBytes)}${update.hasTotal ? ` / ${formatRuntimeBytes(update.totalBytes ?? 0)}` : ""}`;

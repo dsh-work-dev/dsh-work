@@ -44,6 +44,15 @@ type HandoffOutcome struct {
 // the wait is only used to report an installer that failed before the handshake
 // even began.
 func (i *Installer) RunInstaller(ctx context.Context) HandoffOutcome {
+	return i.runInstaller(ctx, false)
+}
+
+// RunInstallerOnExit installs without reopening the application after exit.
+func (i *Installer) RunInstallerOnExit(ctx context.Context) HandoffOutcome {
+	return i.runInstaller(ctx, true)
+}
+
+func (i *Installer) runInstaller(ctx context.Context, exiting bool) HandoffOutcome {
 	outcome := HandoffOutcome{}
 	if i == nil || i.Path == "" {
 		outcome.Err = ErrInstallerUnavailable
@@ -53,6 +62,9 @@ func (i *Installer) RunInstaller(ctx context.Context) HandoffOutcome {
 	if err != nil {
 		outcome.Err = err
 		return outcome
+	}
+	if exiting {
+		args = append(args, "/NORESTART")
 	}
 	process, err := startDetachedProcess(i.Path, args)
 	if err != nil {

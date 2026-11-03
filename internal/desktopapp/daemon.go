@@ -900,6 +900,9 @@ func runDaemon(identity string, resources Resources) {
 		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
 			return
 		}
+		if updates.InstallOnExit(func() { host.Quit() }) {
+			return
+		}
 		server.BeginDrain()
 		host.Quit()
 		if refreshLifecycleMenu != nil {
@@ -915,12 +918,25 @@ func runDaemon(identity string, resources Resources) {
 	}
 	confirmQuit := func(proceed func()) { quitConfirmation.confirm(proceed) }
 	hostService.ConfirmQuit = func(func()) { confirmQuit(quitDSHWork) }
+	openUpdates := func(*application.Context) {
+		if maintenance.InstallerInProgress() || applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
+			return
+		}
+		phase := updates.Snapshot().Phase
+		if phase == daemon.UpdateIdle || phase == daemon.UpdateUpToDate || phase == daemon.UpdateError {
+			if err := updates.Action(context.Background(), daemon.UpdateActionCheck); err != nil {
+				logging.Module(logging.ModUpdate).Warn("menu update check failed", logging.ErrAttrs(err, "")...)
+			}
+		}
+		openSettings("about")
+	}
 	trayMenu := desktop.NewMenu()
 	browserTrayBase.Store(nativeui.TrayStatus(localePreference, lifecycle.StateStarting))
 	trayStatus := trayMenu.Add(browserTrayBase.Load().(string)).SetEnabled(false)
 	trayOpenWorkspace := trayMenu.Add(initialNative.OpenWorkspace).OnClick(func(*application.Context) {
 		showWorkspace()
 	})
+	trayMenu.AddSeparator()
 	traySettings := trayMenu.Add(initialNative.Settings).OnClick(func(*application.Context) {
 		openSettings("settings")
 	})
@@ -940,9 +956,7 @@ func runDaemon(identity string, resources Resources) {
 	updateBrowserTray.Load().(func(automation.Snapshot))(automationState.Snapshot())
 	trayComputer := trayMenu.Add(initialNative.Computer).OnClick(func(*application.Context) { openSettings("computer") })
 	trayMenu.AddSeparator()
-	trayCheckUpdates := trayMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
-		openSettings("about")
-	})
+	trayCheckUpdates := trayMenu.Add(initialNative.CheckUpdates).OnClick(openUpdates)
 	trayMenu.AddSeparator()
 	trayRestartDSH := trayMenu.Add(initialNative.RestartDSH).OnClick(func(*application.Context) {
 		restartDSH()
@@ -967,10 +981,13 @@ func runDaemon(identity string, resources Resources) {
 	refreshLifecycleMenu = func() {
 		enabled := !applicationShuttingDown.Load() && !quitFlow.InProgress() && !windowLedger.IsQuitting() && !restartActionBusy.Load()
 		trayCheckUpdates.SetEnabled(enabled)
-		trayRestartDSH.SetEnabled(enabled)
-		trayQuit.SetEnabled(enabled)
-		appMenuRestartDSH.SetEnabled(enabled)
-		appMenuQuit.SetEnabled(enabled)
+		state := host.Status().State
+		restartable := enabled && state != lifecycle.StateStarting && state != lifecycle.StateStopping
+		quittable := enabled && state != lifecycle.StateStopping
+		trayRestartDSH.SetEnabled(restartable)
+		trayQuit.SetEnabled(quittable)
+		appMenuRestartDSH.SetEnabled(restartable)
+		appMenuQuit.SetEnabled(quittable)
 	}
 	refreshLifecycleMenu()
 	quitFlow.SetStateChanged(func() {
@@ -998,9 +1015,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 	})
 	helpMenu := menu.AddSubmenu(initialNative.Help)
-	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(func(*application.Context) {
-		openSettings("about")
-	})
+	checkUpdates := helpMenu.Add(initialNative.CheckUpdates).OnClick(openUpdates)
 	updateMenuApply = func(state daemon.UpdateSnapshot) {
 		labels := nativeui.LabelsFor(loadNativeLocale(&activeLocale))
 		label := updateMenuLabel(labels, state)
@@ -1316,6 +1331,8 @@ type managerSnapshotReader interface {
 // updateMenuLabel names the tray update item for the current update phase.
 func updateMenuLabel(labels nativeui.Labels, state daemon.UpdateSnapshot) string {
 	switch state.Phase {
+	case daemon.UpdateAvailable:
+		return labels.UpdateDownloadMenu
 	case daemon.UpdateReady:
 		return labels.UpdateAvailableMenu
 	case daemon.UpdateChecking, daemon.UpdateDownloading, daemon.UpdateVerifying, daemon.UpdateInstalling:

@@ -5,7 +5,7 @@
 Closing a desktop window hides it and keeps its WebView in the UI client.
 Reopening restores the same page state and connects to the same daemon. The
 daemon, Worker tasks, tray, Pet and notifications continue while all UI windows
-are hidden. Use 文件 → 退出 in the workbench menu, or “停止后台并退出” from the tray, for
+are hidden. Use 文件 → 退出 in the workbench menu, or “退出” from the tray, for
 Worker/child cleanup and complete background shutdown.
 
 There is no close-behavior setting. Legacy persisted `closeToTray` values are

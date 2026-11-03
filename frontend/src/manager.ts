@@ -1784,13 +1784,14 @@ export function mountManager() {
   }
   Events.On("acquisition", (event) => {
     const status = event.data as OperationStatus;
+    const preparation = acquisitionPreparation(status);
+    if (!preparation) return;
     const kind = status.artifact.kind === "plugin" ? "plugin" : status.artifact.kind === "node" ? "node" : "dsh";
     const log = operationLogs[kind];
     if (status.log) {
       log.append(status.operationId, status.log);
       if (status.step === "output") return;
     }
-    const preparation = acquisitionPreparation(status);
     let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);
     if (status.state === "active" && status.step.startsWith("detect-")) message = t("runtimes.checkingTools");
     if (status.state === "succeeded") message = t("runtimes.resultSucceeded");

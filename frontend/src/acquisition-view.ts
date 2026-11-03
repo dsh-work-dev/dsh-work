@@ -36,7 +36,10 @@ export function runtimePreparationText(preparation: RuntimePreparation): string 
   }
 }
 
-export function acquisitionPreparation(status: OperationStatus): RuntimePreparation {
+export function acquisitionPreparation(status: OperationStatus): RuntimePreparation | undefined {
+  // The daemon seeds the replayable topic with a zero-value snapshot before
+  // any acquisition. It represents no operation, not an active DSH download.
+  if (!status.operationId) return undefined;
   const state = status.state === "succeeded" ? "installed" : status.state === "failed" ? "failed" : status.state === "canceled" ? "cancelled" :
     status.step === "verify" ? "verifying" : status.step.startsWith("detect-") ? "resolving-toolchain" :
     status.artifact.kind === "node" ? "acquiring-node" : "acquiring-dsh";

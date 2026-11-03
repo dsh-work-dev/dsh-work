@@ -114,7 +114,7 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
 - Closing a desktop window hides it and retains its WebView for the next open;
   closing or crashing the UI client leaves background tasks running. The first
   close explains once that running tasks continue and the window can be reopened
-  from the tray. 文件 → 退出 in the workbench menu (“停止后台并退出” in the tray)
+  from the tray. 文件 → 退出 in the workbench menu (“退出” in the tray)
   explicitly stops the Worker and its children, releases locks and exits the
   tray and remaining UI. When a task is running or a scheduled reminder is armed,
   it first asks for confirmation and says which of them would be lost.

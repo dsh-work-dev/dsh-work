@@ -59,6 +59,7 @@ const updating = new Set(["checking", "downloading", "verifying", "installing"])
 const separator: MenuSeparator = {type: "separator"};
 
 function updateLabelKey(phase: string): string {
+  if (phase === "available") return "shell.menu.updateDownload";
   if (phase === "ready") return "shell.menu.updateAvailable";
   return updating.has(phase) ? "shell.menu.updating" : "shell.menu.checkUpdates";
 }

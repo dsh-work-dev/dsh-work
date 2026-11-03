@@ -4,6 +4,7 @@ Unicode true
 ; WebView2 and architecture setup. dsh-work owns dsh:// and dsh-work:// below.
 !define DSH_WORK_DISPLAY_NAME "DSH Work"
 !include "wails_tools.nsh"
+!include "FileFunc.nsh"
 
 !ifndef CLI_EXECUTABLE
     !define CLI_EXECUTABLE "dsh-work-cli.exe"
@@ -625,6 +626,10 @@ installDone:
     ; here instead, after the maintenance boundary is released: starting it
     ; earlier would only make it report that maintenance is in progress.
     IfSilent 0 dshworkSectionEnd
+    ${GetParameters} $0
+    ClearErrors
+    ${GetOptions} $0 "/NORESTART" $1
+    IfErrors 0 dshworkSectionEnd
     Call dshwork.launchAfterSilentInstall
 dshworkSectionEnd:
 SectionEnd
