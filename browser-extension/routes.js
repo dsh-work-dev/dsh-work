@@ -1,5 +1,497 @@
 /*! Derived from Microsoft Playwright. Copyright (c) Microsoft Corporation. Apache-2.0; see LICENSE, NOTICE and PROVENANCE.txt. */
 
+// frontend/public/branding/dsh-work-mark.png
+var dsh_work_mark_default = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAuMAAAJxAQAAAADAqIFBAAAAAnRSTlMAAHaTzTgAAAi9SURBVHja7d1NluMoDAfw+GWRJUfwUTiaORpH4Qgsa1GvPD3dU4ljQPqDpPRLDdr1K+fXBCQ5cfxxucyYMWPGjBkzZsyYMWPGjBkzZsyYMWPGjBkzZsyYMWPGjBkzZsyYMWNGO3ZL/LYnQ33dPwz1bf8y1PfdcOKXX3ow06+/9GSqZzP99kv/NNXtksbtlknzW4+mejbVzXrBulsu62/drFr/6NFUz6a6VbX63XJZ/+hWy/qfnkx1o3r6TzdqZN96NNWzqW6T8d+6zcTf9WSqm+TkXTdpBnfdJCcfejbVLXLyoVv0yYNuMDUH3SBr1t1yao66/tQcdf2pOer6BfWkq/eaJ129DT/ryVTX7gbPunbKn3TldT3pyut61pOprruu7qTr1muhqw6+0FUHX+qagy91zYqq6IoVVdEVB1/Ts6mu1w5uu+Xgq7ra4Ou61uDrutbgG3oy1ZU+ODV0pcFfd8vBt3SdRtzUVRpxU1cZfFvXaMRtXaMRL209m+oK7YDSk6mukJSErrCulJ5NdXmzoXT51GymU0Pq4qwhdfHU0Lp0amhdOjWe1KW9htGTqS7chzC6sFxXWhfmJKdnU12Wk5wuy0nH6dFUF008q4syntVFGX/jdFHG83oy1bNAv7K6pJ54XVJPgB7G9YXXk6meTXXJsvK6pFp5XbKsgB7H9c10WQFd0IQBXbCsHph4Wz2Y6nFYXwE9m+rjSeMAfbzTIPp4SiJ6R0qu8emf/G67KyW31K9HFF9OezJgx9qRkrcRHU5JN6LDKelPOrBj7UjJbURHU3IpPp9AesD065ge0UU96xuiJ0z3Y3rG9HIcHtGxhF8GdSzh3aCOJbwv9VVP3wd1qJyuFd1BegD0dViPgL5VdGj3gZTTsg/rmdddTYcaPFJO3lJfqlOINXi+WJ1A58tpqy8/pLPl9D1IG9019A3SAzYxg3qk8XvVnHUP6YnWvaV+bW63QnrGhj6ok8V6qPez7uS6l+pUKzi22UT8rR1UK6BWH2uShL7K9XYreH7vZx1rks1WcHq5sr7TOtgkYx33nL4J9CLhBvVUwx2/mR/WV2AzTM/IyCv6OqhXizwhQyijaGP1KlTSGyVe6FgbOzfJDdSxRvOJDWlQPzXJHdXBRoOtVSxSa0DftPUAJUIo9K1b9x26h/QIvdtSX3t1okIucn3t0R2kHzJ569F7v7ISBfI1qmfkvVZ0rBU8dN/eqPKBEGsFjxa8W+rXPh1rBXfdIRsdYkP0+7B8p+67dGoseVT/TjZylWr62qOT1ZEquuvRXa+OFSsyjbGiY8WKpG9N7znET28bhPq1W+/5AcH16xuur8D7GymnAAykqq+IHvlJrH9ndrC+mOp0ytSPVUDFmvhx1HWoWBO/QvWjOFA5JT67GseIYH0jN8l1fQP0zL/Jhu5BnVmgVNdXUGeSK9Z1B+gf/HYNHUn4D/49hrqOJPwHvz5CfaM3qeNQOX2yddE8rIjpy6C+QfqV3WI44T/Z1GrqDtKZrZoHuoGE/2LfYW7pQEp+sene1IGU/GLXPrV07ERJZovY1DeeZ99gW/eAzi1OaOoroHOJ1cSRhGe3aevIecfM+yN+GwFSMnj679SvRryemL9Tv3htPC/QvVjPhO7EeiJ07EsrFZHQwd/MBnXwYDMRgdDlSUPh4qShz5dYhTp9roc0aWhdmjTMWTBCPdP6JtMTra8yPdK6k+mB1oXLSuPSXsDosqRhT23yEp09LctJdPaUMlEvyJwuWtbE6aJqjazuTXUn0FlcUq3AibGCZUVOGd6GdeR053VYz4A+Xk8J0Mcnnk9IycQHRHfNlzP/L4K3M/6L1sHLKlov//SkDl4S0kI+aB28nKU18ZnWM6a3Jj6tpJ4wvZWTkdYjqDeU4Eg9gHpjaujej196ttVfTur4ZXNr/eVkg8Mv+bsO6BnWq1PzQetoylxad6oj97loylzqTT7ROo5Xew2td10LWZni2H36RjtqOrVT7LsGda0sm959pcpZoHfosUsvU57WQ5/uyqToOxeKjKVL77701xevJ/Tuy5Zv5ei0UqacGlrvXNTLOWs+SL0bPxUUqQ9cz/088ZnSB65FX3C9e1Evp5wk9Tigu/PwFBf1NPGUPnSR/oLqYzcY2J6nttkJ0pDuQT0O6Q7Uh/CnHRShD955YcH0PKYfl5XQx6b9aVkJfRA/tsnQ/NYwfMOLG6KPTvvRa+uj036c6bY+ih+TJrQO3QjuaOR5fXjaj0nT1Ien/dhpQuMAguRmTDdWl9z27XrU15qeBPrC6gL8sLNr6LIbEW4H3Vd0ycQcxIYuwh+zEarf74V3DWX0KNPdQdctpX/jdhhlqWehfn3olR1f0NPL9i6+ZfZC6dKhPyY7lQ1Y4W7fD93pD/1w24GznuX4vfzTuYmp3H/e30fqn/Wooa8NXecxIA/9uc0EFd3dde1sPOofi8HQ7zX08VSqWg9fuetPpRqV9O8hfx6LSe0JW3f9WExZS/9ezK9jugd1/ZDueg/UqX0VU5uY6qEHtYmx+CRwjK3QNZ9jVOrZVI+muiJefvJVfdBeoas+Ma3Qs6meNPX1rAdTXRMvdN1nM5512yfJZVM9merRVA+muir+Wl35UaSVX+TsdOUnVr5Uz6Z6emM9murhjXVd/KW69hOPf46u/czgV+raj4L+OXqe+l/R09RfpDvLnfbUpy7Uw1vp69Sn3hl+6j9Q36b+V/R96n9DX16px6l/x3Xqf0V/6cFOWz3p6m7qjVh/jp51df/G+vZzdOVjqfvU67G8VNf97cBWv76xfj6BWff3pnfW3Ut12/OK3kn3Zz28j769sX7GdT/Av7Fenmucpv47ymtr8tvotxfrmh+XnKletHfVjxy2un+xbnvivq2uudu21fdX60ENX16uRzX9+sZ67cr49Ca6q+hZTV9fruvtnPzLdb3dx9T/L/q75LttJ6h1saSm2+49jD+lXi4ml2nPmDFjxowZM2bMmPHT4h+PDezKsxpQ9gAAAABJRU5ErkJggg==";
+
+// browser-extension/src/actionIndicator.ts
+var WORLD = "dsh-work-action-indicator-v1";
+function mount(mark) {
+  const g = globalThis;
+  if (window.top !== window) return;
+  if (g.__dshIndicator) return;
+  if (!document.documentElement) {
+    document.addEventListener("DOMContentLoaded", () => mount(mark), { once: true });
+    return;
+  }
+  let alive = Date.now(), running = false, disposed = false, x = 24, y = 24;
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;";
+  const shadow = host.attachShadow({ mode: "closed" });
+  shadow.innerHTML = `<style>*{box-sizing:border-box;pointer-events:none}#cursor{position:absolute;width:62px;height:40px;filter:drop-shadow(0 2px 3px #0005)}#badge{position:absolute;left:13px;top:12px;background:#0a0a0a;border:2px solid white;border-radius:10px;width:33px;height:28px;padding:5px}img{width:100%;height:100%;object-fit:contain}.running #badge{animation:breathe 900ms ease-in-out infinite}#pulse{position:absolute;width:44px;height:44px;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:50%;display:none}#target{position:absolute;display:none;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:5px;background:#ffffff18}@keyframes breathe{50%{transform:translateY(-3px)}}@keyframes pulse{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(1.3)}}@media(prefers-reduced-motion:reduce){.running #badge{animation:none}#pulse{animation:none!important}}</style><div id="target"></div><div id="pulse"></div><div id="cursor"><svg width="22" height="28" viewBox="0 0 22 28"><path d="M2 2L3 23L8 18L12 26L16 24L12 16L20 16Z" fill="white" stroke="#0a0a0a" stroke-width="1.5" stroke-linejoin="round"/></svg><div id="badge"><img src="${mark}"></div></div>`;
+  const cursor = shadow.querySelector("#cursor"), pulse = shadow.querySelector("#pulse"), target = shadow.querySelector("#target");
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  let movement, motionEpoch = 0;
+  let prepared, prepareSequence = 0;
+  cursor.style.transform = `translate(${x}px,${y}px)`;
+  function moveTo(nextX, nextY, instant = false, onArrive) {
+    if (disposed || !onArrive && nextX === x && nextY === y) return;
+    const from = getComputedStyle(cursor).transform;
+    const current = new DOMMatrixReadOnly(from === "none" ? void 0 : from);
+    const distance = Math.hypot(nextX - current.e, nextY - current.f);
+    x = nextX;
+    y = nextY;
+    const epoch = ++motionEpoch;
+    movement?.cancel();
+    movement = void 0;
+    const to = `translate(${x}px,${y}px)`;
+    cursor.style.transform = to;
+    if (instant || reducedMotion.matches || distance < 1) {
+      onArrive?.();
+      return;
+    }
+    const bow = Math.min(26, distance * 0.075), controlX = (current.e + x) / 2 - (y - current.f) / distance * bow, controlY = (current.f + y) / 2 + (x - current.e) / distance * bow;
+    const frames = Array.from({ length: 9 }, (_, i) => {
+      const t = i / 8, u = 1 - t;
+      return { offset: t, transform: `translate(${u * u * current.e + 2 * u * t * controlX + t * t * x}px,${u * u * current.f + 2 * u * t * controlY + t * t * y}px)` };
+    });
+    movement = cursor.animate(frames, {
+      duration: Math.min(prepared?.budget ?? 350, Math.max(150, distance * 0.4)),
+      easing: "cubic-bezier(.2,.75,.25,1)"
+    });
+    movement.onfinish = () => {
+      if (disposed || epoch !== motionEpoch) return;
+      movement = void 0;
+      onArrive?.();
+    };
+  }
+  function cancelMotion() {
+    if (disposed) return;
+    cancelPrepared();
+    const current = new DOMMatrixReadOnly(getComputedStyle(cursor).transform);
+    ++motionEpoch;
+    movement?.cancel();
+    movement = void 0;
+    x = current.e;
+    y = current.f;
+    cursor.style.transform = `translate(${x}px,${y}px)`;
+    target.style.display = pulse.style.display = "none";
+    clearTimeout(targetTimer);
+    clearTimeout(pulseTimer);
+  }
+  const onReducedMotion = () => {
+    if (reducedMotion.matches) {
+      if (prepared && !prepared.settled) {
+        movement?.finish();
+        return;
+      }
+      const destination = { x, y };
+      cancelMotion();
+      moveTo(destination.x, destination.y, true);
+    }
+  };
+  addEventListener("scroll", cancelMotion, { capture: true, passive: true });
+  addEventListener("resize", cancelMotion);
+  reducedMotion.addEventListener("change", onReducedMotion);
+  addEventListener("pagehide", dispose, { once: true });
+  document.documentElement.appendChild(host);
+  let targetTimer, pulseTimer;
+  const icon = document.createElement("link");
+  icon.rel = "icon";
+  icon.type = "image/png";
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext("2d");
+  let base, lastSource = "", needsResource = false, renderEpoch = 0;
+  const logo = new Image();
+  logo.src = mark;
+  function draw() {
+    if (disposed || !base || !base.complete) return;
+    try {
+      ctx.clearRect(0, 0, 32, 32);
+      ctx.drawImage(base, 0, 0, 32, 32);
+      ctx.fillStyle = "#0a0a0a";
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(15, 15, 17, 17, 5);
+      ctx.fill();
+      ctx.stroke();
+      ctx.drawImage(logo, 18, 19, 11, 10);
+      if (running) {
+        ctx.fillStyle = Math.floor(Date.now() / 400) % 2 ? "#ffffff" : "#8d8d8d";
+        ctx.beginPath();
+        ctx.arc(29, 17, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      icon.href = canvas.toDataURL();
+      if (document.head && icon.parentNode !== document.head) document.head.append(icon);
+    } catch {
+    }
+  }
+  async function refresh() {
+    const links = [...document.querySelectorAll('link[rel~="icon"]')].filter((n) => n !== icon);
+    const source = links.at(-1)?.href || (/^https?:/.test(location.href) ? new URL("/favicon.ico", location.href).href : "");
+    if (!source) return;
+    if (source === lastSource) {
+      if (base && icon.parentNode === document.head && icon !== document.head.lastElementChild) document.head.append(icon);
+      return;
+    }
+    lastSource = source;
+    needsResource = false;
+    const epoch = ++renderEpoch;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      if (epoch !== renderEpoch || disposed) return;
+      base = image;
+      draw();
+    };
+    image.onerror = () => {
+      if (epoch === renderEpoch) {
+        base = void 0;
+        needsResource = true;
+        icon.remove();
+      }
+    };
+    image.src = source;
+  }
+  const observer = new MutationObserver((records) => {
+    if (records.some((r) => r.target !== icon && !(r.type === "childList" && [...r.addedNodes, ...r.removedNodes].every((n) => n === icon)))) void refresh();
+  });
+  observer.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["href", "rel"] });
+  void refresh();
+  logo.onload = draw;
+  const timer = setInterval(() => {
+    if (Date.now() - alive > 3e3) {
+      dispose();
+      return;
+    }
+    if (running) draw();
+  }, 400);
+  function dispose() {
+    if (disposed) return;
+    cancelPrepared();
+    disposed = true;
+    ++motionEpoch;
+    movement?.cancel();
+    movement = void 0;
+    removeEventListener("scroll", cancelMotion, true);
+    removeEventListener("resize", cancelMotion);
+    removeEventListener("pagehide", dispose);
+    reducedMotion.removeEventListener("change", onReducedMotion);
+    clearInterval(timer);
+    clearTimeout(targetTimer);
+    clearTimeout(pulseTimer);
+    observer.disconnect();
+    host.remove();
+    icon.remove();
+    delete g.__dshIndicator;
+  }
+  function showPulse(px, py) {
+    if (disposed) return;
+    pulse.style.cssText = `display:block;left:${px - 22}px;top:${py - 22}px;animation:none`;
+    void pulse.offsetWidth;
+    pulse.style.animation = "pulse 650ms ease-out";
+    clearTimeout(pulseTimer);
+    pulseTimer = setTimeout(() => pulse.style.display = "none", 650);
+  }
+  function updateHint(v) {
+    if (disposed) return;
+    alive = Date.now();
+    if (typeof v.running === "boolean") {
+      running = v.running;
+      cursor.classList.toggle("running", running);
+      draw();
+    }
+    if (prepared && !prepared.settled) return;
+    const positioned = Number.isFinite(v.x) && Number.isFinite(v.y);
+    if (v.click) {
+      const px = v.pulseX ?? v.x ?? x, py = v.pulseY ?? v.y ?? y;
+      if (positioned && (v.x !== px || v.y !== py)) {
+        moveTo(px, py, true, () => showPulse(px, py));
+        moveTo(v.x, v.y);
+      } else moveTo(px, py, false, () => showPulse(px, py));
+    } else if (positioned) moveTo(v.x, v.y);
+    if (v.rect) {
+      const r = v.rect;
+      if (!v.click && !positioned) moveTo(Math.max(0, Math.min(innerWidth - 62, r.x + r.width + 6)), Math.max(0, Math.min(innerHeight - 40, r.y + 8)));
+      target.style.cssText = `display:block;left:${r.x - 3}px;top:${r.y - 3}px;width:${r.width + 6}px;height:${r.height + 6}px`;
+      clearTimeout(targetTimer);
+      targetTimer = setTimeout(() => target.style.display = "none", 900);
+    }
+    if (v.focus) {
+      let e = document.activeElement;
+      while (e?.shadowRoot?.activeElement) e = e.shadowRoot.activeElement;
+      if (e && e !== document.body && !["IFRAME", "FRAME"].includes(e.tagName)) {
+        const r = e.getBoundingClientRect();
+        updateHint({ rect: { x: r.x, y: r.y, width: r.width, height: r.height } });
+      }
+    }
+  }
+  function hitAt(px, py) {
+    let d = document;
+    const frames = [];
+    let localX = px, localY = py;
+    for (let depth = 0; depth < 16; depth++) {
+      const hit = d.elementFromPoint(localX, localY);
+      if (!hit) return;
+      if (!["IFRAME", "FRAME"].includes(hit.tagName)) return { hit, frames };
+      const child = hit.contentDocument;
+      if (!child) return;
+      const r = hit.getBoundingClientRect();
+      frames.push({ element: hit, x: r.x, y: r.y, width: r.width, height: r.height });
+      localX -= r.x + hit.clientLeft;
+      localY -= r.y + hit.clientTop;
+      d = child;
+    }
+  }
+  function cancelPrepared() {
+    if (prepared) {
+      prepared.observer?.disconnect();
+      prepared.settled = true;
+      prepared.resolve({ status: "cancelled" });
+      prepared = void 0;
+    }
+  }
+  function prepareClick(px, py, budget) {
+    cancelPrepared();
+    const captured = hitAt(px, py);
+    if (!captured) return { status: "unavailable" };
+    const element = captured.hit, rect = element.getBoundingClientRect(), scrolls = [window, ...captured.frames.map((f) => f.element.contentWindow)].map((view) => ({ view, x: view.scrollX, y: view.scrollY }));
+    let resolve;
+    const promise = new Promise((r) => resolve = r);
+    const token = ++prepareSequence;
+    const state = { token, budget, resolve, promise, settled: false };
+    prepared = state;
+    const observed = element.closest('button,a,input,select,textarea,[role="button"],[role="link"]') || element;
+    state.observer = new MutationObserver(() => cancelMotion());
+    state.observer.observe(observed, { attributes: true, childList: true, characterData: true, subtree: true });
+    for (const node of [observed, ...captured.frames.map((f) => f.element)]) for (let parent = node.parentElement; parent; parent = parent.parentElement) state.observer.observe(parent, { attributes: true });
+    moveTo(px, py, false, () => {
+      if (disposed || prepared !== state) return;
+      const now = hitAt(px, py), r = element.getBoundingClientRect();
+      const same = now?.hit === element && element.isConnected && scrolls.every((s) => s.view.scrollX === s.x && s.view.scrollY === s.y) && ["x", "y", "width", "height"].every((k) => Math.abs(r[k] - rect[k]) < 0.5) && captured.frames.every((f) => {
+        const n = f.element.getBoundingClientRect();
+        return ["x", "y", "width", "height"].every((k) => Math.abs(n[k] - f[k]) < 0.5);
+      });
+      state.settled = true;
+      state.resolve({ status: same ? "ready" : "cancelled" });
+    });
+    return { status: "prepared", token };
+  }
+  function commitClick(px, py) {
+    cancelPrepared();
+    moveTo(px, py, true);
+    showPulse(px, py);
+  }
+  g.__dshIndicator = { dispose, prepareClick, waitClick(token) {
+    return prepared?.token === token ? prepared.promise : Promise.resolve({ status: "cancelled" });
+  }, cancelClick() {
+    cancelMotion();
+  }, commitClick, resource() {
+    return needsResource ? lastSource : void 0;
+  }, base(source, data) {
+    if (disposed || source !== lastSource) return;
+    const image = new Image();
+    image.onload = () => {
+      if (disposed || source !== lastSource) return;
+      base = image;
+      needsResource = false;
+      draw();
+    };
+    image.src = data;
+  }, update: updateHint };
+}
+var install = `(${mount.toString()})(${JSON.stringify(dsh_work_mark_default)})`;
+var ActionIndicator = class {
+  tabs = /* @__PURE__ */ new Map();
+  closed = false;
+  current;
+  running = false;
+  clickMode = false;
+  cancelledClick = false;
+  timer = setInterval(() => {
+    for (const id of this.tabs.keys()) this.schedule(id, {});
+  }, 1e3);
+  send(tabId, method, params = {}) {
+    return chrome.debugger.sendCommand({ tabId }, method, params);
+  }
+  async attach(tabId) {
+    if (this.closed) return;
+    const { identifier } = await this.send(tabId, "Page.addScriptToEvaluateOnNewDocument", { source: install, worldName: WORLD });
+    if (this.closed) {
+      await this.send(tabId, "Page.removeScriptToEvaluateOnNewDocument", { identifier });
+      return;
+    }
+    this.tabs.set(tabId, { script: identifier, epoch: 0 });
+    this.current ??= tabId;
+    this.schedule(tabId, {});
+  }
+  schedule(tabId, value) {
+    const state = this.tabs.get(tabId);
+    if (!state || this.closed) return;
+    state.pending = { ...state.pending, ...value, click: state.pending?.click || value.click, focus: state.pending?.focus || value.focus };
+    if (state.updating) return;
+    state.updating = true;
+    void (async () => {
+      try {
+        while (state.pending && !this.closed && this.tabs.get(tabId) === state) {
+          const next = state.pending;
+          state.pending = void 0;
+          await this.update(tabId, next);
+        }
+      } finally {
+        state.updating = false;
+      }
+    })();
+  }
+  async render(tabId, method, params, timeout = 250) {
+    let timer;
+    try {
+      return await Promise.race([this.send(tabId, method, params), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error("INDICATOR_TIMEOUT")), timeout);
+      })]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async update(tabId, value) {
+    const state = this.tabs.get(tabId);
+    if (!state || this.closed) return;
+    try {
+      const { frameTree } = await this.render(tabId, "Page.getFrameTree", {});
+      const { executionContextId } = await this.render(tabId, "Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: WORLD });
+      if (state.context !== executionContextId) state.attempted = void 0;
+      state.context = executionContextId;
+      if (this.closed || this.tabs.get(tabId) !== state) return;
+      if (state.waiting) {
+        state.pending = void 0;
+        return;
+      }
+      if (state.pending) {
+        value = { ...value, ...state.pending, click: value.click || state.pending.click, focus: value.focus || state.pending.focus };
+        state.pending = void 0;
+      }
+      const evaluation = await this.render(tabId, "Runtime.evaluate", { contextId: state.context, returnByValue: true, expression: `${install};globalThis.__dshIndicator?.update(${JSON.stringify({ running: this.running && tabId === this.current, ...value })});globalThis.__dshIndicator?.resource()` });
+      const source = evaluation.result?.value;
+      if (typeof source === "string" && !state.loading && state.attempted !== source && /^https?:/.test(source)) {
+        state.attempted = source;
+        state.loading = true;
+        void this.resource(tabId, state, source, frameTree.frame.id).finally(() => state.loading = false);
+      }
+    } catch {
+    }
+  }
+  // CDP loads the existing favicon with no credentials, preserving cross-origin
+  // site icons without adding extension host permissions. Only bounded image
+  // bytes are returned to the local compositor, never to MCP/Go/the agent.
+  async resource(tabId, state, source, frameId) {
+    let stream;
+    try {
+      const { resource } = await this.send(tabId, "Network.loadNetworkResource", { frameId, url: source, options: { disableCache: false, includeCredentials: false } });
+      stream = resource?.stream;
+      if (!resource?.success || !stream) return;
+      const type = Object.entries(resource.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1];
+      if (typeof type !== "string" || !type.toLowerCase().startsWith("image/")) return;
+      const chunks = [];
+      let size = 0;
+      for (; ; ) {
+        const part = await this.send(tabId, "IO.read", { handle: stream, size: 32768 });
+        const bytes = part.base64Encoded ? Uint8Array.from(atob(part.data), (c) => c.charCodeAt(0)) : new TextEncoder().encode(part.data);
+        size += bytes.length;
+        if (size > 262144) return;
+        chunks.push(bytes);
+        if (part.eof) break;
+      }
+      if (this.closed || this.tabs.get(tabId) !== state) return;
+      const all = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        all.set(chunk, offset);
+        offset += chunk.length;
+      }
+      let binary = "";
+      for (const byte of all) binary += String.fromCharCode(byte);
+      await this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: "globalThis.__dshIndicator?.base(" + JSON.stringify(source) + "," + JSON.stringify("data:" + type.split(";")[0] + ";base64," + btoa(binary)) + ")" });
+    } catch {
+    } finally {
+      if (stream) try {
+        await this.send(tabId, "IO.close", { handle: stream });
+      } catch {
+      }
+    }
+  }
+  state(running, rect, action) {
+    this.running = running;
+    this.clickMode = running && action === "browser_click";
+    if (running) this.cancelledClick = false;
+    const geometry = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number" && Number.isFinite(rect[key])) ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : void 0;
+    if (this.current !== void 0) this.schedule(this.current, { ...geometry ? { rect: geometry } : {} });
+  }
+  invalidate(tabId) {
+    const state = this.tabs.get(tabId);
+    if (!state) return;
+    state.epoch++;
+    if (state.waiting) this.cancelledClick = true;
+    if (state.context) void this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: "globalThis.__dshIndicator?.cancelClick()" }).catch(() => {
+    });
+  }
+  async beforeClick(tabId, p) {
+    if (this.cancelledClick) throw Error("BROWSER_CLICK_INTERRUPTED");
+    const state = this.tabs.get(tabId);
+    if (!state?.context) return;
+    const epoch = state.epoch, deadline = Date.now() + 400;
+    state.waiting = true;
+    state.pending = void 0;
+    const current = () => !this.closed && this.tabs.get(tabId) === state && state.epoch === epoch && !this.cancelledClick;
+    const evaluate = (expression, awaitPromise = false) => this.render(tabId, "Runtime.evaluate", { contextId: state.context, expression, awaitPromise, returnByValue: true }, Math.max(1, deadline - Date.now()));
+    try {
+      const setup = await evaluate(`globalThis.__dshIndicator?.prepareClick(${p.x},${p.y},${Math.min(350, deadline - Date.now() - 30)})`);
+      if (!current()) throw Error("BROWSER_CLICK_INTERRUPTED");
+      if (setup.exceptionDetails) throw Error("BROWSER_CLICK_PREPARATION_FAILED");
+      const plan = setup.result?.value;
+      if (!plan || plan.status === "unavailable") return;
+      const arrived = await evaluate(`globalThis.__dshIndicator?.waitClick(${plan.token})`, true);
+      if (!current() || arrived.result?.value?.status !== "ready") throw Error("BROWSER_CLICK_INTERRUPTED");
+    } catch (error) {
+      if (!this.closed && this.tabs.get(tabId) === state) void evaluate("globalThis.__dshIndicator?.cancelClick()").catch(() => {
+      });
+      this.cancelledClick = true;
+      throw error;
+    } finally {
+      state.waiting = false;
+    }
+  }
+  committedClick(tabId, p) {
+    const state = this.tabs.get(tabId);
+    if (!state?.context || this.closed) return;
+    void this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: `globalThis.__dshIndicator?.commitClick(${p.x},${p.y})` }).catch(() => {
+    });
+  }
+  input(tabId, method, p) {
+    if (method === "Page.bringToFront") {
+      this.current = tabId;
+      return;
+    }
+    if (!method.startsWith("Input.")) return;
+    this.current = tabId;
+    this.schedule(tabId, { ...method === "Input.dispatchMouseEvent" ? { x: p.x, y: p.y, click: p.type === "mousePressed", ...p.type === "mousePressed" ? { pulseX: p.x, pulseY: p.y } : {} } : {}, focus: method === "Input.insertText" || method === "Input.dispatchKeyEvent" });
+  }
+  async detach(tabId) {
+    const state = this.tabs.get(tabId);
+    this.tabs.delete(tabId);
+    if (!state) return;
+    const cleanup = async () => {
+      try {
+        await this.send(tabId, "Page.removeScriptToEvaluateOnNewDocument", { identifier: state.script });
+        if (state.context) await this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: "globalThis.__dshIndicator?.dispose()" });
+      } catch {
+      }
+    };
+    let timer;
+    await Promise.race([cleanup(), new Promise((resolve) => {
+      timer = setTimeout(resolve, 250);
+    })]);
+    clearTimeout(timer);
+  }
+  async close() {
+    this.closed = true;
+    clearInterval(this.timer);
+    await Promise.all([...this.tabs.keys()].map((id) => this.detach(id)));
+  }
+};
+
 // browser-extension/playwright/relayConnection.ts
 function debugLog(...args) {
   const enabled = false;
@@ -42,6 +534,8 @@ var RelayConnection = class {
   _closed = false;
   _pendingReattach = /* @__PURE__ */ new Set();
   _recentReattach = /* @__PURE__ */ new Set();
+  _indicator = new ActionIndicator();
+  _inputTails = /* @__PURE__ */ new Map();
   onclose;
   ontabattached;
   ontabdetached;
@@ -77,7 +571,7 @@ var RelayConnection = class {
   detachTab(tabId) {
     if (this._closed || !this._attachedTabs.has(tabId))
       return;
-    chrome.debugger.detach({ tabId }).catch((error) => {
+    this._indicator.detach(tabId).finally(() => chrome.debugger.detach({ tabId })).catch((error) => {
       debugLog("Error detaching tab:", error);
     });
     this._notifyTabDetached(tabId);
@@ -117,12 +611,10 @@ var RelayConnection = class {
     for (const l of this._eventListeners)
       l.remove();
     this._eventListeners = [];
+    const cleanup = this._indicator.close();
     for (const tabId of [...this._attachedTabs]) {
-      try {
-        chrome.debugger.detach({ tabId }).catch(() => {
-        });
-      } catch {
-      }
+      void cleanup.finally(() => chrome.debugger.detach({ tabId })).catch(() => {
+      });
       try {
         this._notifyTabDetached(tabId);
       } catch (error) {
@@ -142,8 +634,10 @@ var RelayConnection = class {
     if (tabId === void 0 || !this._attachedTabs.has(tabId))
       return;
     if (fullMethod === "chrome.tabs.onCreated") this._ownedTabs.add(args[0].id);
+    if (fullMethod === "chrome.debugger.onEvent" && ["Page.frameStartedLoading", "Page.frameNavigated", "Page.navigatedWithinDocument"].includes(args[1])) this._indicator.invalidate(tabId);
     this._sendMessage({ method: fullMethod, params: args });
     if (fullMethod === "chrome.debugger.onDetach") {
+      void this._indicator.detach(tabId);
       const reason = args[1];
       this._notifyTabDetached(tabId);
       if (reason === "target_closed" && this._maybeScheduleReattach(tabId))
@@ -233,6 +727,11 @@ var RelayConnection = class {
   }
   async _handleCommand(message) {
     if (this._closed) throw new Error("Connection closed");
+    if (message.method === "dsh.indicator") {
+      const value = message.params;
+      this._indicator.state(value?.running === true, value?.rect, value?.action);
+      return {};
+    }
     if (!ALLOWED_CHROME_COMMANDS.has(message.method))
       throw new Error(`Unknown method: ${message.method}`);
     const args = message.params ?? [];
@@ -245,6 +744,33 @@ var RelayConnection = class {
       const ids = Array.isArray(args[0]) ? args[0] : [args[0]];
       if (ids.some((id) => !this._ownedTabs.has(id))) throw new Error("Tab outside this connection");
     }
+    if (message.method === "chrome.debugger.sendCommand" && !args[0]?.sessionId) {
+      const tabId = args[0].tabId, method = args[1], p = args[2] ?? {};
+      if (["Page.navigate", "Page.reload", "Page.navigateToHistoryEntry"].includes(method)) this._indicator.invalidate(tabId);
+      if (method === "Input.dispatchMouseEvent") {
+        const gated = p.type === "mousePressed" && this._indicator.clickMode;
+        const previous = this._inputTails.get(tabId);
+        if (gated || previous) {
+          const task = (previous ?? Promise.resolve()).then(async () => {
+            if (this._closed || !this._attachedTabs.has(tabId)) throw Error("BROWSER_ROUTE_CLOSED");
+            if (gated) await this._indicator.beforeClick(tabId, p);
+            if (this._closed || !this._attachedTabs.has(tabId)) throw Error("BROWSER_ROUTE_CLOSED");
+            const result2 = await invokeChromeMethod(message.method, args);
+            if (gated) this._indicator.committedClick(tabId, p);
+            else this._indicator.input(tabId, method, p);
+            return result2;
+          });
+          this._inputTails.set(tabId, task);
+          void task.finally(() => {
+            if (this._inputTails.get(tabId) === task) this._inputTails.delete(tabId);
+          }).catch(() => {
+          });
+          return task;
+        }
+      }
+      this._indicator.input(tabId, method, p);
+    }
+    if (message.method === "chrome.debugger.detach") await this._indicator.detach(args[0].tabId);
     const result = await invokeChromeMethod(message.method, args);
     if (message.method === "chrome.tabs.create" && result?.id !== void 0 && !this._closed) this._ownedTabs.add(result.id);
     if (message.method === "chrome.debugger.attach") {
@@ -252,7 +778,10 @@ var RelayConnection = class {
       if (target?.tabId !== void 0) {
         if (this._closed) chrome.debugger.detach({ tabId: target.tabId }).catch(() => {
         });
-        else this._notifyTabAttached(target.tabId);
+        else {
+          this._notifyTabAttached(target.tabId);
+          void this._indicator.attach(target.tabId).catch((error) => debugLog("Indicator unavailable", error));
+        }
       }
     }
     return result ?? {};

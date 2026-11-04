@@ -23,7 +23,7 @@ same source into an unpacked extension. No cache paths are overridden.
 The host embeds the checked-in routes.js plus known runtime/license files.
 MCP remains pinned at 0.0.83 / SDK 1.32.2 in automation's existing lockfile.
 
-Local source identity: dsh-work-extension/0.2.0/session-v2-r6
+Local source identity: dsh-work-extension/0.2.0/session-v2-r9
 Compatibility: host 0.2.0, setup 1, session wire 2. Host recovery inputs include
 this local revision and the complete upstream commit above. Update the revision
 when changing the shipped fork/transport/compatibility contract.
@@ -49,3 +49,9 @@ script tools or extension permissions. Session wire remains 2. Browser access,
 DSH action approval and resource ownership remain independent boundaries.
 
 r6 adds shipped-source handshake for safe update/reload detection; extension ID and wire unchanged.
+
+r7 adds session-owned branded action feedback in an isolated CDP world; reuses the supplied DSH Work sprout asset. Nonblocking input feedback and favicon composition add no Agent tools or extension permissions. Route release cleans before detach; lost-debugger pages expire within 3.4 seconds of the last heartbeat.
+
+r8 adds bounded native WAAPI pointer motion, retargeted from the current displayed position; click feedback arrives at its actual coordinate without delaying real input. Reduced motion, viewport changes and disposal cancel interpolation. Current visual assets remain provisional.
+
+r9 synchronizes approved browser_click presses with a bounded native curved pointer arrival; preserves press/release order, cancels changed targets or revoked routes, and adds no read-tool or per-drag-point delay. The source identity changes; extension ID and wire remain unchanged.

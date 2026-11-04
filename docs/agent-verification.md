@@ -79,6 +79,21 @@ screenshot. Its bindings permit only reading and answering that permission
 panel, not general settings operations. Never answer Allow on the user's behalf
 without explicit authorization.
 
+## Check browser action feedback
+
+Use an isolated browser profile and local fixture through the real MCP tools.
+For a distant click, capture intermediate pointer frames and record the page's
+mousedown time: the pointer should have arrived before input, with a pulse
+following dispatch. Test cancellation during movement and confirm that the
+page receives no click. Reading snapshots should not wait for animation.
+Check normal and reduced-motion settings, route isolation, and restoration of
+the site's latest favicon after release. Direct CDP mouse events alone do not
+establish the MCP click behavior.
+
+The development watcher observes embedded JavaScript. Generated Worker assets
+are ignored by an absolute-path-compatible glob, and the generator only writes
+changed content so a build cannot repeatedly trigger itself.
+
 ## Limits
 
 - The daemon debug port is development-only, as is the workbench's. Pet

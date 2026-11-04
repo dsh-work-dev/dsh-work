@@ -4,13 +4,14 @@ import {inspectBrowser} from './inspect.mjs';
 
 test('fixed inspection parses the actual multiline MCP Result section', async () => {
   const calls = [];
-  const observation = {url:'http://localhost/fixture',element:{tag:'input',type:'password'}};
+  const observation = {url:'http://localhost/fixture',element:{tag:'input',type:'password'},geometry:{x:1,y:2,width:30,height:40}};
   const client = {callTool:async call => {
     calls.push(call);
     return {content:[{type:'text',text:`### Result\n${JSON.stringify(observation,null,2)}\n### Ran Playwright code\nignored`} ]};
   }};
-  const value = await inspectBrowser(client,{argumentsForMCP:args=>args},{targets:['#password']});
+  let geometry;const value = await inspectBrowser(client,{argumentsForMCP:args=>args},{targets:['#password']},(target,rect)=>{geometry={target,rect}});
   assert.deepEqual(value,{url:observation.url,elements:[observation.element],tabs:[]});
+  assert.deepEqual(geometry,{target:'#password',rect:observation.geometry});
   assert.equal(calls[0].name,'browser_evaluate');
   assert.equal(calls[0].arguments.target,'#password');
 });

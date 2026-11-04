@@ -5,7 +5,8 @@ const observe = `(element) => {
  if(!element)while(e?.shadowRoot?.activeElement)e=e.shadowRoot.activeElement;
  const label=node=>{if(!node)return '';const labelled=(node.getAttribute('aria-labelledby')||'').split(/\\s+/).map(id=>d.getElementById(id)?.textContent||'').join(' ');return (node.getAttribute('aria-label')||labelled.trim()||[...(node.labels||[])].map(n=>n.textContent).join(' ')||(['BUTTON','A','OPTION'].includes(node.tagName)?node.textContent:'')||node.getAttribute('placeholder')||'').replace(/\\s+/g,' ').trim().slice(0,160)};
  const form=e?.form||e?.closest('form'), submit=form?.querySelector('button[type=submit],input[type=submit],button:not([type])');
- return {url:d.location.href,element:{name:label(e),tag:(e?.tagName||'').toLowerCase(),role:e?.getAttribute('role')||'',type:e?.getAttribute('type')||'',autocomplete:e?.getAttribute('autocomplete')||'',multiline:e?.tagName==='TEXTAREA'||e?.isContentEditable||e?.getAttribute('aria-multiline')==='true',inForm:!!form,submit:e?.tagName==='BUTTON'&&e.type==='submit'||e?.tagName==='INPUT'&&e.type==='submit',submitName:label(submit)}};
+ let geometry=null;try{const w=d.defaultView,r=e&&w===w.top?e.getBoundingClientRect():null;if(r)geometry={x:r.x,y:r.y,width:r.width,height:r.height}}catch{}
+ return {url:d.location.href,geometry,element:{name:label(e),tag:(e?.tagName||'').toLowerCase(),role:e?.getAttribute('role')||'',type:e?.getAttribute('type')||'',autocomplete:e?.getAttribute('autocomplete')||'',multiline:e?.tagName==='TEXTAREA'||e?.isContentEditable||e?.getAttribute('aria-multiline')==='true',inForm:!!form,submit:e?.tagName==='BUTTON'&&e.type==='submit'||e?.tagName==='INPUT'&&e.type==='submit',submitName:label(submit)}};
 }`;
 function resultJSON(result) {
  if(result.isError)throw Error('BROWSER_POLICY_INSPECTION_FAILED');
@@ -14,7 +15,7 @@ function resultJSON(result) {
  if(!match)throw Error('BROWSER_POLICY_INSPECTION_FAILED');
  try{return JSON.parse(match[1].trim())}catch{throw Error('BROWSER_POLICY_INSPECTION_FAILED')}
 }
-export async function inspectBrowser(client, refs, args) {
+export async function inspectBrowser(client, refs, args, observeGeometry) {
  // MCP disallows tab tools (including snapshot/evaluate) while its file chooser
  // is pending. The context-level tabs list still reports URL and modal state.
  // Require that state; never substitute cached page evidence for an upload.
@@ -34,6 +35,7 @@ export async function inspectBrowser(client, refs, args) {
   const parameters={function:observe};
   if(target!==undefined){parameters.target=refs.argumentsForMCP({target}).target;parameters.element='Browser access check';}
   const value=resultJSON(await client.callTool({name:'browser_evaluate',arguments:parameters},undefined,{timeout:5000}));
+  observeGeometry?.(target,value.geometry);
   url=value.url;elements.push(value.element);
  }
  const tabs=[];

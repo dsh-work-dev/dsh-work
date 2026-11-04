@@ -71,6 +71,24 @@ agents share that conversation's resources. Browser 停止 releases the
 conversation's automation and ungroups its tabs, keeping the browser and tabs
 open. Disabling browser control stops browser use across conversations.
 
+## Follow browser actions
+
+Conversation-owned pages show an Agent pointer and brief click or input-target
+feedback. The pointer follows a short curved path; explicit clicks wait about
+150–350 ms for arrival before reaching the page. Reading a snapshot or network
+response does not move the pointer. Keyboard scrolling can move the page while
+the pointer stays still. Reduced-motion preferences use immediate positioning.
+
+The website icon keeps its original image with an activity badge when that image
+can be read. The badge animates during execution and stays still while waiting
+for permission. Stop or loss of control removes the indicators and restores the
+website's current icon. An unreadable icon is left unchanged.
+
+Click synchronization is skipped when the renderer is initially unavailable or
+a cross-origin frame cannot be inspected. Once synchronization starts, a changed
+target, navigation or cancellation interrupts the click rather than sending it
+to an old location. Input-target highlighting inside frames is currently omitted.
+
 ## Repair the step that failed
 
 - **Node/npm unavailable:** use 打开运行时设置, configure or repair Node, then retry

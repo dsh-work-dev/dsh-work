@@ -664,6 +664,29 @@ not the product's browser-consent channel. Revisit this presentation if the
 application gains a different native interaction surface, while retaining Go
 authority and the narrow answer contract.
 
+The extension owns a per-route, per-tab action indicator in a CDP isolated world
+with a closed shadow root and an aria-hidden, pointer-transparent host. Admitted
+adapter calls supply execution state; actual CDP input supplies coordinates.
+Geometry from mandatory policy inspection stays in the adapter. The display
+does not listen to the user's mouse or add tools to the Agent whitelist.
+
+WAAPI animates a bounded curved path from the current rendered position.
+For explicit `browser_click`, the Relay gates mousePressed on pointer arrival
+and orders subsequent mouse events behind it. Animation takes 150–350 ms;
+the gate has a 400 ms total deadline including IPC. During the wait, target,
+scroll, document and route changes cancel the click. Unknown arrival cancels;
+an initially unavailable renderer or unreadable cross-origin frame retains the
+original input path without synchronization. This check is not an atomic DOM
+transaction. Other tools do not wait for the animation.
+
+Release removes the injected script and overlay before debugger detach, with a
+250 ms cleanup bound; an orphaned page indicator expires after its heartbeat
+lease. Favicon composition uses a separate icon node, leaving site-owned nodes
+intact for restoration. The small display layer is local because Playwright's
+recording-oriented annotations do not supply the required branding, favicon
+lifecycle and selective click timing; mouse-helper mixes user and Agent events.
+Revisit this choice if the pinned dependency exposes those contracts publicly.
+
 Preparation uses the selected Run context's validated Node/npm and environment,
 the application's frozen package lock and existing acquisition/staging and
 file-replacement adapters. A lock-derived identity separates component sets

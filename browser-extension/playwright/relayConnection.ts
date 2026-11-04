@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import {ActionIndicator} from '../src/actionIndicator';
+
 export function debugLog(...args: unknown[]): void {
   const enabled = false;
   if (enabled) {
@@ -69,6 +71,8 @@ export class RelayConnection {
   private _closed = false;
   private _pendingReattach = new Set<number>();
   private _recentReattach = new Set<number>();
+  private _indicator = new ActionIndicator();
+  private _inputTails = new Map<number,Promise<any>>();
 
   onclose?: () => void;
   ontabattached?: (tabId: number) => void;
@@ -119,7 +123,7 @@ export class RelayConnection {
   detachTab(tabId: number): void {
     if (this._closed || !this._attachedTabs.has(tabId))
       return;
-    chrome.debugger.detach({ tabId }).catch(error => {
+    this._indicator.detach(tabId).finally(()=>chrome.debugger.detach({ tabId })).catch(error => {
       debugLog('Error detaching tab:', error);
     });
     this._notifyTabDetached(tabId);
@@ -163,8 +167,9 @@ export class RelayConnection {
     for (const l of this._eventListeners)
       l.remove();
     this._eventListeners = [];
+    const cleanup=this._indicator.close();
     for (const tabId of [...this._attachedTabs]) {
-      try { chrome.debugger.detach({ tabId }).catch(() => {}); } catch {}
+      void cleanup.finally(()=>chrome.debugger.detach({tabId})).catch(()=>{});
       try { this._notifyTabDetached(tabId); } catch (error) { debugLog(error); }
     }
     this.onclose?.();
@@ -182,9 +187,11 @@ export class RelayConnection {
     if (tabId === undefined || !this._attachedTabs.has(tabId))
       return;
     if(fullMethod==='chrome.tabs.onCreated')this._ownedTabs.add(args[0].id);
+    if(fullMethod==='chrome.debugger.onEvent'&&['Page.frameStartedLoading','Page.frameNavigated','Page.navigatedWithinDocument'].includes(args[1]))this._indicator.invalidate(tabId);
     this._sendMessage({ method: fullMethod, params: args });
     // chrome.debugger.onDetach is the single source of truth for detach bookkeeping.
     if (fullMethod === 'chrome.debugger.onDetach') {
+      void this._indicator.detach(tabId);
       const reason = args[1] as string | undefined;
       this._notifyTabDetached(tabId);
       if (reason === 'target_closed' && this._maybeScheduleReattach(tabId))
@@ -284,6 +291,11 @@ export class RelayConnection {
 
   private async _handleCommand(message: ProtocolCommand): Promise<any> {
     if (this._closed) throw new Error('Connection closed');
+    if(message.method==='dsh.indicator') {
+      const value=message.params;
+      this._indicator.state(value?.running===true,value?.rect,value?.action);
+      return {};
+    }
     if (!ALLOWED_CHROME_COMMANDS.has(message.method))
       throw new Error(`Unknown method: ${message.method}`);
     const args = (message.params ?? []) as any[];
@@ -297,6 +309,29 @@ export class RelayConnection {
       const ids=Array.isArray(args[0])?args[0]:[args[0]];
       if(ids.some(id=>!this._ownedTabs.has(id)))throw new Error('Tab outside this connection');
     }
+    if(message.method==='chrome.debugger.sendCommand'&&!args[0]?.sessionId){
+      const tabId=args[0].tabId,method=args[1],p=args[2]??{};
+      if(['Page.navigate','Page.reload','Page.navigateToHistoryEntry'].includes(method))this._indicator.invalidate(tabId);
+      if(method==='Input.dispatchMouseEvent'){
+        const gated=p.type==='mousePressed'&&this._indicator.clickMode;
+        const previous=this._inputTails.get(tabId);
+        if(gated||previous){
+          const task=(previous??Promise.resolve()).then(async()=>{
+            if(this._closed||!this._attachedTabs.has(tabId))throw Error('BROWSER_ROUTE_CLOSED');
+            if(gated)await this._indicator.beforeClick(tabId,p);
+            if(this._closed||!this._attachedTabs.has(tabId))throw Error('BROWSER_ROUTE_CLOSED');
+            const result=await invokeChromeMethod(message.method,args);
+            if(gated)this._indicator.committedClick(tabId,p);else this._indicator.input(tabId,method,p);
+            return result;
+          });
+          this._inputTails.set(tabId,task);
+          void task.finally(()=>{if(this._inputTails.get(tabId)===task)this._inputTails.delete(tabId)}).catch(()=>{});
+          return task;
+        }
+      }
+      this._indicator.input(tabId,method,p);
+    }
+    if(message.method==='chrome.debugger.detach')await this._indicator.detach(args[0].tabId);
     const result = await invokeChromeMethod(message.method, args);
     if(message.method==='chrome.tabs.create' && result?.id!==undefined && !this._closed)this._ownedTabs.add(result.id);
 
@@ -305,7 +340,12 @@ export class RelayConnection {
       const target = args[0] as chrome.debugger.Debuggee | undefined;
       if (target?.tabId !== undefined) {
         if(this._closed) chrome.debugger.detach({tabId:target.tabId}).catch(()=>{});
-        else this._notifyTabAttached(target.tabId);
+        else {
+          // Own the physical attachment before awaiting optional rendering.
+          // A close during installation must still detach this debugger.
+          this._notifyTabAttached(target.tabId);
+          void this._indicator.attach(target.tabId).catch(error=>debugLog('Indicator unavailable',error));
+        }
       }
     }
     return result ?? {};

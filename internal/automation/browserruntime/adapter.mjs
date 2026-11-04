@@ -14,8 +14,9 @@ const socket=net.connect(process.env.DSH_WORK_BRIDGE_PIPE);
 const token=process.env.DSH_WORK_BRIDGE_TOKEN;
 delete process.env.DSH_WORK_BRIDGE_PIPE;delete process.env.DSH_WORK_BRIDGE_TOKEN;
 let buffer=Buffer.alloc(0),nonce,authenticated=false,stopping=false;
-let client,transport,server,wss,cdp,model,validator,schemas,require;
+let client,transport,server,wss,cdp,model,validator,schemas,require,indicator;
 let refs;
+const geometry=new Map();
 let commandId=0;const commands=new Map();
 const mac=role=>createHmac('sha256',token).update(role).update(nonce).digest();
 const send=m=>{const b=Buffer.from(JSON.stringify(m));if(b.length>8*1024*1024)throw Error('BROWSER_ADAPTER_MESSAGE_TOO_LARGE');const h=Buffer.alloc(4);h.writeUInt32LE(b.length);socket.write(Buffer.concat([h,b]));};
@@ -37,8 +38,9 @@ async function receive(m){
   require=createRequire(path.join(m.dependencies,'package.json'));
   for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
   const {WebSocketServer}=require('ws');
-  const command=(method,params)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop()},20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
+  const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop()}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
   model=new ExtensionProtocolV2(command);
+  indicator=value=>{void command('dsh.indicator',value,true).catch(()=>{});};
   const dispatch=async(method,params,sessionId)=>{
    if(method==='Browser.getVersion')return{protocolVersion:'1.3',product:'Chrome/DSH-Work',userAgent:'DSH-Work/0.2.0'};
    if(method==='Browser.setDownloadBehavior')return{};
@@ -67,7 +69,7 @@ async function receive(m){
   if(!model)throw Error('BROWSER_ADAPTER_NOT_INITIALIZED');const v=m.payload;
   if(v.id!==undefined){const p=commands.get(v.id);if(!p)return;commands.delete(v.id);clearTimeout(p.timer);v.error?p.reject(Error(String(v.error))):p.resolve(v.result)}else model.handleExtensionEvent(v.method,v.params);
  }else if(m.kind==='call'){
-  if(m.tool==='__dsh_inspect'){try{send({kind:'result',id:m.id,result:await inspectBrowser(client,refs,m.arguments??{})})}catch(e){send({kind:'result',id:m.id,error:e.message})}return;}
+  if(m.tool==='__dsh_inspect'){geometry.clear();try{send({kind:'result',id:m.id,result:await inspectBrowser(client,refs,m.arguments??{},(target,rect)=>{if(target!==undefined)geometry.set(refs.argumentsForMCP({target}).target,rect)})})}catch(e){send({kind:'result',id:m.id,error:e.message})}return;}
   try{
    const schema=schemas?.find(t=>t.name===m.tool);if(!schema)throw Error('BROWSER_TOOL_UNAVAILABLE');
    const args=m.arguments;if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(schema.inputSchema.properties??{},k)))throw Error('BROWSER_INVALID_ARGUMENT');
@@ -85,7 +87,17 @@ async function receive(m){
     const selected=await client.callTool({name:'browser_tabs',arguments:{action:'select',index:Number(current[1])}},undefined,{timeout:5000});
     if(selected.isError)throw Error('BROWSER_CURRENT_TAB_UNAVAILABLE');
    }
-   const rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000});send({kind:'result',id:m.id,result:refs.resultForAgent(rawResult),rawResult})
+   // Only Go-admitted calls reach here. Inspections and pending approvals do
+   // not animate; the extension receives geometry, never target text/values.
+   // Reuse the gateway's mandatory, immediately preceding inspection. Optional
+   // display never adds an MCP query or waits ahead of the admitted action.
+   const target=m.arguments.target??m.arguments.fields?.[0]?.target??m.arguments.startTarget;
+   const rect=['browser_type','browser_fill_form','browser_select_option'].includes(m.tool)?geometry.get(target):undefined;geometry.clear();
+   indicator({running:true,rect,action:m.tool});
+   let rawResult;
+   try{rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
+   finally{indicator({running:false})}
+   send({kind:'result',id:m.id,result:refs.resultForAgent(rawResult),rawResult})
   }catch(e){send({kind:'result',id:m.id,error:e.message,fatal:true});void stop()}
  }else throw Error('BROWSER_ADAPTER_OPERATION_REJECTED');
 }

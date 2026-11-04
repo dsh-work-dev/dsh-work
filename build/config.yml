@@ -26,7 +26,7 @@ dev_mode:
       - .evolve
       - .evolve-support
       - .task
-      - internal/desktopbridge/assets
+      - "*/internal/desktopbridge/assets/*"
       - frontend
       - tools/dsh
       - bin
