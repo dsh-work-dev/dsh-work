@@ -48,6 +48,9 @@ func (n *interactionNotifier) added(surface, instance, sessionID string, it dshi
 	switch it.Kind {
 	case "approval":
 		copy = nativeui.DSHApprovalNotification(n.locale(), it.ToolName)
+		if it.Reason != "" {
+			copy.Body = it.Reason
+		}
 		categoryID = dshApprovalCategoryID
 	case "question", "plan-review":
 		copy = nativeui.DSHAnswerNotification(n.locale())

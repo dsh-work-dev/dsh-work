@@ -14,6 +14,8 @@ import {mountOperationLog} from "./operation-log";
 import {mountStorage} from "./storage";
 import {mountRecovery} from "./recovery";
 import {mountNotifications, mountSettings} from "./settings";
+import type {Snapshot as AutomationSnapshot} from "../bindings/github.com/local/dsh-work/internal/automation";
+import {mountAutomation} from "./automation";
 import {mountPets} from "./pets";
 import {mountDiagnostics} from "./diagnostics-panel";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
@@ -132,13 +134,13 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "pets" | "about";
+type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "about";
 
 type DesktopUpdateState = UpdateSnapshot;
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
-  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "pets" || value === "about") {
+  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "about") {
     return value;
   }
   return "overview";
@@ -146,11 +148,11 @@ function sectionName(value: string | null): ManagerSection {
 
 // filterLoaderLayers keeps the loader entries whose id or package matches the
 // query, dropping layers left without a match.
-export function filterLoaderLayers(layers: LoaderLayer[], query: string): Array<LoaderLayer & {entries: LoaderEntry[]}> {
+export function filterLoaderLayers(layers: LoaderLayer[], query: string, modifiedOnly = false): Array<LoaderLayer & {entries: LoaderEntry[]}> {
   const needle = query.trim().toLowerCase();
   return layers
-    .map(layer => ({...layer, entries: (layer.entries ?? []).filter(entry => !needle || entry.id.toLowerCase().includes(needle) || entry.package.toLowerCase().includes(needle))}))
-    .filter(layer => !needle || layer.entries.length > 0);
+    .map(layer => ({...layer, entries: (layer.entries ?? []).filter(entry => (!modifiedOnly || entry.userModified) && (!needle || entry.id.toLowerCase().includes(needle) || entry.package.toLowerCase().includes(needle)))}))
+    .filter(layer => layer.entries.length > 0);
 }
 
 // mergePluginObservation adds live DSH activation state and registry details to
@@ -260,6 +262,7 @@ export function mountManager() {
   const profileDelete = document.getElementById("manager-profile-delete") as HTMLButtonElement;
   const builtinComponentList = document.getElementById("manager-builtin-components") as HTMLDivElement;
   let builtinComponentSnapshot: unknown;
+  let automationSnapshot: AutomationSnapshot | undefined;
   const renderBuiltinComponents = (value: unknown = builtinComponentSnapshot) => {
     builtinComponentSnapshot = value;
     const rows = buildBuiltinComponentViews(value).map(component => {
@@ -278,6 +281,16 @@ export function mountManager() {
       row.append(main, trail);
       return row;
     });
+    for (const capability of ["browser", "computer"] as const) {
+      const state = automationSnapshot?.[capability];
+      if (!state?.enabled) continue;
+      const row=document.createElement("div");row.className="row";
+      const main=document.createElement("div");main.className="row-main";
+      const title=document.createElement("strong");title.textContent=t(`automation.${capability}.components`);main.append(title);
+      const trail=document.createElement("div");trail.className="row-trail";
+      trail.append(stateTag(t(state.dependency === "prepared" ? "automation.prepared" : state.dependency === "failed" ? "automation.componentFailed" : "automation.unprepared")));
+      row.append(main,trail);rows.push(row);
+    }
     builtinComponentList.replaceChildren(...rows);
   };
   const pluginEmpty = document.getElementById("manager-plugin-empty") as HTMLElement;
@@ -320,8 +333,8 @@ export function mountManager() {
   let pluginObservationInFlight: string | undefined;
   let pluginObservationRetryDelay = 0;
   let pluginObservationRetry: number | undefined;
-  // The loader tree starts collapsed for each profile shown.
-  let loaderTree = {profile: "", open: false, query: "", openLayers: new Set<string>()};
+  // Each profile starts with its explicit modifications visible.
+  let loaderTree = {profile: "", open: true, showAll: false, query: "", openLayers: new Set<string>()};
   let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
     ? {dataDirectoryId: initialDataDirectory, name: initialProfile}
     : undefined;
@@ -347,6 +360,8 @@ export function mountManager() {
     "data-directories": {title: "manager.dataDirectories"},
     diagnostics: {title: "manager.diagnostics"},
     notifications: {title: "manager.notifications"},
+ browser: {title: "manager.browser"},
+ computer: {title: "manager.computer"},
     pets: {title: "manager.pets"},
     about: {title: "manager.about"}
   };
@@ -406,6 +421,7 @@ export function mountManager() {
   mountStorage();
   const notifications = mountNotifications(feedbackFor("notifications"));
   const pets = mountPets();
+ const automation = mountAutomation(state=>{automationSnapshot=state;renderBuiltinComponents();});
   const diagnosticsPanel = mountDiagnostics({
     feedback: feedbackFor("diagnostics"),
     open: section => showSection(section),
@@ -1018,12 +1034,12 @@ export function mountManager() {
   }
 
   // renderLoaderTree shows the current profile's official loader entries as
-  // official layer -> entry, inside a section that starts collapsed.
+  // official layer -> entry, initially showing only explicit profile edits.
   function renderLoaderTree(item: ManagerProfile, mutable: boolean) {
     const key = `${item.ref.dataDirectoryId}/${item.ref.name}`;
     const layers = pluginObservation?.profile === key ? pluginObservation.layers : undefined;
     if (!layers || layers.length === 0) return;
-    if (loaderTree.profile !== key) loaderTree = {profile: key, open: false, query: "", openLayers: new Set()};
+    if (loaderTree.profile !== key) loaderTree = {profile: key, open: true, showAll: false, query: "", openLayers: new Set()};
     const section = document.createElement("details");
     section.className = "plugin-official";
     section.open = loaderTree.open;
@@ -1031,7 +1047,14 @@ export function mountManager() {
       loaderTree.open = section.open;
     });
     const summary = document.createElement("summary");
-    summary.textContent = t("plugins.official", {count: layers.reduce((total, layer) => total + (layer.entries?.length ?? 0), 0)});
+    const toolbar = document.createElement("div");
+    toolbar.className = "loader-toolbar";
+    const scope = document.createElement("span");
+    const showAll = document.createElement("button");
+    showAll.type = "button";
+    showAll.className = "button button-secondary";
+    showAll.setAttribute("aria-pressed", String(loaderTree.showAll));
+    toolbar.append(scope, showAll);
     const search = document.createElement("input");
     search.type = "search";
     search.className = "loader-search";
@@ -1043,21 +1066,26 @@ export function mountManager() {
     const renderTree = () => {
       tree.replaceChildren();
       const searching = !!loaderTree.query.trim();
-      const visible = filterLoaderLayers(layers, loaderTree.query);
+      const scoped = filterLoaderLayers(layers, "", !loaderTree.showAll);
+      summary.textContent = t("plugins.official", {count: scoped.reduce((total, layer) => total + layer.entries.length, 0)});
+      scope.textContent = t(loaderTree.showAll ? "plugins.allEntries" : "plugins.modifiedEntries");
+      showAll.textContent = t(loaderTree.showAll ? "plugins.showModified" : "action.showAll");
+      showAll.setAttribute("aria-pressed", String(loaderTree.showAll));
+      const visible = filterLoaderLayers(layers, loaderTree.query, !loaderTree.showAll);
       if (visible.length === 0) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = t("plugins.noMatches");
+        empty.textContent = t(!loaderTree.showAll && scoped.length === 0 ? "plugins.unmodified" : "plugins.noMatches");
         tree.append(empty);
         return;
       }
       for (const layer of visible) {
         const group = document.createElement("details");
         group.className = "loader-layer";
-        // A search opens every layer with a match.
-        group.open = searching || loaderTree.openLayers.has(layer.package);
+        // Modified entries are immediately visible; searches open matching layers.
+        group.open = !loaderTree.showAll || searching || loaderTree.openLayers.has(layer.package);
         group.addEventListener("toggle", () => {
-          if (searching) return;
+          if (searching || !loaderTree.showAll) return;
           if (group.open) loaderTree.openLayers.add(layer.package);
           else loaderTree.openLayers.delete(layer.package);
         });
@@ -1090,8 +1118,12 @@ export function mountManager() {
       loaderTree.query = search.value;
       renderTree();
     });
+    showAll.addEventListener("click", () => {
+      loaderTree.showAll = !loaderTree.showAll;
+      renderTree();
+    });
     renderTree();
-    section.append(summary, search, tree);
+    section.append(summary, toolbar, search, tree);
     profilePlugins.append(section);
   }
 
@@ -1726,7 +1758,7 @@ export function mountManager() {
       console.error("Could not read DSH manager snapshot", error);
     }
     loadRetry.disabled = false;
-    await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh()]);
+    await Promise.all([settings.refresh(), notifications.refresh(), pets.refresh(), automation.refresh()]);
   }
 
   for (const item of navItems) {
@@ -1768,13 +1800,14 @@ export function mountManager() {
   }
   Events.On("acquisition", (event) => {
     const status = event.data as OperationStatus;
+    const preparation = acquisitionPreparation(status);
+    if (!preparation) return;
     const kind = status.artifact.kind === "plugin" ? "plugin" : status.artifact.kind === "node" ? "node" : "dsh";
     const log = operationLogs[kind];
     if (status.log) {
       log.append(status.operationId, status.log);
       if (status.step === "output") return;
     }
-    const preparation = acquisitionPreparation(status);
     let message = kind === "plugin" && status.state === "active" ? t("logs.pluginApplying") : runtimePreparationText(preparation);
     if (status.state === "active" && status.step.startsWith("detect-")) message = t("runtimes.checkingTools");
     if (status.state === "succeeded") message = t("runtimes.resultSucceeded");

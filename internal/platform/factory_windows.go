@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshmanager"
 	winplatform "github.com/local/dsh-work/internal/platform/windows"
 )
@@ -33,4 +34,8 @@ func NewNodeInstaller(storeRoot string) dshmanager.NodeInstaller {
 
 func NewNodeResolver(storeRoot string) dshmanager.NodeResolver {
 	return winplatform.NewRunNodeResolver(winplatform.NewCommandExecutor(), storeRoot)
+}
+
+func NewAutomationPreparer(root string) automation.Preparer {
+	return winplatform.NewAutomationPreparer(root)
 }

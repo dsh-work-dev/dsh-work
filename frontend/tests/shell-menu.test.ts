@@ -19,7 +19,7 @@ test("menus follow the 文件／视图／设置／帮助 layout", () => {
   assert.deepEqual(menus.map(keysOf), [
     ["session.new", "session.search", "workspace.add", "-", "terminal.new", "browser.new", "-", "refresh", "restart", "-", "closeWindow", "quit"],
     ["sidebar.left.toggle", "sidebar.right.toggle", "-", "zoomIn", "zoomOut", "zoomReset", "fullscreen", "-", "showPet"],
-    ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "settings.diagnostics", "-", "settings.open"],
+    ["settings.overview", "-", "settings.settings", "settings.notifications", "settings.browser", "settings.computer", "settings.pets", "-", "settings.runtimes", "settings.profiles", "settings.plugins", "-", "settings.data-directories", "settings.diagnostics", "-", "settings.open"],
     ["docs", "shortcuts.open", "-", "feedbackDesktop", "feedbackDsh", "-", "logs", "copyDiagnostics", "devtools", "-", "update", "about"],
   ]);
 });
@@ -114,6 +114,7 @@ test("window keys map to window actions", () => {
 });
 
 test("help reflects the update phase", () => {
+  assert.equal(item(buildMenus(state({updatePhase: "available"}), t), "update").label, "shell.menu.updateDownload");
   const ready = buildMenus(state({updatePhase: "ready"}), t);
   assert.equal(ready.find(menu => menu.id === "help")?.badge, true);
   assert.equal(item(ready, "update").label, "shell.menu.updateAvailable");
@@ -132,7 +133,7 @@ test("keyboard steps skip separators and wrap", () => {
 
 test("every shell menu label is translated in every locale", () => {
   const keys = [
-    "shell.menu.bar", "shell.menu.unbound", "shell.menu.unavailable", "shell.menu.updateAvailable", "shell.menu.updating",
+    "shell.menu.bar", "shell.menu.unbound", "shell.menu.unavailable", "shell.menu.updateAvailable", "shell.menu.updateDownload", "shell.menu.updating",
     "shell.toast.commandFailed", "shell.toast.diagnosticsCopied", "shell.toast.diagnosticsFailed",
     "shell.toast.exportSaved", "shell.toast.exportFailed",
     "shell.toast.signOutPending", "shell.toast.signedOut", "shell.toast.signOutFailed",

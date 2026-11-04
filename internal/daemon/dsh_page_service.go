@@ -59,6 +59,9 @@ func (s *DSHPageService) ResetInteractions(ctx context.Context, instance string)
 }
 
 func validateInteractionReport(report dshinteraction.Report) error {
+	if !utf8.ValidString(report.Reason) || utf8.RuneCountInString(report.Reason) > 320 {
+		return errors.New("interaction reason is invalid")
+	}
 	if report.Instance == "" {
 		return errors.New("interaction instance is required")
 	}

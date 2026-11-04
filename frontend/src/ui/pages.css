@@ -11,6 +11,10 @@
 .row-trail select { width: min(280px, 100%); }
 .brand-mark, .brand img { filter: var(--brand-filter); }
 
+/* ---------- browser connection setup ---------- */
+#automation-browser-setup-steps { list-style: decimal; padding-left: 1.5em; margin-top: var(--space-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
+#automation-browser-setup-steps > li + li { margin-top: var(--space-2); }
+
 /* ---------- overview ---------- */
 #environment-editor { display: grid; gap: var(--space-3); }
 #environment-editor .row-trail { margin-left: auto; }
@@ -53,6 +57,8 @@ dialog.restore-point-preview input { width: 100%; }
 .diagnostics-problem-detail { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .diagnostics-problem > :not(summary) { padding: 0 var(--row-pad-x) var(--row-pad-y); }
 .loader-search { display: block; width: calc(100% - 2 * var(--row-pad-x)); margin: var(--space-3) var(--row-pad-x); }
+.loader-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--row-pad-x) 0; }
+.loader-toolbar > span { color: var(--muted); font-size: var(--fs-control); }
 .loader-tree { padding: 0 var(--row-pad-x) var(--space-3); }
 .loader-layer { border-left: var(--row-divider); margin: var(--space-2) 0 0 var(--space-1); padding-left: var(--space-3); }
 .loader-layer > summary { padding: var(--space-2) 0; cursor: pointer; font: 500 var(--fs-control) var(--font-mono); overflow-wrap: anywhere; }
@@ -112,3 +118,17 @@ button.pets-list-item:disabled { opacity: .5; cursor: default; }
 /* ---------- about ---------- */
 .about-brand { display: flex; align-items: center; gap: var(--space-2); }
 .about-brand .brand-mark { width: 20px; height: 20px; }
+
+/* Browser access stays in the trusted workbench, separate from the DSH frame. */
+#automation-browser-policy > section { margin-top: var(--space-5); }
+#automation-browser-policy h2 { margin-bottom: var(--space-3); font-size: var(--fs-section); }
+#automation-browser-consent > p { margin-block: var(--space-3); overflow-wrap: anywhere; }
+#automation-browser-consent .actions { margin-top: var(--space-5); flex-wrap: wrap; }
+#automation-browser-active { --wails-non-client-region: client; flex-shrink: 1; max-width: 35vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.browser-access-warning { display: flex; align-items: flex-start; gap: var(--space-2); }
+.browser-access-warning > svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+
+.browser-permission {max-width:34rem;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:14px;overflow-wrap:anywhere}.browser-permission h1{font-size:23px;line-height:1.3}.browser-permission p{margin:0}.browser-permission .actions{margin-top:18px;justify-content:flex-end}
+
+.browser-permission{height:100vh;box-sizing:border-box;overflow-y:auto}.browser-permission .actions{margin-top:auto;padding-top:16px}

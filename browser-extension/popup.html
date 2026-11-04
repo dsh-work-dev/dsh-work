@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>DSH Work</title>
+<style>body{font:14px system-ui;margin:20px;width:300px;color:#202124;background:#fff}h1{display:flex;align-items:center;gap:10px;font-size:18px;margin:0 0 16px}button{font:inherit;padding:8px 12px;margin:12px 6px 0 0;border:1px solid #999;border-radius:5px;background:#f8f9fa;cursor:pointer}button:focus-visible{outline:2px solid #1769c2;outline-offset:2px}#status{line-height:1.6;min-height:44px}#error{color:#a62116;line-height:1.5}</style>
+<h1><img src="icon-32.png" width="32" height="32" alt="">DSH Work</h1><p id="status" role="status">正在连接…</p>
+<form id="bind-form"><button id="bind" type="submit">连接到 DSH Work</button></form>
+<button id="cancel" hidden>取消绑定</button><button id="reconnect">重新连接</button>
+<p id="error" role="alert"></p><script src="popup.js" type="module"></script></html>

@@ -4,7 +4,7 @@ import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemo
 import {copyReport, latestProblem} from "./diagnostics";
 import {controlTokenProperty, measureControls} from "./dsh-controls";
 import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame, type Rgba} from "./dsh-theme";
-import {subscribeLocale, t} from "./i18n";
+import {currentLocale,subscribeLocale, t} from "./i18n";
 import {parseAnswerApprovalCommand, parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
@@ -348,7 +348,7 @@ export function mountShell() {
   window.addEventListener("message", event => {
     const src = frame.getAttribute("src");
     if (!src || event.source !== frame.contentWindow || event.origin !== new URL(src).origin) return;
-    const message = parseFrameMessage(event.data);
+    const message = parseFrameMessage(event.data,currentLocale());
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
     else if (message.type === "component-ready") {

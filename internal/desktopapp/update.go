@@ -57,7 +57,7 @@ type updateBackend interface {
 	Check(context.Context) (*pendingRelease, error)
 	Stage(context.Context, *pendingRelease, func(written, total int64)) error
 	Recheck() error
-	Install(context.Context) error
+	Install(ctx context.Context, restart bool) error
 	// WithChannel returns a backend that follows another feed, and Discard drops
 	// everything the previous channel produced.
 	WithChannel(channel string) (updateBackend, error)
@@ -184,16 +184,18 @@ func (b *installerBackend) Recheck() error {
 // installer takes the maintenance boundary, stops the running workbench,
 // replaces the whole release unit, releases the boundary and starts the new
 // workbench; this process is expected to be stopped by that handshake.
-func (b *installerBackend) Install(ctx context.Context) error {
+func (b *installerBackend) Install(ctx context.Context, restart bool) error {
 	if b.staged == nil {
 		return errUpdateNoRelease
 	}
-	outcome := b.staged.RunInstaller(ctx)
-	return outcome.Err
+	if !restart {
+		return b.staged.RunInstallerOnExit(ctx).Err
+	}
+	return b.staged.RunInstaller(ctx).Err
 }
 
 // updateRunner is the daemon's single-flight update coordinator. Automatic
-// checks download silently; only an explicit install action stops the UI and
+// checks download silently; an install action or confirmed exit stops the UI and
 // hands the authenticated installer to the operating system.
 type updateRunner struct {
 	backend  updateBackend
@@ -202,6 +204,7 @@ type updateRunner struct {
 	stopUI   func() error
 	publish  func(daemon.UpdateSnapshot)
 
+	exitPending    atomic.Bool
 	busy           atomic.Bool
 	mu             sync.RWMutex
 	state          daemon.UpdateSnapshot
@@ -343,7 +346,7 @@ func (r *updateRunner) Action(ctx context.Context, action daemon.UpdateAction) e
 		}
 		go func() {
 			defer r.busy.Store(false)
-			r.runInstall(operationCtx)
+			r.runInstall(operationCtx, true)
 		}()
 		return nil
 	default:
@@ -471,7 +474,7 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 	})
 }
 
-func (r *updateRunner) runInstall(ctx context.Context) {
+func (r *updateRunner) runInstall(ctx context.Context, restart bool) {
 	// The staged bytes are authenticated again here, before anything is stopped:
 	// a payload that changed on disk after staging is refused while the running
 	// workbench can still be kept.
@@ -496,10 +499,35 @@ func (r *updateRunner) runInstall(ctx context.Context) {
 		state.InstallMode = daemon.UpdateInstallInstaller
 		state.ErrorCode = ""
 	})
-	if err := r.backend.Install(ctx); err != nil {
+	if err := r.backend.Install(ctx, restart); err != nil {
 		logging.Module(logging.ModUpdate).Error("update install failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateInstallFailed)...)
 		r.setError("install")
 	}
+}
+
+// InstallOnExit claims a ready update before handing off the confirmed quit.
+// A failed handoff still completes the user's exit; partial downloads never
+// delay exit. Internal maintenance stops do not enter this path.
+func (r *updateRunner) InstallOnExit(quit func()) bool {
+	if r != nil && r.exitPending.Load() {
+		return true
+	}
+	if r == nil || r.backend == nil || !r.busy.CompareAndSwap(false, true) {
+		return false
+	}
+	if r.Snapshot().Phase != daemon.UpdateReady {
+		r.busy.Store(false)
+		return false
+	}
+	r.exitPending.Store(true)
+	r.Stop()
+	go func() {
+		defer r.exitPending.Store(false)
+		defer r.busy.Store(false)
+		r.runInstall(context.Background(), false)
+		quit()
+	}()
+	return true
 }
 
 func (r *updateRunner) Stop() {

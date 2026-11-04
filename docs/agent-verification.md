@@ -12,7 +12,7 @@ hosting, which screen-capture and click tools treat as an opaque region.
 | Workbench shell and DSH page | WebView2 DevTools Protocol (CDP) on a loopback port | script evaluation, synthetic input, page screenshots, console |
 | Daemon and runtime | `dsh-work-cli` over the daemon pipe | runtime install, Run context switch, status |
 | Notifications | Windows toast history (WinRT) | what was sent, with its payload |
-| Pet and other native windows | capture of that one window by title | pixels, without moving focus |
+| Daemon WebViews (Pet and browser permission window) | development CDP on the next port | isolated page state and rendered pixels |
 
 **CDP.** Development builds (`!production`) open WebView2's remote-debugging
 port when `DSH_WORK_WEBVIEW_DEBUG_PORT` is set
@@ -69,12 +69,43 @@ to test the page side of a flow on its own.
 5. Restore what you changed: appearance, Pet visibility, Run context, drafts,
    test files.
 
+The daemon's development WebViews use the next port: setting
+`DSH_WORK_WEBVIEW_DEBUG_PORT=9333` gives the workbench port 9333 and daemon port
+9334. For the independent browser permission window, set `DSH_WORK_CDP_PORT`
+to `9334` when running `scripts/dev-cdp.mjs`; the script skips Pet targets.
+The permission window is created only for an actual pending request. Capture
+it while visible, before answering: a hidden idle window may not produce a
+screenshot. Its bindings permit only reading and answering that permission
+panel, not general settings operations. Never answer Allow on the user's behalf
+without explicit authorization.
+
+## Check browser action feedback
+
+Use an isolated browser profile and local fixture through the real MCP tools.
+Confirm that initial navigation, reads and a user-opened tab in the same group
+leave an untouched document's pointer hidden. On the first real target, capture
+the reveal at the (24,24) CSS-pixel hotspot and the curved movement toward the
+target. After operating two documents, switch away and back: each should retain
+its own stationary pointer position. Navigation should reset only that document;
+release should remove both.
+
+For a distant click, capture intermediate pointer frames and record the page's
+mousedown time: the pointer should have arrived before input, with a pulse
+following dispatch. Test cancellation during movement and confirm that the
+page receives no click. Reading snapshots should not wait for animation.
+Check normal and reduced-motion settings, route isolation, and restoration of
+the site's latest favicon after release. Direct CDP mouse events alone do not
+establish the MCP click behavior.
+
+The development watcher observes embedded JavaScript. Generated Worker assets
+are ignored by an absolute-path-compatible glob, and the generator only writes
+changed content so a build cannot repeatedly trigger itself.
+
 ## Limits
 
-- The Pet window belongs to the daemon process, which has no debug port.
-  Capture it by window title with a DPI-aware window capture, and drive it with
-  real pointer input only when the user agrees. Its data bindings answer only
-  the Pet window.
+- The daemon debug port is development-only, as is the workbench's. Pet
+  bindings answer only the Pet surface; browser-permission bindings answer
+  only their own surface.
 - Toast banners are outside every WebView. Clicking a banner button needs the
   user or UI Automation while the banner is on screen. To test only the page
   half, send the same `dsh-work/answer-approval` message into the frame.

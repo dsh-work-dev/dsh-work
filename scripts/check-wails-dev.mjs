@@ -6,6 +6,21 @@ const taskfile = readFileSync(resolve(root, "Taskfile.yml"), "utf8");
 const config = readFileSync(resolve(root, "build", "config.yml"), "utf8");
 const failures = [];
 
+// refresh's ignore-dir check compares single path components; multi-component
+// generated paths need a glob that also matches its absolute event paths.
+if (!/["']\*\/internal\/desktopbridge\/assets\/\*["']/.test(config)) {
+  failures.push("build/config.yml must ignore generated Worker JS with an absolute-path-compatible glob");
+}
+
+// Go embeds the Host plugins, MCP adapter and unpacked extension. Vite cannot
+// update those bytes in a running executable.
+const watched = config.match(/watched_extension:\s*\n((?:\s+-[^\n]*\n)+)/)?.[1] ?? "";
+for (const extension of ["go", "js", "mjs", "json", "html"]) {
+  if (!watched.includes(`"*.${extension}"`)) {
+    failures.push(`build/config.yml must rebuild embedded *.${extension} sources`);
+  }
+}
+
 if (!/\n\s+frontend:dev:\s*\n/.test(taskfile)) {
   failures.push("Taskfile.yml must define frontend:dev");
 }

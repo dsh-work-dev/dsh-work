@@ -1,8 +1,20 @@
-import {Check, ChevronLeft, ChevronRight, Copy, createElement, LoaderCircle, Minus, Square, TriangleAlert, X, type IconNode} from "lucide";
+import {Bell, Blocks, FolderOpen, Info, LayoutDashboard, PawPrint, Settings, SlidersHorizontal, SquareTerminal, Stethoscope, Globe, Monitor, Check, ChevronLeft, ChevronRight, Copy, createElement, LoaderCircle, Minus, Square, TriangleAlert, X, type IconNode} from "lucide";
 
 // One maintained icon family (lucide). Only icons in use are imported so the
 // bundle stays small; add names here rather than drawing ad-hoc glyphs.
 const icons = {
+  bell: Bell,
+  blocks: Blocks,
+  "folder-open": FolderOpen,
+  info: Info,
+  "layout-dashboard": LayoutDashboard,
+  "paw-print": PawPrint,
+  settings: Settings,
+  "sliders-horizontal": SlidersHorizontal,
+  "square-terminal": SquareTerminal,
+  stethoscope: Stethoscope,
+  globe: Globe,
+  monitor: Monitor,
   check: Check,
   "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight,

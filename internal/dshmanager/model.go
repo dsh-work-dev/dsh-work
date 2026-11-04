@@ -375,6 +375,8 @@ type LoaderEntry struct {
 	Conditional     bool   `json:"conditional,omitempty"`
 	Disabled        bool   `json:"disabled,omitempty"`
 	CanToggle       bool   `json:"canToggle,omitempty"`
+	// UserModified denotes an explicit profile patch, excluding shell defaults.
+	UserModified bool `json:"userModified,omitempty"`
 }
 
 type LoaderEntryListRequest struct {

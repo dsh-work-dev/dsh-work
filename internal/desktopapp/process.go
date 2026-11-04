@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/automation/browsernative"
+	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
@@ -28,6 +32,15 @@ type Resources struct {
 }
 
 func Run(resources Resources) {
+	// Browser-launched invocations must branch before UI, singleton, maintenance
+	// dialogs or normal application logging can touch their protocol stdout.
+	if len(os.Args) > 1 && (strings.HasPrefix(os.Args[1], "chrome-extension://") || os.Args[1] == "browser-native" || os.Args[1] == "browser-host-remove" || os.Args[1] == "browser-host-refresh") {
+		if err := runBrowserHostCommand(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	proc := logging.ProcessUI
 	if len(os.Args) > 1 && os.Args[1] == "--daemon" {
 		proc = logging.ProcessDaemon
@@ -55,6 +68,54 @@ func Run(resources Resources) {
 		}
 		logging.Fatal(logging.Module(logging.ModApp), "desktop client failed", logging.ErrAttrs(err, "")...)
 	}
+}
+
+func browserDaemonIdentity() string {
+	identity := filepath.Dir(app.DefaultConfig(currentDiscoveryRoot()).SettingsPath)
+	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		identity = root
+	}
+	return identity
+}
+func runBrowserHostCommand() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if os.Args[1] == "browser-host-remove" {
+		return browserhost.New(browserhost.Config{Executable: exe, Identity: browserDaemonIdentity(), Replacer: platform.New().FileReplacer}).Remove(context.Background())
+	}
+	if os.Args[1] == "browser-host-refresh" {
+		return browserhost.New(browserhost.Config{Executable: exe, Identity: browserDaemonIdentity(), Replacer: platform.New().FileReplacer}).Refresh(context.Background())
+	}
+	if maintenance.InstallerInProgress() {
+		return maintenance.ErrInstallerBusy
+	}
+	origin := os.Args[1]
+	if origin == "browser-native" {
+		if len(os.Args) < 3 {
+			return errors.New("browser-native requires an extension origin")
+		}
+		origin = os.Args[2]
+	}
+	if origin != browsernative.Origin {
+		return errors.New("BROWSER_EXTENSION_SOURCE_REJECTED")
+	}
+	// Native diagnostics use the existing structured stderr facility, never the
+	// native-message stdout or a shared rotating file contested by host processes.
+	logging.Init(logging.ProcessBrowserNative, "")
+	defer logging.Close()
+	parent, err := browserhost.DetectParentBrowser()
+	if err != nil {
+		return err
+	}
+	client := daemon.NewClient(browserDaemonIdentity())
+	defer client.Close()
+	err = browsernative.RunForParent(context.Background(), client, origin, parent, os.Stdin, os.Stdout)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }
 
 func logRoot() string {

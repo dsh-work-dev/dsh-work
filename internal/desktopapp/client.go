@@ -201,7 +201,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
 		Services: []application.Service{
 			application.NewService(hostService), application.NewService(&desktopclient.ManagerService{Client: client}),
-			application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
+			application.NewService(&desktopclient.AutomationService{Client: client}), application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
 			application.NewService(&desktopclient.DiagnosticsService{Client: client}),
 			application.NewService(shellService),
 			application.NewService(&desktopclient.LogService{}),

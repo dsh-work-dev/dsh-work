@@ -23,8 +23,9 @@ import (
 type Process string
 
 const (
-	ProcessDaemon Process = "daemon"
-	ProcessUI     Process = "ui"
+	ProcessDaemon        Process = "daemon"
+	ProcessUI            Process = "ui"
+	ProcessBrowserNative Process = "browser-native"
 )
 
 const (

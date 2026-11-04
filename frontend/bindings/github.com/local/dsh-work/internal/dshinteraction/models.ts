@@ -10,6 +10,7 @@ export interface Report {
     "kind": string;
     "key": string;
     "toolName": string;
+    "reason"?: string;
     "current": string;
     "visible": boolean;
 }

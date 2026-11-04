@@ -8,7 +8,7 @@ version: "0.1.0"
 section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
-description: "Local-first desktop host for DeepSeek Harness"
+description: "Your personal AI agent"
 vendor: "dsh-work"
 homepage: "https://github.com/dsh-work-dev/dsh-work"
 release: "1"

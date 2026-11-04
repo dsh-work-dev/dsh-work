@@ -5,7 +5,7 @@ import re
 root = Path(__file__).resolve().parent.parent
 sources = [p.read_text(encoding="utf-8") for p in (root / "internal/app").glob("*.go") if not p.name.endswith("_test.go")]
 types = set(re.findall(r"^type (\w+) ", "\n".join(sources), re.M))
-services = ["HostService", "ManagerService", "SettingsService", "StorageService", "PetSettingsService", "DiagnosticsService"]
+services = ["HostService", "ManagerService", "SettingsService", "StorageService", "PetSettingsService", "DiagnosticsService", "AutomationService"]
 imports = {"context": "context", "app": "github.com/local/dsh-work/internal/app", "daemon": "github.com/local/dsh-work/internal/daemon"}
 mutating_pet_methods = {
     "SetPetHitRegions", "PetGesture", "OpenPetActivity", "SetPetReducedMotion",
@@ -62,7 +62,7 @@ for service in services:
     if service == "PetSettingsService":
         helper = "func (s *PetSettingsService) localMaintenanceFailure() error {\n" \
             + "\tif s.Maintenance == nil || !s.Maintenance() { return nil }\n" \
-            + "\treturn lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: \"dsh-work is being updated.\", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: \"Wait for the installer to finish, then retry the Pet action.\"}\n" \
+            + "\treturn lifecycle.Failure{Code: lifecycle.ErrorManagerOperationBusy, Summary: \"DSH Work is being updated.\", Retryable: true, CorrelationID: lifecycle.NewCorrelationID(), Detail: \"Wait for the installer to finish, then retry the Pet action.\"}\n" \
             + "}\n\n"
     if service == "HostService":
         imports["errors"] = "errors"

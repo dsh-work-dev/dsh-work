@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
       if (!origin || stopped) return;
       window.parent.postMessage({version: 1, type: 'dsh-work/interaction', instance, sessionId,
         kind: interaction?.kind ?? '', key: interaction?.key ?? '', toolName: interaction?.toolName ?? '',
+ ...(interaction?.displayReason?{displayReason:interaction.displayReason}:{}),
         current: currentSession(), visible: isVisible()}, origin);
     }
     function readInteractions() {
@@ -40,6 +41,7 @@ window.__ModuleLoader__.load({id: '@dsh-work/pet', factory: () => ({
           kind: pendingInteraction.kind,
           key: pendingInteraction.key,
           toolName: pendingInteraction.kind === 'approval' ? pendingInteraction.toolName : '',
+ ...(pendingInteraction.kind==='approval'&&pendingInteraction.displayReason?{displayReason:pendingInteraction.displayReason}:{}),
         });
       }
       return interactions;

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import {browserSetupStage} from "../src/browser-setup";
+import type {BrowserProfilesSnapshot} from "../bindings/github.com/local/dsh-work/internal/automation";
 import {readFileSync} from "node:fs";
 import test from "node:test";
 
@@ -229,19 +231,21 @@ test("a failed attempt does not overwrite the next manual runtime selection", ()
 test("the loader tree search keeps only matching entries under their layer", () => {
   const layers = [
     {package: "@deepseek-ai/dsh-base", entries: [
-      {id: "web-search-deepseek", package: "@deepseek-ai/dsh-web-search-deepseek"},
+      {id: "web-search-deepseek", package: "@deepseek-ai/dsh-web-search-deepseek", userModified: true},
       {id: "tool-bash", package: "@deepseek-ai/dsh-bash-sandbox", defaultDisabled: true}
     ]},
     {package: "@deepseek-ai/dsh-web-app", entries: [{id: "workspace", package: "@deepseek-ai/dsh-api-workspace-controller"}]}
   ] as never;
   assert.equal(filterLoaderLayers(layers, "").length, 2);
+  assert.deepEqual(filterLoaderLayers(layers, "", true).map(layer => layer.entries.map(entry => entry.id)), [["web-search-deepseek"]]);
+  assert.deepEqual(filterLoaderLayers(layers, "bash", true), []);
   const matches = filterLoaderLayers(layers, "  WEB-search ");
   assert.equal(matches.length, 1);
   assert.equal(matches[0].package, "@deepseek-ai/dsh-base");
   assert.deepEqual(matches[0].entries.map(entry => entry.id), ["web-search-deepseek"]);
   // Package names match too.
   assert.deepEqual(filterLoaderLayers(layers, "bash-sandbox")[0].entries.map(entry => entry.id), ["tool-bash"]);
-  for (const key of ["plugins.official", "plugins.searchEntries", "plugins.noMatches", "value.defaultOff", "value.conditional"]) {
+  for (const key of ["plugins.official", "plugins.searchEntries", "plugins.noMatches", "plugins.allEntries", "plugins.modifiedEntries", "plugins.showModified", "plugins.unmodified", "value.defaultOff", "value.conditional"]) {
     assert.equal(hasTranslationInEveryLocale(key), true, key);
   }
 });
@@ -278,4 +282,37 @@ test("the frontend theme registry matches the Host's supported themes and modes"
 	assert.equal(themes[0].id, "dsh");
 	assert.equal(themeInfo(undefined).id, "dsh");
 	assert.equal(supportedMode(undefined, undefined), "system");
+});
+
+
+test("browser setup guides binding before use without selecting an instance", () => {
+  const profiles = {selected:"",bindings:[],pending:[],registration:null} as BrowserProfilesSnapshot;
+  assert.equal(browserSetupStage(profiles,1000),"install");
+  profiles.pending=[{id:"candidate",connection:"connection",browser:"chrome",name:"Work",expires:new Date(2000).toISOString()}];
+  assert.equal(browserSetupStage(profiles,1000),"confirm");
+  assert.equal(browserSetupStage(profiles,3000),"install");
+  profiles.pending=[];
+  profiles.bindings=[{id:"binding",browser:"chrome",name:"Work",status:"connected"}];
+  assert.equal(browserSetupStage(profiles),"choose");
+  assert.equal(profiles.selected,"");
+  profiles.selected="binding";
+  assert.equal(browserSetupStage(profiles),"connected");
+  for(const status of ["offline","conflict"]){profiles.bindings[0].status=status;assert.equal(browserSetupStage(profiles),status);}
+  for(const stage of ["install","confirm","choose","offline","conflict"]){
+    for(const part of ["title","detail"])assert.equal(hasTranslationInEveryLocale(`automation.browser.guide.${stage}.${part}`),true);
+  }
+});
+
+
+test("empty acquisition snapshot does not invent a DSH download", async () => {
+  const {acquisitionPreparation} = await import("../src/acquisition-view");
+  const {ArtifactKind, OperationState} = await import("../bindings/github.com/local/dsh-work/internal/acquisition/models");
+  // Exact zero-value snapshot seeded by the daemon before any operation.
+  const empty = {operationId: "", artifact: {kind: ArtifactKind.$zero, name: ""}, state: OperationState.$zero, step: "", hasTotal: false, canCancel: false};
+  assert.equal(acquisitionPreparation(empty), undefined);
+  const active = {...empty, operationId: "install-1", artifact: {kind: ArtifactKind.ArtifactDSH, name: "@deepseek-ai/dsh", version: "2.4.6"}, state: OperationState.OperationActive, step: "install-dsh"};
+  assert.equal(acquisitionPreparation(active)?.state, "acquiring-dsh");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationSucceeded})?.state, "installed");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationFailed})?.state, "failed");
+  assert.equal(acquisitionPreparation({...active, state: OperationState.OperationCanceled})?.state, "cancelled");
 });

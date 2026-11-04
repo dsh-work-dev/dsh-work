@@ -4,6 +4,7 @@ Unicode true
 ; WebView2 and architecture setup. dsh-work owns dsh:// and dsh-work:// below.
 !define DSH_WORK_DISPLAY_NAME "DSH Work"
 !include "wails_tools.nsh"
+!include "FileFunc.nsh"
 
 !ifndef CLI_EXECUTABLE
     !define CLI_EXECUTABLE "dsh-work-cli.exe"
@@ -593,6 +594,16 @@ Section "Program files" SEC_PROGRAM_FILES
     StrCpy $DshWorkFailureStage "move staged install into $INSTDIR"
     !insertmacro dshwork.replaceInstall
     Call dshwork.registerProtocol
+    ; Refresh only previously configured, owned native host manifests. A normal
+    ; first install does not register or enable browser automation.
+    ClearErrors
+    ExecWait '"$INSTDIR\${PRODUCT_EXECUTABLE}" browser-host-refresh' $0
+    IfErrors nativeRefreshWarning
+    StrCmp $0 0 nativeRefreshDone
+nativeRefreshWarning:
+    Push "Browser native host refresh did not complete; the app can retry setup. Exit code: $0"
+    Call dshwork.log
+nativeRefreshDone:
     WriteRegStr HKCU "${DSH_WORK_INSTALL_REG_KEY}" "Install_Dir" "$INSTDIR"
 
     CreateShortcut "$SMPROGRAMS\${DSH_WORK_DISPLAY_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -615,6 +626,10 @@ installDone:
     ; here instead, after the maintenance boundary is released: starting it
     ; earlier would only make it report that maintenance is in progress.
     IfSilent 0 dshworkSectionEnd
+    ${GetParameters} $0
+    ClearErrors
+    ${GetOptions} $0 "/NORESTART" $1
+    IfErrors 0 dshworkSectionEnd
     Call dshwork.launchAfterSilentInstall
 dshworkSectionEnd:
 SectionEnd
@@ -644,6 +659,17 @@ Section "uninstall"
     !insertmacro wails.setShellContext
     Call un.dshwork.stopExistingOnce
     Call un.dshwork.cleanRecovery
+
+    ; Remove only registrations/manifests still owned by this executable. An
+    ; optional browser cleanup failure is visible, not a new prerequisite that
+    ; prevents uninstalling an otherwise usable legacy installation.
+    ClearErrors
+    ExecWait '"$INSTDIR\${PRODUCT_EXECUTABLE}" browser-host-remove' $0
+    IfErrors uninstallNativeWarning
+    StrCmp $0 0 uninstallNativeDone
+uninstallNativeWarning:
+    DetailPrint "Browser connection cleanup did not complete (exit $0). Its registration may require cleanup from an ordinary terminal."
+uninstallNativeDone:
 
     ; Application data is owned by the current user and remains available for
     ; a later reinstall. WebView2 is shared and is never removed here.

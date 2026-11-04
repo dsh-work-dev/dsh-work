@@ -9,6 +9,8 @@ import (
 
 // Labels contains user-facing copy owned by the native desktop shell.
 type Labels struct {
+	Browser               string
+	Computer              string
 	BackgroundNotice      string
 	QuitQuestion          string
 	QuitActiveTasks       string
@@ -25,6 +27,7 @@ type Labels struct {
 	Quit                  string
 	TrayTooltip           string
 	UpdateAvailableMenu   string
+	UpdateDownloadMenu    string
 	UpdateInProgressMenu  string
 	UpdateReadyTitle      string
 	UpdateReadyMessage    string
@@ -54,6 +57,7 @@ type NotificationCopy struct {
 
 var labelsByLocale = map[settings.Locale]Labels{
 	settings.LocaleEnglish: {
+		Browser: "Browser", Computer: "Computer",
 		BackgroundNotice:      "Running tasks will continue. You can reopen the window from the system tray.",
 		QuitQuestion:          "Quit DSH Work?",
 		QuitActiveTasks:       "Running tasks will be interrupted.",
@@ -62,15 +66,16 @@ var labelsByLocale = map[settings.Locale]Labels{
 		Actions:               "Actions",
 		Settings:              "Settings",
 		ShowPet:               "Show desktop pet",
-		OpenWorkspace:         "Open workspace",
+		OpenWorkspace:         "Open workbench",
 		Help:                  "Help",
-		CheckUpdates:          "Check for Updates…",
+		CheckUpdates:          "Check for Updates",
 		About:                 "About DSH Work",
 		RestartDSH:            "Restart DSH",
-		Quit:                  "Stop background and exit",
+		Quit:                  "Quit",
 		TrayTooltip:           "DSH Work",
 		trayStatus:            "DSH: {state}",
-		UpdateAvailableMenu:   "Update ready to install…",
+		UpdateAvailableMenu:   "Update ready to install",
+		UpdateDownloadMenu:    "Update available to download",
 		UpdateInProgressMenu:  "Updating…",
 		UpdateReadyTitle:      "Update ready to install",
 		UpdateReadyMessage:    "Version %s is ready. Open About to install it.",
@@ -106,6 +111,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleChinese: {
+		Browser: "浏览器", Computer: "电脑",
 		BackgroundNotice:      "正在运行的任务不会中断，可在系统托盘中重新打开窗口",
 		QuitQuestion:          "退出 DSH Work？",
 		QuitActiveTasks:       "当前正在运行的任务将会中断",
@@ -114,15 +120,16 @@ var labelsByLocale = map[settings.Locale]Labels{
 		Actions:               "操作",
 		Settings:              "设置",
 		ShowPet:               "显示桌面宠物",
-		OpenWorkspace:         "打开工作区",
+		OpenWorkspace:         "打开工作台",
 		Help:                  "帮助",
-		CheckUpdates:          "检查更新…",
+		CheckUpdates:          "检查更新",
 		About:                 "关于 DSH Work",
 		RestartDSH:            "重启 DSH",
-		Quit:                  "停止后台并退出",
+		Quit:                  "退出",
 		TrayTooltip:           "DSH Work",
 		trayStatus:            "DSH：{state}",
-		UpdateAvailableMenu:   "有新版本可安装…",
+		UpdateAvailableMenu:   "有新版本可安装",
+		UpdateDownloadMenu:    "有新版本可下载",
 		UpdateInProgressMenu:  "更新中…",
 		UpdateReadyTitle:      "新版本可以安装",
 		UpdateReadyMessage:    "版本 %s 已准备好。打开关于页面进行安装。",
@@ -158,6 +165,7 @@ var labelsByLocale = map[settings.Locale]Labels{
 		},
 	},
 	settings.LocaleJapanese: {
+		Browser: "ブラウザー", Computer: "コンピューター",
 		BackgroundNotice:      "実行中のタスクは続行されます。システムトレイからウィンドウを再び開けます。",
 		QuitQuestion:          "DSH Work を終了しますか？",
 		QuitActiveTasks:       "実行中のタスクは中断されます。",
@@ -166,15 +174,16 @@ var labelsByLocale = map[settings.Locale]Labels{
 		Actions:               "操作",
 		Settings:              "設定",
 		ShowPet:               "デスクトップペットを表示",
-		OpenWorkspace:         "ワークスペースを開く",
+		OpenWorkspace:         "ワークベンチを開く",
 		Help:                  "ヘルプ",
-		CheckUpdates:          "更新を確認…",
+		CheckUpdates:          "更新を確認",
 		About:                 "DSH Work について",
 		RestartDSH:            "DSH を再起動",
-		Quit:                  "バックグラウンドを停止して終了",
+		Quit:                  "終了",
 		TrayTooltip:           "DSH Work",
 		trayStatus:            "DSH：{state}",
-		UpdateAvailableMenu:   "インストールできる更新があります…",
+		UpdateAvailableMenu:   "インストールできる更新があります",
+		UpdateDownloadMenu:    "ダウンロードできる更新があります",
 		UpdateInProgressMenu:  "更新中…",
 		UpdateReadyTitle:      "更新をインストールできます",
 		UpdateReadyMessage:    "バージョン %s の準備ができました。概要を開いてインストールしてください。",

@@ -5,12 +5,17 @@
 Closing a desktop window hides it and keeps its WebView in the UI client.
 Reopening restores the same page state and connects to the same daemon. The
 daemon, Worker tasks, tray, Pet and notifications continue while all UI windows
-are hidden. Use 文件 → 退出 in the workbench menu, or “停止后台并退出” from the tray, for
+are hidden. Use 文件 → 退出 in the workbench menu, or “退出” from the tray, for
 Worker/child cleanup and complete background shutdown.
 
 There is no close-behavior setting. Legacy persisted `closeToTray` values are
 ignored and are omitted when preferences are saved. Locale, appearance,
 automatic recovery, Pet and notification preferences remain persisted.
+
+The independent browser permission window is an exception to hide-on-close:
+closing it rejects the displayed request. It is owned by DSH Work, outside the
+workbench panel and DSH page.
+
 Settings saved before dsh-work owned its appearance adopt DSH's light/dark
 preference once.
 
@@ -70,7 +75,7 @@ Every Settings page follows one grammar so pages read as one application:
 ## Navigation and pages
 
 Overview stands alone. The sidebar groups Application (General, Notifications,
-Pets), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
+Browser, Computer, Pets), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
 Diagnostics, About). The narrow-window selector uses the same groups. Switching sections
 preserves their selection and remembers content scroll and return focus within
 the current Settings instance.
@@ -78,9 +83,11 @@ the current Settings instance.
 | Page | Current layout |
 |---|---|
 | Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save. |
+| Browser | Browser-control and default-browser switches, installation/binding guidance, selected browser profile, native-host recheck, component preparation/repair and optional profile launch directory. Access, website, operation-category and duration preferences follow below, with browser activity and stop controls. See [Set up browser control](browser-setup.md). |
+| Computer | Capability switch and component preparation status. Production computer-control acceptance remains separate from browser setup. |
 | Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. Removing a runtime shows a short confirmation below the runtime list. |
 | Profiles | One column, list then detail. All profiles lists only existing profiles; each row shows the name, current marker when applicable, and plugin count. Its heading has Import profile and Import from DSH. Choosing a row opens that profile's detail, and All profiles returns to the list, as does choosing Profiles in the sidebar. The detail has the name with Switch on its heading, a group with backups (manage history, back up now) and plugins, and a Profile actions group with one row each for clone, export, rename and delete. dsh-work's own profile is titled DSH Work; it has no rename or delete rows, and built-in profiles have none either. |
-| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). When two or more plugins have updates, Upgrade all on the Installed heading upgrades them in one change: the Worker stops once, every package updates in order, then one health check decides. A failure is handled as one plugin change, so automatic rollback returns the profile to its state before the first upgrade. While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, a collapsed Official loader entries section shows a searchable tree of official layer → loader entry. Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. A 内置组件 section lists dsh-work's own DSH plugins (shell, account and desktop pet integration) with their load state and no controls. Check for updates re-runs the registry check. A plugin DSH disables because it does not declare support for the running DSH version is marked with that version and offers Enable anyway, which grants DSH's exemption for that exact plugin and DSH version after confirmation; an install or upgrade DSH refuses for the same reason asks before retrying with that exemption. |
+| Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). When two or more plugins have updates, Upgrade all on the Installed heading upgrades them in one change: the Worker stops once, every package updates in order, then one health check decides. A failure is handled as one plugin change, so automatic rollback returns the profile to its state before the first upgrade. While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, Official plugins (官方插件) opens with only explicitly modified entries shown, grouped by official layer. Show all reveals the complete searchable tree; Show modified only returns to edited entries. The heading counts entries in the selected view. Modifications are enablement or configuration overrides in the profile's own patch, excluding matching Work-managed defaults. An unchanged profile shows “No official plugins modified.” Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. A 内置组件 section lists dsh-work's own DSH plugins (shell, account and desktop pet integration) with their load state and no controls. Check for updates re-runs the registry check. A plugin DSH disables because it does not declare support for the running DSH version is marked with that version and offers Enable anyway, which grants DSH's exemption for that exact plugin and DSH version after confirmation; an install or upgrade DSH refuses for the same reason asks before retrying with that exemption. |
 | Pets | Display section (show, always on top, size), then the pet list. The pet being viewed opens its preview in place under its row (large preview, description, Clear/Retry/Use), one pet at a time; the page opens on the pet in use. Arrow keys move between pets. |
 | General and Notifications | General has Startup (failure policy) and Interface (language, theme, appearance) sections; Notifications is one group with the desktop switch and its nested event switches. |
 | Storage and About | Storage has one section per location, with migration save/cancel in the user-data footer. About has a product section (version, description, help, copy diagnostics) and an application update section. |
@@ -104,6 +111,14 @@ Version records and profile backups are separate operations: a version record
 reconstructs dependency versions; it does not archive conversation data.
 
 ## Startup and operation feedback
+
+Browser enablement keeps installation, component preparation and binding state
+on the Browser page. An enabled switch or connected extension does not grant
+conversation access. Actual browser access, website and risk decisions appear
+in the independent permission window; expired requests cannot be answered.
+The Browser page directs toolchain failures to Runtimes and distinguishes
+component repair from extension reload. Follow [the setup and repair flow](browser-setup.md)
+rather than deleting caches or rebinding for every failure.
 
 Startup shows Node, DSH, profile/plugins and service-start steps. When a step
 fails, its summary, available recovery actions and bounded diagnostic output

@@ -11,6 +11,14 @@ export {
 
 export type {
     Appearance,
+    Automation,
+    AutomationBrowser,
+    AutomationCapability,
+    BrowserBinding,
+    BrowserLaunchHint,
+    BrowserPolicy,
+    BrowserProfiles,
+    BrowserSiteRule,
     PetPosition,
     PetPreference,
     Values,

@@ -39,6 +39,7 @@ type updateBackendFake struct {
 
 	mu            sync.Mutex
 	downloadCalls int
+	restart       bool
 	installCalls  int
 	recheckCalls  int
 	recheckErr    error
@@ -103,9 +104,10 @@ func (f *updateBackendFake) Recheck() error {
 	return f.recheckErr
 }
 
-func (f *updateBackendFake) Install(context.Context) error {
+func (f *updateBackendFake) Install(_ context.Context, restart bool) error {
 	f.mu.Lock()
 	f.installCalls++
+	f.restart = restart
 	f.mu.Unlock()
 	return nil
 }
@@ -315,5 +317,40 @@ func TestManifestURLNamesTheChannelReleaseAsset(t *testing.T) {
 		if got != want {
 			t.Fatalf("manifestURL(%q, beta) = %q, want %q", root, got, want)
 		}
+	}
+}
+
+func TestUpdateRunnerInstallOnExit(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		phase       daemon.UpdatePhase
+		recheckErr  error
+		wantInstall int
+	}{
+		{"ready", daemon.UpdateReady, nil, 1},
+		{"downloading", daemon.UpdateDownloading, nil, 0},
+		{"changed payload", daemon.UpdateReady, selfupdate.ErrStagedPayloadChanged, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &updateBackendFake{recheckErr: tc.recheckErr}
+			runner := &updateRunner{backend: backend, state: daemon.UpdateSnapshot{Phase: tc.phase}}
+			exited := make(chan struct{})
+			claimed := runner.InstallOnExit(func() { close(exited) })
+			if claimed != (tc.phase == daemon.UpdateReady) {
+				t.Fatalf("claimed = %v", claimed)
+			}
+			if claimed {
+				select {
+				case <-exited:
+				case <-time.After(time.Second):
+					t.Fatal("exit did not complete")
+				}
+			}
+			backend.mu.Lock()
+			defer backend.mu.Unlock()
+			if backend.installCalls != tc.wantInstall || backend.restart {
+				t.Fatalf("installs=%d restart=%v", backend.installCalls, backend.restart)
+			}
+		})
 	}
 }

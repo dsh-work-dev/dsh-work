@@ -389,3 +389,8 @@ func authenticodeSigner(path string) (string, error) {
 	windows.CertGetNameString(cert, windows.CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nil, &name[0], length)
 	return strings.TrimSpace(windows.UTF16ToString(name)), nil
 }
+
+// VerifyAuthenticodePublisher verifies a managed dependency without running it.
+func VerifyAuthenticodePublisher(path, publisher string) error {
+	return verifyAuthenticode(path, publisher)
+}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	dshworkapp "github.com/local/dsh-work/internal/app"
+	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -136,18 +137,19 @@ func newManager() (*dshmanager.Manager, *dshworkapp.ProcessLock, error) {
 		runner = commandRunner{executor: dependencies.CommandExecutor}
 	}
 	manager, err := dshmanager.New(dshmanager.Config{
-		StatePath:         statePath,
-		MinimumDSHVersion: dshadapter.MinimumVersion,
-		CommandRunner:     runner,
-		PluginCommands:    dshadapter.NewPluginCommands(),
-		RuntimeInstaller:  platform.NewRuntimeInstaller(runtimeStore),
-		DSHCatalog:        platform.NewDSHReleaseCatalog(runtimeStore),
-		NodeCatalog:       platform.NewNodeReleaseCatalog(runtimeStore),
-		NodeInstaller:     platform.NewNodeInstaller(runtimeStore),
-		NodeResolver:      platform.NewNodeResolver(runtimeStore),
-		RuntimeVerifier:   dsh,
-		ProfileCatalog:    dsh,
-		AppProfile:        dsh,
+		AutomationVersions: automation.CurrentVersionInputs,
+		StatePath:          statePath,
+		MinimumDSHVersion:  dshadapter.MinimumVersion,
+		CommandRunner:      runner,
+		PluginCommands:     dshadapter.NewPluginCommands(),
+		RuntimeInstaller:   platform.NewRuntimeInstaller(runtimeStore),
+		DSHCatalog:         platform.NewDSHReleaseCatalog(runtimeStore),
+		NodeCatalog:        platform.NewNodeReleaseCatalog(runtimeStore),
+		NodeInstaller:      platform.NewNodeInstaller(runtimeStore),
+		NodeResolver:       platform.NewNodeResolver(runtimeStore),
+		RuntimeVerifier:    dsh,
+		ProfileCatalog:     dsh,
+		AppProfile:         dsh,
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work DSH data directory", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},

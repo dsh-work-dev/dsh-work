@@ -7,7 +7,7 @@ import {subscribeLocale, t} from "./i18n";
 type Feedback = (message: string, tone?: "neutral" | "success" | "error", display?: boolean | "transient") => void;
 export interface DiagnosticsPanelOptions {
   feedback: Feedback;
-  open(section: "runtimes" | "plugins" | "profiles" | "data-directories"): void;
+  open(section: "runtimes" | "plugins" | "profiles" | "data-directories" | "browser" | "computer"): void;
   restart(): Promise<unknown>;
   checkUpdates(): void;
 }
@@ -18,6 +18,8 @@ export function mountDiagnostics(options: DiagnosticsPanelOptions): {refresh(): 
   const openFolder = document.getElementById("diagnostics-open-folder") as HTMLButtonElement;
   const exportButton = document.getElementById("diagnostics-export") as HTMLButtonElement;
   const actionLabels: Record<ProblemAction, string> = {
+    browser: "manager.browser",
+    computer: "manager.computer",
     runtimes: "diagnostics.action.runtimes",
     restart: "diagnostics.action.restart",
     plugins: "diagnostics.action.plugins",
@@ -64,6 +66,8 @@ export function mountDiagnostics(options: DiagnosticsPanelOptions): {refresh(): 
   async function runAction(action: ProblemAction): Promise<void> {
     try {
       switch (action) {
+        case "browser": options.open("browser"); break;
+        case "computer": options.open("computer"); break;
         case "runtimes": options.open("runtimes"); break;
         case "plugins": options.open("plugins"); break;
         case "profiles": options.open("profiles"); break;
@@ -93,7 +97,9 @@ export function mountDiagnostics(options: DiagnosticsPanelOptions): {refresh(): 
     const summary = document.createElement("summary");
     const title = document.createElement("span");
     title.className = "diagnostics-problem-title";
-    title.textContent = t("diagnostics.group." + group);
+    title.textContent = group === "browser" || group === "computer"
+      ? t("automation.failure." + (problem.code.endsWith("_NETWORK") ? "network" : problem.code.endsWith("_VERIFY") ? "verify" : "other"))
+      : t("diagnostics.group." + group);
     const meta = document.createElement("span");
     meta.className = "diagnostics-problem-meta";
     meta.textContent = new Date(problem.lastTime).toLocaleString() + (problem.count > 1 ? " · " + t("diagnostics.count", {count: problem.count}) : "");
