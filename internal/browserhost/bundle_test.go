@@ -14,6 +14,11 @@ func TestBundleUpdateRetainsCompletePreviousDirectory(t *testing.T) {
 		t.Fatal(e)
 	}
 	dir := DevelopmentDirectory(c)
+	for _, name := range []string{"icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("published icon %s: %v", name, err)
+		}
+	}
 	old := []byte("previous complete background")
 	if e := os.WriteFile(filepath.Join(dir, "background.js"), old, 0600); e != nil {
 		t.Fatal(e)

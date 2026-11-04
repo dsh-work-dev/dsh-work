@@ -689,7 +689,34 @@ adapter calls supply execution state; actual CDP input supplies coordinates.
 Geometry from mandatory policy inspection stays in the adapter. The display
 does not listen to the user's mouse or add tools to the Agent whitelist.
 
+Tab-group attachment defines eligible resources, not pointer visibility.
+Only Agent-issued CDP targets select the current display tab; user activation
+and tab creation do not. Each document starts hidden and keeps its own last
+rendered coordinate after real positioning. Its first coordinate or valid input
+target reveals the fixed (24,24) CSS-pixel hotspot before moving. Switching the
+Agent away cancels pending movement/clicks and leaves that document's pointer
+stationary; switching back continues from its retained coordinate. Navigation
+resets only that document, while release disposes all route-owned indicators.
+Heartbeats, execution-state updates and reads cannot reveal an untouched pointer.
+Keyboard target feedback uses available inspection geometry or a focused control;
+untargeted keys do not invent a pointer position.
+
+The hole-free whale-tail logo PNGs live in `frontend/public/branding`.
+Application, tray and packaged platform icons preserve their existing canvases;
+`build/appicon.png` is the Wails ICO/ICNS generation input. The extension's
+16/32/48/128 PNGs derive from `dsh-work-appicon-light.png` and are included in
+both manifest icon maps, the Go embed and the complete published bundle.
+The independent pointer uses `agent-pointer.json` as the shared source for its
+path, CSS dimensions, hotspot and procedural glow. Its canvas is 45×43.2 CSS
+pixels, with hotspot (7.2,7.2) and a 31.5×29.7 silhouette. SVG filters provide
+bright inner and soft outer glow behind the solid body, without a circular
+cutout. Run `node scripts/generate-agent-pointer.mjs` after changing the JSON,
+then `node browser-extension/compile.mjs` to regenerate the extension bundle.
+The browser consumes the same JSON/SVG intended for desktop feedback; desktop
+control has no cursor-overlay consumer yet.
+
 WAAPI animates a bounded curved path from the current rendered position.
+Reduced-motion preferences position immediately.
 For explicit `browser_click`, the Relay gates mousePressed on pointer arrival
 and orders subsequent mouse events behind it. Animation takes 150–350 ms;
 the gate has a 400 ms total deadline including IPC. During the wait, target,
@@ -700,10 +727,13 @@ transaction. Other tools do not wait for the animation.
 
 Release removes the injected script and overlay before debugger detach, with a
 250 ms cleanup bound; an orphaned page indicator expires after its heartbeat
-lease. Favicon composition uses a separate icon node, leaving site-owned nodes
-intact for restoration. The small display layer is local because Playwright's
-recording-oriented annotations do not supply the required branding, favicon
-lifecycle and selective click timing; mouse-helper mixes user and Agent events.
+lease. A versioned installer replaces legacy in-page instances instead of
+renewing their older display behavior. Favicon composition runs for the Agent's
+current tab using a separate icon node; switching away or releasing removes it,
+leaving site-owned nodes intact for restoration. The small display layer is local
+because Playwright's recording-oriented annotations do not supply the required
+branding, favicon lifecycle and selective click timing; mouse-helper mixes user
+and Agent events.
 Revisit this choice if the pinned dependency exposes those contracts publicly.
 
 Preparation uses the selected Run context's validated Node/npm and environment,

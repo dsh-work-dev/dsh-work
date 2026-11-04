@@ -34,7 +34,7 @@ func InstallDevelopmentBundle(ctx context.Context, c Config) error {
 	}
 	// Build a complete new directory first; never publish a mixed file set.
 	files := map[string][]byte{".dsh-work-owned": []byte(Name + "\n" + c.Identity + "\n"), "bundle-source.txt": []byte(browserextension.SourceIdentity + "\n")}
-	for _, name := range []string{"manifest.json", "background.js", "protocol.js", "popup.html", "popup.js", "routes.js", "LICENSE", "NOTICE", "PROVENANCE.txt"} {
+	for _, name := range []string{"manifest.json", "background.js", "protocol.js", "popup.html", "popup.js", "routes.js", "LICENSE", "NOTICE", "PROVENANCE.txt", "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png"} {
 		b, e := browserextension.Files.ReadFile(name)
 		if e != nil {
 			return e

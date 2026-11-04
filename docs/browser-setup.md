@@ -73,16 +73,25 @@ open. Disabling browser control stops browser use across conversations.
 
 ## Follow browser actions
 
-Conversation-owned pages show an Agent pointer and brief click or input-target
-feedback. The pointer follows a short curved path; explicit clicks wait about
-150–350 ms for arrival before reaching the page. Reading a snapshot or network
-response does not move the pointer. Keyboard scrolling can move the page while
-the pointer stays still. Reduced-motion preferences use immediate positioning.
+The Agent uses a solid whale-tail pointer with a white outline and blue glow.
+A new or untouched page has no pointer. At the first real target, the pointer
+appears near the upper-left corner and follows a short curved path to it.
+Explicit clicks wait about 150–350 ms for arrival before reaching the page.
 
-The website icon keeps its original image with an activity badge when that image
-can be read. The badge animates during execution and stays still while waiting
-for permission. Stop or loss of control removes the indicators and restores the
-website's current icon. An unreadable icon is left unchanged.
+Each document keeps its last pointer position when the Agent switches tabs;
+the next action continues from that position. Reading snapshots, joining the
+conversation's tab group or switching tabs yourself does not create or move a
+pointer. Navigation resets the affected page's pointer. Keyboard input can
+highlight its actual target without waiting for animation; untargeted keyboard
+scrolling does not reveal a pointer. Reduced-motion preferences use immediate
+positioning.
+
+On the Agent's current tab, the website icon keeps its original image with an
+activity badge when that image can be read. The badge animates during execution
+and stays still while waiting for permission. Switching the Agent to another
+tab restores the previous tab's website icon while leaving its pointer still.
+Stop or loss of control removes all indicators and restores the websites'
+current icons. An unreadable icon is left unchanged.
 
 Click synchronization is skipped when the renderer is initially unavailable or
 a cross-origin frame cannot be inspected. Once synchronization starts, a changed

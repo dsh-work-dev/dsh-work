@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {build} from '../frontend/node_modules/esbuild/lib/main.js';
 export async function compileRoutes() {
- const result=await build({entryPoints:[fileURLToPath(new URL('src/routes.ts',import.meta.url))],bundle:true,format:'esm',platform:'browser',write:false,loader:{'.png':'dataurl'},
+ const result=await build({entryPoints:[fileURLToPath(new URL('src/routes.ts',import.meta.url))],bundle:true,format:'esm',platform:'browser',write:false,loader:{'.png':'dataurl','.svg':'text'},
  banner:{js:'/*! Derived from Microsoft Playwright. Copyright (c) Microsoft Corporation. Apache-2.0; see LICENSE, NOTICE and PROVENANCE.txt. */'}});
  return result.outputFiles[0].contents;
 }

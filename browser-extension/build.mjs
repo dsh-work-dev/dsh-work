@@ -16,7 +16,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(source, 'manifest.json'), 
 // Chromium's public-key identity derivation, not an ordinary content hash check.
 const id = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32).replace(/[0-9a-f]/g, c => String.fromCharCode(97 + parseInt(c, 16)));
 if (id !== 'fpemabjfldbpdmjfdofdnfdaccafobod') throw Error('Development extension identity changed');
-for (const name of ['manifest.json', 'background.js', 'protocol.js', 'popup.html', 'popup.js', 'LICENSE','NOTICE','PROVENANCE.txt']) fs.copyFileSync(path.join(source, name), path.join(out, name));
+for (const name of ['manifest.json', 'background.js', 'protocol.js', 'popup.html', 'popup.js', 'LICENSE','NOTICE','PROVENANCE.txt','icon-16.png','icon-32.png','icon-48.png','icon-128.png']) fs.copyFileSync(path.join(source, name), path.join(out, name));
 fs.writeFileSync(path.join(out,'routes.js'),await compileRoutes());
 fs.writeFileSync(marker, 'setup-v1\n');
 fs.writeFileSync(path.join(out, 'identity.json'), JSON.stringify({extensionId: id, version: manifest.version, protocol: PROTOCOL, host: HOST_NAME, slice: 'browser-session-v2'}, null, 2) + '\n');

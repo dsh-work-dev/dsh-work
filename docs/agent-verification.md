@@ -82,6 +82,13 @@ without explicit authorization.
 ## Check browser action feedback
 
 Use an isolated browser profile and local fixture through the real MCP tools.
+Confirm that initial navigation, reads and a user-opened tab in the same group
+leave an untouched document's pointer hidden. On the first real target, capture
+the reveal at the (24,24) CSS-pixel hotspot and the curved movement toward the
+target. After operating two documents, switch away and back: each should retain
+its own stationary pointer position. Navigation should reset only that document;
+release should remove both.
+
 For a distant click, capture intermediate pointer frames and record the page's
 mousedown time: the pointer should have arrived before input, with a pulse
 following dispatch. Test cancellation during movement and confirm that the

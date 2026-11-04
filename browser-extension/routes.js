@@ -1,31 +1,76 @@
 /*! Derived from Microsoft Playwright. Copyright (c) Microsoft Corporation. Apache-2.0; see LICENSE, NOTICE and PROVENANCE.txt. */
 
 // frontend/public/branding/dsh-work-mark.png
-var dsh_work_mark_default = "data:image/png;base64,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";
+var dsh_work_mark_default = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAuMAAAJxAQAAAADAqIFBAAAAAnRSTlMAAHaTzTgAAAACYktHRAAB3YoTpAAAAAd0SU1FB+oLBAkJASqthFIAAAAldEVYdGRhdGU6Y3JlYXRlADIwMjYtMDktMDNUMTE6MDI6NTcrMDA6MDBAzc15AAAAJXRFWHRkYXRlOm1vZGlmeQAyMDI2LTA5LTAzVDExOjA4OjMyKzAwOjAwsuXDLAAAACh0RVh0ZGF0ZTp0aW1lc3RhbXAAMjAyNi0xMS0wNFQwOTowOTowMSswMDowMONmeB4AAAgkSURBVHja7d1NcuQsDAbgdvUiS47go3A0fDSOwhFYZjEVf1Mzk6RjA3rRj1OdT9pNxfMUDZLcP9i+3Tw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PPqxW+IvezHU1/3VUE/7m6G+74YTv/zWNzP9/lsvpno1019+679MdbukCbtl0vzRs6leTXWzXrDulsv6Rzer1r96NtWrqW5VrXG3XNa/utWy/tOLqW5UT/90o0b2rmdTvZrqNhn/rttM/IdeTHWTnPzQTZrBh26Sk596NdUtcvJTt+iTD7rB1DzoBlmz7pZT86jrT82jrj81j7p+QX3R1XvNF129DX/Vi6mu3Q2+6topf9CV1/WgK6/rUS+muu66hoOuW68nXXXwJ1118Gddc/BnXbOiGrpiRTV0xcG39Gqq67WDl91y8E1dbfBtXWvwbV1r8B29mOpKb5w6utLg77vl4Hu6TiPu6iqNuKurDL6vazTivq7RiJe+Xk11hXYw0ouprpCUA11hXUd6NdXlzWaky6cmmU7NUBdnzVAXT81Yl07NWJdOTRzq0l5D6MVUF55DCF1YrutYF+YkpVdTXZaTlC7LyUDp2VQXTTypizKe1EUZ/0Lpooyn9WKqV4F+J3VJPdG6pJ4AfePrC60XU72a6pJlpXVJtdK6ZFkBPfP1ZLqsgC5owoAuWNYITLytvpnqma2vgF5NdX7SBEDndxpE56ckok+k5Jq//JM+bU+lZCrzekbx5XAmA06sEyn5wtHhlAwcHU7JeNCBE+tESiaOjqbkcnp/Aukbpt95ekYX9agnRC+YHnl6xfTzOCKiYwm/MHUs4QNTxxI+nvVVT9+ZOlRO94YeIH0D9JWtZ0BPDR06fSDltOxsvdJ6aOlQg0fKKVrqS3MKsQZPF2sQ6HQ5pfbyQzpZTu+DtNFDR0+QvmETw9TzGP+omqMeIb2M9Wip37vHrZBesaEz9WGxPtT7UQ9yPUr1USt4bLNl8Ld+jFrBaPWxJjnQV7nebwVfX/tRx5pktxUc/ruyvo91sEnmNh4pPQn0U8Ix9dLCA31YZOsrcBimV2TkDX1l6s0iL8gQznFqY+0qVNI7JX7SsTZ2bJIJ1LFG8wsbElM/NMkd1cFGg61VPqUWQ0/a+gYlwnbS07QeJ/QI6Rl6tWd9ndUHFXKT6+uMHiD9IZPTjD77kXVQIG9cvSKvtaFjreBTj/2DGm8IsVbw2YJ3S/0+p2Ot4EMPyEEPkRD9Y1hxUo9T+mgslau/J9twlVr6OqMPq6M09DCjh1kdK1ZkGnNDx4oVSd+WPvMV//jYTajfp/WZHxDCvJ5wfQVeH6ecNmAgTX1F9ExPYvszc4D1xVQfp0z7uwqoWAs9jrYOFWuhV6j9LQ5UToXOrs53RLCehofUtp4AvdIvsqNHUCcWqLT1FdSJ5MptPQD6K31cR0cS/pV+jVtbRxL+lV4foZ7Gh7RxqJx+kXXR/VoR0xemniD9Th7BTvhfZGp19QDpxFHdL7qBhH8jX2Ht6UBKvpHp3tWBlHwj1770dGyjJHFE7uqJ5skX2NcjoFOLs3X1FdCpxOriSMKTx/R1ZN8x8foGv40AKbnF8d9HvxrReiH+PvrFK9G8QI9ivQ70INbLQMc+tI4iD3TwNzOmDn7ZPIhtoMuTZoSLk2a8X2IV6uO9HtKkGevSpCF2wQj1OtaTTC9jfZXpeawHmb6NdeGyjnFpLyB0WdKQW5uiRCe3ZQWJTm4pE/WCSumiZS2ULqrWTOrRVA8CncQl1QpsjBUsK7JlOLF1ZLvzytYroPPrqQA6f+LphJRM/IbogasjODvjwcsqmDp4SUjk6eDlLMyJr5jOnPiC6cyczKC+svQN1FlTg196xpka/LI5ztTgl/xxpqbCOmdq0JS5sQoKTZkbq8njOKPXTF0LOX3+m7uOc1afuwZ1ndTLlD6b8nlKn035bU4PU/js5bNzKT996W+c0acvW55K+TKrT03N5KLe5rJmGp8pKMb13BMTz7gWfWLipxf1NpOTmaEHw0WdmHjWRfrwxPNuMJAMFxVfVs6i4svKwtETFPPOC+CyVp6uc7VcN7BlZeJYm2Tf8AKqVu60Y0nDnXYsabg4uv2CG0DSsKcdShr2tCOdRnIzJjolJbd9o1OyCHQ6JQU4/QlHdiNCKuElE0MnvAinEl5411BCzzI9DHHpbXLH5VSFOmNLt5YuvmX2Yjn0YbEq3O3bdOiDVlDleL8VqNx/vqtnDX3t4DqPAenpm4oezLJxoOsMvdPGtB6+0tazkt5sY2pP2GrqVUtvNsnNUtd7oM5iOTHNFqw2MS1d85lsyXDaW3o11bOproifT06qD9o76apPTDvp1VQvmvpqWKkNXRM/6brPZjzqtk+Sq6Z6MdWzqb6Z6qr4tbryo0gPb/WUH4h50JWfWHmpXk318sR6NtW3J9Z18Ut17Sce/xxd+5nBV+raj4L+OXp1/Vv04vpFerA8abvuulDfnkpfXXd9MqLrP1BPrn+Lvrv+HfpypZ5df4+769+iX/plp61edPXgeifWn6NXXT0+sZ5+jq78XeruejuWS3Xd3w5s9fsT68ftkbq/Nz2zHi7VbfcVPZMej/r2PHp6Yv2I676Bf2L9vNe4uP4nzvvT69PoLxfrmm+Xgql+au+qbzls9Xixbrtx31bXPG3b6vvV+qaGL5frWU2/P7HeuuyrPIkeGnpV09fLdb2TU7xc1zt9uP5/0Z8l3207QauLFTXd9uxh/C71dnjTob0d2MPDw8PDw8PDw+OHxH+q9KRoBi/BpAAAAABJRU5ErkJggg==";
+
+// frontend/public/branding/agent-pointer.svg
+var agent_pointer_default = '<!-- Generated by scripts/generate-agent-pointer.mjs from agent-pointer.json. -->\n<svg xmlns="http://www.w3.org/2000/svg" width="45" height="43.2" viewBox="0 0 45 43.2" overflow="visible">\n  <defs>\n    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">\n      <feGaussianBlur stdDeviation="2.5"/>\n    </filter>\n    <filter id="glow-core" x="-120%" y="-120%" width="340%" height="340%">\n      <feGaussianBlur stdDeviation="0.45"/>\n    </filter>\n    <clipPath id="body"><path d="M7.2 7.2 C15.3 12.6 23.4 11.7 26.1 21.6 C29.7 18 35.1 19.8 38.7 16.2 C36.9 24.3 31.5 27 27.9 27.9 C25.2 30.6 26.1 34.2 27 36.9 L19.8 36.9 C22.5 30.6 22.5 27.9 17.1 26.1 C10.8 23.4 7.2 16.2 7.2 7.2Z"/></clipPath>\n  </defs>\n  <g class="halo">\n    <path d="M7.2 7.2 C15.3 12.6 23.4 11.7 26.1 21.6 C29.7 18 35.1 19.8 38.7 16.2 C36.9 24.3 31.5 27 27.9 27.9 C25.2 30.6 26.1 34.2 27 36.9 L19.8 36.9 C22.5 30.6 22.5 27.9 17.1 26.1 C10.8 23.4 7.2 16.2 7.2 7.2Z" fill="none" stroke="#28c6ff" stroke-width="5" opacity="1" filter="url(#glow)"/>\n    <path d="M7.2 7.2 C15.3 12.6 23.4 11.7 26.1 21.6 C29.7 18 35.1 19.8 38.7 16.2 C36.9 24.3 31.5 27 27.9 27.9 C25.2 30.6 26.1 34.2 27 36.9 L19.8 36.9 C22.5 30.6 22.5 27.9 17.1 26.1 C10.8 23.4 7.2 16.2 7.2 7.2Z" fill="none" stroke="#28c6ff" stroke-width="1.6" opacity="1" filter="url(#glow-core)"/>\n  </g>\n  <path d="M7.2 7.2 C15.3 12.6 23.4 11.7 26.1 21.6 C29.7 18 35.1 19.8 38.7 16.2 C36.9 24.3 31.5 27 27.9 27.9 C25.2 30.6 26.1 34.2 27 36.9 L19.8 36.9 C22.5 30.6 22.5 27.9 17.1 26.1 C10.8 23.4 7.2 16.2 7.2 7.2Z" fill="#0a0a0a" stroke="#ffffff" stroke-width="1.98" stroke-linejoin="miter" clip-path="url(#body)"/>\n</svg>\n';
+
+// frontend/public/branding/agent-pointer.json
+var agent_pointer_default2 = {
+  version: 1,
+  width: 45,
+  height: 43.2,
+  hotspot: {
+    x: 7.2,
+    y: 7.2
+  },
+  visibleBounds: {
+    x: 7.2,
+    y: 7.2,
+    width: 31.5,
+    height: 29.7
+  },
+  fill: "#0a0a0a",
+  outline: "#ffffff",
+  outlineWidth: 1.98,
+  glow: {
+    color: "#28c6ff",
+    width: 5,
+    blur: 2.5,
+    opacity: 1,
+    core: {
+      width: 1.6,
+      blur: 0.45,
+      opacity: 1
+    },
+    runningOpacityMin: 0.78
+  },
+  path: "M7.2 7.2 C15.3 12.6 23.4 11.7 26.1 21.6 C29.7 18 35.1 19.8 38.7 16.2 C36.9 24.3 31.5 27 27.9 27.9 C25.2 30.6 26.1 34.2 27 36.9 L19.8 36.9 C22.5 30.6 22.5 27.9 17.1 26.1 C10.8 23.4 7.2 16.2 7.2 7.2Z"
+};
 
 // browser-extension/src/actionIndicator.ts
 var WORLD = "dsh-work-action-indicator-v1";
-function mount(mark) {
+function mount(mark, graphic, geometry) {
   const g = globalThis;
   if (window.top !== window) return;
-  if (g.__dshIndicator) return;
+  if (g.__dshIndicator) {
+    if (g.__dshIndicator.version === "document-position-v2") return;
+    g.__dshIndicator.dispose();
+  }
   if (!document.documentElement) {
-    document.addEventListener("DOMContentLoaded", () => mount(mark), { once: true });
+    document.addEventListener("DOMContentLoaded", () => mount(mark, graphic, geometry), { once: true });
     return;
   }
-  let alive = Date.now(), running = false, disposed = false, x = 24, y = 24;
+  let alive = Date.now(), running = false, disposed = false, active = false, positioned = false, x = 24, y = 24;
   const host = document.createElement("div");
   host.setAttribute("aria-hidden", "true");
   host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;";
   const shadow = host.attachShadow({ mode: "closed" });
-  shadow.innerHTML = `<style>*{box-sizing:border-box;pointer-events:none}#cursor{position:absolute;width:62px;height:40px;filter:drop-shadow(0 2px 3px #0005)}#badge{position:absolute;left:13px;top:12px;background:#0a0a0a;border:2px solid white;border-radius:10px;width:33px;height:28px;padding:5px}img{width:100%;height:100%;object-fit:contain}.running #badge{animation:breathe 900ms ease-in-out infinite}#pulse{position:absolute;width:44px;height:44px;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:50%;display:none}#target{position:absolute;display:none;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:5px;background:#ffffff18}@keyframes breathe{50%{transform:translateY(-3px)}}@keyframes pulse{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(1.3)}}@media(prefers-reduced-motion:reduce){.running #badge{animation:none}#pulse{animation:none!important}}</style><div id="target"></div><div id="pulse"></div><div id="cursor"><svg width="22" height="28" viewBox="0 0 22 28"><path d="M2 2L3 23L8 18L12 26L16 24L12 16L20 16Z" fill="white" stroke="#0a0a0a" stroke-width="1.5" stroke-linejoin="round"/></svg><div id="badge"><img src="${mark}"></div></div>`;
+  shadow.innerHTML = `<style>*{box-sizing:border-box;pointer-events:none}#cursor{visibility:hidden;position:absolute;width:${geometry.width}px;height:${geometry.height}px}#graphic{position:absolute;left:${-geometry.hotspot.x}px;top:${-geometry.hotspot.y}px;width:${geometry.width}px;height:${geometry.height}px}.running .halo{animation:breathe 900ms ease-in-out infinite}#pulse{position:absolute;width:44px;height:44px;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:50%;display:none}#target{position:absolute;display:none;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:5px;background:#ffffff18}@keyframes breathe{50%{opacity:${geometry.glow.runningOpacityMin}}}@keyframes pulse{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(1.3)}}@media(prefers-reduced-motion:reduce){.running .halo{animation:none}#pulse{animation:none!important}}</style><div id="target"></div><div id="pulse"></div><div id="cursor"><div id="graphic">${graphic}</div></div>`;
   const cursor = shadow.querySelector("#cursor"), pulse = shadow.querySelector("#pulse"), target = shadow.querySelector("#target");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let movement, motionEpoch = 0;
   let prepared, prepareSequence = 0;
   cursor.style.transform = `translate(${x}px,${y}px)`;
   function moveTo(nextX, nextY, instant = false, onArrive) {
-    if (disposed || !onArrive && nextX === x && nextY === y) return;
+    if (disposed || !active) return;
+    const first = !positioned;
+    if (!first && !onArrive && nextX === x && nextY === y) return;
+    if (first) {
+      positioned = true;
+      cursor.style.visibility = "visible";
+    }
     const from = getComputedStyle(cursor).transform;
     const current = new DOMMatrixReadOnly(from === "none" ? void 0 : from);
     const distance = Math.hypot(nextX - current.e, nextY - current.f);
@@ -69,8 +114,21 @@ function mount(mark) {
     clearTimeout(targetTimer);
     clearTimeout(pulseTimer);
   }
+  function suspend() {
+    cancelMotion();
+    running = false;
+    cursor.classList.remove("running");
+    icon.remove();
+  }
+  function reset() {
+    suspend();
+    positioned = false;
+    x = y = 24;
+    cursor.style.transform = `translate(${x}px,${y}px)`;
+    cursor.style.visibility = "hidden";
+  }
   const onReducedMotion = () => {
-    if (reducedMotion.matches) {
+    if (reducedMotion.matches && positioned) {
       if (prepared && !prepared.settled) {
         movement?.finish();
         return;
@@ -96,7 +154,7 @@ function mount(mark) {
   const logo = new Image();
   logo.src = mark;
   function draw() {
-    if (disposed || !base || !base.complete) return;
+    if (disposed || !active || !base || !base.complete) return;
     try {
       ctx.clearRect(0, 0, 32, 32);
       ctx.drawImage(base, 0, 0, 32, 32);
@@ -179,7 +237,7 @@ function mount(mark) {
     delete g.__dshIndicator;
   }
   function showPulse(px, py) {
-    if (disposed) return;
+    if (disposed || !active || !positioned) return;
     pulse.style.cssText = `display:block;left:${px - 22}px;top:${py - 22}px;animation:none`;
     void pulse.offsetWidth;
     pulse.style.animation = "pulse 650ms ease-out";
@@ -189,23 +247,31 @@ function mount(mark) {
   function updateHint(v) {
     if (disposed) return;
     alive = Date.now();
+    if (typeof v.active === "boolean") {
+      active = v.active;
+      if (!active) {
+        suspend();
+        return;
+      }
+    }
+    if (!active) return;
     if (typeof v.running === "boolean") {
       running = v.running;
       cursor.classList.toggle("running", running);
       draw();
     }
     if (prepared && !prepared.settled) return;
-    const positioned = Number.isFinite(v.x) && Number.isFinite(v.y);
+    const positioned2 = Number.isFinite(v.x) && Number.isFinite(v.y);
     if (v.click) {
       const px = v.pulseX ?? v.x ?? x, py = v.pulseY ?? v.y ?? y;
-      if (positioned && (v.x !== px || v.y !== py)) {
+      if (positioned2 && (v.x !== px || v.y !== py)) {
         moveTo(px, py, true, () => showPulse(px, py));
         moveTo(v.x, v.y);
       } else moveTo(px, py, false, () => showPulse(px, py));
-    } else if (positioned) moveTo(v.x, v.y);
+    } else if (positioned2) moveTo(v.x, v.y);
     if (v.rect) {
       const r = v.rect;
-      if (!v.click && !positioned) moveTo(Math.max(0, Math.min(innerWidth - 62, r.x + r.width + 6)), Math.max(0, Math.min(innerHeight - 40, r.y + 8)));
+      if (!v.click && !positioned2) moveTo(Math.max(0, Math.min(innerWidth - (geometry.width - geometry.hotspot.x), r.x + r.width + 6)), Math.max(0, Math.min(innerHeight - (geometry.height - geometry.hotspot.y), r.y + 8)));
       target.style.cssText = `display:block;left:${r.x - 3}px;top:${r.y - 3}px;width:${r.width + 6}px;height:${r.height + 6}px`;
       clearTimeout(targetTimer);
       targetTimer = setTimeout(() => target.style.display = "none", 900);
@@ -275,7 +341,7 @@ function mount(mark) {
     moveTo(px, py, true);
     showPulse(px, py);
   }
-  g.__dshIndicator = { dispose, prepareClick, waitClick(token) {
+  g.__dshIndicator = { version: "document-position-v2", dispose, reset, suspend, prepareClick, waitClick(token) {
     return prepared?.token === token ? prepared.promise : Promise.resolve({ status: "cancelled" });
   }, cancelClick() {
     cancelMotion();
@@ -293,10 +359,11 @@ function mount(mark) {
     image.src = data;
   }, update: updateHint };
 }
-var install = `(${mount.toString()})(${JSON.stringify(dsh_work_mark_default)})`;
+var install = `(${mount.toString()})(${JSON.stringify(dsh_work_mark_default)},${JSON.stringify(agent_pointer_default)},${JSON.stringify(agent_pointer_default2)})`;
 var ActionIndicator = class {
   tabs = /* @__PURE__ */ new Map();
   closed = false;
+  // Selected only by Agent-issued CDP targets, not group membership or user focus.
   current;
   running = false;
   clickMode = false;
@@ -315,7 +382,6 @@ var ActionIndicator = class {
       return;
     }
     this.tabs.set(tabId, { script: identifier, epoch: 0 });
-    this.current ??= tabId;
     this.schedule(tabId, {});
   }
   schedule(tabId, value) {
@@ -349,12 +415,13 @@ var ActionIndicator = class {
   async update(tabId, value) {
     const state = this.tabs.get(tabId);
     if (!state || this.closed) return;
+    const epoch = state.epoch;
     try {
       const { frameTree } = await this.render(tabId, "Page.getFrameTree", {});
       const { executionContextId } = await this.render(tabId, "Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: WORLD });
       if (state.context !== executionContextId) state.attempted = void 0;
       state.context = executionContextId;
-      if (this.closed || this.tabs.get(tabId) !== state) return;
+      if (this.closed || this.tabs.get(tabId) !== state || state.epoch !== epoch) return;
       if (state.waiting) {
         state.pending = void 0;
         return;
@@ -363,9 +430,9 @@ var ActionIndicator = class {
         value = { ...value, ...state.pending, click: value.click || state.pending.click, focus: value.focus || state.pending.focus };
         state.pending = void 0;
       }
-      const evaluation = await this.render(tabId, "Runtime.evaluate", { contextId: state.context, returnByValue: true, expression: `${install};globalThis.__dshIndicator?.update(${JSON.stringify({ running: this.running && tabId === this.current, ...value })});globalThis.__dshIndicator?.resource()` });
+      const evaluation = await this.render(tabId, "Runtime.evaluate", { contextId: state.context, returnByValue: true, expression: `${install};globalThis.__dshIndicator?.update(${JSON.stringify({ active: tabId === this.current, running: this.running && tabId === this.current, ...value })});globalThis.__dshIndicator?.resource()` });
       const source = evaluation.result?.value;
-      if (typeof source === "string" && !state.loading && state.attempted !== source && /^https?:/.test(source)) {
+      if (tabId === this.current && typeof source === "string" && !state.loading && state.attempted !== source && /^https?:/.test(source)) {
         state.attempted = source;
         state.loading = true;
         void this.resource(tabId, state, source, frameTree.frame.id).finally(() => state.loading = false);
@@ -412,6 +479,16 @@ var ActionIndicator = class {
       }
     }
   }
+  select(tabId) {
+    if (this.current === tabId) return;
+    const previous = this.current;
+    this.current = tabId;
+    if (previous !== void 0) {
+      this.invalidate(previous, false);
+      this.schedule(previous, {});
+    }
+    this.schedule(tabId, {});
+  }
   state(running, rect, action) {
     this.running = running;
     this.clickMode = running && action === "browser_click";
@@ -419,25 +496,29 @@ var ActionIndicator = class {
     const geometry = rect && ["x", "y", "width", "height"].every((key) => typeof rect[key] === "number" && Number.isFinite(rect[key])) ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : void 0;
     if (this.current !== void 0) this.schedule(this.current, { ...geometry ? { rect: geometry } : {} });
   }
-  invalidate(tabId) {
+  invalidate(tabId, resetDocument = true) {
     const state = this.tabs.get(tabId);
     if (!state) return;
     state.epoch++;
+    state.pending = void 0;
+    state.clickEpoch = void 0;
     if (state.waiting) this.cancelledClick = true;
-    if (state.context) void this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: "globalThis.__dshIndicator?.cancelClick()" }).catch(() => {
+    if (state.context) void this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: resetDocument ? "globalThis.__dshIndicator?.reset()" : "globalThis.__dshIndicator?.suspend()" }).catch(() => {
     });
   }
   async beforeClick(tabId, p) {
     if (this.cancelledClick) throw Error("BROWSER_CLICK_INTERRUPTED");
     const state = this.tabs.get(tabId);
+    this.select(tabId);
     if (!state?.context) return;
     const epoch = state.epoch, deadline = Date.now() + 400;
+    state.clickEpoch = epoch;
     state.waiting = true;
     state.pending = void 0;
     const current = () => !this.closed && this.tabs.get(tabId) === state && state.epoch === epoch && !this.cancelledClick;
     const evaluate = (expression, awaitPromise = false) => this.render(tabId, "Runtime.evaluate", { contextId: state.context, expression, awaitPromise, returnByValue: true }, Math.max(1, deadline - Date.now()));
     try {
-      const setup = await evaluate(`globalThis.__dshIndicator?.prepareClick(${p.x},${p.y},${Math.min(350, deadline - Date.now() - 30)})`);
+      const setup = await evaluate(`globalThis.__dshIndicator?.update({active:true,running:${this.running}});globalThis.__dshIndicator?.prepareClick(${p.x},${p.y},${Math.min(350, deadline - Date.now() - 30)})`);
       if (!current()) throw Error("BROWSER_CLICK_INTERRUPTED");
       if (setup.exceptionDetails) throw Error("BROWSER_CLICK_PREPARATION_FAILED");
       const plan = setup.result?.value;
@@ -455,17 +536,17 @@ var ActionIndicator = class {
   }
   committedClick(tabId, p) {
     const state = this.tabs.get(tabId);
-    if (!state?.context || this.closed) return;
+    if (!state?.context || this.closed || state.clickEpoch !== state.epoch || this.current !== tabId) return;
     void this.send(tabId, "Runtime.evaluate", { contextId: state.context, expression: `globalThis.__dshIndicator?.commitClick(${p.x},${p.y})` }).catch(() => {
     });
   }
   input(tabId, method, p) {
     if (method === "Page.bringToFront") {
-      this.current = tabId;
+      this.select(tabId);
       return;
     }
     if (!method.startsWith("Input.")) return;
-    this.current = tabId;
+    this.select(tabId);
     this.schedule(tabId, { ...method === "Input.dispatchMouseEvent" ? { x: p.x, y: p.y, click: p.type === "mousePressed", ...p.type === "mousePressed" ? { pulseX: p.x, pulseY: p.y } : {} } : {}, focus: method === "Input.insertText" || method === "Input.dispatchKeyEvent" });
   }
   async detach(tabId) {

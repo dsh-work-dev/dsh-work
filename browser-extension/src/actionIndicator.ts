@@ -1,29 +1,38 @@
 import brand from '../../frontend/public/branding/dsh-work-mark.png';
+import pointerSvg from '../../frontend/public/branding/agent-pointer.svg';
+import pointer from '../../frontend/public/branding/agent-pointer.json';
 
 const WORLD = 'dsh-work-action-indicator-v1';
 // Serialized into a CDP isolated world. No page text, values or input listeners
 // are involved. The closed shadow and aria-hidden host keep snapshots unchanged.
-function mount(mark: string) {
+function mount(mark: string, graphic: string, geometry: typeof pointer) {
  const g = globalThis as any;
  if(window.top!==window)return;
- if (g.__dshIndicator) return;
+ if (g.__dshIndicator) {
+  if(g.__dshIndicator.version==='document-position-v2')return;
+  g.__dshIndicator.dispose();
+ }
  if (!document.documentElement) {
-  document.addEventListener('DOMContentLoaded',()=>mount(mark),{once:true});
+  document.addEventListener('DOMContentLoaded',()=>mount(mark,graphic,geometry),{once:true});
   return;
  }
- let alive = Date.now(), running = false, disposed = false, x = 24, y = 24;
+ let alive = Date.now(), running = false, disposed = false, active = false, positioned = false, x = 24, y = 24;
  const host = document.createElement('div');
  host.setAttribute('aria-hidden','true');
  host.style.cssText='all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;';
  const shadow=host.attachShadow({mode:'closed'});
- shadow.innerHTML=`<style>*{box-sizing:border-box;pointer-events:none}#cursor{position:absolute;width:62px;height:40px;filter:drop-shadow(0 2px 3px #0005)}#badge{position:absolute;left:13px;top:12px;background:#0a0a0a;border:2px solid white;border-radius:10px;width:33px;height:28px;padding:5px}img{width:100%;height:100%;object-fit:contain}.running #badge{animation:breathe 900ms ease-in-out infinite}#pulse{position:absolute;width:44px;height:44px;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:50%;display:none}#target{position:absolute;display:none;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:5px;background:#ffffff18}@keyframes breathe{50%{transform:translateY(-3px)}}@keyframes pulse{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(1.3)}}@media(prefers-reduced-motion:reduce){.running #badge{animation:none}#pulse{animation:none!important}}</style><div id="target"></div><div id="pulse"></div><div id="cursor"><svg width="22" height="28" viewBox="0 0 22 28"><path d="M2 2L3 23L8 18L12 26L16 24L12 16L20 16Z" fill="white" stroke="#0a0a0a" stroke-width="1.5" stroke-linejoin="round"/></svg><div id="badge"><img src="${mark}"></div></div>`;
+ shadow.innerHTML=`<style>*{box-sizing:border-box;pointer-events:none}#cursor{visibility:hidden;position:absolute;width:${geometry.width}px;height:${geometry.height}px}#graphic{position:absolute;left:${-geometry.hotspot.x}px;top:${-geometry.hotspot.y}px;width:${geometry.width}px;height:${geometry.height}px}.running .halo{animation:breathe 900ms ease-in-out infinite}#pulse{position:absolute;width:44px;height:44px;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:50%;display:none}#target{position:absolute;display:none;border:2px solid #0a0a0a;box-shadow:0 0 0 2px white;border-radius:5px;background:#ffffff18}@keyframes breathe{50%{opacity:${geometry.glow.runningOpacityMin}}}@keyframes pulse{from{opacity:1;transform:scale(.3)}to{opacity:0;transform:scale(1.3)}}@media(prefers-reduced-motion:reduce){.running .halo{animation:none}#pulse{animation:none!important}}</style><div id="target"></div><div id="pulse"></div><div id="cursor"><div id="graphic">${graphic}</div></div>`;
  const cursor=shadow.querySelector('#cursor') as HTMLElement, pulse=shadow.querySelector('#pulse') as HTMLElement, target=shadow.querySelector('#target') as HTMLElement;
  const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
  let movement:Animation|undefined,motionEpoch=0;
  let prepared:any,prepareSequence=0;
  cursor.style.transform=`translate(${x}px,${y}px)`;
  function moveTo(nextX:number,nextY:number,instant=false,onArrive?:()=>void){
-  if(disposed||(!onArrive&&nextX===x&&nextY===y))return;
+  if(disposed||!active)return;
+  const first=!positioned;
+  if(!first&&!onArrive&&nextX===x&&nextY===y)return;
+  // Reveal the fixed origin only after a real target, then use the normal curve.
+  if(first){positioned=true;cursor.style.visibility='visible';}
   const from=getComputedStyle(cursor).transform;
   const current=new DOMMatrixReadOnly(from==='none'?undefined:from);
   const distance=Math.hypot(nextX-current.e,nextY-current.f);
@@ -47,7 +56,9 @@ function mount(mark: string) {
   x=current.e;y=current.f;cursor.style.transform=`translate(${x}px,${y}px)`;
   target.style.display=pulse.style.display='none';clearTimeout(targetTimer);clearTimeout(pulseTimer);
  }
- const onReducedMotion=()=>{if(reducedMotion.matches){if(prepared&&!prepared.settled){movement?.finish();return}const destination={x,y};cancelMotion();moveTo(destination.x,destination.y,true)}};
+ function suspend(){cancelMotion();running=false;cursor.classList.remove('running');icon.remove()}
+ function reset(){suspend();positioned=false;x=y=24;cursor.style.transform=`translate(${x}px,${y}px)`;cursor.style.visibility='hidden'}
+ const onReducedMotion=()=>{if(reducedMotion.matches&&positioned){if(prepared&&!prepared.settled){movement?.finish();return}const destination={x,y};cancelMotion();moveTo(destination.x,destination.y,true)}};
  addEventListener('scroll',cancelMotion,{capture:true,passive:true});
  addEventListener('resize',cancelMotion);
  reducedMotion.addEventListener('change',onReducedMotion);
@@ -60,19 +71,21 @@ function mount(mark: string) {
  const canvas=document.createElement('canvas');canvas.width=canvas.height=32;
  const ctx=canvas.getContext('2d')!;let base:HTMLImageElement|undefined, lastSource='',needsResource=false,renderEpoch=0;
  const logo=new Image();logo.src=mark;
- function draw(){if(disposed||!base||!base.complete)return;try{ctx.clearRect(0,0,32,32);ctx.drawImage(base,0,0,32,32);ctx.fillStyle='#0a0a0a';ctx.strokeStyle='white';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(15,15,17,17,5);ctx.fill();ctx.stroke();ctx.drawImage(logo,18,19,11,10);if(running){ctx.fillStyle=Math.floor(Date.now()/400)%2?'#ffffff':'#8d8d8d';ctx.beginPath();ctx.arc(29,17,2,0,Math.PI*2);ctx.fill()}icon.href=canvas.toDataURL();if(document.head&&icon.parentNode!==document.head)document.head.append(icon)}catch{/* Cross-origin taint: retain the site's icon. */}}
+ function draw(){if(disposed||!active||!base||!base.complete)return;try{ctx.clearRect(0,0,32,32);ctx.drawImage(base,0,0,32,32);ctx.fillStyle='#0a0a0a';ctx.strokeStyle='white';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(15,15,17,17,5);ctx.fill();ctx.stroke();ctx.drawImage(logo,18,19,11,10);if(running){ctx.fillStyle=Math.floor(Date.now()/400)%2?'#ffffff':'#8d8d8d';ctx.beginPath();ctx.arc(29,17,2,0,Math.PI*2);ctx.fill()}icon.href=canvas.toDataURL();if(document.head&&icon.parentNode!==document.head)document.head.append(icon)}catch{/* Cross-origin taint: retain the site's icon. */}}
  async function refresh(){const links=[...document.querySelectorAll('link[rel~="icon"]')].filter(n=>n!==icon) as HTMLLinkElement[];const source=links.at(-1)?.href||(/^https?:/.test(location.href)?new URL('/favicon.ico',location.href).href:'');if(!source)return;if(source===lastSource){if(base&&icon.parentNode===document.head&&icon!==document.head.lastElementChild)document.head.append(icon);return}lastSource=source;needsResource=false;const epoch=++renderEpoch;const image=new Image();image.crossOrigin='anonymous';image.onload=()=>{if(epoch!==renderEpoch||disposed)return;base=image;draw()};image.onerror=()=>{if(epoch===renderEpoch){base=undefined;needsResource=true;icon.remove()}};image.src=source}
  const observer=new MutationObserver(records=>{if(records.some(r=>r.target!==icon&&!(r.type==='childList'&&[...r.addedNodes,...r.removedNodes].every(n=>n===icon))))void refresh()});observer.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['href','rel']});void refresh();logo.onload=draw;
  const timer=setInterval(()=>{if(Date.now()-alive>3000){dispose();return}if(running)draw()},400);
  function dispose(){if(disposed)return;cancelPrepared();disposed=true;++motionEpoch;movement?.cancel();movement=undefined;removeEventListener('scroll',cancelMotion,true);removeEventListener('resize',cancelMotion);removeEventListener('pagehide',dispose);reducedMotion.removeEventListener('change',onReducedMotion);clearInterval(timer);clearTimeout(targetTimer);clearTimeout(pulseTimer);observer.disconnect();host.remove();icon.remove();delete g.__dshIndicator}
  function showPulse(px:number,py:number){
-  if(disposed)return;
+  if(disposed||!active||!positioned)return;
   pulse.style.cssText=`display:block;left:${px-22}px;top:${py-22}px;animation:none`;
   void pulse.offsetWidth;pulse.style.animation='pulse 650ms ease-out';
   clearTimeout(pulseTimer);pulseTimer=setTimeout(()=>pulse.style.display='none',650);
  }
  function updateHint(v:any){
   if(disposed)return;alive=Date.now();
+  if(typeof v.active==='boolean'){active=v.active;if(!active){suspend();return}}
+  if(!active)return;
   if(typeof v.running==='boolean'){running=v.running;cursor.classList.toggle('running',running);draw()}
   if(prepared&&!prepared.settled)return;
   const positioned=Number.isFinite(v.x)&&Number.isFinite(v.y);
@@ -85,7 +98,7 @@ function mount(mark: string) {
   }else if(positioned)moveTo(v.x,v.y);
   if(v.rect){
    const r=v.rect;
-   if(!v.click&&!positioned)moveTo(Math.max(0,Math.min(innerWidth-62,r.x+r.width+6)),Math.max(0,Math.min(innerHeight-40,r.y+8)));
+   if(!v.click&&!positioned)moveTo(Math.max(0,Math.min(innerWidth-(geometry.width-geometry.hotspot.x),r.x+r.width+6)),Math.max(0,Math.min(innerHeight-(geometry.height-geometry.hotspot.y),r.y+8)));
    target.style.cssText=`display:block;left:${r.x-3}px;top:${r.y-3}px;width:${r.width+6}px;height:${r.height+6}px`;
    clearTimeout(targetTimer);targetTimer=setTimeout(()=>target.style.display='none',900);
   }
@@ -119,14 +132,15 @@ function mount(mark: string) {
   return{status:'prepared',token};
  }
  function commitClick(px:number,py:number){cancelPrepared();moveTo(px,py,true);showPulse(px,py)}
- g.__dshIndicator={dispose,prepareClick,waitClick(token:number){return prepared?.token===token?prepared.promise:Promise.resolve({status:'cancelled'})},cancelClick(){cancelMotion()},commitClick,resource(){return needsResource?lastSource:undefined},base(source:string,data:string){if(disposed||source!==lastSource)return;const image=new Image();image.onload=()=>{if(disposed||source!==lastSource)return;base=image;needsResource=false;draw()};image.src=data},update:updateHint};
+ g.__dshIndicator={version:'document-position-v2',dispose,reset,suspend,prepareClick,waitClick(token:number){return prepared?.token===token?prepared.promise:Promise.resolve({status:'cancelled'})},cancelClick(){cancelMotion()},commitClick,resource(){return needsResource?lastSource:undefined},base(source:string,data:string){if(disposed||source!==lastSource)return;const image=new Image();image.onload=()=>{if(disposed||source!==lastSource)return;base=image;needsResource=false;draw()};image.src=data},update:updateHint};
 }
 
-const install=`(${mount.toString()})(${JSON.stringify(brand)})`;
-type TabState={script:string,context?:number,loading?:boolean,attempted?:string,pending?:any,updating?:boolean,epoch:number,waiting?:boolean};
+const install=`(${mount.toString()})(${JSON.stringify(brand)},${JSON.stringify(pointerSvg)},${JSON.stringify(pointer)})`;
+type TabState={script:string,context?:number,loading?:boolean,attempted?:string,pending?:any,updating?:boolean,epoch:number,waiting?:boolean,clickEpoch?:number};
 export class ActionIndicator {
  private tabs=new Map<number,TabState>();
  private closed=false;
+ // Selected only by Agent-issued CDP targets, not group membership or user focus.
  private current?:number;
  private running=false;
  clickMode=false;
@@ -137,7 +151,7 @@ export class ActionIndicator {
   if(this.closed)return;
   const {identifier}=await this.send(tabId,'Page.addScriptToEvaluateOnNewDocument',{source:install,worldName:WORLD});
   if(this.closed){await this.send(tabId,'Page.removeScriptToEvaluateOnNewDocument',{identifier});return}
-  this.tabs.set(tabId,{script:identifier,epoch:0});this.current??=tabId;this.schedule(tabId,{});
+  this.tabs.set(tabId,{script:identifier,epoch:0});this.schedule(tabId,{});
  }
  private schedule(tabId:number,value:any){
   const state=this.tabs.get(tabId);if(!state||this.closed)return;
@@ -152,15 +166,16 @@ export class ActionIndicator {
  }
  async update(tabId:number,value:any){
   const state=this.tabs.get(tabId);if(!state||this.closed)return;
+  const epoch=state.epoch;
   try{const {frameTree}=await this.render(tabId,'Page.getFrameTree',{});const {executionContextId}=await this.render(tabId,'Page.createIsolatedWorld',{frameId:frameTree.frame.id,worldName:WORLD});
    if(state.context!==executionContextId)state.attempted=undefined;
    state.context=executionContextId;
-   if(this.closed||this.tabs.get(tabId)!==state)return;
+   if(this.closed||this.tabs.get(tabId)!==state||state.epoch!==epoch)return;
    if(state.waiting){state.pending=undefined;return;}
    if(state.pending){value={...value,...state.pending,click:value.click||state.pending.click,focus:value.focus||state.pending.focus};state.pending=undefined;}
-   const evaluation=await this.render(tabId,'Runtime.evaluate',{contextId:state.context,returnByValue:true,expression:`${install};globalThis.__dshIndicator?.update(${JSON.stringify({running:this.running&&tabId===this.current,...value})});globalThis.__dshIndicator?.resource()`});
+   const evaluation=await this.render(tabId,'Runtime.evaluate',{contextId:state.context,returnByValue:true,expression:`${install};globalThis.__dshIndicator?.update(${JSON.stringify({active:tabId===this.current,running:this.running&&tabId===this.current,...value})});globalThis.__dshIndicator?.resource()`});
    const source=evaluation.result?.value;
-   if(typeof source==='string'&&!state.loading&&state.attempted!==source&&/^https?:/.test(source)){
+   if(tabId===this.current&&typeof source==='string'&&!state.loading&&state.attempted!==source&&/^https?:/.test(source)){
     state.attempted=source;state.loading=true;void this.resource(tabId,state,source,frameTree.frame.id).finally(()=>state.loading=false);
    }
   }catch{/* A navigating or closing document is retried on the next heartbeat. */}
@@ -183,6 +198,12 @@ export class ActionIndicator {
    await this.send(tabId,'Runtime.evaluate',{contextId:state.context,expression:'globalThis.__dshIndicator?.base('+JSON.stringify(source)+','+JSON.stringify('data:'+type.split(';')[0]+';base64,'+btoa(binary))+')'});
   }catch{}finally{if(stream)try{await this.send(tabId,'IO.close',{handle:stream})}catch{}}
  }
+ private select(tabId:number){
+  if(this.current===tabId)return;
+  const previous=this.current;this.current=tabId;
+  if(previous!==undefined){this.invalidate(previous,false);this.schedule(previous,{})}
+  this.schedule(tabId,{});
+ }
  state(running:boolean,rect?:any,action?:string){
   this.running=running;
   this.clickMode=running&&action==='browser_click';
@@ -191,20 +212,21 @@ export class ActionIndicator {
    ?{x:rect.x,y:rect.y,width:rect.width,height:rect.height}:undefined;
   if(this.current!==undefined)this.schedule(this.current,{...(geometry?{rect:geometry}: {})});
  }
- invalidate(tabId:number){
+ invalidate(tabId:number,resetDocument=true){
   const state=this.tabs.get(tabId);if(!state)return;
-  state.epoch++;if(state.waiting)this.cancelledClick=true;
-  if(state.context)void this.send(tabId,'Runtime.evaluate',{contextId:state.context,expression:'globalThis.__dshIndicator?.cancelClick()'}).catch(()=>{});
+  state.epoch++;state.pending=undefined;state.clickEpoch=undefined;if(state.waiting)this.cancelledClick=true;
+  if(state.context)void this.send(tabId,'Runtime.evaluate',{contextId:state.context,expression:resetDocument?'globalThis.__dshIndicator?.reset()':'globalThis.__dshIndicator?.suspend()'}).catch(()=>{});
  }
  async beforeClick(tabId:number,p:any){
   if(this.cancelledClick)throw Error('BROWSER_CLICK_INTERRUPTED');
   const state=this.tabs.get(tabId);
+  this.select(tabId);
   if(!state?.context)return; // Optional renderer unavailable before any wait.
-  const epoch=state.epoch,deadline=Date.now()+400;state.waiting=true;state.pending=undefined;
+  const epoch=state.epoch,deadline=Date.now()+400;state.clickEpoch=epoch;state.waiting=true;state.pending=undefined;
   const current=()=>!this.closed&&this.tabs.get(tabId)===state&&state.epoch===epoch&&!this.cancelledClick;
   const evaluate=(expression:string,awaitPromise=false)=>this.render(tabId,'Runtime.evaluate',{contextId:state.context,expression,awaitPromise,returnByValue:true},Math.max(1,deadline-Date.now()));
   try{
-   const setup=await evaluate(`globalThis.__dshIndicator?.prepareClick(${p.x},${p.y},${Math.min(350,deadline-Date.now()-30)})`);
+   const setup=await evaluate(`globalThis.__dshIndicator?.update({active:true,running:${this.running}});globalThis.__dshIndicator?.prepareClick(${p.x},${p.y},${Math.min(350,deadline-Date.now()-30)})`);
    if(!current())throw Error('BROWSER_CLICK_INTERRUPTED');
    if(setup.exceptionDetails)throw Error('BROWSER_CLICK_PREPARATION_FAILED');
    const plan=setup.result?.value;
@@ -218,13 +240,13 @@ export class ActionIndicator {
   }finally{state.waiting=false;}
  }
  committedClick(tabId:number,p:any){
-  const state=this.tabs.get(tabId);if(!state?.context||this.closed)return;
+  const state=this.tabs.get(tabId);if(!state?.context||this.closed||state.clickEpoch!==state.epoch||this.current!==tabId)return;
   void this.send(tabId,'Runtime.evaluate',{contextId:state.context,expression:`globalThis.__dshIndicator?.commitClick(${p.x},${p.y})`}).catch(()=>{});
  }
  input(tabId:number,method:string,p:any){
-  if(method==='Page.bringToFront'){this.current=tabId;return}
+  if(method==='Page.bringToFront'){this.select(tabId);return}
   if(!method.startsWith('Input.'))return;
-  this.current=tabId;
+  this.select(tabId);
   this.schedule(tabId,{...(method==='Input.dispatchMouseEvent'?{x:p.x,y:p.y,click:p.type==='mousePressed',...(p.type==='mousePressed'?{pulseX:p.x,pulseY:p.y}:{})}:{}),focus:method==='Input.insertText'||method==='Input.dispatchKeyEvent'});
  }
  async detach(tabId:number){const state=this.tabs.get(tabId);this.tabs.delete(tabId);if(!state)return;
