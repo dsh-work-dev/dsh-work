@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=DSH Work
-Comment=Local-first desktop host for DeepSeek Harness
+Comment=Your personal AI agent
 Exec=/usr/local/bin/dsh-work %u
 Terminal=false
 Type=Application

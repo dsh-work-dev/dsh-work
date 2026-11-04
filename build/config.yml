@@ -4,9 +4,9 @@ info:
   companyName: "dsh-work"
   productName: "dsh-work"
   productIdentifier: "com.local.dsh-work"
-  description: "Local-first desktop host for DeepSeek Harness"
+  description: "Your personal AI agent"
   copyright: "Copyright 2026 DSH Work"
-  comments: "DSH Work desktop foundation"
+  comments: "Your personal AI agent"
   version: "0.1.0"
 
 protocols:
