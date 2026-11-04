@@ -38,7 +38,11 @@ func (m *Manager) ListLoaderEntries(ctx context.Context, request LoaderEntryList
 	if err != nil {
 		return nil, err
 	}
-	layers, err := officialLoaderLayers(filepath.Join(dataDirectory.Path, "profiles", request.Target.Profile.Name), runtime)
+	defaultPatch := ""
+	if provider, ok := m.config.AppProfile.(interface{ AppProfileDefaultPatch() string }); ok && isAppProfile(dataDirectory, request.Target.Profile.Name) {
+		defaultPatch = provider.AppProfileDefaultPatch()
+	}
+	layers, err := officialLoaderLayers(filepath.Join(dataDirectory.Path, "profiles", request.Target.Profile.Name), runtime, defaultPatch)
 	if err != nil {
 		return nil, failure(lifecycle.ErrorProfileInvalid, "DSH profile could not be read", "the profile or one of its layer patches is invalid")
 	}
@@ -48,7 +52,7 @@ func (m *Manager) ListLoaderEntries(ctx context.Context, request LoaderEntryList
 // officialLoaderLayers replays the profile's layer patches in order. Entries
 // are grouped under the official layer that inserts them; any later layer,
 // official or not, may change their default state.
-func officialLoaderLayers(profilePath string, runtime RuntimeInfo) ([]LoaderLayer, error) {
+func officialLoaderLayers(profilePath string, runtime RuntimeInfo, defaultPatch string) ([]LoaderLayer, error) {
 	manifest, err := readProfileBundleManifest(profilePath)
 	if err != nil {
 		return nil, err
@@ -96,7 +100,14 @@ func officialLoaderLayers(profilePath string, runtime RuntimeInfo) ([]LoaderLaye
 			}
 		}
 	}
-	userDisabled, err := userPatchDisables(filepath.Join(profilePath, userPatchName))
+	userPatch, err := readPatchSequence(filepath.Join(profilePath, userPatchName))
+	if errors.Is(err, os.ErrNotExist) {
+		userPatch, err = &yaml.Node{Kind: yaml.SequenceNode}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defaults, err := parsePatchSequence([]byte(defaultPatch))
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +116,7 @@ func officialLoaderLayers(profilePath string, runtime RuntimeInfo) ([]LoaderLaye
 			entry := &layers[layerIndex].Entries[entryIndex]
 			entry.DefaultDisabled = state[entry.ID] == loaderDisabled
 			entry.Conditional = state[entry.ID] == loaderConditional
-			entry.Disabled = userDisabled[entry.ID]
+			entry.Disabled, entry.UserModified = profileEntryOverride(userPatch, defaults, entry.ID, entry.Package)
 		}
 	}
 	return layers, nil
@@ -182,6 +193,10 @@ func readPatchSequence(path string) (*yaml.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parsePatchSequence(data)
+}
+
+func parsePatchSequence(data []byte) (*yaml.Node, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		return nil, err
@@ -195,25 +210,53 @@ func readPatchSequence(path string) (*yaml.Node, error) {
 	return document.Content[0], nil
 }
 
-// userPatchDisables reports the ids the profile's own patch layer turns off.
-func userPatchDisables(path string) (map[string]bool, error) {
-	disabled := map[string]bool{}
-	patch, err := readPatchSequence(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return disabled, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, item := range patch.Content {
-		if item.Kind != yaml.MappingNode || mappingValue(item, "insert") != nil {
-			continue
+// profileEntryOverride observes explicit per-profile edits, not runtime state
+// differences. In particular, conditional and bundle defaults are not edits.
+func profileEntryOverride(patch, defaults *yaml.Node, id, name string) (disabled, modified bool) {
+	fields := map[string]*yaml.Node{}
+	var collect func(*yaml.Node)
+	collect = func(row *yaml.Node) {
+		if row.Kind != yaml.MappingNode {
+			return
 		}
-		if id := scalarValue(mappingValue(item, "id")); id != "" && disabledState(mappingValue(item, "disabled")) == loaderDisabled {
-			disabled[id] = true
+		if inserted := mappingValue(row, "insert"); inserted != nil {
+			for _, entry := range inserted.Content {
+				collect(entry)
+			}
+			return
+		}
+		if scalarValue(mappingValue(row, "id")) != id {
+			return
+		}
+		if qualifier := scalarValue(mappingValue(row, "name")); qualifier != "" && qualifier != name {
+			return
+		}
+		for i := 0; i+1 < len(row.Content); i += 2 {
+			key := row.Content[i].Value
+			if key != "id" && key != "name" {
+				fields[key] = row.Content[i+1]
+			}
 		}
 	}
-	return disabled, nil
+	for _, row := range patch.Content {
+		collect(row)
+	}
+	for key, value := range fields {
+		if key == "disabled" {
+			disabled = disabledState(value) == loaderDisabled
+			var shellDefault *yaml.Node
+			for _, row := range defaults.Content {
+				if scalarValue(mappingValue(row, "id")) == id {
+					shellDefault = mappingValue(row, "disabled")
+				}
+			}
+			if shellDefault != nil && value.ShortTag() == "!!bool" && disabledState(value) == disabledState(shellDefault) {
+				continue
+			}
+		}
+		modified = true
+	}
+	return disabled, modified
 }
 
 func disabledState(value *yaml.Node) loaderDisabledState {

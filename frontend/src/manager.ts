@@ -148,11 +148,11 @@ function sectionName(value: string | null): ManagerSection {
 
 // filterLoaderLayers keeps the loader entries whose id or package matches the
 // query, dropping layers left without a match.
-export function filterLoaderLayers(layers: LoaderLayer[], query: string): Array<LoaderLayer & {entries: LoaderEntry[]}> {
+export function filterLoaderLayers(layers: LoaderLayer[], query: string, modifiedOnly = false): Array<LoaderLayer & {entries: LoaderEntry[]}> {
   const needle = query.trim().toLowerCase();
   return layers
-    .map(layer => ({...layer, entries: (layer.entries ?? []).filter(entry => !needle || entry.id.toLowerCase().includes(needle) || entry.package.toLowerCase().includes(needle))}))
-    .filter(layer => !needle || layer.entries.length > 0);
+    .map(layer => ({...layer, entries: (layer.entries ?? []).filter(entry => (!modifiedOnly || entry.userModified) && (!needle || entry.id.toLowerCase().includes(needle) || entry.package.toLowerCase().includes(needle)))}))
+    .filter(layer => layer.entries.length > 0);
 }
 
 // mergePluginObservation adds live DSH activation state and registry details to
@@ -333,8 +333,8 @@ export function mountManager() {
   let pluginObservationInFlight: string | undefined;
   let pluginObservationRetryDelay = 0;
   let pluginObservationRetry: number | undefined;
-  // The loader tree starts collapsed for each profile shown.
-  let loaderTree = {profile: "", open: false, query: "", openLayers: new Set<string>()};
+  // Each profile starts with its explicit modifications visible.
+  let loaderTree = {profile: "", open: true, showAll: false, query: "", openLayers: new Set<string>()};
   let managedProfile: ManagerProfileRef | undefined = initialDataDirectory && initialProfile
     ? {dataDirectoryId: initialDataDirectory, name: initialProfile}
     : undefined;
@@ -1034,12 +1034,12 @@ export function mountManager() {
   }
 
   // renderLoaderTree shows the current profile's official loader entries as
-  // official layer -> entry, inside a section that starts collapsed.
+  // official layer -> entry, initially showing only explicit profile edits.
   function renderLoaderTree(item: ManagerProfile, mutable: boolean) {
     const key = `${item.ref.dataDirectoryId}/${item.ref.name}`;
     const layers = pluginObservation?.profile === key ? pluginObservation.layers : undefined;
     if (!layers || layers.length === 0) return;
-    if (loaderTree.profile !== key) loaderTree = {profile: key, open: false, query: "", openLayers: new Set()};
+    if (loaderTree.profile !== key) loaderTree = {profile: key, open: true, showAll: false, query: "", openLayers: new Set()};
     const section = document.createElement("details");
     section.className = "plugin-official";
     section.open = loaderTree.open;
@@ -1047,7 +1047,14 @@ export function mountManager() {
       loaderTree.open = section.open;
     });
     const summary = document.createElement("summary");
-    summary.textContent = t("plugins.official", {count: layers.reduce((total, layer) => total + (layer.entries?.length ?? 0), 0)});
+    const toolbar = document.createElement("div");
+    toolbar.className = "loader-toolbar";
+    const scope = document.createElement("span");
+    const showAll = document.createElement("button");
+    showAll.type = "button";
+    showAll.className = "button button-secondary";
+    showAll.setAttribute("aria-pressed", String(loaderTree.showAll));
+    toolbar.append(scope, showAll);
     const search = document.createElement("input");
     search.type = "search";
     search.className = "loader-search";
@@ -1059,21 +1066,26 @@ export function mountManager() {
     const renderTree = () => {
       tree.replaceChildren();
       const searching = !!loaderTree.query.trim();
-      const visible = filterLoaderLayers(layers, loaderTree.query);
+      const scoped = filterLoaderLayers(layers, "", !loaderTree.showAll);
+      summary.textContent = t("plugins.official", {count: scoped.reduce((total, layer) => total + layer.entries.length, 0)});
+      scope.textContent = t(loaderTree.showAll ? "plugins.allEntries" : "plugins.modifiedEntries");
+      showAll.textContent = t(loaderTree.showAll ? "plugins.showModified" : "action.showAll");
+      showAll.setAttribute("aria-pressed", String(loaderTree.showAll));
+      const visible = filterLoaderLayers(layers, loaderTree.query, !loaderTree.showAll);
       if (visible.length === 0) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = t("plugins.noMatches");
+        empty.textContent = t(!loaderTree.showAll && scoped.length === 0 ? "plugins.unmodified" : "plugins.noMatches");
         tree.append(empty);
         return;
       }
       for (const layer of visible) {
         const group = document.createElement("details");
         group.className = "loader-layer";
-        // A search opens every layer with a match.
-        group.open = searching || loaderTree.openLayers.has(layer.package);
+        // Modified entries are immediately visible; searches open matching layers.
+        group.open = !loaderTree.showAll || searching || loaderTree.openLayers.has(layer.package);
         group.addEventListener("toggle", () => {
-          if (searching) return;
+          if (searching || !loaderTree.showAll) return;
           if (group.open) loaderTree.openLayers.add(layer.package);
           else loaderTree.openLayers.delete(layer.package);
         });
@@ -1106,8 +1118,12 @@ export function mountManager() {
       loaderTree.query = search.value;
       renderTree();
     });
+    showAll.addEventListener("click", () => {
+      loaderTree.showAll = !loaderTree.showAll;
+      renderTree();
+    });
     renderTree();
-    section.append(summary, search, tree);
+    section.append(summary, toolbar, search, tree);
     profilePlugins.append(section);
   }
 

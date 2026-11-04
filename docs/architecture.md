@@ -605,6 +605,25 @@ non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
 disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
 commands through the manager.
 
+The Official plugins view initially shows explicit edits in the profile's own
+`cordis.patch.yml`. Its `userModified` observation includes enablement and
+configuration overrides matched by entry ID and any module-name qualifier;
+ID/name selectors alone do not count. Bundle defaults, third-party layer
+overrides and conditional runtime loading do not establish a user edit.
+This describes saved overrides rather than a history of who changed them.
+When DSH removes a simple enablement override on returning to the bundle
+default, the next observation removes that entry from the modified view.
+
+For the managed app profile, the adapter's optional `AppProfileDefaultPatch`
+supplies the same template used to initialize its patch. The manager excludes
+matching default `disabled` values while retaining other explicit fields on
+the entry as modifications. Keeping defaults with their writer avoids a
+second ID/value catalog in the manager. The view uses explicit profile edits
+instead of a full official-configuration diff because its purpose is to find
+local customizations. Revisit this attribution if DSH supplies writer metadata
+or Work moves its automatic defaults out of the profile patch. Live switch
+state still comes from DSH's PluginManager, independently of `userModified`.
+
 A failed start has no Worker to call. The same holds when a ready Worker exits
 unexpectedly, for example after a plugin was enabled while it ran. The startup
 window then lists every installed third-party bundle of the failed profile and can disable or remove

@@ -57,6 +57,8 @@ dialog.restore-point-preview input { width: 100%; }
 .diagnostics-problem-detail { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .diagnostics-problem > :not(summary) { padding: 0 var(--row-pad-x) var(--row-pad-y); }
 .loader-search { display: block; width: calc(100% - 2 * var(--row-pad-x)); margin: var(--space-3) var(--row-pad-x); }
+.loader-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--row-pad-x) 0; }
+.loader-toolbar > span { color: var(--muted); font-size: var(--fs-control); }
 .loader-tree { padding: 0 var(--row-pad-x) var(--space-3); }
 .loader-layer { border-left: var(--row-divider); margin: var(--space-2) 0 0 var(--space-1); padding-left: var(--space-3); }
 .loader-layer > summary { padding: var(--space-2) 0; cursor: pointer; font: 500 var(--fs-control) var(--font-mono); overflow-wrap: anywhere; }

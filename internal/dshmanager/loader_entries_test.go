@@ -90,7 +90,7 @@ func loaderEntry(t *testing.T, layers []LoaderLayer, id string) LoaderEntry {
 
 func TestOfficialLoaderEntriesAreGroupedByTheLayerThatInsertsThem(t *testing.T) {
 	launch, profilePath := newLoaderTestProfile(t)
-	layers, err := officialLoaderLayers(profilePath, launch.Runtime)
+	layers, err := officialLoaderLayers(profilePath, launch.Runtime, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,18 +101,96 @@ func TestOfficialLoaderEntriesAreGroupedByTheLayerThatInsertsThem(t *testing.T) 
 		t.Fatalf("base entries = %d", got)
 	}
 	search := loaderEntry(t, layers, "web-search-deepseek")
-	if search.Package != "@deepseek-ai/dsh-web-search-deepseek" || search.DefaultDisabled || search.Disabled || search.Conditional {
+	if search.Package != "@deepseek-ai/dsh-web-search-deepseek" || search.DefaultDisabled || search.Disabled || search.Conditional || search.UserModified {
 		t.Fatalf("web search = %#v", search)
 	}
 	// A later layer's override decides the default, not the inserting layer.
-	if bash := loaderEntry(t, layers, "tool-bash"); !bash.DefaultDisabled {
+	if bash := loaderEntry(t, layers, "tool-bash"); !bash.DefaultDisabled || bash.UserModified {
 		t.Fatalf("tool-bash = %#v", bash)
 	}
-	if manager := loaderEntry(t, layers, "plugin-manager"); manager.DefaultDisabled || !manager.Conditional {
+	if manager := loaderEntry(t, layers, "plugin-manager"); manager.DefaultDisabled || !manager.Conditional || manager.UserModified {
 		t.Fatalf("plugin-manager = %#v", manager)
 	}
-	if workspace := loaderEntry(t, layers, "workspace"); !workspace.DefaultDisabled {
+	if workspace := loaderEntry(t, layers, "workspace"); !workspace.DefaultDisabled || workspace.UserModified {
 		t.Fatalf("third-party override was ignored: %#v", workspace)
+	}
+}
+
+func TestOfficialLoaderEntriesIdentifyOnlyProfileOverrides(t *testing.T) {
+	launch, profilePath := newLoaderTestProfile(t)
+	patch := `- id: web-search-deepseek
+  disabled: true
+- id: tool-bash
+  disabled: false
+- id: plugin-manager
+  config:
+    custom: true
+- id: workspace
+`
+	if err := os.WriteFile(filepath.Join(profilePath, userPatchName), []byte(patch), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	layers, err := officialLoaderLayers(profilePath, launch.Runtime, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"web-search-deepseek", "tool-bash", "plugin-manager"} {
+		if entry := loaderEntry(t, layers, id); !entry.UserModified {
+			t.Fatalf("explicit override not marked: %#v", entry)
+		}
+	}
+	if entry := loaderEntry(t, layers, "workspace"); entry.UserModified {
+		t.Fatalf("ID-only selector counted as modification: %#v", entry)
+	}
+	// Match shell defaults from their provider rather than marking its automatic
+	// edits as user changes. Other fields on the same entry must still count.
+	defaults := "- id: web-search-deepseek\n  disabled: true\n- id: tool-bash\n  disabled: true\n- id: plugin-manager\n  disabled: false\n"
+	layers, err = officialLoaderLayers(profilePath, launch.Runtime, defaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry := loaderEntry(t, layers, "web-search-deepseek"); entry.UserModified {
+		t.Fatalf("shell default counted as modification: %#v", entry)
+	}
+	if entry := loaderEntry(t, layers, "tool-bash"); !entry.UserModified {
+		t.Fatalf("override of shell default not marked: %#v", entry)
+	}
+	if entry := loaderEntry(t, layers, "plugin-manager"); !entry.UserModified {
+		t.Fatalf("custom configuration not marked: %#v", entry)
+	}
+	// DSH removes simple enablement overrides on restoring the bundle default.
+	if err := os.WriteFile(filepath.Join(profilePath, userPatchName), []byte("[]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	layers, err = officialLoaderLayers(profilePath, launch.Runtime, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, layer := range layers {
+		for _, entry := range layer.Entries {
+			if entry.UserModified {
+				t.Fatalf("restored entry still modified: %#v", entry)
+			}
+		}
+	}
+}
+
+func TestProfileEntryOverrideUsesLastValueAndModuleQualifier(t *testing.T) {
+	patch, err := parsePatchSequence([]byte(`- id: x
+  disabled: true
+- id: x
+  disabled: false
+- id: x
+  name: other-module
+  disabled: true
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, _ := parsePatchSequence(nil)
+	disabled, modified := profileEntryOverride(patch, defaults, "x", "module")
+	if disabled || !modified {
+		t.Fatalf("disabled=%v modified=%v", disabled, modified)
 	}
 }
 
@@ -126,7 +204,7 @@ func TestOfficialLoaderEntriesReadBundlePatchArraysInOrder(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bundleDir, "preset.patch.yml"), []byte("- id: tool-bash\n  disabled: false\n- insert:\n    - id: preset\n      name: '@deepseek-ai/dsh-agent-preset'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	layers, err := officialLoaderLayers(profilePath, launch.Runtime)
+	layers, err := officialLoaderLayers(profilePath, launch.Runtime, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -126,6 +126,11 @@ export interface LoaderEntry {
     "conditional"?: boolean;
     "disabled"?: boolean;
     "canToggle"?: boolean;
+
+    /**
+     * UserModified denotes an explicit profile patch, excluding shell defaults.
+     */
+    "userModified"?: boolean;
 }
 
 export interface LoaderEntryDisableRequest {
