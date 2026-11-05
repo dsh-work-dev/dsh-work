@@ -6,7 +6,9 @@ import (
 	browserextension "github.com/local/dsh-work/browser-extension"
 )
 
-const DSHVersion = "0.2.1-rc.5"
+const AUVVersion = "0.0.43"
+
+const DSHVersion = "0.2.2-rc.1"
 const MCPVersion = "0.0.83"
 const SDKVersion = "1.32.2"
 const DriverVersion = "0.28.1"
@@ -38,6 +40,7 @@ type VersionInputs struct {
 	SchemaVersion   int    `json:"schemaVersion"`
 	BrowserLock     string `json:"browserLock"`
 	ComputerLock    string `json:"computerLock"`
+	AUVLock         string `json:"auvLock"`
 	DriverVersion   string `json:"driverVersion"`
 	DriverArchive   string `json:"driverArchive"`
 	DriverSHA256    string `json:"driverSha256"`
@@ -47,7 +50,8 @@ type VersionInputs struct {
 func CurrentVersionInputs() VersionInputs {
 	browser, _ := DependencyFiles(Browser)
 	computer, _ := DependencyFiles(Computer)
-	return VersionInputs{1, string(browser["package-lock.json"]), string(computer["package-lock.json"]), DriverVersion, DriverArchive, DriverSHA256, browserextension.SourceIdentity}
+	auv, _ := DependencyFiles(AUV)
+	return VersionInputs{1, string(browser["package-lock.json"]), string(computer["package-lock.json"]), string(auv["package-lock.json"]), DriverVersion, DriverArchive, DriverSHA256, browserextension.SourceIdentity}
 }
 func (v VersionInputs) Validate() error {
 	if v != CurrentVersionInputs() {

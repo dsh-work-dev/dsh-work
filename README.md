@@ -5,9 +5,16 @@ dsh-work is a local-first desktop host for
 turns a separately managed DSH runtime into a dependable desktop application
 while leaving agents, plugins, conversations and Workspaces under DSH ownership.
 
+The managed DSH Work profile keeps personal agent data under the user's
+control. It disables product analytics, desktop and feedback telemetry,
+Session-log contribution and plugin-inventory reporting. Functional network
+traffic follows the model provider, web capability or browser integration the
+user chooses to use.
+
 ## What it provides
 
 - a trusted desktop shell and Settings surface;
+- a local-first managed profile with optional reporting pinned off;
 - explicit DSH runtime, data-directory and profile management;
 - serialized Run-context switching with configurable recovery;
 - automatic and manual version snapshots for DSH and profile plugins;

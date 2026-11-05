@@ -132,3 +132,16 @@ button.pets-list-item:disabled { opacity: .5; cursor: default; }
 .browser-permission {max-width:34rem;margin:0 auto;padding:24px;display:flex;flex-direction:column;gap:14px;overflow-wrap:anywhere}.browser-permission h1{font-size:23px;line-height:1.3}.browser-permission p{margin:0}.browser-permission .actions{margin-top:18px;justify-content:flex-end}
 
 .browser-permission{height:100vh;box-sizing:border-box;overflow-y:auto}.browser-permission .actions{margin-top:auto;padding-top:16px}
+
+/* Directly managed automation distributions. */
+.component-list { margin-top: var(--space-4); }
+.component-row { align-items: flex-start; }
+.component-row > .row-trail { padding-top: 2px; flex-wrap: wrap; }
+.component-row details { margin-top: var(--space-1); }
+.component-row summary { cursor: pointer; width: fit-content; }
+.component-row details p { margin: var(--space-1) 0 0; }
+.component-location { overflow-wrap: anywhere; }
+
+html[data-surface=computer-pointer],.computer-pointer-surface{background:transparent!important;overflow:hidden!important;margin:0!important}.computer-agent-pointer{display:block;filter:drop-shadow(0 0 3px #28c6ff);animation:computer-pointer-pulse .8s ease-in-out infinite alternate}.computer-control-surface{overflow:hidden!important}.computer-control{height:72px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);background:var(--canvas);border-radius:12px}.computer-control strong{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.computer-control span{color:var(--muted);font-size:13px}.computer-control button{margin-left:auto;flex-shrink:0}@keyframes computer-pointer-pulse{to{filter:drop-shadow(0 0 7px #28c6ff)}}@media(prefers-reduced-motion:reduce){.computer-agent-pointer{animation:none}}
+
+.computer-access>h2{font:var(--heading-weight) var(--fs-section)/1.4 var(--font-heading);margin:var(--space-5) 0 var(--space-2)}.computer-access>details{margin-top:var(--space-4)}.computer-control{overflow:hidden}.computer-control>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -230,9 +230,21 @@ func (b *Bridge) connect(parent context.Context, auth string, u *url.URL, transp
 		case "turn":
 			_, _ = service.BrowserTurn(r)
 		case "discard":
-			service.DiscardBrowserPermit(r)
+			if r.Capability == Computer {
+				service.DiscardComputerPermit(r)
+			} else {
+				service.DiscardBrowserPermit(r)
+			}
+		case "release":
+			if r.Capability == Computer {
+				_ = service.ReleaseComputer(r.Session, r.Lifetime)
+			}
 		case "stop":
-			service.StopSession(generation, r.Session, r.Lifetime)
+			if r.Capability == Computer {
+				_ = service.StopComputerUse(r.Session, r.Lifetime)
+			} else {
+				service.StopSession(generation, r.Session, r.Lifetime)
+			}
 		case "cancel":
 			pendingMu.Lock()
 			if c := pending[message.ID]; c != nil {
@@ -246,10 +258,10 @@ func (b *Bridge) connect(parent context.Context, auth string, u *url.URL, transp
 				return
 			}
 			timeout := 15 * time.Second
-			if r.Operation == "browser" {
+			if r.Operation == "browser" || r.Operation == "computer" {
 				timeout = 80 * time.Second
 			}
-			if r.Operation == "authorize" {
+			if r.Operation == "authorize" || r.Operation == "computer-authorize" {
 				timeout = 300 * time.Second
 			}
 			callCtx, stop := context.WithTimeout(run, timeout)
@@ -272,7 +284,7 @@ func (b *Bridge) connect(parent context.Context, auth string, u *url.URL, transp
 					if errors.Is(err, context.Canceled) {
 						code = "AUTOMATION_CANCELLED"
 					}
-					if strings.HasPrefix(err.Error(), "BROWSER_") {
+					if strings.HasPrefix(err.Error(), "BROWSER_") || strings.HasPrefix(err.Error(), "COMPUTER_") {
 						code = err.Error()
 					}
 				}

@@ -18,9 +18,10 @@ type AutomationService struct {
 }
 
 type BrowserPermissionPanel struct {
-	Request    *automation.BrowserConsent `json:"request"`
-	Locale     settings.Locale            `json:"locale"`
-	Appearance settings.Appearance        `json:"appearance"`
+	ComputerRequest *automation.ComputerConsent `json:"computerRequest,omitempty"`
+	Request         *automation.BrowserConsent  `json:"request"`
+	Locale          settings.Locale             `json:"locale"`
+	Appearance      settings.Appearance         `json:"appearance"`
 }
 
 // The standalone native window has only permission read/answer authority.
@@ -36,10 +37,7 @@ func (s *AutomationService) GetBrowserPermission(ctx context.Context) (BrowserPe
 		panel.Appearance = s.permissionAppearance()
 	}
 	v := s.service.Snapshot()
-	if v.BrowserAccess != nil && len(v.BrowserAccess.Requests) > 0 {
-		r := v.BrowserAccess.Requests[0]
-		panel.Request = &r
-	}
+	panel.Request, panel.ComputerRequest = automation.FirstAutomationPermission(v)
 	return panel, nil
 }
 func SetBrowserPermissionLocale(s *AutomationService, locale func() settings.Locale) {
@@ -51,6 +49,17 @@ func SetBrowserPermissionAppearance(s *AutomationService, appearance func() sett
 func (s *AutomationService) AnswerBrowserPermission(ctx context.Context, id, choice string) (BrowserPermissionPanel, error) {
 	if !isTrustedWindow(ctx, "browser-permission") {
 		return BrowserPermissionPanel{}, trustedSurfaceRequired("Open the browser permission window.")
+	}
+	v := s.service.Snapshot()
+	if v.ComputerAccess != nil {
+		for _, r := range v.ComputerAccess.Requests {
+			if r.ID == id {
+				if _, err := s.service.AnswerComputerConsent(ctx, id, choice); err != nil {
+					return BrowserPermissionPanel{}, err
+				}
+				return s.GetBrowserPermission(ctx)
+			}
+		}
 	}
 	if _, err := s.service.AnswerBrowserConsent(ctx, id, choice); err != nil {
 		return BrowserPermissionPanel{}, err
@@ -65,18 +74,49 @@ func (s *AutomationService) GetAutomation(ctx context.Context) (automation.Snaps
 	if !isTrustedWindow(ctx, "workspace") {
 		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work Settings.")
 	}
-	return s.service.Snapshot(), nil
+	return s.service.InspectInstalled(), nil
+}
+
+func (s *AutomationService) CheckAutomationComponents(ctx context.Context, force bool) (automation.Snapshot, error) {
+	if !isTrustedWindow(ctx, "workspace") {
+		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work Settings.")
+	}
+	return s.service.CheckComponents(ctx, force)
+}
+
+func (s *AutomationService) SetComputerEngine(ctx context.Context, engine string) (automation.Snapshot, error) {
+	if !isTrustedWindow(ctx, "workspace") {
+		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work Settings.")
+	}
+	return s.service.SelectComputerEngine(ctx, engine)
+}
+
+func (s *AutomationService) InstallAutomationComponent(ctx context.Context, id string, repair bool) (automation.Snapshot, error) {
+	if e := s.browserSetupAllowed(ctx); e != nil {
+		return automation.Snapshot{}, e
+	}
+	if id == "browser-extension" {
+		return s.PrepareBrowserConnection(ctx)
+	}
+	c := automation.Capability("")
+	switch id {
+	case "browser-mcp":
+		c = automation.Browser
+	case "cua-driver":
+		c = automation.Computer
+	case "auv":
+		c = automation.AUV
+	}
+	if repair {
+		return s.service.Repair(c)
+	}
+	return s.service.Retry(c)
 }
 func (s *AutomationService) SetAutomationEnabled(ctx context.Context, capability string, enabled bool) (automation.Snapshot, error) {
 	if !isTrustedWindow(ctx, "workspace") {
 		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work Settings.")
 	}
-	v, e := s.service.SetEnabled(ctx, automation.Capability(capability), enabled)
-	if e == nil && capability == "browser" && enabled && v.DefaultBrowserEnabled {
-		s.prepareBrowserHost(ctx)
-		v = s.service.Snapshot()
-	}
-	return v, e
+	return s.service.SetEnabled(ctx, automation.Capability(capability), enabled)
 }
 func (s *AutomationService) RetryAutomation(ctx context.Context, capability string) (automation.Snapshot, error) {
 	if !isTrustedWindow(ctx, "workspace") {
@@ -95,12 +135,7 @@ func (s *AutomationService) SetDefaultBrowserEnabled(ctx context.Context, enable
 	if !isTrustedWindow(ctx, "workspace") {
 		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work Settings.")
 	}
-	v, e := s.service.SetDefaultBrowser(ctx, enabled)
-	if e == nil && enabled && v.Browser.Enabled {
-		s.prepareBrowserHost(ctx)
-		v = s.service.Snapshot()
-	}
-	return v, e
+	return s.service.SetDefaultBrowser(ctx, enabled)
 }
 
 // Setup mutations remain on the existing trusted workbench/current-profile path.
@@ -116,10 +151,6 @@ func (s *AutomationService) browserSetupAllowed(ctx context.Context) error {
 }
 func SetBrowserHostRegistrar(s *AutomationService, r browserhost.Registrar) {
 	s.registrar = r
-	v := s.service.Snapshot()
-	if v.Browser.Enabled && v.DefaultBrowserEnabled {
-		s.prepareBrowserHost(context.Background())
-	}
 }
 func (s *AutomationService) prepareBrowserHost(ctx context.Context) {
 	s.service.BrowserDiscovery(browserhost.Discover())
@@ -189,7 +220,6 @@ func (s *AutomationService) OpenBrowserExtensionFolder(ctx context.Context) erro
 	if s.openBrowserExtension == nil {
 		return browserhost.ErrUnsupported
 	}
-	s.prepareBrowserHost(ctx)
 	return s.openBrowserExtension()
 }
 
@@ -272,4 +302,53 @@ func (s *AutomationService) OpenBrowserConversation(ctx context.Context, session
 		}
 	}
 	return automation.ErrRevoked
+}
+
+func (s *AutomationService) AnswerComputerConsent(ctx context.Context, id, choice string) (automation.Snapshot, error) {
+	if !isTrustedWindow(ctx, "workspace") {
+		return automation.Snapshot{}, trustedSurfaceRequired("Open DSH Work.")
+	}
+	return s.service.AnswerComputerConsent(ctx, id, choice)
+}
+
+type ComputerControlPanel struct {
+	State      automation.ComputerSnapshot `json:"state"`
+	Locale     settings.Locale             `json:"locale"`
+	Appearance settings.Appearance         `json:"appearance"`
+}
+
+func (s *AutomationService) GetComputerControl(ctx context.Context) (ComputerControlPanel, error) {
+	if !isTrustedWindow(ctx, "computer-control") && !isTrustedWindow(ctx, "computer-pointer") {
+		return ComputerControlPanel{}, trustedSurfaceRequired("Open computer controls.")
+	}
+	p := ComputerControlPanel{Locale: settings.DefaultLocale}
+	if s.permissionLocale != nil {
+		p.Locale = s.permissionLocale()
+	}
+	if s.permissionAppearance != nil {
+		p.Appearance = s.permissionAppearance()
+	}
+	v := s.service.Snapshot()
+	if v.ComputerAccess != nil {
+		p.State = *v.ComputerAccess
+	}
+	return p, nil
+}
+func (s *AutomationService) StopComputerUse(ctx context.Context, session, lifetime string) (automation.Snapshot, error) {
+	if !isTrustedWindow(ctx, "workspace") && !isTrustedWindow(ctx, "computer-control") {
+		return automation.Snapshot{}, trustedSurfaceRequired("Open computer controls.")
+	}
+	v := s.service.Snapshot()
+	if v.ComputerAccess == nil || v.ComputerAccess.Use == nil || v.ComputerAccess.Use.Session != session || v.ComputerAccess.Use.Lifetime != lifetime {
+		return v, automation.ErrRevoked
+	}
+	err := s.service.StopComputerUse(session, lifetime)
+	return s.service.Snapshot(), err
+}
+
+func (s *AutomationService) SetComputerPolicy(ctx context.Context, revision uint64, policy settings.ComputerPolicy) (automation.Snapshot, error) {
+	if !isTrustedWindow(ctx, "workspace") {
+		return automation.Snapshot{}, trustedSurfaceRequired("Open computer settings.")
+	}
+	return s.service.SetComputerPolicy(ctx, revision, policy)
 }

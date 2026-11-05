@@ -84,7 +84,7 @@ func (r *setupRegistrar) Ensure(context.Context) []browserhost.Registration {
 }
 func (*setupRegistrar) Refresh(context.Context) error { return nil }
 func (*setupRegistrar) Remove(context.Context) error  { return nil }
-func TestEnablingBrowserChecksSetupBeforeAnyToolCall(t *testing.T) {
+func TestBrowserSetupRequiresExplicitUserAction(t *testing.T) {
 	state := automation.New(newPetServiceManager(t, settings.DefaultValues()), nil)
 	defer state.Close()
 	state.Worker("setup", true, true)
@@ -96,17 +96,29 @@ func TestEnablingBrowserChecksSetupBeforeAnyToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if registrar.calls != 1 || snapshot.Profiles.Discovery == nil || len(snapshot.Profiles.Registration) != 1 {
-		t.Fatal("enabling did not check browser setup")
+	if registrar.calls != 0 || snapshot.Browser.Dependency != "unprepared" {
+		t.Fatal("enabling installed components", snapshot)
 	}
-	if len(snapshot.Profiles.Bindings) != 0 || snapshot.Profiles.Selected != "" || len(snapshot.BrowserTools) != 0 {
-		t.Fatal("setup fabricated binding or granted execution")
+	opened := false
+	SetBrowserExtensionFolder(service, func() error { opened = true; return nil })
+	if err = service.OpenBrowserExtensionFolder(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if !opened || registrar.calls != 0 {
+		t.Fatal("opening folder prepared components")
+	}
+	if _, err = service.PrepareBrowserConnection(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if registrar.calls != 1 {
+		t.Fatal("explicit setup did not prepare host")
 	}
 	service.SetDefaultBrowserEnabled(workspace, false)
 	if _, err = service.SetDefaultBrowserEnabled(workspace, true); err != nil {
 		t.Fatal(err)
 	}
-	if registrar.calls != 2 {
-		t.Fatal("reenabling default path skipped setup check")
+	if registrar.calls != 1 {
+		t.Fatal("reenabling installed components")
 	}
+
 }

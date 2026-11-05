@@ -6,6 +6,14 @@ dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It
 makes a versioned external DSH runtime startable, observable and recoverable
 without turning the Host into another agent runtime.
 
+The managed DSH Work profile gives users control of personal agent data. It
+pins product analytics, desktop and feedback telemetry, Session-log
+contribution and plugin-inventory reporting off. Logs and diagnostics stay on
+the machine until the user exports them. Functional network traffic follows
+the model provider, web capability or browser integration the user chooses to
+use. This privacy contract is a primary product feature and remains enforced
+when upstream profile defaults change.
+
 The product is shown to users as **DSH Work** in every language: window and
 installer titles, tray, menus, notifications, error summaries and executable
 metadata. `dsh-work` remains the technical identifier for the repository, Go
@@ -46,6 +54,11 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
 
 ## Current capabilities
 
+- The managed DSH Work profile disables product analytics, desktop telemetry,
+  feedback OTel export, official-API Session-log contribution and plugin
+  inventory reporting. Profile initialization migrates these rows back to the
+  privacy contract while preserving unrelated patch content. User-registered
+  data directories and profiles remain under their owners' configuration.
 - Windows Chrome/Edge browser control uses an explicitly bound and selected
   profile, with one tab group per top-level conversation. Settings guides
   unpacked-extension installation and component preparation/repair. Browser

@@ -165,7 +165,7 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 		creates.Add(1)
 		return &routedResource{session: r.Session}, nil
 	})
-	s.SetEnabled(ctx, Browser, true)
+	enableAndInstallForTest(s, ctx, Browser, true)
 	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
 	until := time.Now().Add(8 * time.Second)
 	for !strings.Contains(call("schemas", "a", ""), "my_automation_probe") {
@@ -200,7 +200,7 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 	if got := call("call", "b", ""); !strings.Contains(got, "host-routed:b") {
 		t.Fatal("stopping a affected b", got)
 	}
-	s.SetEnabled(ctx, Browser, false)
+	enableAndInstallForTest(s, ctx, Browser, false)
 	until = time.Now().Add(5 * time.Second)
 	for call("schemas", "a", "") != "[]" {
 		if time.Now().After(until) {
@@ -211,7 +211,7 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 	if got := call("old", "a", ""); strings.Contains(got, "host-routed") {
 		t.Fatal("old schema executed", got)
 	}
-	s.SetEnabled(ctx, Browser, true)
+	enableAndInstallForTest(s, ctx, Browser, true)
 	until = time.Now().Add(5 * time.Second)
 	for !strings.Contains(call("schemas", "a", ""), "my_automation_probe") {
 		if time.Now().After(until) {
@@ -266,7 +266,7 @@ func liveProductBrowserScenario(t *testing.T, ctx context.Context, s *Service, c
 	if err := s.SelectBrowserBinding(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetEnabled(ctx, Browser, true); err != nil {
+	if _, err := enableAndInstallForTest(s, ctx, Browser, true); err != nil {
 		t.Fatal(err)
 	}
 	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })

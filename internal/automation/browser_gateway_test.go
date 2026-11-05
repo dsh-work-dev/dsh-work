@@ -36,7 +36,7 @@ func gatewayForTest(t *testing.T) (*Service, *gatewayResource, Request) {
 	s.ConfigureBrowserBackend(func(context.Context, Request) (Resource, error) { return resource, nil }, schemas)
 	s.EnableBrowserGateway(BrowserGatewayConfig{})
 	s.Worker("gate", true, true)
-	if _, e := s.SetEnabled(context.Background(), Browser, true); e != nil {
+	if _, e := enableAndInstallForTest(s, context.Background(), Browser, true); e != nil {
 		t.Fatal(e)
 	}
 	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })

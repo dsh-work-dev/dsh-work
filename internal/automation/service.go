@@ -20,9 +20,10 @@ type Capability string
 const (
 	Browser  Capability = "browser"
 	Computer Capability = "computer"
+	AUV      Capability = "computer-auv"
 )
 
-func (c Capability) Valid() bool { return c == Browser || c == Computer }
+func (c Capability) Valid() bool { return c == Browser || c == Computer || c == AUV }
 
 type State struct {
 	RepairFailure string `json:"repairFailure,omitempty"`
@@ -36,6 +37,8 @@ type State struct {
 	TotalBytes    int64  `json:"totalBytes"`
 }
 type Snapshot struct {
+	Components            []Component             `json:"components"`
+	ComputerEngine        string                  `json:"computerEngine"`
 	GatewayConnected      bool                    `json:"gatewayConnected"`
 	DefaultBrowserEnabled bool                    `json:"defaultBrowserEnabled"`
 	Revision              uint64                  `json:"revision"`
@@ -46,6 +49,8 @@ type Snapshot struct {
 	Computer              State                   `json:"computer"`
 	Profiles              BrowserProfilesSnapshot `json:"profiles"`
 	BrowserAccess         *BrowserGatewaySnapshot `json:"browserAccess,omitempty"`
+	ComputerAccess        *ComputerSnapshot       `json:"computerAccess,omitempty"`
+	ComputerTools         []json.RawMessage       `json:"computerTools,omitempty"`
 	BrowserTools          []json.RawMessage       `json:"browserTools,omitempty"`
 }
 type Progress struct {
@@ -74,6 +79,7 @@ type Request struct {
 	Turn             string         `json:"turn,omitempty"`
 	Permit           string         `json:"permit,omitempty"`
 	PreviousLifetime string         `json:"previousLifetime,omitempty"`
+	UserTurn         bool           `json:"userTurn,omitempty"`
 }
 type entry struct {
 	call                   sync.Mutex
@@ -87,6 +93,9 @@ type entry struct {
 	closed                 chan struct{}
 	waiters                int
 	initializationCanceled bool
+	closeErr               error
+	desktopRelease         func() error
+	beforeDesktopRelease   func() error
 }
 type slot struct {
 	repair       bool
@@ -112,9 +121,14 @@ type Service struct {
 	profiles           profileState
 	browserFactory     Factory
 	browserSchemas     []json.RawMessage
+	computer           *computerGateway
 	gate               *browserGateway
 	development        bool
 	browserMaintenance bool
+	componentInspector func() []Component
+	componentChecks    map[string]componentCheck
+	lastComponentCheck time.Time
+	checkMu            sync.Mutex
 }
 
 var ErrRevoked = errors.New("AUTOMATION_REVOKED")
@@ -129,11 +143,15 @@ func New(manager *settings.Manager, prepare Preparer) *Service {
 			values = v
 		}
 	}
+	s.state.ComputerEngine = values.Automation.Computer.Engine
+	if s.state.ComputerEngine != "auv" {
+		s.state.ComputerEngine = "cua-driver"
+	}
 	s.state.DefaultBrowserEnabled = values.Automation.Browser.Default.Enabled
 	s.profiles = newProfileState(values.BrowserProfiles)
-	for _, c := range []Capability{Browser, Computer} {
+	for _, c := range []Capability{Browser, Computer, AUV} {
 		enabled := values.Automation.Browser.Enabled
-		if c == Computer {
+		if c != Browser {
 			enabled = values.Automation.Computer.Enabled
 		}
 		s.slots[c] = &slot{state: State{Enabled: enabled, Dependency: "unprepared", Availability: "disabled", Epoch: 1}}
@@ -149,6 +167,21 @@ func (s *Service) snapshotLocked() Snapshot {
 	v := s.state
 	v.Browser = s.slots[Browser].state
 	v.Computer = s.slots[Computer].state
+	if s.state.ComputerEngine == "auv" {
+		v.Computer = s.slots[AUV].state
+		v.Computer.Enabled = s.slots[Computer].state.Enabled
+	}
+	if !v.Computer.Enabled {
+		v.Computer.Availability = "disabled"
+	} else if v.Computer.Dependency != "preparing" {
+		v.Computer.Availability = "unavailable"
+	}
+	v.ComputerAccess = s.computerSnapshotLocked()
+	if s.computer != nil && s.computer.config.Factory != nil && v.ComputerAccess.Failure == "" && s.state.CanChange && s.state.GatewayConnected && v.Computer.Enabled && v.Computer.Dependency == "prepared" {
+		v.Computer.Availability = "available"
+		v.ComputerTools = ComputerToolSchemas(s.state.ComputerEngine)
+	}
+	v.Components = s.componentsLocked()
 	v.Profiles = s.profileSnapshotLocked()
 	v.BrowserAccess = s.browserGatewaySnapshotLocked()
 	if !s.browserMaintenance && s.gate != nil && s.browserFactory != nil && s.state.CanChange && s.state.GatewayConnected && v.Browser.Enabled && v.Browser.Dependency == "prepared" && s.state.DefaultBrowserEnabled {
@@ -176,7 +209,7 @@ func (s *Service) publishLocked() {
 func (s *Service) SetEnabled(ctx context.Context, c Capability, enabled bool) (Snapshot, error) {
 	s.op.Lock()
 	defer s.op.Unlock()
-	if !c.Valid() {
+	if c != Browser && c != Computer {
 		return s.Snapshot(), errors.New("AUTOMATION_UNKNOWN_CAPABILITY")
 	}
 	s.mu.Lock()
@@ -199,8 +232,9 @@ func (s *Service) SetEnabled(ctx context.Context, c Capability, enabled bool) (S
 	slot := s.slots[c]
 	slot.state.Enabled = enabled
 	slot.state.Epoch++
-	if slot.cancel != nil {
-		slot.cancel()
+	if c == Computer {
+		s.slots[AUV].state.Enabled = enabled
+		s.slots[AUV].state.Epoch++
 	}
 	if !enabled {
 		if c == Browser {
@@ -208,13 +242,13 @@ func (s *Service) SetEnabled(ctx context.Context, c Capability, enabled bool) (S
 		}
 		slot.state.Availability = "disabled"
 		slot.state.Step = ""
-		if slot.state.Dependency == "preparing" {
-			slot.state.Dependency = "unprepared"
-		}
 	}
 	old := s.revokeLocked(c, "")
 	if enabled {
-		s.startLocked(c)
+		s.probeLocked(c)
+		if c == Computer {
+			s.probeLocked(AUV)
+		}
 	}
 	s.publishLocked()
 	s.mu.Unlock()
@@ -250,17 +284,13 @@ func (s *Service) SetDefaultBrowser(ctx context.Context, enabled bool) (Snapshot
 	}
 	slot := s.slots[Browser]
 	slot.state.Epoch++
-	if slot.cancel != nil {
-		slot.cancel()
+	if slot.state.Dependency != "preparing" {
+		slot.state.Step = ""
 	}
-	if slot.state.Dependency == "preparing" {
-		slot.state.Dependency = "unprepared"
-	}
-	slot.state.Step = ""
 	slot.state.Availability = "disabled"
 	old := s.revokeLocked(Browser, "")
 	if enabled {
-		s.startLocked(Browser)
+		s.probeLocked(Browser)
 	}
 	s.publishLocked()
 	s.mu.Unlock()
@@ -276,10 +306,14 @@ func (s *Service) Retry(c Capability) (Snapshot, error) {
 		return s.snapshotLocked(), errors.New("AUTOMATION_UNKNOWN_CAPABILITY")
 	}
 	slot := s.slots[c]
-	if !s.state.CanChange || !slot.state.Enabled {
+	if !s.state.CanChange {
 		return s.snapshotLocked(), ErrRevoked
 	}
-	if slot.state.Dependency == "failed" {
+	if s.componentWorkLocked(c) {
+		return s.snapshotLocked(), errors.New("AUTOMATION_UPDATE_BUSY")
+	}
+	if slot.state.Dependency != "preparing" {
+		s.probeLocked(c)
 		s.startLocked(c)
 		s.publishLocked()
 	}
@@ -294,13 +328,13 @@ func (s *Service) Repair(c Capability) (Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v := s.slots[c]
-	if v == nil || !s.state.CanChange || !v.state.Enabled {
+	if v == nil || !s.state.CanChange {
 		return s.snapshotLocked(), ErrRevoked
 	}
 	if v.state.Dependency == "preparing" {
 		return s.snapshotLocked(), errors.New("AUTOMATION_PREPARATION_BUSY")
 	}
-	if c == Browser && s.browserWorkLocked() {
+	if s.componentWorkLocked(c) {
 		return s.snapshotLocked(), errors.New("BROWSER_UPDATE_BUSY: stop browser use before repairing components")
 	}
 	v.repair = true
@@ -350,11 +384,7 @@ func (s *Service) BeginBrowserMaintenance() (func(), error) {
 }
 func (s *Service) startLocked(c Capability) {
 	slot := s.slots[c]
-	if !slot.state.Enabled || !s.state.CanChange || slot.state.Dependency == "preparing" {
-		return
-	}
-	if c == Browser && !s.state.DefaultBrowserEnabled {
-		slot.state.Availability = "disabled"
+	if !s.state.CanChange || slot.state.Dependency == "preparing" {
 		return
 	}
 	slot.state.Availability = "unavailable"
@@ -423,6 +453,9 @@ func (s *Service) startLocked(c Capability) {
 		slot.cancel = nil
 		slot.state.Step = ""
 		slot.state.Availability = "unavailable"
+		if !slot.state.Enabled || c == Browser && !s.state.DefaultBrowserEnabled {
+			slot.state.Availability = "disabled"
+		}
 		if err != nil {
 			if repair {
 				if checker, ok := s.prepare.(interface{ Ready(Capability) bool }); ok && checker.Ready(c) {
@@ -471,6 +504,9 @@ func (s *Service) Worker(generation string, ready, profile bool) {
 	if s.state.Generation != generation || !ready || !profile {
 		s.cancelBrowserOpeningLocked()
 	}
+	if s.computer != nil && s.state.Generation != generation {
+		s.computer.sessions = map[string]*computerConversation{}
+	}
 	if s.gate != nil && s.state.Generation != generation {
 		s.gate.sessions = map[string]*browserConversation{}
 	}
@@ -479,7 +515,7 @@ func (s *Service) Worker(generation string, ready, profile bool) {
 	s.state.AvailableProfile = profile
 	old := s.revokeLocked("", "")
 	s.stopped = map[string]bool{}
-	for _, c := range []Capability{Browser, Computer} {
+	for _, c := range []Capability{Browser, Computer, AUV} {
 		slot := s.slots[c]
 		slot.state.Epoch++
 		if slot.cancel != nil {
@@ -491,7 +527,7 @@ func (s *Service) Worker(generation string, ready, profile bool) {
 		slot.state.Availability = "disabled"
 		slot.state.Step = ""
 		if s.state.CanChange {
-			s.startLocked(c)
+			s.probeLocked(c)
 		}
 	}
 	s.publishLocked()
@@ -522,6 +558,9 @@ func (s *Service) Gateway(generation string, connected bool) {
 	s.release(old)
 }
 func (s *Service) validLocked(r Request) bool {
+	if r.Operation == "computer" {
+		return s.computerValidLocked(r)
+	}
 	if r.Capability == Browser && s.browserMaintenance {
 		return false
 	}
@@ -541,6 +580,18 @@ func key(r Request) string {
 	return string(r.Capability) + "/" + r.Operation + "/" + r.Session + "/" + r.Lifetime
 }
 func (s *Service) Execute(ctx context.Context, r Request) (any, error) {
+	if r.Capability == Computer {
+		if r.Operation == "computer-turn" {
+			return s.ComputerTurn(r)
+		}
+		if r.Operation == "computer-authorize" {
+			r.Operation = "computer"
+			return s.AuthorizeComputer(ctx, r)
+		}
+		if r.Operation == "computer" {
+			return s.executeComputerPermit(ctx, r)
+		}
+	}
 	if r.Capability == Browser {
 		s.mu.Lock()
 		product := s.gate != nil
@@ -576,6 +627,10 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 			f = s.browserFactory
 		}
 	}
+	if r.Capability == Computer && r.Operation == "computer" && s.computer != nil {
+		engine := s.state.ComputerEngine
+		f = func(ctx context.Context, _ Request) (Resource, error) { return s.computer.config.Factory(ctx, engine) }
+	}
 	if f == nil {
 		s.mu.Unlock()
 		return nil, ErrUnavailable
@@ -601,6 +656,12 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 		create, cancel := context.WithCancel(s.root)
 		e = &entry{ctx: create, ready: make(chan struct{}), closed: make(chan struct{}), cancel: cancel}
 		s.entries[key(r)] = e
+		if r.Operation == "computer" {
+			s.computer.lease = e
+			e.desktopRelease = s.computer.releaseDesktop
+			gate := s.computer
+			e.beforeDesktopRelease = func() error { gate.probes.Wait(); s.mu.Lock(); defer s.mu.Unlock(); return gate.desktopFailure }
+		}
 		go func() {
 			resource, err := f(create, r)
 			s.mu.Lock()
@@ -655,7 +716,7 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 		return nil, ErrRevoked
 	}
 	if err != nil {
-		s.failOwnedBrowserEntry(r, e)
+		s.failOwnedAutomationEntry(r, e)
 		return nil, err
 	}
 	if resource == nil {
@@ -668,7 +729,7 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 	value, err := resource.Execute(callCtx, r.Tool, r.Arguments)
 	if err != nil {
 		if terminal, ok := resource.(interface{ AutomationTerminal() bool }); ok && terminal.AutomationTerminal() {
-			if s.failOwnedBrowserEntry(r, e) {
+			if s.failOwnedAutomationEntry(r, e) {
 				return nil, err
 			}
 		}
@@ -687,7 +748,12 @@ func (s *Service) StopSession(generation, session, lifetime string) {
 		s.mu.Unlock()
 		return
 	}
-	for _, c := range []Capability{Browser, Computer} {
+	if s.computer != nil {
+		if c := s.computer.sessions[session]; c != nil && c.life == lifetime {
+			c.stopped = true
+		}
+	}
+	for _, c := range []Capability{Browser, Computer, AUV} {
 		s.stopped[revocationKey(Request{Capability: c, Epoch: s.slots[c].state.Epoch, Session: session, Lifetime: lifetime})] = true
 	}
 	if s.gate != nil {
@@ -705,6 +771,7 @@ func (s *Service) StopSession(generation, session, lifetime string) {
 }
 func (s *Service) revokeLocked(c Capability, session string) []*entry {
 	s.revokeBrowserGrantsLocked(c, session)
+	s.revokeComputerLocked(c, session)
 	var old []*entry
 	for k, e := range s.entries {
 		if (c == "" || strings.HasPrefix(k, string(c)+"/")) && (session == "" || strings.HasSuffix(k, "/"+session)) {
@@ -722,8 +789,15 @@ func (s *Service) closeEntry(e *entry) {
 		<-e.ready
 		if e.resource != nil {
 			if err := e.resource.Close(); err != nil {
+				e.closeErr = err
 				logging.Module(logging.ModSettings).Warn("automation resource release failed", "err", err)
 			}
+		}
+		if e.beforeDesktopRelease != nil {
+			e.closeErr = errors.Join(e.closeErr, e.beforeDesktopRelease())
+		}
+		if e.closeErr == nil && e.desktopRelease != nil {
+			e.closeErr = e.desktopRelease()
 		}
 	})
 	<-e.closed
@@ -735,6 +809,7 @@ func (s *Service) release(entries []*entry) {
 		go func() { defer wg.Done(); s.closeEntry(e) }()
 	}
 	wg.Wait()
+	s.finishComputerEntries(entries)
 }
 func (s *Service) Close() {
 	s.cancel()
@@ -755,13 +830,13 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) failOwnedBrowserEntry(r Request, e *entry) bool {
+func (s *Service) failOwnedAutomationEntry(r Request, e *entry) bool {
 	s.mu.Lock()
-	if s.gate == nil || r.Operation != "browser" || s.entries[key(r)] != e {
+	if (r.Operation != "browser" || s.gate == nil) && (r.Operation != "computer" || s.computer == nil) || s.entries[key(r)] != e {
 		s.mu.Unlock()
 		return false
 	}
-	old := s.revokeLocked(Browser, r.Session+"/"+r.Lifetime)
+	old := s.revokeLocked(r.Capability, r.Session+"/"+r.Lifetime)
 	s.publishLocked()
 	s.mu.Unlock()
 	s.release(old)

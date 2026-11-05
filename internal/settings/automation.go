@@ -5,12 +5,36 @@ import "context"
 // Only implemented preferences are writable. Deferred policy fields are not
 // serialized yet; older readers continue to ignore additive settings fields.
 type Automation struct {
-	Browser  AutomationBrowser    `json:"browser"`
-	Computer AutomationCapability `json:"computer"`
+	Browser  AutomationBrowser  `json:"browser"`
+	Computer AutomationComputer `json:"computer"`
 }
 type AutomationCapability struct {
 	Enabled bool `json:"enabled"`
 }
+
+type AutomationComputer struct {
+	Policy  *ComputerPolicy `json:"policy,omitempty"`
+	Enabled bool            `json:"enabled"`
+	Engine  string          `json:"engine,omitempty"`
+}
+
+func (m *Manager) SetComputerEngine(ctx context.Context, engine string) (Values, error) {
+	if engine != "cua-driver" && engine != "auv" {
+		return Values{}, failure("SETTINGS_STATE_INVALID", "Unknown computer engine", "choose Cua Driver or AUV")
+	}
+	if err := contextError(ctx); err != nil {
+		return Values{}, err
+	}
+	m.mu.Lock()
+	next := m.values
+	next.Automation.Computer.Engine = engine
+	if err := m.store.Save(ctx, m.path, next); err != nil {
+		m.mu.Unlock()
+		return Values{}, err
+	}
+	return m.commit(next), nil
+}
+
 type AutomationBrowser struct {
 	Enabled bool                 `json:"enabled"`
 	Default AutomationCapability `json:"default"`

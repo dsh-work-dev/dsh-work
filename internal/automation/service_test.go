@@ -45,7 +45,7 @@ func TestConfiguredBrowserBackendDoesNotAuthorizeProduct(t *testing.T) {
 	var called atomic.Int32
 	s.ConfigureBrowserBackend(func(context.Context, Request) (Resource, error) { called.Add(1); return nil, nil }, nil)
 	s.Worker("product", true, true)
-	if _, err := s.SetEnabled(context.Background(), Browser, true); err != nil {
+	if _, err := enableAndInstallForTest(s, context.Background(), Browser, true); err != nil {
 		t.Fatal(err)
 	}
 	v := awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
@@ -70,7 +70,7 @@ func developmentServiceForTest(t *testing.T) *Service {
 	}
 	t.Cleanup(s.Close)
 	s.Worker("dev", true, true)
-	if _, err = s.SetEnabled(context.Background(), Browser, true); err != nil {
+	if _, err = enableAndInstallForTest(s, context.Background(), Browser, true); err != nil {
 		t.Fatal(err)
 	}
 	awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
@@ -176,7 +176,7 @@ func TestBrowserCreationOneCancelledWaiterKeepsSharedInitialization(t *testing.T
 	}
 }
 
-func TestPreparationIntentRetryCancelAndRestart(t *testing.T) {
+func TestExplicitPreparationSurvivesIntentChangesAndRetriesIndependently(t *testing.T) {
 	ctx := context.Background()
 	m := managerForTest(t)
 	var attempts, computerAttempts atomic.Int32
@@ -189,13 +189,9 @@ func TestPreparationIntentRetryCancelAndRestart(t *testing.T) {
 		if c == Computer {
 			return nil
 		}
-		n := attempts.Add(1)
+		attempts.Add(1)
 		p(Progress{Step: "verify"})
 		entered <- struct{}{}
-		if n == 1 {
-			<-ctx.Done()
-			return ctx.Err()
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -209,32 +205,34 @@ func TestPreparationIntentRetryCancelAndRestart(t *testing.T) {
 	if attempts.Load() != 0 {
 		t.Fatal("startup prepared a disabled capability")
 	}
-	if _, e := s.SetEnabled(ctx, Browser, true); e != nil {
+	if _, e := enableAndInstallForTest(s, ctx, Browser, true); e != nil {
 		t.Fatal(e)
 	}
 	<-entered
 	for range 8 {
-		if _, e := s.SetEnabled(ctx, Browser, true); e != nil {
+		if _, e := enableAndInstallForTest(s, ctx, Browser, true); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if attempts.Load() != 1 {
 		t.Fatal("duplicate enable was not merged")
 	}
-	if _, e := s.SetEnabled(ctx, Computer, true); e != nil {
+	if _, e := enableAndInstallForTest(s, ctx, Computer, true); e != nil {
 		t.Fatal(e)
 	}
 	v := awaitState(t, s, func(v Snapshot) bool { return v.Computer.Dependency == "failed" })
 	if !v.Computer.Enabled || v.Browser.Dependency != "preparing" || !v.CanChange {
 		t.Fatal("preparation failure escaped its capability")
 	}
-	if _, e := s.SetEnabled(ctx, Browser, false); e != nil {
+	if _, e := enableAndInstallForTest(s, ctx, Browser, false); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.SetEnabled(ctx, Browser, true); e != nil {
+	if _, e := enableAndInstallForTest(s, ctx, Browser, true); e != nil {
 		t.Fatal(e)
 	}
-	<-entered
+	if attempts.Load() != 1 {
+		t.Fatal("intent change restarted installation")
+	}
 	close(release)
 	v = awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
 	if v.Browser.Availability != "unavailable" {
@@ -286,7 +284,7 @@ func TestResourceEpochIsolationAndFailureCleanup(t *testing.T) {
 	defer s.Close()
 	s.Worker("w1", true, true)
 	s.Gateway("w1", true)
-	s.SetEnabled(ctx, Browser, true)
+	enableAndInstallForTest(s, ctx, Browser, true)
 	v := awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
 	a := Request{Generation: "w1", Epoch: v.Browser.Epoch, Capability: Browser, Session: "a", Lifetime: "life", Operation: "probe"}
 	if _, e := s.Execute(ctx, a); !errors.Is(e, ErrUnavailable) {
@@ -328,11 +326,11 @@ func TestResourceEpochIsolationAndFailureCleanup(t *testing.T) {
 	if _, e := s.Execute(ctx, b); e != nil {
 		t.Fatal("stopping a affected b", e)
 	}
-	s.SetEnabled(ctx, Browser, false)
+	enableAndInstallForTest(s, ctx, Browser, false)
 	if resources["a"].closed.Load() != 1 || resources["b"].closed.Load() != 1 {
 		t.Fatal("cleanup failure blocked another resource")
 	}
-	s.SetEnabled(ctx, Browser, true)
+	enableAndInstallForTest(s, ctx, Browser, true)
 	v = s.Snapshot()
 	if _, e := s.Execute(ctx, a); !errors.Is(e, ErrRevoked) {
 		t.Fatal("old epoch revived")
@@ -384,7 +382,7 @@ func TestCallCancellationKeepsTheResourceAndStopRevokesIt(t *testing.T) {
 	defer s.Close()
 	s.Worker("worker", true, true)
 	s.Gateway("worker", true)
-	s.SetEnabled(ctx, Browser, true)
+	enableAndInstallForTest(s, ctx, Browser, true)
 	v := awaitState(t, s, func(v Snapshot) bool { return v.Browser.Dependency == "prepared" })
 	r := Request{Generation: "worker", Epoch: v.Browser.Epoch, Capability: Browser, Session: "a", Lifetime: "one", Operation: "probe"}
 	resource := &fixtureResource{block: true, started: make(chan struct{}, 1)}
@@ -434,7 +432,7 @@ func TestGatewayLossDoesNotCancelPreparationOrDisableSettings(t *testing.T) {
 	defer s.Close()
 	s.Worker("worker", true, true)
 	s.Gateway("worker", true)
-	s.SetEnabled(context.Background(), Browser, true)
+	enableAndInstallForTest(s, context.Background(), Browser, true)
 	<-entered
 	s.Gateway("worker", false)
 	close(finish)
@@ -442,7 +440,22 @@ func TestGatewayLossDoesNotCancelPreparationOrDisableSettings(t *testing.T) {
 	if !v.CanChange || v.GatewayConnected || !v.Browser.Enabled {
 		t.Fatal("connection health changed readiness or intent")
 	}
-	if _, err := s.SetEnabled(context.Background(), Browser, false); err != nil {
+	if _, err := enableAndInstallForTest(s, context.Background(), Browser, false); err != nil {
 		t.Fatal("could not turn off after channel loss", err)
 	}
+}
+
+// Execution/lifetime fixtures explicitly install their fake dependencies.
+func enableAndInstallForTest(s *Service, ctx context.Context, c Capability, enabled bool) (Snapshot, error) {
+	v, err := s.SetEnabled(ctx, c, enabled)
+	if err != nil || !enabled || vState(v, c).Dependency == "preparing" || vState(v, c).Dependency == "prepared" {
+		return v, err
+	}
+	return s.Retry(c)
+}
+func vState(v Snapshot, c Capability) State {
+	if c == Browser {
+		return v.Browser
+	}
+	return v.Computer
 }

@@ -16,6 +16,7 @@ bin/
 frontend/dist/
 frontend/node_modules/
 tools/dsh/node_modules/
+internal/automation/assets/*/node_modules/
 
 # Temporary scaffolds used only while bootstrapping the repository.
 .tmp-wails-*/

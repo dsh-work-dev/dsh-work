@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 )
 
 type automationFailure struct {
@@ -32,11 +34,15 @@ func (e automationFailure) Unwrap() error             { return e.cause }
 func (e automationFailure) AutomationFailure() string { return e.code }
 
 type AutomationPreparer struct {
-	root       string
-	executor   dshadapter.CommandExecutor
-	downloader artifactDownloader
-	signature  func(string, string) error
-	resolve    func(context.Context) (dshmanager.ResolvedNode, error)
+	inventoryMu        sync.Mutex
+	driverProbeTime    time.Time
+	driverProbeVersion string
+	driverProbePath    string
+	root               string
+	executor           dshadapter.CommandExecutor
+	downloader         artifactDownloader
+	signature          func(string, string) error
+	resolve            func(context.Context) (dshmanager.ResolvedNode, error)
 }
 
 func NewAutomationPreparer(root string) *AutomationPreparer {
@@ -46,17 +52,16 @@ func (i *AutomationPreparer) Prepare(ctx context.Context, c automation.Capabilit
 	if !c.Valid() {
 		return errors.New("unknown capability")
 	}
-	if c == automation.Computer && runtime.GOARCH != "amd64" {
+	if c != automation.Browser && runtime.GOARCH != "amd64" {
 		return automationFailure{"other", errors.New("computer preparation is currently Windows amd64 only")}
 	}
 	report(automation.Progress{Step: "verify"})
-	if err := i.packages(ctx, c, report); err != nil {
-		return err
-	}
 	if c == automation.Computer {
-		return i.driver(ctx, report)
+		if err := i.driver(ctx, report); err != nil {
+			return err
+		}
 	}
-	return nil
+	return i.packages(ctx, c, report)
 }
 
 // ConfigureToolchain binds preparation to the already validated Run context.
@@ -78,16 +83,21 @@ func (i *AutomationPreparer) Ready(c automation.Capability) bool {
 			return false
 		}
 	}
-	return validateAutomationPackages(dir, c) == nil
-}
-func (i *AutomationPreparer) Repair(ctx context.Context, c automation.Capability, report func(automation.Progress)) error {
-	if err := i.preparePackages(ctx, c, report, true); err != nil {
-		return err
+	if validateAutomationPackages(dir, c) != nil {
+		return false
 	}
 	if c == automation.Computer {
-		return i.driver(ctx, report)
+		return i.driverReady()
 	}
-	return nil
+	return true
+}
+func (i *AutomationPreparer) Repair(ctx context.Context, c automation.Capability, report func(automation.Progress)) error {
+	if c == automation.Computer {
+		if err := i.driver(ctx, report); err != nil {
+			return err
+		}
+	}
+	return i.preparePackages(ctx, c, report, true)
 }
 func (i *AutomationPreparer) packages(ctx context.Context, c automation.Capability, report func(automation.Progress)) error {
 	return i.preparePackages(ctx, c, report, false)
@@ -261,7 +271,19 @@ func (a automationPackageAdapter) Attempt(ctx context.Context, r acquisition.Att
 	return acquisition.AttemptResult{ResolvedIdentity: r.Identity, PayloadPath: payload}, nil
 }
 func validateAutomationPackages(root string, c automation.Capability) error {
+	if c == automation.AUV {
+		info, err := os.Stat(filepath.Join(root, "node_modules", "@auv-js", "cli-win32-x64-msvc", "bin", "auv.exe"))
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || info.Size() == 0 {
+			return errors.New("AUV executable missing")
+		}
+	}
 	expected := map[string]string{"@modelcontextprotocol/sdk": automation.SDKVersion, "@playwright/mcp": automation.MCPVersion}
+	if c == automation.AUV {
+		expected = map[string]string{"@auv-js/sdk": automation.AUVVersion, "@auv-js/cli-win32-x64-msvc": automation.AUVVersion}
+	}
 	if c == automation.Computer {
 		expected = map[string]string{"@deepseek-ai/dsh-computer-use": automation.DSHVersion, "@deepseek-ai/dsh-experimental-computer-use-cua-driver-mcp": automation.DSHVersion}
 	}
@@ -294,11 +316,9 @@ func (i *AutomationPreparer) driver(ctx context.Context, report func(automation.
 	}
 	if data, e := os.ReadFile(filepath.Join(root, "release.json")); e == nil && string(data) == automation.DriverSHA256 {
 		report(automation.Progress{Step: "verify"})
-		if err := verify(root); err != nil {
-			_ = os.Remove(filepath.Join(root, "release.json"))
-			return automationFailure{"verify", err}
+		if err := verify(root); err == nil {
+			return nil
 		}
-		return nil
 	}
 	archive := filepath.Join(i.root, "automation", "downloads", automation.DriverArchive)
 	if _, err := os.Stat(archive); errors.Is(err, os.ErrNotExist) {
@@ -345,10 +365,29 @@ func (i *AutomationPreparer) driver(ctx context.Context, report func(automation.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(root); err != nil {
+	// Retain the previous complete release until the staged replacement is published.
+	backup, err := os.MkdirTemp(filepath.Dir(root), ".driver-previous-")
+	if err != nil {
 		return err
 	}
-	return os.Rename(stage, root)
+	if err = os.Remove(backup); err != nil {
+		return err
+	}
+	_, statErr := os.Stat(root)
+	if statErr == nil {
+		if err = os.Rename(root, backup); err != nil {
+			return err
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	if err = os.Rename(stage, root); err != nil {
+		if statErr == nil {
+			return errors.Join(err, os.Rename(backup, root))
+		}
+		return err
+	}
+	return nil
 }
 func extractAutomationDriver(ctx context.Context, archive, destination string) error {
 	reader, err := zip.OpenReader(archive)

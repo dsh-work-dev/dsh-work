@@ -1,6 +1,8 @@
 import {Events} from "@wailsio/runtime";
 import {AutomationService,ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import type {Snapshot} from "../bindings/github.com/local/dsh-work/internal/automation";
+import {mountAutomationComponents} from "./automation-components";
+import {mountComputerAccess} from "./computer-access";
 import {mountBrowserAccess} from "./browser-access";
 import {browserSetupStage} from "./browser-setup";
 import {subscribeLocale, t} from "./i18n";
@@ -9,6 +11,8 @@ type Capability = "browser" | "computer";
 export function mountAutomation(changed?: (state: Snapshot)=>void) {
  let current: Snapshot | undefined;
  const access=mountBrowserAccess(accept);
+ const computerAccess=mountComputerAccess(accept);
+ const components=mountAutomationComponents(accept);
  const busy = new Set<Capability>();
  const capabilities: Capability[] = ["browser", "computer"];
  let setupError = "";
@@ -36,7 +40,7 @@ export function mountAutomation(changed?: (state: Snapshot)=>void) {
   }
   select.value=current?.profiles?.selected ?? "";
   select.disabled=!current?.canChange || busy.has("browser") || !rows.length;
-  for(const suffix of ["forget","rename","extension-folder","check"])(document.getElementById(`automation-browser-${suffix}`) as HTMLButtonElement).disabled=!current?.canChange||busy.has("browser")||(["forget","rename"].includes(suffix)&&!selected);
+  for(const suffix of ["forget","rename","extension-folder","check"])(document.getElementById(`automation-browser-${suffix}`) as HTMLButtonElement).disabled=!current?.canChange||busy.has("browser")||(["forget","rename"].includes(suffix)&&!selected)||(suffix==="extension-folder"&&!current?.components?.find(c=>c.id==="browser-extension")?.installedVersion);
   if(editingName?.id!==selected?.id)editingName=undefined;
   document.getElementById("automation-browser-name-row")!.hidden=!visible||!editingName;
   const nameInput=document.getElementById("automation-browser-name") as HTMLInputElement;
@@ -99,7 +103,7 @@ export function mountAutomation(changed?: (state: Snapshot)=>void) {
    control.checked = value?.enabled ?? false;
    profile.hidden = !current || current.availableProfile;
    row.hidden = !!current && !current.availableProfile;
-   dependency.hidden = !current?.availableProfile || !value?.enabled || c === "browser" && !current.defaultBrowserEnabled;
+   dependency.hidden = true;
    retry.hidden = value?.dependency !== "failed";
    retry.disabled = control.disabled;
    detail.textContent = t(c === "computer" && value?.dependency === "prepared" ? "automation.computer.detailPrepared" : `automation.${c}.detail`);
@@ -107,7 +111,7 @@ export function mountAutomation(changed?: (state: Snapshot)=>void) {
    if (!current) {status.textContent=t("view.loading");continue;}
    if (!current.availableProfile) continue;
    if (!current.canChange) status.textContent = t("automation.afterStart");
-   else if (c !== "browser" && value?.enabled && value.dependency === "prepared") status.textContent = t("automation.notConnected");
+
    const text = document.getElementById(`automation-${c}-dependency-text`)!;
    if (value?.dependency === "preparing") {
     text.textContent = t("automation.preparing", {step:t(`automation.step.${value.step || "download"}`)});
@@ -122,7 +126,8 @@ export function mountAutomation(changed?: (state: Snapshot)=>void) {
  runtime.hidden=current?.browser.failure!=="toolchain"&&current?.browser.repairFailure!=="toolchain";
  runtime.disabled=!current?.canChange;
  repair.disabled=!current?.canChange||!current.browser.enabled||current.browser.dependency==="preparing"||busy.has("browser");
- if(current)access.render(current);
+ components.render(current);
+ if(current){access.render(current);computerAccess.render(current);}
  }
  function accept(next: Snapshot) {if (!current || next.revision >= current.revision) {current=next;render();changed?.(next);}}
  async function refresh() {try {accept(await AutomationService.GetAutomation());} catch {for(const c of capabilities)document.getElementById(`automation-${c}-status`)!.textContent=t("error.loadSettings");}}
@@ -161,5 +166,5 @@ export function mountAutomation(changed?: (state: Snapshot)=>void) {
  for(const key of ["set","clear","open"]){document.getElementById(`automation-browser-launch-${key}`)!.addEventListener("click",()=>{const id=current?.profiles?.selected;if(id)void setup(()=>key==="set"?AutomationService.ConfigureBrowserLaunch(id):key==="clear"?AutomationService.ClearBrowserLaunch(id):AutomationService.OpenBrowserProfile(id));});}
  Events.On("automation",event=>accept(event.data as Snapshot));
  subscribeLocale(render);
- return {refresh};
+ return {refresh:async()=>{await refresh();void components.check(false);}};
 }

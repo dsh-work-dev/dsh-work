@@ -19,6 +19,8 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/automation/browsernative"
 	"github.com/local/dsh-work/internal/automation/browserruntime"
+	"github.com/local/dsh-work/internal/automation/computerruntime"
+	"github.com/local/dsh-work/internal/automation/computeruia"
 	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/desktopclient"
@@ -336,6 +338,9 @@ func runDaemon(identity string, resources Resources) {
 		})
 	}
 	automationState := automation.New(settingsManager, automationPreparer)
+	if inspector, ok := automationPreparer.(interface{ Inventory() []automation.Component }); ok {
+		automationState.ConfigureComponents(inspector.Inventory)
+	}
 	defer automationState.Close()
 	automationState.ConfigureProfileLauncher(browserhost.NewProfileLauncher())
 	automationState.EnableBrowserGateway(automation.BrowserGatewayConfig{
@@ -369,6 +374,46 @@ func runDaemon(identity string, resources Resources) {
 			return browserruntime.Runtime{Node: resolved.Node.NodePath, Environment: resolved.Node.ChildEnvironment, Dependencies: directory}, nil
 		},
 	}), browserruntime.ToolSchemas())
+	computerHelperExecutable, _ := os.Executable()
+	automationState.ConfigureComputerGateway(automation.ComputerGatewayConfig{Inspect: automation.InspectComputerTarget, Acquire: automation.AcquireComputerDesktopLease, Probe: computeruia.NewProbe(dependencies.Supervisor, computerHelperExecutable), Factory: computerruntime.NewFactory(computerruntime.Config{
+		Supervisor: dependencies.Supervisor, Root: filepath.Join(config.CacheDirectory, "automation", "computer-sessions"),
+		Resolve: func(ctx context.Context, engine string) (computerruntime.Runtime, error) {
+			if manager == nil || engine != "cua-driver" && engine != "auv" {
+				return computerruntime.Runtime{}, automation.ErrUnavailable
+			}
+			capability := automation.Computer
+			if engine == "auv" {
+				capability = automation.AUV
+			}
+			checker, ok := automationPreparer.(interface {
+				Ready(automation.Capability) bool
+			})
+			if !ok || !checker.Ready(capability) {
+				return computerruntime.Runtime{}, automation.ErrUnavailable
+			}
+			snapshot, err := manager.Snapshot(ctx)
+			if err != nil {
+				return computerruntime.Runtime{}, err
+			}
+			selection := snapshot.Current
+			if selection == nil || selection.Profile.DataDirectoryID != "dsh-work" || selection.Profile.Name != dshmanager.AppProfileName {
+				return computerruntime.Runtime{}, automation.ErrRevoked
+			}
+			resolved, err := manager.ResolveLaunch(ctx, dshmanager.LaunchRequest{RuntimeID: selection.RuntimeID, Node: selection.Node, Profile: selection.Profile})
+			if err != nil {
+				return computerruntime.Runtime{}, err
+			}
+			directory, err := automation.PublishedPackage(config.CacheDirectory, capability)
+			if err != nil {
+				return computerruntime.Runtime{}, err
+			}
+			driver := filepath.Join(config.CacheDirectory, "automation", "cua-driver", automation.DriverVersion, "windows-amd64", "cua-driver.exe")
+			if engine == "auv" {
+				driver = filepath.Join(directory, "node_modules", "@auv-js", "cli-win32-x64-msvc", "bin", "auv.exe")
+			}
+			return computerruntime.Runtime{Node: resolved.Node.NodePath, Environment: resolved.Node.ChildEnvironment, Dependencies: directory, Driver: driver}, nil
+		},
+	})})
 	automationBridge.Attach(automationState)
 	automationService := dshworkapp.NewAutomationService(automationState)
 	dshworkapp.SetBrowserPermissionLocale(automationService, func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) })
@@ -377,12 +422,18 @@ func runDaemon(identity string, resources Resources) {
 		return v.Appearance
 	})
 	var permissionUI atomic.Pointer[browserPermissionWindow]
+	var computerUI atomic.Pointer[computerControlWindow]
 	dshworkapp.SetBrowserProfileDirectoryPicker(automationService, func(current string) (string, error) { return nativeui.ChooseDirectory(desktop, current) })
 	nativeContext, stopNative := context.WithCancel(context.Background())
 	defer stopNative()
 	selfExecutable, selfExecutableErr := os.Executable()
 	if selfExecutableErr == nil {
 		nativeConfig := browserhost.Config{Directory: filepath.Join(storage.Root, "browser-native"), Executable: selfExecutable, Identity: identity, Replacer: dependencies.FileReplacer}
+		if inspector, ok := automationPreparer.(interface{ Inventory() []automation.Component }); ok {
+			automationState.ConfigureComponents(func() []automation.Component {
+				return append(inspector.Inventory(), automation.ExtensionComponent(browserhost.DevelopmentDirectory(nativeConfig)))
+			})
+		}
 		dshworkapp.SetBrowserHostRegistrar(automationService, &developmentBrowserRegistrar{config: nativeConfig, maintenance: automationState.BeginBrowserMaintenance, Registrar: browserhost.New(nativeConfig)})
 		dshworkapp.SetBrowserExtensionFolder(automationService, func() error {
 			return desktop.Env.OpenFileManager(browserhost.DevelopmentDirectory(nativeConfig), false)
@@ -458,6 +509,9 @@ func runDaemon(identity string, resources Resources) {
 	var browserAttention atomic.Bool
 	var browserTrayBase atomic.Value
 	automationState.OnChange(func(state automation.Snapshot) {
+		if controls := computerUI.Load(); controls != nil {
+			controls.update(state)
+		}
 		if popup := permissionUI.Load(); popup != nil {
 			popup.update(state)
 		}
@@ -557,6 +611,7 @@ func runDaemon(identity string, resources Resources) {
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
+	computerUI.Store(newComputerControlWindow(desktop, resources.Assets, applicationShuttingDown.Load))
 	permissionUI.Store(&browserPermissionWindow{app: desktop, service: automationState, quitting: applicationShuttingDown.Load})
 	updateChannel := dshworksettings.DefaultUpdateChannel
 	if settingsManager != nil {

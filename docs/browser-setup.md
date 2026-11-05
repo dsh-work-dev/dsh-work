@@ -8,10 +8,10 @@ Edge through the DSH Work extension loaded from an unpacked directory.
 
 1. Start the DSH Work profile with a working Run context. If Node is missing,
    configure it in Settings → 运行时 first.
-2. In Settings → 浏览器, enable 浏览器操作 and 使用默认浏览器. Component
-   preparation starts, and the page shows the next installation or binding
-   step. You can install the extension while components are being prepared.
-3. Click 打开扩展文件夹. In the browser profile you want to use, open
+2. In Settings → 浏览器, enable 浏览器操作 and 使用默认浏览器. In 组件,
+   click 安装 for Playwright MCP. Enabling the capability and starting DSH Work
+   only inspect existing components; installation requires this explicit action.
+3. Click 安装 on the DSH Work extension component, then 打开扩展文件夹. In the browser profile you want to use, open
    `chrome://extensions` or `edge://extensions`, enable developer mode, and
    choose **Load unpacked**. Select the supplied directory containing
    `manifest.json`. Keep that directory in place for updates.
@@ -104,11 +104,11 @@ to an old location. Input-target highlighting inside frames is currently omitted
   preparation. No Workspace-level `npm install` is needed.
 - **Download or verification failed:** restore network access and retry the
   component step. Existing bindings are retained.
-- **Components need reinstalling:** choose 检查并修复组件, including when the
+- **Components need reinstalling:** choose 修复 on the affected component, including when the
   page already says prepared. Stop browser use and resolve pending requests
   first. A failed repair keeps the old set usable only if it still passes
   validation, and reports the repair failure separately.
-- **Native host registration failed or the application moved:** use 重新检查.
+- **Native host registration failed or the application moved:** use 准备连接.
   Registration only updates objects owned by this application. An ownership
   conflict, permission error or unsupported package context must be resolved
   before a connection can work.
@@ -127,8 +127,8 @@ to an old location. Input-target highlighting inside frames is currently omitted
 
 1. Stop active conversation browser use and finish or reject pending requests.
 2. Update DSH Work. The native host is part of the same executable; after an
-   installation-path change, use 重新检查 to repair its registration.
-3. In Settings → 浏览器, use 重新检查 to prepare the supplied extension directory.
+   installation-path change, use 准备连接 to repair its registration.
+3. In Settings → 浏览器, use 准备连接 to prepare the supplied extension directory.
    Keep the existing loaded directory rather than uninstalling the extension.
 4. On the browser's extension-management page, click the DSH Work card's
    **Reload** button (the circular arrow). This is distinct from **Reconnect**
@@ -138,7 +138,8 @@ to an old location. Input-target highlighting inside frames is currently omitted
    warning to disappear before asking a conversation to use the browser.
 
 Component versions follow the application's frozen lock, not an independent
-`npm update` or latest-version check. A new component set is staged and
+`npm update`. Checking release metadata never downloads or installs components.
+A new component set is staged and
 validated before its selection pointer changes. Failed publication leaves the
 previous selection intact. The extension directory is published as a complete
 set with a previous-directory backup; the handshake checks the code actually

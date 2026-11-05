@@ -174,9 +174,10 @@ func TestAccountCallbackServerShowsFailurePageForOAuthError(t *testing.T) {
 	}
 }
 
-func TestAccountCallbackTreatsDSHCompletionRedirectAsSuccess(t *testing.T) {
+func TestAccountCallbackPreservesDSHCompletionRedirect(t *testing.T) {
+	const completionURL = "https://platform.deepseek.com/dsh/authorized?login_source=desktop"
 	callback, err := NewAccountCallbackServer(func(w http.ResponseWriter, _ *http.Request, _ string) {
-		w.Header().Set("Location", "https://chat.deepseek.com/desktop/complete")
+		w.Header().Set("Location", completionURL)
 		w.WriteHeader(http.StatusFound)
 	})
 	if err != nil {
@@ -185,13 +186,51 @@ func TestAccountCallbackTreatsDSHCompletionRedirectAsSuccess(t *testing.T) {
 	defer callback.Close()
 	callback.SetGeneration("current-worker")
 
-	response, err := http.Get(callback.Origin() + "/oauth/callback?code=code&state=state")
-	if err != nil {
-		t.Fatal(err)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for _, path := range []string{"/oauth/callback", "/"} {
+		response, err := client.Get(callback.Origin() + path + "?code=code&state=state")
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusFound || response.Header.Get("Location") != completionURL {
+			t.Fatalf("%s: got status %d and Location %q, want DSH completion redirect", path, response.StatusCode, response.Header.Get("Location"))
+		}
+		if response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Referrer-Policy") != "no-referrer" {
+			t.Fatalf("completion redirect is missing privacy headers: %v", response.Header)
+		}
 	}
-	body, readErr := io.ReadAll(response.Body)
-	response.Body.Close()
-	if readErr != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "登录流程已完成") || !strings.Contains(string(body), `href="dsh-work://open"`) {
-		t.Fatalf("completion redirect produced status %d instead of the success page: %s (%v)", response.StatusCode, body, readErr)
+}
+
+func TestAccountCallbackRejectsUnsafeRedirectAndDoesNotRedirectOAuthErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, location, query string
+		want                  int
+	}{
+		{"unsafe scheme", "javascript:alert(1)", "code=code&state=state", http.StatusBadGateway},
+		{"relative location", "/dsh/authorized", "code=code&state=state", http.StatusBadGateway},
+		{"OAuth error", "https://platform.deepseek.com/dsh/authorized?login_source=desktop", "error=access_denied&state=state", http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			callback, err := NewAccountCallbackServer(func(w http.ResponseWriter, _ *http.Request, _ string) {
+				w.Header().Set("Location", tc.location)
+				w.WriteHeader(http.StatusFound)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer callback.Close()
+			callback.SetGeneration("current-worker")
+			client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			response, err := client.Get(callback.Origin() + "/oauth/callback?" + tc.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != tc.want || response.Header.Get("Location") != "" || !strings.Contains(string(body), "登录尚未完成") {
+				t.Fatalf("got status %d, Location %q, body %s, error %v", response.StatusCode, response.Header.Get("Location"), body, err)
+			}
+		})
 	}
 }

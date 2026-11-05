@@ -47,6 +47,7 @@ type BrowserBindingRequest struct {
 	Expires    time.Time `json:"expires"`
 }
 type BrowserBindingView struct {
+	LoadedVersion   string `json:"loadedVersion,omitempty"`
 	LoadedSource    string `json:"loadedSource,omitempty"`
 	ExpectedSource  string `json:"expectedSource,omitempty"`
 	ID              string `json:"id"`
@@ -149,6 +150,7 @@ func (s *Service) profileSnapshotLocked() BrowserProfilesSnapshot {
 		}
 		if id, e := s.bindingConnectionLocked(b); e == nil {
 			view.LoadedSource = s.profiles.connections[id].hello.Source
+			view.LoadedVersion = s.profiles.connections[id].hello.ExtensionVersion
 		}
 
 		if b.Launch != nil {

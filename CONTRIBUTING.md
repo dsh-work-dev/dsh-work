@@ -6,7 +6,7 @@ Use the repository-pinned toolchain from `toolchain.lock.json`:
 
 - Go 1.25.14;
 - Wails CLI and module v3.0.0-beta.16;
-- Node.js 24 or newer;
+- Node.js 24.9.0 or newer;
 - npm 11 or newer (dependencies are pinned by `frontend/package-lock.json`).
 
 Use the machine's resolved Go, Node, npm and Wails environment. Do not relocate

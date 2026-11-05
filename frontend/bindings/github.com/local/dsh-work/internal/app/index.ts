@@ -3,6 +3,7 @@
 
 export type {
     BrowserPermissionPanel,
+    ComputerControlPanel,
     PetHitRegion,
     PetOverlayState,
     PetPanel,

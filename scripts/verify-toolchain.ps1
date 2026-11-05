@@ -12,7 +12,8 @@ if ($fixtureDeclared -ne $manifest.dsh.version -or $fixtureLocked -ne $manifest.
 
 $go = (go version).Trim()
 $node = (node --version).Trim()
-$nodeMajorMatch = [regex]::Match($node, '^v(?<major>\d+)')
+$nodeVersion = [version]($node -replace '^v', '')
+$minimumNodeVersion = [version][string]$manifest.node.minimumVersion
 $npm = (npm --version).Trim()
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
@@ -23,8 +24,8 @@ $wails = ([regex]::Match($wailsOutput, 'v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]
 if ($go -notmatch [regex]::Escape("go$($manifest.go.version)")) {
     throw "Go mismatch: expected go$($manifest.go.version), got $go"
 }
-if (-not $nodeMajorMatch.Success -or [int]$nodeMajorMatch.Groups['major'].Value -lt [int]$manifest.node.minimumMajor) {
-    throw "Node mismatch: expected >=$($manifest.node.minimumMajor), got $node"
+if ($nodeVersion -lt $minimumNodeVersion) {
+    throw "Node mismatch: expected >=$($manifest.node.minimumVersion), got $node"
 }
 $npmMajorMatch = [regex]::Match($npm, '^(?<major>\d+)\.')
 if (-not $npmMajorMatch.Success -or [int]$npmMajorMatch.Groups['major'].Value -lt [int]$manifest.packageManager.minimumMajor) {

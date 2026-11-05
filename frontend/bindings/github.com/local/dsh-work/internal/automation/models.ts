@@ -30,6 +30,7 @@ export interface BrowserBindingRequest {
 }
 
 export interface BrowserBindingView {
+    "loadedVersion"?: string;
     "loadedSource"?: string;
     "expectedSource"?: string;
     "id": string;
@@ -80,7 +81,89 @@ export interface BrowserUse {
     "site": string;
 }
 
+export enum Capability {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    Browser = "browser",
+    Computer = "computer",
+    AUV = "computer-auv",
+};
+
+/**
+ * Component is a directly managed distribution, not an npm dependency tree.
+ */
+export interface Component {
+    "id": string;
+    "name": string;
+    "capability": Capability;
+    "installedVersion": string;
+    "supportedVersion": string;
+    "latestVersion"?: string;
+    "loadedSource"?: string;
+    "loadedVersion"?: string;
+    "source"?: string;
+    "expectedSource"?: string;
+    "location": string;
+    "adapter"?: string;
+    "state": string;
+    "step"?: string;
+    "receivedBytes": number;
+    "totalBytes": number;
+    "failure"?: string;
+    "checkFailure"?: boolean;
+    "checkedAt"?: string;
+    "unsupportedRelease": boolean;
+    "managedWithApp": boolean;
+    "backendAvailable": boolean;
+}
+
+export interface ComputerConsent {
+    "id": string;
+    "session": string;
+    "title": string;
+    "target": ComputerTarget;
+    "expires": string;
+}
+
+export interface ComputerSnapshot {
+    "failure"?: string;
+    "policy": settings$0.ComputerPolicy;
+    "policyRevision": number;
+    "requests": ComputerConsent[] | null;
+    "use"?: ComputerUse | null;
+}
+
+export interface ComputerTarget {
+    "identity": string;
+    "warning": boolean;
+    "pid": number;
+    "windowId": number;
+    "executable": string;
+    "created": number;
+    "windowIdentity": string;
+    "app": string;
+    "title": string;
+    "level": string;
+}
+
+export interface ComputerUse {
+    "session": string;
+    "lifetime": string;
+    "title": string;
+    "engine": string;
+    "target"?: ComputerTarget | null;
+    "stopping": boolean;
+    "running": boolean;
+    "action"?: string;
+    "rect"?: { [_ in string]?: any } | null;
+}
+
 export interface Snapshot {
+    "components": Component[] | null;
+    "computerEngine": string;
     "gatewayConnected": boolean;
     "defaultBrowserEnabled": boolean;
     "revision": number;
@@ -91,6 +174,8 @@ export interface Snapshot {
     "computer": State;
     "profiles": BrowserProfilesSnapshot;
     "browserAccess"?: BrowserGatewaySnapshot | null;
+    "computerAccess"?: ComputerSnapshot | null;
+    "computerTools"?: json$0.RawMessage[] | null;
     "browserTools"?: json$0.RawMessage[] | null;
 }
 

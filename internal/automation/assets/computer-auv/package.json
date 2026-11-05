@@ -1,0 +1,1 @@
+{"name":"dsh-work-auv-dependencies","private":true,"version":"1.0.0","dependencies":{"@auv-js/sdk":"0.0.43","@auv-js/cli-win32-x64-msvc":"0.0.43"}}

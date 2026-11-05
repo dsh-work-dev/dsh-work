@@ -15,6 +15,12 @@
 
 ## Data and privacy
 
+- Pin optional analytics, telemetry, Session-log contribution and plugin
+  inventory reporting off in the managed DSH Work profile. An upstream default
+  cannot weaken this boundary.
+- Keep task network access attributable to an enabled capability and selected
+  provider. Treat model requests, web retrieval and browser operations as
+  functional data paths, separate from product reporting.
 - Preserve user and DSH-owned data by default.
 - Keep dsh-work application data, installed runtime files, DSH data directories
   and Workspaces as separate ownership domains.
