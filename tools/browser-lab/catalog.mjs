@@ -30,12 +30,14 @@ export const cases = [
  c('download.attached-default', '附加自动化不绕过下载目的地授权', 'download', {knownGap: 'R78-download-auto-save'}),
  c('download.native-default', '恢复 Alloy 默认后观察取消', 'download'),
  c('permissions.defaults', '敏感权限默认未获授予（仅 query）', 'permissions'),
- c('permissions.lifecycle', '站点权限允许/拒绝/撤销的原生流程', 'permissionUI', {unimplemented: true}),
- c('download.authorization', '下载目的地/路径/取消撤销/自动打开契约', 'downloadUI', {unimplemented: true}),
+ c('permissions.lifecycle', '站点权限允许/拒绝/撤销的原生流程', 'permissions', {knownGap:'R78-permission-lifecycle'}),
+ c('download.authorization', '下载目的地/路径/取消撤销/自动打开契约', 'download', {knownGap:'R78-download-authorization'}),
  c('input.native-ime', '真实键盘焦点与中文 IME 组合提交', 'physicalInput', {manual: true}),
  c('dpi.mixed-monitors', '真实不同缩放显示器之间移动', 'mixedDPI', {manual: true}),
 ];
 export const knownGaps = {
+ 'R78-permission-lifecycle':'真实本地通知权限请求未形成可允许、拒绝和撤销的宿主许可流程。',
+ 'R78-download-authorization':'真实原生默认下载取消；缺少批准目的地和活动下载撤销流程。',
  'R78-macos-shared-broker':'当前Mac CEF与Wails同进程，broker故障/冷重启无法保留Wails；必须实际终止及重启后记录该缺口。',
  'R78-popup-window-open': 'CEF 样例产生未初始化 popup，点击 ACK 超时；需托管或明确拒绝。',
  'R78-popup-unmanaged': 'CEF 默认新窗口不在 Wails tab/admission 中。',

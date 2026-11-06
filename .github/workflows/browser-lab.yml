@@ -106,6 +106,48 @@ jobs:
             tools/browser-lab/results/*/evidence/cleanup.json
             tools/browser-lab/results/*/evidence/sandbox-processes.json
 
+  native-windows-hosted:
+    name: Browser Lab native full (windows-2025)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: tools/browser-lab
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache-dependency-path: |
+            go.sum
+            tools/browser-lab/native/windows/host/go.sum
+            tools/browser-lab/native/gateway/go.sum
+      - run: npm ci --ignore-scripts
+      - name: Record actual hosted desktop context
+        run: |
+          New-Item -ItemType Directory -Force results/hosted-context | Out-Null
+          @{sessionId=(Get-Process -Id $PID).SessionId;interactive=[Environment]::UserInteractive;os=[Environment]::OSVersion.VersionString} | ConvertTo-Json | Set-Content results/hosted-context/desktop.json
+      - run: ./native/windows/build-ci.ps1
+      - name: Attempt unchanged interactive native suite
+        run: node cli.mjs run --profile regression --consent scripted --network
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: browser-lab-native-full-windows-2025
+          path: |
+            tools/browser-lab/results/hosted-context/*.json
+            tools/browser-lab/results/*/report.json
+            tools/browser-lab/results/*/junit.xml
+            tools/browser-lab/results/*/evidence/*.png
+            tools/browser-lab/results/*/evidence/*.log
+            tools/browser-lab/results/*/evidence/cleanup.json
+            tools/browser-lab/results/*/evidence/sandbox-processes.json
+
   native-posix:
     name: Browser Lab native full (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -79,7 +79,7 @@ const server=http.createServer(async(req,res)=>{
  if(req.headers.origin||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){audit.denied++;record('unauthenticated-request',{path:req.url,originPresent:!!req.headers.origin});res.writeHead(403);res.end(JSON.stringify({error:'LAB_AUTH_REQUIRED'}));return}
  try{let body={};if(req.method==='POST'){let text='';for await(const part of req){text+=part;if(text.length>65536)throw Error('Body too large')};body=JSON.parse(text||'{}')}
  let value;
- if(['/batch-start','/batch-finish','/popup-clean','/download-mode','/permissions','/storage-get','/storage-set'].includes(req.url))value=await batchProbe(req.url,body);
+ if(['/batch-start','/batch-finish','/popup-clean','/download-mode','/permissions','/permission-result','/storage-get','/storage-set'].includes(req.url))value=await batchProbe(req.url,body);
  else if(req.url==='/health')value={ready:connected&&controlReady&&!faultError,targets:tabs.size};
  else if(req.url==='/profile-close'){for(const tab of [...tabs.values()])await tab.page.close();await waitUntil(()=>!connected,'profile graceful disconnect');await faults;await waitUntil(async()=>!(await hostState()).guestRunning,'profile broker exit');value=await faultState()}
  else if(req.url==='/page-text')value=await tabs.get('A').page.evaluate(()=>({text:document.body?.innerText,url:location.href,title:document.title}));
