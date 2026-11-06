@@ -132,7 +132,9 @@ func (l *lab) quit() {
 		application.InvokeSync(func() {
 			// On Cocoa, never re-enter CefShutdown from an active message pump.
 			if C.lab_closed() != 0 {
+				log.Print("CEF shutdown beginning after native close callbacks and pump return")
 				C.lab_shutdown()
+				log.Print("CEF shutdown returned")
 				done = true
 			}
 		})

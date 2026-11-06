@@ -83,8 +83,10 @@ export async function startNative(options){
    const before=await a.state(),oldPID=manager.child.pid;
    let oldRequest,held,pendingResult;
    if(!normal){await c.action('browser_type','#entry',{text:'before-broker-fault'});oldRequest=await c.permit(await c.request('browser_type','#entry',{text:'must-not-dispatch',_labHoldMs:10000}));held=await c.hold(oldRequest)}
-   if(normal){await a.call('backend','/profile-detach',{});await a.call('control','/command?action=quit',{})}else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
+   let sampleTimer;
+   if(normal){await a.call('backend','/profile-detach',{});sampleTimer=setTimeout(()=>{if(manager.child.exitCode===null&&!manager.child.signalCode)try{execFileSync('/usr/bin/sample',[String(oldPID),'3','-file',join(options.evidenceRoot,'normal-shutdown-sample.log')],{timeout:7000})}catch(e){writeFileSync(join(options.evidenceRoot,'normal-shutdown-sample-error.log'),String(e))}},2000);await a.call('control','/command?action=quit',{})}else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
    await waitFor(()=>manager.child.exitCode!==null||manager.child.signalCode,'actual shared host termination',20000);
+   if(sampleTimer)clearTimeout(sampleTimer);
    const oldExit={pid:oldPID,code:manager.child.exitCode,signal:manager.child.signalCode};
    if(normal&&oldExit.code!==0)throw Error('Normal persistent-profile shutdown failed: '+JSON.stringify(oldExit));
    if(held){pendingResult=await held.operation;if(pendingResult.ok)throw Error('Pending operation survived shared-host crash')}
