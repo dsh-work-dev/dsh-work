@@ -34,6 +34,7 @@ static std::atomic<bool> running{false};
 static CefRefPtr<CefBrowser> browser;
 static std::atomic<int> created{0}, closed{0};
 static std::string last_error;
+#define LAB_EXPORT extern "C" __attribute__((visibility("default")))
 class Task final : public CefTask {
  public:
   explicit Task(std::function<void()> work) : work_(std::move(work)) {}
@@ -76,7 +77,7 @@ class Client final : public CefClient, public CefLifeSpanHandler {
  private:
   IMPLEMENT_REFCOUNTING(Client);
 };
-extern "C" int lab_init(const char* cache, const char* helper, const char* log) {
+LAB_EXPORT int lab_init(const char* cache, const char* helper, const char* log) {
 #if defined(__APPLE__)
   if(!loader.LoadInMain()){last_error="CEF framework load failed";return 0;}
   [BrowserLabApplication sharedApplication];
@@ -101,7 +102,7 @@ extern "C" int lab_init(const char* cache, const char* helper, const char* log) 
   if(!CefInitialize(args,settings,new App(),nullptr)){running=false;last_error="CefInitialize failed";return 0;}
   return 1;
 }
-extern "C" int lab_create(void* native, const char* url) {
+LAB_EXPORT int lab_create(void* native, const char* url) {
   CefWindowInfo info;
 #if defined(__APPLE__)
   host_window=(NSWindow*)native;
@@ -119,7 +120,7 @@ extern "C" int lab_create(void* native, const char* url) {
   CefBrowserSettings settings;
   return CefBrowserHost::CreateBrowser(info,new Client(),url,settings,nullptr,nullptr);
 }
-extern "C" const char* lab_state() {
+LAB_EXPORT const char* lab_state() {
   static thread_local std::string result;
   bool attached=false;uintptr_t id=0,guest=0;
   OnUI([&]{
@@ -138,7 +139,7 @@ extern "C" const char* lab_state() {
   std::ostringstream out;out<<"{\"initialized\":"<<(running?"true":"false")<<",\"created\":"<<created<<",\"closed\":"<<closed<<",\"parentAttached\":"<<(attached?"true":"false")<<",\"windowId\":\""<<id<<"\",\"guestId\":\""<<guest<<"\"}";
   result=out.str();return result.c_str();
 }
-extern "C" void lab_close() { OnUI([]{if(browser)browser->GetHost()->CloseBrowser(true);}); }
-extern "C" int lab_closed() { return created>0 && created==closed; }
-extern "C" void lab_shutdown() {running=false;CefShutdown();}
-extern "C" const char* lab_error() {return last_error.c_str();}
+LAB_EXPORT void lab_close() { OnUI([]{if(browser)browser->GetHost()->CloseBrowser(true);}); }
+LAB_EXPORT int lab_closed() { return created>0 && created==closed; }
+LAB_EXPORT void lab_shutdown() {running=false;CefShutdown();}
+LAB_EXPORT const char* lab_error() {return last_error.c_str();}
