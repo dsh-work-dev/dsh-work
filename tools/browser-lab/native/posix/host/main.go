@@ -38,6 +38,7 @@ type lab struct {
 	quitting                atomic.Bool
 	unauthorized            atomic.Uint64
 	results                 sync.Map
+	loads                   [2]atomic.Uint64
 }
 
 func cstr(s string) *C.char { return C.CString(s) }
@@ -237,13 +238,23 @@ func (l *lab) routes(w http.ResponseWriter, r *http.Request, asset bool) {
 			return
 		}
 		target := l.main
+		index := 0
 		if v.Surface == "float" {
 			target = l.float
+			index = 1
 		} else if v.Surface != "main" {
 			http.Error(w, "surface required", 400)
 			return
 		}
-		application.InvokeSync(func() { target.SetURL(v.URL) })
+		var previous uint64
+		application.InvokeSync(func() { previous = l.loads[index].Load(); target.SetURL(v.URL) })
+		for l.loads[index].Load() <= previous {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(25 * time.Millisecond):
+			}
+		}
 		fmt.Fprint(w, "{\"ok\":true}")
 		return
 	}
@@ -311,7 +322,12 @@ func main() {
 	l.app = application.New(application.Options{Name: "Browser Lab POSIX", Assets: application.AssetOptions{Handler: http.HandlerFunc(l.assets)}})
 	l.main = l.app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Browser Lab native embedding", Width: 1150, Height: 800, URL: "/"})
 	l.float = l.app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Browser Lab floating", Width: 1000, Height: 750, URL: "/float", Hidden: true})
-	for _, window := range []*application.WebviewWindow{l.main, l.float} {
+	for index, window := range []*application.WebviewWindow{l.main, l.float} {
+		loaded := events.Linux.WindowLoadFinished
+		if runtime.GOOS == "darwin" {
+			loaded = events.Mac.WebViewDidFinishNavigation
+		}
+		window.OnWindowEvent(loaded, func(*application.WindowEvent) { l.loads[index].Add(1) })
 		window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 			if !l.quitting.Load() {
 				e.Cancel()
