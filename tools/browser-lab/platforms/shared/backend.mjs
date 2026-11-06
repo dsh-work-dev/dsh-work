@@ -95,7 +95,7 @@ const server=http.createServer(async(req,res)=>{
  else if(req.url==='/renderer')value=await recoverRenderer(body);
  else if(req.url==='/crash-broker')value=await crashBroker();
  else if(req.url==='/broker')value=await recoverBroker();
- else if(req.url==='/documents'){value={};for(const [name,tab]of tabs){try{value[name]=await tab.page.evaluate(()=>({instance:window.lab?.instance||window.artifactInstance,value:document.querySelector('#entry')?.value,result:document.querySelector('#result')?.textContent,clicks:window.businessClickCount,url:location.href,dpr:devicePixelRatio}))}catch(e){value[name]={unavailable:String(e.message)}}}}
+ else if(req.url==='/documents'){value={};for(const [name,tab]of tabs){try{value[name]=await tab.page.evaluate(()=>({instance:window.lab?.instance||window.artifactInstance,value:document.querySelector('#entry')?.value,result:document.querySelector('#result')?.textContent,clicks:window.businessClickCount,url:location.href,dpr:devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},activeElement:document.activeElement?.id}))}catch(e){value[name]={unavailable:String(e.message)}}}}
  else if(req.url==='/stats')value=audit;
  else if(req.url==='/observe')value=await observe(body.selector||'#entry');
  else if(req.url==='/execute')value=await execute(body,res);

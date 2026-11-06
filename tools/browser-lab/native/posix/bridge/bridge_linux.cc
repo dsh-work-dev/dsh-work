@@ -25,6 +25,17 @@ static xcb_connection_t *query = nullptr;
 static std::array<std::atomic<unsigned long>, 2> guests{};
 static std::array<std::atomic<int>, 2> guest_dpi{};
 static int main_dpi = 0, float_dpi = 0;
+static GtkWidget *main_widget = nullptr;
+static GtkWidget *FindWebView(GtkWidget *widget) {
+  if (std::string(G_OBJECT_TYPE_NAME(widget)).find("WebKitWebView") !=
+      std::string::npos)
+    return widget;
+  for (auto child = gtk_widget_get_first_child(widget); child;
+       child = gtk_widget_get_next_sibling(child))
+    if (auto result = FindWebView(child))
+      return result;
+  return nullptr;
+}
 static std::array<std::atomic<bool>, 2> closed{};
 static std::atomic<bool> shutdown_returned{false}, exited_cleanly{false},
     alive{false};
@@ -196,6 +207,7 @@ LAB_EXPORT int lab_init(const char *cache, const char *helper,
   return 1;
 }
 LAB_EXPORT int lab_create(void *native, const char *) {
+  main_widget = GTK_WIDGET(native);
   auto surface = gtk_native_get_surface(GTK_NATIVE(native));
   if (!surface || !GDK_IS_X11_SURFACE(surface)) {
     last_error = "realized X11 parent required";
@@ -262,6 +274,17 @@ LAB_EXPORT int lab_command(const char *action, int index) {
     if (!alive)
       return 0;
     return kill(broker_pid, SIGKILL) == 0;
+  } else if (a == "focus-guest") {
+    if (covered || faults[selected] || !alive || !guests[selected])
+      return 0;
+    XSetInputFocus(display, guests[selected], RevertToParent, CurrentTime);
+  } else if (a == "focus-host") {
+    auto webview = FindWebView(main_widget);
+    if (!webview)
+      return 0;
+    gtk_window_present(GTK_WINDOW(main_widget));
+    if (!gtk_widget_grab_focus(webview))
+      return 0;
   } else if (a != "layout")
     return 0;
   Layout();
@@ -312,7 +335,30 @@ LAB_EXPORT const char *lab_state() {
           << ",\"parentHWND\":0,\"visible\":true,\"title\":\"\"}";
       }
   }
-  s << "]}";
+  Window focused = 0;
+  int revert = 0;
+  if (display)
+    XGetInputFocus(display, &focused, &revert);
+  bool in_guest = false;
+  Window cursor = focused;
+  for (int n = 0; n < 16 && cursor > 1; n++) {
+    if (cursor == guests[selected]) {
+      in_guest = true;
+      break;
+    }
+    auto r =
+        xcb_query_tree_reply(query, xcb_query_tree(query, cursor), nullptr);
+    if (!r)
+      break;
+    cursor = r->parent;
+    free(r);
+  }
+  s << "],\"nativeFocus\":{\"inGuest\":" << (in_guest ? "true" : "false")
+    << ",\"inHost\":"
+    << ((focused == main_id || RootFor(focused) == main_id) && !in_guest
+            ? "true"
+            : "false")
+    << "}}";
   result = s.str();
   return result.c_str();
 }

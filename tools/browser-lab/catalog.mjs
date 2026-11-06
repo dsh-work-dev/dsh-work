@@ -1,6 +1,6 @@
 // Stable IDs describe product requirements, not a particular OS or script.
 const c = (id, title, capability, extra = {}) => ({id, title, capability, ...extra});
-export const catalogVersion = 1;
+export const catalogVersion = 2;
 export const cases = [
  c('native.composition', '宿主与 live guest 同窗可见', 'nativeCapture'),
  c('sandbox.renderer', '实际 renderer token 沙箱', 'sandboxProbe'),
@@ -9,6 +9,8 @@ export const cases = [
  c('content.https', '默认 TLS 的 HTTPS 读取与错误证书拒绝', 'network', {optional: true}),
  c('tabs.retention', '两个真实标签隐藏后保活', 'nativeViews'),
  c('views.float-dock', '同一 guest 浮动与停靠', 'nativeViews'),
+ c('views.resize', '改变原生边界后页面保活且 viewport 跟随', 'nativeViews'),
+ c('input.native-routing', '原生焦点及定向 ASCII 事件路由', 'nativeInput'),
  c('dpi.current', '当前屏 host/guest DPI 一致', 'nativeViews'),
  c('authorization.display-only', '显示不自动授予操作', 'gateway'),
  c('authorization.exact-once', 'permit 精确请求绑定及单次消耗', 'gateway'),

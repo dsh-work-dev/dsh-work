@@ -22,7 +22,7 @@ export async function startNative(options){
  const manager=await startPosixSmoke({...options,fullNative:true}),children=[];
  const session={runId:options.runId,runRoot:options.runRoot,dataRoot:join(options.runRoot,'data'),evidenceRoot:options.evidenceRoot,token:options.token,build:manager.build,endpoints:Object.fromEntries(Object.entries({fixture:19478,cef:19479,shell:19480,control:19481,gateway:19482,backend:19483,artifact:19484}).map(([k,p])=>[k,'http://127.0.0.1:'+p]))};
  writeFileSync(join(options.runRoot,'session.json'),JSON.stringify({control:session.endpoints.control,dataRoot:session.dataRoot}));
- const a={session,consentChannel:'trusted-Wails-ExecJS-fixture',capabilities:new Set(['browser','gateway','nativeViews','nativeCapture','sandboxProbe','overlay','faultInjection','artifactRoot','hostStorage','profileRestart','popup','download','permissions',...(options.network?['network']:[])]),
+ const a={session,consentChannel:'trusted-Wails-ExecJS-fixture',capabilities:new Set(['browser','gateway','nativeViews','nativeInput','nativeCapture','sandboxProbe','overlay','faultInjection','artifactRoot','hostStorage','profileRestart','popup','download','permissions',...(options.network?['network']:[])]),
   async api(role,path,body,{authenticate=true,origin}={}){
    const headers={'Content-Type':'application/json'};if(authenticate)headers['X-Browser-Lab-Token']=options.token;if(origin)headers.Origin=origin;
    const r=await fetch(session.endpoints[role]+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
@@ -33,6 +33,15 @@ export async function startNative(options){
   async state(){return this.normalize(await this.call('control','/state'))},
   docs(){return this.call('backend','/documents')},stats(){return this.call('backend','/stats')},
   async command(action,args={}){await this.call('control','/command?'+new URLSearchParams({action,...args}),{});await sleep(150)},
+  async nativeInput(target){
+   if(process.env.GITHUB_ACTIONS!=='true')throw Error('Native synthetic keyboard routing is restricted to the owned GitHub runner desktop');
+   await this.command('focus-'+target);
+   const state=await this.call('control','/state');
+   if(!state.nativeFocus?.[target==='guest'?'inGuest':'inHost'])throw Error('Native focus is outside requested owned view: '+JSON.stringify(state.nativeFocus));
+   if(process.platform==='linux')execFileSync('xdotool',['type','--clearmodifiers','--delay','50','r']);
+   else await this.command('native-key');
+   return {nativeFocus:state.nativeFocus,method:process.platform==='linux'?'XTEST on owned Xvfb':'NSEvent to owned NSWindow'};
+  },
   capture:(name,which)=>manager.capture(name,which),visualMarkers:path=>manager.markers(path),
   async sandboxAssessment(){
    const processes=(await this.call('backend','/processes')).processInfo,renderers=processes.filter(p=>p.type==='renderer');

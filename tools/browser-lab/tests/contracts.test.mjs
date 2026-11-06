@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {cases,validateCatalog} from '../catalog.mjs';
+import {cases,validateCatalog,catalogVersion} from '../catalog.mjs';
 import {nativeCases} from '../cases/native.mjs';
 import {assessResults,createReport,evidencePath,requireManualResult} from '../lib/report.mjs';
 import {platformSupport,validateSession} from '../platforms/index.mjs';
@@ -34,7 +34,7 @@ test('qualification: fail, blocked, known gaps and all-skipped cannot become gre
 });
 test('report: one result per ID, bounded evidence path, explicit non-ready summary',()=>{
  const dir=mkdtempSync(join(tmpdir(),'browser-lab-contract-'));
- try{const report=createReport(dir,{runId:'contract-only',layer:'contract'},'regression');report.record({id:'a',status:'known-gap'});assert.throws(()=>report.record({id:'a',status:'pass'}),/Duplicate/);assert.throws(()=>evidencePath(dir,'../outside.png'),/escapes/);assert.throws(()=>evidencePath(dir,'.'),/escapes/);assert.equal(report.finish().qualification,'not-ready');assert.equal(JSON.parse(readFileSync(join(dir,'report.json'))).catalogVersion,1)}finally{rmSync(dir,{recursive:true})}
+ try{const report=createReport(dir,{runId:'contract-only',layer:'contract'},'regression');report.record({id:'a',status:'known-gap'});assert.throws(()=>report.record({id:'a',status:'pass'}),/Duplicate/);assert.throws(()=>evidencePath(dir,'../outside.png'),/escapes/);assert.throws(()=>evidencePath(dir,'.'),/escapes/);assert.equal(report.finish().qualification,'not-ready');assert.equal(JSON.parse(readFileSync(join(dir,'report.json'))).catalogVersion,catalogVersion)}finally{rmSync(dir,{recursive:true})}
 });
 test('manual evidence cannot be silently reused from a prior run',()=>{
  const value={runId:'this-run',results:[{id:'input.native-ime',status:'pass',operator:'operator',at:'2026-11-06T00:00:00Z',observation:'Actual composition events and correct focus in docked/floating input'}]};

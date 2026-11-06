@@ -71,7 +71,7 @@ func businessProxy(w http.ResponseWriter, r *http.Request, token string) bool {
 
 const businessControls = `<section id="grant-panel"><b>浏览器控制授权</b><output id="status"></output><output id="grants">等待授权服务</output><div id="requests"></div><button onclick="stopControl()">撤销控制</button></section>`
 const businessJS = `
-const panel=document.querySelector('aside');panel.innerHTML=document.querySelector('#grant-template').innerHTML;
+const panel=document.querySelector('aside');panel.insertAdjacentHTML('beforeend',document.querySelector('#grant-template').innerHTML);
 async function gate(path,body){const r=await fetch('/gate/'+path,{method:body?'POST':'GET',headers:{'X-Browser-Lab-Token':token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error(await r.text());return r.json()}
 async function stopControl(){try{await Promise.all(((await gate('state')).browserAccess?.sessions||[]).map(s=>gate('revoke',{session:s.session,lifetime:s.lifetime})))}catch(e){document.querySelector('#grants').textContent=e.message}}
 window.stopControl=stopControl;

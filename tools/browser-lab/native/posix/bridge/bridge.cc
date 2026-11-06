@@ -214,6 +214,28 @@ LAB_EXPORT int lab_command(const char *command, int index) {
     last_error =
         "CEF shares the Wails process; cold restart requires a new host";
     return 0;
+  } else if (a == "focus-guest") {
+    if (covered || faults[selected] || !views[selected])
+      return 0;
+    NSWindow *w = floating ? float_window : main_window;
+    [w makeKeyAndOrderFront:nil];
+    views[selected]->GetHost()->SetFocus(true);
+  } else if (a == "focus-host") {
+    [main_window makeKeyAndOrderFront:nil];
+  } else if (a == "native-key") {
+    NSWindow *w = floating ? float_window : main_window;
+    NSEvent *e =
+        [NSEvent keyEventWithType:NSEventTypeKeyDown
+                               location:NSZeroPoint
+                          modifierFlags:0
+                              timestamp:NSProcessInfo.processInfo.systemUptime
+                           windowNumber:w.windowNumber
+                                context:nil
+                             characters:@"r"
+            charactersIgnoringModifiers:@"r"
+                              isARepeat:NO
+                                keyCode:15];
+    [w sendEvent:e];
   } else if (a != "layout")
     return 0;
   Layout();
@@ -268,7 +290,16 @@ LAB_EXPORT const char *lab_state() {
       << ",\"parentHWND\":0,\"visible\":" << (w && w.visible ? "true" : "false")
       << ",\"title\":\"\"}";
   }
-  s << "]}";
+  NSWindow *active = floating ? float_window : main_window;
+  NSResponder *responder = active.firstResponder;
+  NSView *focused =
+      [responder isKindOfClass:[NSView class]] ? (NSView *)responder : nil;
+  bool in_guest =
+      focused && slots[selected] && [focused isDescendantOf:slots[selected]];
+  bool in_host =
+      focused && [focused isDescendantOf:main_window.contentView] && !in_guest;
+  s << "],\"nativeFocus\":{\"inGuest\":" << (in_guest ? "true" : "false")
+    << ",\"inHost\":" << (in_host ? "true" : "false") << "}}";
   result = s.str();
   return result.c_str();
 }
