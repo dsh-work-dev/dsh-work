@@ -42,7 +42,29 @@ await connectTargets();
 function requireControl(tab){if(faultError)throw Error('CEF_FAULT_INVALIDATION_FAILED');if(!connected)throw Error('CEF_BROKER_DISCONNECTED');if(!controlReady)throw Error('CEF_CONTROL_INVALIDATING');if(!tab||tab.crashed)throw Error('CEF_RENDERER_CRASHED')}
 async function faultState(){return {connected,connectionEpoch,controlEpoch,controlReady,faultError,tabs:[...tabs.values()].map(t=>({name:t.name,targetId:t.targetId,faultEpoch:t.faultEpoch,crashed:t.crashed})),native:await hostState()}}
 async function waitUntil(check,label,timeout=15000){const end=Date.now()+timeout;while(Date.now()<end){if(await check())return;await new Promise(r=>setTimeout(r,100))}throw Error('Timeout: '+label)}
-async function crashRenderer(body){const tab=tabs.get(body.tab);requireControl(tab);record('inject-renderer-crash',{tab:body.tab,method:process.platform==='linux'?'SIGKILL exact CEF-reported renderer PID':'Page.crash'});if(process.platform==='linux')await native('crash-renderer',{tab:body.tab});else tab.cdp.send('Page.crash').catch(e=>record('crash-command-ended',{error:e.message}));await waitUntil(()=>tab.crashed,'renderer crash event');await faults;await waitUntil(async()=>(await hostState()).tabs.find(t=>t.name===body.tab)?.fault,'native renderer fault');if(faultError)throw Error(faultError);return faultState()}
+// Chromium's browser-side trace metadata reports OS PIDs. A renderer's own
+// getpid() may be namespace-local on Linux and must never select a kill target.
+async function killOwnedLinuxRenderer(tab){
+ const client=await browser.newBrowserCDPSession(),events=[];let complete=false,started=false;
+ const collect=e=>events.push(...e.value);
+ client.on('Tracing.dataCollected',collect);client.on('Tracing.tracingComplete',()=>{complete=true});
+ try{
+  await client.send('Tracing.start',{categories:'-*,disabled-by-default-devtools.timeline',transferMode:'ReportEvents'});started=true;
+  await new Promise(r=>setTimeout(r,250));await client.send('Tracing.end');started=false;
+  await waitUntil(()=>complete,'bounded renderer trace completed');
+  const frames=events.filter(e=>e.name==='TracingStartedInBrowser').flatMap(e=>e.args?.data?.frames||[]);
+  const normalize=id=>String(id).replaceAll('-','').toLowerCase();
+  const identities=await Promise.all([...tabs.values()].map(async t=>({name:t.name,...await identity(t)})));
+  const rows=identities.map(t=>({...t,pid:Number(frames.find(f=>normalize(f.frame)===normalize(t.frameId))?.processId)}));
+  const selected=rows.find(t=>t.name===tab.name),peer=rows.find(t=>t.name!==tab.name);
+  const inventory=(await client.send('SystemInfo.getProcessInfo')).processInfo;
+  if(!Number.isSafeInteger(selected?.pid)||selected.pid<=1||selected.pid===peer?.pid||!inventory.some(p=>p.type==='renderer'&&Number(p.id)===selected.pid))throw Error('No unique owned renderer OS PID: '+JSON.stringify({rows,frames}));
+  record('renderer-os-pid-binding',{rows,source:'browser-side TracingStartedInBrowser, cross-checked SystemInfo renderer inventory'});
+  process.kill(selected.pid,'SIGKILL');
+ }finally{if(started)await client.send('Tracing.end').catch(()=>{});await client.detach()}
+}
+async function crashRenderer(body){const tab=tabs.get(body.tab);requireControl(tab);record('inject-renderer-crash',{tab:body.tab,method:process.platform==='linux'?'SIGKILL browser-reported renderer OS PID':'Page.crash'});if(process.platform==='linux')await killOwnedLinuxRenderer(tab);else tab.cdp.send('Page.crash').catch(e=>record('crash-command-ended',{error:e.message}));await waitUntil(()=>tab.crashed,'renderer crash event');await faults;await waitUntil(async()=>(await hostState()).tabs.find(t=>t.name===body.tab)?.fault,'native renderer fault');if(faultError)throw Error(faultError);return faultState()}
+
 async function recoverRenderer(body){const tab=tabs.get(body.tab);if(!connected||!tab?.crashed)throw Error('No crashed renderer to recover');await faults;if(faultError)throw Error(faultError);await tab.cdp.send('Page.reload');const previous=browser;browser=null;connected=false;await previous.close();await connectTargets();const repaired=tabs.get(body.tab);await repaired.page.waitForFunction(()=>!!window.lab?.instance,{},{timeout:10000});repaired.faultEpoch=tab.faultEpoch+1;await native('renderer-recovered',{tab:body.tab});record('renderer-recovered',{tab:body.tab,targetId:repaired.targetId,previousTargetId:tab.targetId,faultEpoch:repaired.faultEpoch});return faultState()}
 async function crashBroker(){if(!connected)throw Error('Broker not connected');record('inject-broker-crash');await native('crash-broker');await waitUntil(()=>!connected,'broker disconnect');await faults;await waitUntil(async()=>!(await hostState()).guestRunning,'broker wait completed');if(faultError)throw Error(faultError);return faultState()}
 async function recoverBroker(){if(connected)throw Error('Broker still connected');await faults;if(faultError)throw Error(faultError);await native('restart-broker');await waitUntil(async()=>(await hostState()).ready,'native broker restart');await connectTargets();record('broker-recovered',{connectionEpoch});return faultState()}

@@ -24,7 +24,6 @@ static Display *display = nullptr;
 static xcb_connection_t *query = nullptr;
 static std::array<std::atomic<unsigned long>, 2> guests{};
 static std::array<std::atomic<int>, 2> guest_dpi{};
-static std::array<std::atomic<int>, 2> renderer_pids{};
 static int main_dpi = 0, float_dpi = 0;
 static GtkWidget *main_widget = nullptr;
 static GtkWidget *FindWebView(GtkWidget *widget) {
@@ -182,11 +181,6 @@ static bool Spawn() {
         s >> i;
         if (i >= 0 && i < 2)
           closed[i] = true;
-      } else if (event == "RENDERER") {
-        int i, pid;
-        s >> i >> pid;
-        if (i >= 0 && i < 2)
-          renderer_pids[i] = pid;
       } else if (event == "SHUTDOWN")
         shutdown_returned = true;
       else if (event == "POPUP") {
@@ -284,13 +278,6 @@ LAB_EXPORT int lab_command(const char *action, int index) {
     if (covered || faults[selected] || !alive || !guests[selected])
       return 0;
     XSetInputFocus(display, guests[selected], RevertToParent, CurrentTime);
-  } else if (a == "crash-renderer") {
-    if (!alive || renderer_pids[index] <= 1 ||
-        renderer_pids[index] == renderer_pids[1 - index])
-      return 0;
-    std::string cmd = std::string("crash-renderer-") + (index ? "B\n" : "A\n");
-    return write(command_fd, cmd.c_str(), cmd.size()) ==
-           static_cast<ssize_t>(cmd.size());
   } else if (a == "focus-host") {
     auto webview = FindWebView(main_widget);
     if (!webview)
@@ -330,7 +317,6 @@ LAB_EXPORT const char *lab_state() {
       s << ",";
     auto id = guests[i].load();
     s << "{\"name\":\"" << (i ? "B" : "A") << "\",\"hwnd\":" << id
-      << ",\"rendererPID\":" << renderer_pids[i]
       << ",\"parentHWND\":" << (id && alive ? RootFor(id) : 0)
       << ",\"visible\":" << (id && alive && Visible(id) ? "true" : "false")
       << ",\"dpi\":" << guest_dpi[i]
