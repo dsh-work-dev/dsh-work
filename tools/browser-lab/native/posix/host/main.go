@@ -18,10 +18,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 func cstr(value string) *C.char { return C.CString(value) }
@@ -50,8 +52,9 @@ func main() {
 	})}})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Browser Lab native embedding", Width: 1000, Height: 700, URL: "http://wails.localhost/"})
 	var once sync.Once
+	var started atomic.Bool
 	var createError string
-	go func() {
+	startNative := func() {
 		log.Print("Waiting for Wails native window")
 		for i := 0; i < 200; i++ {
 			ready := false
@@ -74,13 +77,22 @@ func main() {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-	}()
+	}
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		started.Store(true)
+		log.Print("Wails application started")
+		go startNative()
+	})
 	listener, err := net.Listen("tcp", "127.0.0.1:19481")
 	if err != nil {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
+		if !started.Load() {
+			http.Error(w, "Wails is starting", 503)
+			return
+		}
 		var raw string
 		application.InvokeSync(func() { raw = C.GoString(C.lab_state()); log.Print("Native state: ", raw) })
 		if createError != "" {

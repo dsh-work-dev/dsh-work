@@ -14,7 +14,7 @@ export async function startPosixSmoke(options){
  const token=options.token,headers={'X-Browser-Lab-Token':token};
  const out=openSync(join(options.evidenceRoot,'host.stdout.log'),'w'),err=openSync(join(options.evidenceRoot,'host.stderr.log'),'w');
  const child=spawn(build.executable,[],{cwd:options.runRoot,detached:true,stdio:['ignore',out,err],env:{...process.env,BROWSER_LAB_RUN_ROOT:options.runRoot,BROWSER_LAB_TOKEN:token,BROWSER_LAB_BRIDGE:build.bridge,BROWSER_LAB_HELPER:build.helper,LD_LIBRARY_PATH:process.platform==='linux'?options.bundle:process.env.LD_LIBRARY_PATH}});closeSync(out);closeSync(err);
- let browser,closed=false,spawnError;child.on('error',e=>{spawnError=e});
+ let browser,closed=false,spawnError;child.on('error',e=>{spawnError=e});child.on('exit',(code,signal)=>writeFileSync(join(options.evidenceRoot,'host-exit.json'),JSON.stringify({pid:child.pid,code,signal},null,2)));
  const groupAlive=()=>{try{process.kill(-child.pid,0);return true}catch(e){if(e.code==='ESRCH')return false;throw e}};
  async function call(path,method='GET'){
   if(spawnError)throw spawnError;if(child.exitCode!==null||child.signalCode)throw Error('Native host exited before '+path);

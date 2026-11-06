@@ -133,10 +133,23 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor
       - run: npm ci --ignore-scripts
       - name: Build actual Wails and sandbox-enabled CEF candidate
         run: node native/posix/build.mjs
+      - name: Permit this lab executable to create sandbox user namespaces
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu 24.04 requires an explicit per-application userns grant.
+          # Keep the global restriction and both browser sandboxes enabled.
+          cat > "$RUNNER_TEMP/browser-lab.apparmor" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile browser-lab-ci "$GITHUB_WORKSPACE/tools/browser-lab/.work/posix/bundle/host" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$RUNNER_TEMP/browser-lab.apparmor"
       - name: Run actual Linux X11 native loop
         if: runner.os == 'Linux'
         env:
@@ -157,3 +170,8 @@ jobs:
             tools/browser-lab/results/*/evidence/cleanup.json
             tools/browser-lab/results/*/evidence/host-closed.json
             tools/browser-lab/results/*/evidence/startup-state.json
+            tools/browser-lab/results/*/evidence/host-exit.json
+      - name: Remove the isolated namespace grant
+        if: always() && runner.os == 'Linux'
+        run: |
+          if test -f "$RUNNER_TEMP/browser-lab.apparmor"; then sudo apparmor_parser -R "$RUNNER_TEMP/browser-lab.apparmor"; fi
