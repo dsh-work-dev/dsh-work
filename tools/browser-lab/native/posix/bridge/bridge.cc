@@ -130,7 +130,8 @@ extern "C" const char* lab_state() {
 #else
       id=host_xid;Display* display=XOpenDisplay(nullptr);Window root,parent,*children=nullptr;unsigned count=0;
       if(XQueryTree(display,guest,&root,&parent,&children,&count))attached=parent==host_xid;
-      if(children)XFree(children);XCloseDisplay(display);
+      if(children) { XFree(children); }
+      XCloseDisplay(display);
 #endif
     }
   });

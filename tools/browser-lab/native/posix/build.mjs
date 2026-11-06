@@ -21,7 +21,8 @@ run('cmake',['--build',build,'--config','Release','--target','cefsimple','browse
 const cefOut=join(build,'tests/cefsimple/Release'),bundle=join(work,'bundle');mkdirSync(bundle,{recursive:true});
 let executable,helper,bridge;
 if(process.platform==='darwin'){
- const app=join(bundle,'cefsimple.app');cpSync(join(cefOut,'cefsimple.app'),app,{recursive:true});
+ // Preserve relative framework symlinks; fs.cp's default rewrites their targets.
+ const app=join(bundle,'cefsimple.app');run('ditto',[join(cefOut,'cefsimple.app'),app]);
  executable=join(app,'Contents/MacOS/cefsimple');
  helper=join(app,'Contents/Frameworks/cefsimple Helper.app/Contents/MacOS/cefsimple Helper');
  bridge=join(app,'Contents/Frameworks/libbrowser_lab_bridge.dylib');copyFileSync(join(build,'lab/libbrowser_lab_bridge.dylib'),bridge);
