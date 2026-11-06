@@ -15,6 +15,9 @@ extern char **environ;
 #define LAB_EXPORT extern "C" __attribute__((visibility("default")))
 static std::string cache_path, broker_path, log_path, error;
 static Window parent_window;
+static Window slot_window;
+static Display *slot_display = nullptr;
+static int parent_depth = 0, slot_depth = 0;
 static std::atomic<unsigned long> guest{0};
 static std::atomic<bool> closed{false}, shutdown_returned{false},
     exited_cleanly{false};
@@ -35,6 +38,33 @@ LAB_EXPORT int lab_create(void *native, const char *url) {
   }
   parent_window = gdk_x11_surface_get_xid(surface);
   gdk_display_sync(gdk_surface_get_display(surface));
+  // CEF's native X11 host chooses a non-ARGB visual. Give it an explicit
+  // matching native slot instead of GTK4's potentially ARGB top-level visual.
+  slot_display = XOpenDisplay(nullptr);
+  XWindowAttributes parent_attributes{};
+  if (!slot_display ||
+      !XGetWindowAttributes(slot_display, parent_window, &parent_attributes)) {
+    error = "GTK X11 parent is not published on the server";
+    return 0;
+  }
+  parent_depth = parent_attributes.depth;
+  int screen = DefaultScreen(slot_display);
+  XSetWindowAttributes attributes{};
+  attributes.colormap = DefaultColormap(slot_display, screen);
+  attributes.border_pixel = 0;
+  attributes.background_pixel = 0;
+  slot_depth = DefaultDepth(slot_display, screen);
+  slot_window = XCreateWindow(
+      slot_display, parent_window, 240, 100, 700, 540, 0, slot_depth,
+      InputOutput, DefaultVisual(slot_display, screen),
+      CWColormap | CWBorderPixel | CWBackPixel, &attributes);
+  XMapWindow(slot_display, slot_window);
+  XSync(slot_display, False);
+  XWindowAttributes slot_attributes{};
+  if (!XGetWindowAttributes(slot_display, slot_window, &slot_attributes)) {
+    error = "X11 native slot creation failed";
+    return 0;
+  }
   int input[2], output[2];
   if (pipe(input) != 0) {
     error = "broker input pipe failed";
@@ -52,7 +82,7 @@ LAB_EXPORT int lab_create(void *native, const char *url) {
   posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO);
   for (int fd : {input[0], input[1], output[0], output[1]})
     posix_spawn_file_actions_addclose(&actions, fd);
-  std::string parent = "--parent-xid=" + std::to_string(parent_window),
+  std::string parent = "--parent-xid=" + std::to_string(slot_window),
               page = std::string("--url=") + url,
               cache = "--cache-path=" + cache_path,
               log = "--log-file=" + log_path;
@@ -133,7 +163,10 @@ LAB_EXPORT const char *lab_state() {
       << (guest ? 1 : 0) << ",\"closed\":" << (closed ? 1 : 0)
       << ",\"parentAttached\":" << (attached ? "true" : "false")
       << ",\"windowId\":\"" << parent_window << "\",\"guestId\":\"" << guest
-      << "\",\"guestAncestors\":" << ancestry.str() << "}";
+      << "\",\"slotId\":\"" << slot_window
+      << "\",\"parentDepth\":" << parent_depth
+      << ",\"slotDepth\":" << slot_depth
+      << ",\"guestAncestors\":" << ancestry.str() << "}";
   state = out.str();
   return state.c_str();
 }
@@ -152,5 +185,11 @@ LAB_EXPORT int lab_closed() {
 LAB_EXPORT void lab_shutdown() {
   if (reader.joinable())
     reader.join();
+  if (slot_display) {
+    XDestroyWindow(slot_display, slot_window);
+    XSync(slot_display, False);
+    XCloseDisplay(slot_display);
+    slot_display = nullptr;
+  }
 }
 LAB_EXPORT const char *lab_error() { return error.c_str(); }

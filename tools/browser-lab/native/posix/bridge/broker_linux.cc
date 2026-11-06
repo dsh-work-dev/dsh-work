@@ -36,7 +36,7 @@ public:
     CefWindowInfo info;
     info.SetAsChild(
         std::stoull(command->GetSwitchValue("parent-xid").ToString()),
-        CefRect(240, 100, 700, 540));
+        CefRect(0, 0, 700, 540));
     info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
     CefBrowserSettings settings;
     CefBrowserHost::CreateBrowser(info, new Client(),
