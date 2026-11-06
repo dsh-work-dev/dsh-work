@@ -50,7 +50,7 @@ func main() {
 	app := application.New(application.Options{Name: "Browser Lab POSIX", Assets: application.AssetOptions{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#16273f;color:white;font:22px system-ui}header{height:80px;padding:12px}i{display:inline-block;width:24px;height:24px;background:#39e2b5}aside{width:220px;padding:12px}</style><header><i></i> Browser Lab</header><aside>Wails 宿主</aside>`)
 	})}})
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Browser Lab native embedding", Width: 1000, Height: 700, URL: "http://wails.localhost/"})
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "Browser Lab native embedding", Width: 1000, Height: 700, URL: "/"})
 	var once sync.Once
 	var started atomic.Bool
 	var createError string
@@ -117,6 +117,11 @@ func main() {
 			for i := 0; i < 200; i++ {
 				if C.lab_closed() != 0 {
 					application.InvokeSync(func() { C.lab_shutdown() })
+					// Cocoa terminate exits rather than returning from App.Run.
+					// Record the completed CEF lifecycle before asking Wails to quit.
+					if err := os.WriteFile(filepath.Join(root, "evidence", "host-closed.json"), []byte(`{"createdClosed":true,"cefShutdownReturned":true}`), 0600); err != nil {
+						log.Fatal(err)
+					}
 					app.Quit()
 					return
 				}
@@ -138,5 +143,4 @@ func main() {
 		log.Fatal(err)
 	}
 	server.Close()
-	os.WriteFile(filepath.Join(root, "evidence", "host-closed.json"), []byte(fmt.Sprintf(`{"createdClosed":%t,"cefShutdownReturned":true}`, C.lab_closed() != 0)), 0600)
 }

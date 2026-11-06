@@ -131,6 +131,9 @@ LAB_EXPORT int lab_create(void* native, const char* url) {
   GdkSurface* surface=gtk_native_get_surface(GTK_NATIVE(native));
   if(!surface || !GDK_IS_X11_SURFACE(surface)){last_error="X11 surface required; Wayland is a separate assessment";return 0;}
   host_xid=gdk_x11_surface_get_xid(surface);
+  // GTK and CEF use different X11 connections. Publish the parent's create
+  // request before CEF's UI thread issues CreateWindow against that XID.
+  gdk_display_sync(gdk_surface_get_display(surface));
   info.SetAsChild(host_xid,CefRect(240,100,700,540));
 #endif
   info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
