@@ -1,7 +1,7 @@
 export function platformSupport(platform = process.platform) {
  if (platform === 'win32') return {implemented: true, name: 'windows', module: './windows.mjs'};
- if (platform === 'darwin') return {implemented: false, name: 'macos', reason: 'Native NSView/helper/sandbox/signing adapter has not been implemented or exercised.'};
- if (platform === 'linux') return {implemented: false, name: 'linux', reason: 'GTK4 embedding and X11/XWayland/native Wayland capabilities have not been implemented or exercised.'};
+ if (platform === 'darwin') return {implemented: true, name: 'macos', module: './posix.mjs'};
+ if (platform === 'linux') return {implemented: true, name: 'linux-x11', module: './posix.mjs'};
  return {implemented: false, name: platform, reason: 'No native adapter registered.'};
 }
 

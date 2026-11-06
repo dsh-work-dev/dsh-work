@@ -86,3 +86,4 @@ export async function startWindows(options) {
   throw error;
  }
 }
+export const startNative=startWindows;

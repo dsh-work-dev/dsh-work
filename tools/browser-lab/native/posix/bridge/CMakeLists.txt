@@ -16,7 +16,7 @@ else()
   pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
   # SDK sample logical imports are directory-scoped; create our own import.
   ADD_LOGICAL_TARGET(browser_lab_cef "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
-  target_link_libraries(browser_lab_bridge PkgConfig::GTK4 X11)
+  target_link_libraries(browser_lab_bridge PkgConfig::GTK4 X11 xcb)
   add_executable(browser_lab_broker broker_linux.cc)
   SET_EXECUTABLE_TARGET_PROPERTIES(browser_lab_broker)
   target_link_libraries(browser_lab_broker browser_lab_cef libcef_dll_wrapper ${CEF_STANDARD_LIBS})

@@ -22,7 +22,7 @@ if(command==='list'){
  const runRoot=mkdtempSync(join(tmpdir(),'browser-lab-')),evidenceRoot=join(runRoot,'evidence');mkdirSync(evidenceRoot);
  const selectedCases=option('case')?.split(',');
  if(selectedCases?.some(id=>!cases.some(c=>c.id===id)))throw Error('Unknown --case ID');
- const options={runId,profile,consent,token:randomUUID()+randomUUID(),network:args.includes('--network'),selectedCases,bundle:resolve(option('bundle',join(root,command==='smoke'?'.work/posix/bundle':'.work/bundle'))),runRoot,evidenceRoot,output,manualEvidence:option('manual-evidence'),operator:option('operator')};
+ const options={runId,profile,consent,token:randomUUID()+randomUUID(),network:args.includes('--network'),selectedCases,bundle:resolve(option('bundle',join(root,process.platform==='win32'?'.work/bundle':'.work/posix/bundle'))),runRoot,evidenceRoot,output,manualEvidence:option('manual-evidence'),operator:option('operator')};
  if(command==='manual'){
   try{const {runManual}=await import('./manual.mjs');const result=await runManual(options);console.log('Manual evidence: '+join(output,'manual-evidence.json'));process.exitCode=result.results.some(r=>r.status==='fail')?1:result.results.some(r=>r.status==='blocked')?2:0}finally{cpSync(evidenceRoot,join(output,'evidence'),{recursive:true})}
  }else{

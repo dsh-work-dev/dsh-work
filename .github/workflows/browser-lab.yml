@@ -106,8 +106,8 @@ jobs:
             tools/browser-lab/results/*/evidence/cleanup.json
             tools/browser-lab/results/*/evidence/sandbox-processes.json
 
-  native-posix-smoke:
-    name: Browser Lab native minimum (${{ matrix.os }})
+  native-posix:
+    name: Browser Lab native full (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -133,7 +133,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libxcb1-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
       - run: npm ci --ignore-scripts
       - name: Build actual Wails and sandbox-enabled CEF candidate
         run: node native/posix/build.mjs
@@ -154,14 +154,14 @@ jobs:
         if: runner.os == 'Linux'
         env:
           GDK_BACKEND: x11
-        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-openbox.log 2>&1 & node cli.mjs smoke'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-openbox.log 2>&1 & node cli.mjs run --profile regression --consent scripted --network'
       - name: Run actual macOS Cocoa native loop
         if: runner.os == 'macOS'
-        run: node cli.mjs smoke
+        run: node cli.mjs run --profile regression --consent scripted --network
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: browser-lab-native-minimum-${{ matrix.os }}
+          name: browser-lab-native-full-${{ matrix.os }}
           path: |
             tools/browser-lab/results/*/report.json
             tools/browser-lab/results/*/junit.xml

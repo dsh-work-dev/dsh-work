@@ -71,7 +71,7 @@ export function makeContext(adapter, options) {
     if(r.session!=='browser-lab:'+ctx.caseId||r.title!=='Browser Lab isolated fixture'||!siteAllowed)throw Error('Refusing scripted consent outside current fixture scope');
     const row=adapter.main.locator('[data-consent-id="'+r.id+'"]');
     await row.locator('[data-choice="allow"]').click({timeout:5000});
-    ctx.consentEvents.push({caseId:ctx.caseId,kind:r.kind,site:r.site,choice:'allow',channel:'trusted-Wails-CDP-fixture'});
+    ctx.consentEvents.push({caseId:ctx.caseId,kind:r.kind,site:r.site,choice:'allow',channel:adapter.consentChannel||'trusted-Wails-CDP-fixture'});
    }
   }catch(e){ctx.consentError=String(e.stack||e)}finally{busy=false}
  },150):null;

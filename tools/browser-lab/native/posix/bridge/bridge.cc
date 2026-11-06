@@ -1,182 +1,290 @@
-// Isolated research bridge, not a production browser provider.
+// Cocoa native views. CEF shares this Wails process; broker-loss tests must
+// observe that boundary rather than pretend there is a separate broker PID.
 #include "include/cef_app.h"
-#include "include/cef_browser.h"
-#include "include/cef_client.h"
-#include "include/cef_task.h"
-#include <atomic>
-#include <algorithm>
-#include <condition_variable>
-#include <functional>
-#include <mutex>
-#include <sstream>
-#if defined(__APPLE__)
-#import <Cocoa/Cocoa.h>
 #include "include/cef_application_mac.h"
+#include "include/cef_client.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
-@interface BrowserLabApplication : NSApplication <CefAppProtocol> { BOOL handling_; }
+#import <Cocoa/Cocoa.h>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <csignal>
+#include <sstream>
+#include <string>
+#include <unistd.h>
+#include <vector>
+@interface BrowserLabApplication : NSApplication <CefAppProtocol> {
+  BOOL handling_;
+}
 @end
 @implementation BrowserLabApplication
-- (BOOL)isHandlingSendEvent { return handling_; }
-- (void)setHandlingSendEvent:(BOOL)value { handling_ = value; }
-- (void)sendEvent:(NSEvent*)event { CefScopedSendingEvent scope; [super sendEvent:event]; }
-@end
-static CefScopedLibraryLoader loader;
-static NSWindow* host_window;
-static NSView* slot;
-static NSTimer* pump_timer;
-static bool pumping=false;
-static std::atomic<uint64_t> pump_epoch{0};
-#else
-#include <gtk/gtk.h>
-#include <gdk/x11/gdkx.h>
-#include <X11/Xlib.h>
-static Window host_xid;
-#endif
-static std::atomic<bool> running{false};
-static CefRefPtr<CefBrowser> browser;
-static std::atomic<int> created{0}, closed{0};
-static std::string last_error;
-#define LAB_EXPORT extern "C" __attribute__((visibility("default")))
-#if defined(__APPLE__)
-static void PumpWork() {
-  if(!running || pumping)return;
-  pumping=true;CefDoMessageLoopWork();pumping=false;
+- (BOOL)isHandlingSendEvent {
+  return handling_;
 }
-#endif
-class Task final : public CefTask {
- public:
-  explicit Task(std::function<void()> work) : work_(std::move(work)) {}
-  void Execute() override { work_(); }
- private:
-  std::function<void()> work_;
-  IMPLEMENT_REFCOUNTING(Task);
-};
-static void OnUI(std::function<void()> work) {
-  if (CefCurrentlyOn(TID_UI)) { work(); return; }
-  std::mutex mutex; std::condition_variable cv; bool done = false;
-  CefPostTask(TID_UI, new Task([&] { work(); {std::lock_guard<std::mutex> lock(mutex);done=true;} cv.notify_one(); }));
-  std::unique_lock<std::mutex> lock(mutex); cv.wait(lock, [&] {return done;});
+- (void)setHandlingSendEvent:(BOOL)v {
+  handling_ = v;
+}
+- (void)sendEvent:(NSEvent *)event {
+  CefScopedSendingEvent scope;
+  [super sendEvent:event];
+}
+@end
+#define LAB_EXPORT extern "C" __attribute__((visibility("default")))
+static CefScopedLibraryLoader loader;
+static NSWindow *main_window;
+static NSWindow *float_window;
+static std::array<NSView *, 2> slots{};
+static std::array<CefRefPtr<CefBrowser>, 2> views;
+static std::vector<CefRefPtr<CefBrowser>> popups;
+static std::array<bool, 2> faults{};
+static std::atomic<bool> running{false};
+static std::atomic<uint64_t> pump_epoch{0};
+static NSTimer *pump_timer;
+static bool pumping = false;
+static int selected = 0, closed_count = 0;
+static bool covered = false, floating = false;
+static std::string last_error;
+static void PumpWork() {
+  if (!running || pumping)
+    return;
+  pumping = true;
+  CefDoMessageLoopWork();
+  pumping = false;
+}
+static void Layout() {
+  for (int i = 0; i < 2; i++) {
+    NSWindow *owner = floating && selected == i ? float_window : main_window;
+    if (!owner || !slots[i])
+      continue;
+    NSView *content = owner.contentView;
+    if (slots[i].superview != content) {
+      [slots[i] removeFromSuperview];
+      [content addSubview:slots[i] positioned:NSWindowAbove relativeTo:nil];
+    }
+    CGFloat left = owner == main_window ? 240 : 20;
+    slots[i].frame = NSMakeRect(
+        left, 20, std::max<CGFloat>(100, content.bounds.size.width - left - 20),
+        std::max<CGFloat>(100, content.bounds.size.height - 120));
+    slots[i].hidden = i != selected || covered || faults[i];
+    if (views[i])
+      [(NSView *)views[i]->GetHost()->GetWindowHandle()
+          setFrame:slots[i].bounds];
+  }
 }
 class App final : public CefApp, public CefBrowserProcessHandler {
- public:
-  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
-  void OnScheduleMessagePumpWork(int64_t delay_ms) override {
-#if defined(__APPLE__)
-    const auto epoch=++pump_epoch;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, std::clamp<int64_t>(delay_ms,0,33)*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ if(epoch==pump_epoch)PumpWork(); });
-#endif
+public:
+  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+    return this;
   }
- private:
+  void OnScheduleMessagePumpWork(int64_t delay) override {
+    auto epoch = ++pump_epoch;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW,
+                      std::clamp<int64_t>(delay, 0, 33) * NSEC_PER_MSEC),
+        dispatch_get_main_queue(), ^{
+          if (epoch == pump_epoch)
+            PumpWork();
+        });
+  }
+
+private:
   IMPLEMENT_REFCOUNTING(App);
 };
 class Client final : public CefClient, public CefLifeSpanHandler {
- public:
+  int index_;
+
+public:
+  explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-  void OnAfterCreated(CefRefPtr<CefBrowser> value) override { browser=value; created++; }
-  bool DoClose(CefRefPtr<CefBrowser> value) override {
-    // Destroy only the owned child, never send close to the Wails top-level.
-#if defined(__APPLE__)
-    NSView* view=(NSView*)value->GetHost()->GetWindowHandle(); [view removeFromSuperview];
-#else
-    // CEF's X11 CloseHostWindow closes its own child, not the native parent.
-    return false;
-#endif
-    return true;
+  void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    if (!views[index_]) {
+      views[index_] = b;
+      NSView *v = (NSView *)b->GetHost()->GetWindowHandle();
+      v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    } else
+      popups.push_back(b);
   }
-  void OnBeforeClose(CefRefPtr<CefBrowser> value) override { browser=nullptr; closed++; }
- private:
+  bool DoClose(CefRefPtr<CefBrowser> b) override {
+    if (views[index_] && views[index_]->IsSame(b)) {
+      [(NSView *)b->GetHost()->GetWindowHandle() removeFromSuperview];
+      return true;
+    }
+    return false;
+  }
+  void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    if (views[index_] && views[index_]->IsSame(b)) {
+      views[index_] = nullptr;
+      closed_count++;
+    } else
+      for (auto i = popups.begin(); i != popups.end(); ++i)
+        if ((*i)->IsSame(b)) {
+          popups.erase(i);
+          break;
+        }
+  }
+
+private:
   IMPLEMENT_REFCOUNTING(Client);
 };
-LAB_EXPORT int lab_init(const char* cache, const char* helper, const char* log) {
-#if defined(__APPLE__)
-  if(!loader.LoadInMain()){last_error="CEF framework load failed";return 0;}
+LAB_EXPORT int lab_init(const char *cache, const char *helper,
+                        const char *log) {
+  if (!loader.LoadInMain()) {
+    last_error = "CEF framework load failed";
+    return 0;
+  }
   [BrowserLabApplication sharedApplication];
-  if(![NSApp isKindOfClass:[BrowserLabApplication class]]){last_error="NSApp initialized before CEF protocol subclass";return 0;}
-#else
-  XInitThreads();
-#endif
+  if (![NSApp isKindOfClass:[BrowserLabApplication class]]) {
+    last_error = "NSApp protocol subclass was not installed first";
+    return 0;
+  }
   CefSettings settings;
-  settings.no_sandbox=false;
-  settings.remote_debugging_port=19479;
-  CefString(&settings.root_cache_path)=cache;
-  CefString(&settings.cache_path)=cache;
-  CefString(&settings.browser_subprocess_path)=helper;
-  CefString(&settings.log_file)=log;
-#if defined(__APPLE__)
-  settings.external_message_pump=true;
-#else
-  settings.multi_threaded_message_loop=true;
-#endif
-  char arg0[]="browser-lab";char* argv[]={arg0,nullptr};CefMainArgs args(1,argv);
-  running=true;
-  if(!CefInitialize(args,settings,new App(),nullptr)){running=false;last_error="CefInitialize failed";return 0;}
-#if defined(__APPLE__)
-  // The official external-pump sample bounds idle work to 30Hz as well as
-  // servicing schedule callbacks. Without this idle timer IPC can stall.
-  pump_timer=[NSTimer timerWithTimeInterval:1.0/30.0 repeats:YES block:^(NSTimer*){PumpWork();}];
+  settings.no_sandbox = false;
+  settings.remote_debugging_port = 19479;
+  settings.external_message_pump = true;
+  CefString(&settings.root_cache_path) = cache;
+  CefString(&settings.cache_path) = cache;
+  CefString(&settings.browser_subprocess_path) = helper;
+  CefString(&settings.log_file) = log;
+  char name[] = "browser-lab";
+  char *argv[] = {name, nullptr};
+  CefMainArgs args(1, argv);
+  running = true;
+  if (!CefInitialize(args, settings, new App(), nullptr)) {
+    running = false;
+    last_error = "CefInitialize failed";
+    return 0;
+  }
+  pump_timer = [NSTimer timerWithTimeInterval:1.0 / 30.0
+                                      repeats:YES
+                                        block:^(NSTimer *) {
+                                          PumpWork();
+                                        }];
   [[NSRunLoop mainRunLoop] addTimer:pump_timer forMode:NSRunLoopCommonModes];
-#endif
   return 1;
 }
-LAB_EXPORT int lab_create(void* native, const char* url) {
-  CefWindowInfo info;
-#if defined(__APPLE__)
-  host_window=(NSWindow*)native;
-  NSView* content=host_window.contentView;
-  slot=[[NSView alloc] initWithFrame:NSMakeRect(240,20,700,540)];
-  [content addSubview:slot positioned:NSWindowAbove relativeTo:nil];
-  info.SetAsChild(slot,CefRect(0,0,700,540));
-#else
-  GdkSurface* surface=gtk_native_get_surface(GTK_NATIVE(native));
-  if(!surface || !GDK_IS_X11_SURFACE(surface)){last_error="X11 surface required; Wayland is a separate assessment";return 0;}
-  host_xid=gdk_x11_surface_get_xid(surface);
-  // GTK and CEF use different X11 connections. Publish the parent's create
-  // request before CEF's UI thread issues CreateWindow against that XID.
-  gdk_display_sync(gdk_surface_get_display(surface));
-  info.SetAsChild(host_xid,CefRect(240,100,700,540));
-#endif
-  info.runtime_style=CEF_RUNTIME_STYLE_ALLOY;
-  CefBrowserSettings settings;
-  return CefBrowserHost::CreateBrowser(info,new Client(),url,settings,nullptr,nullptr);
+LAB_EXPORT int lab_create(void *native, const char *) {
+  main_window = (NSWindow *)native;
+  closed_count = 0;
+  for (int i = 0; i < 2; i++) {
+    slots[i] = [[NSView alloc] initWithFrame:NSMakeRect(240, 20, 700, 540)];
+    [main_window.contentView addSubview:slots[i]
+                             positioned:NSWindowAbove
+                             relativeTo:nil];
+    slots[i].hidden = i != selected;
+    CefWindowInfo info;
+    info.SetAsChild(slots[i], CefRect(0, 0, 700, 540));
+    info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+    CefBrowserSettings settings;
+    CefBrowserHost::CreateBrowser(info, new Client(i),
+                                  "http://localhost:19478/interactions?tab=" +
+                                      std::string(i ? "B" : "A"),
+                                  settings, nullptr, nullptr);
+  }
+  Layout();
+  return 1;
 }
-LAB_EXPORT const char* lab_state() {
+LAB_EXPORT int lab_float_parent(void *native) {
+  float_window = (NSWindow *)native;
+  return float_window != nil;
+}
+LAB_EXPORT int lab_command(const char *command, int index) {
+  std::string a(command);
+  if (a == "tab") {
+    floating = false;
+    selected = index;
+  } else if (a == "float") {
+    if (!float_window)
+      return 0;
+    floating = true;
+  } else if (a == "dock")
+    floating = false;
+  else if (a == "cover")
+    covered = true;
+  else if (a == "uncover")
+    covered = false;
+  else if (a == "renderer-fault")
+    faults[index] = true;
+  else if (a == "renderer-recovered")
+    faults[index] = false;
+  else if (a == "crash-broker") {
+    kill(getpid(), SIGKILL);
+    return 0;
+  } else if (a == "restart-broker") {
+    last_error =
+        "CEF shares the Wails process; cold restart requires a new host";
+    return 0;
+  } else if (a != "layout")
+    return 0;
+  Layout();
+  return 1;
+}
+LAB_EXPORT const char *lab_state() {
   static thread_local std::string result;
-  bool attached=false;uintptr_t id=0,guest=0;std::string ancestry="[]";
-  OnUI([&]{
-    if(browser){
-      guest=(uintptr_t)browser->GetHost()->GetWindowHandle();
-#if defined(__APPLE__)
-      id=host_window.windowNumber;attached=[(NSView*)guest isDescendantOf:slot] && [(NSView*)guest window]==host_window;
-#else
-      id=host_xid;Display* display=XOpenDisplay(nullptr);Window current=guest;
-      std::ostringstream chain;chain<<"[";
-      for(int depth=0;depth<16;depth++){
-        Window root,parent,*children=nullptr;unsigned count=0;
-        bool found=XQueryTree(display,current,&root,&parent,&children,&count);
-        if(children) { XFree(children); }
-        if(!found)break;
-        if(depth) { chain<<","; }
-        chain<<parent;
-        if(parent==host_xid){attached=true;break;}
-        if(parent==root || parent==0 || parent==current)break;
-        current=parent;
-      }
-      chain<<"]";ancestry=chain.str();
-      XCloseDisplay(display);
-#endif
-    }
-  });
-  std::ostringstream out;out<<"{\"initialized\":"<<(running?"true":"false")<<",\"created\":"<<created<<",\"closed\":"<<closed<<",\"parentAttached\":"<<(attached?"true":"false")<<",\"windowId\":\""<<id<<"\",\"guestId\":\""<<guest<<"\",\"guestAncestors\":"<<ancestry<<"}";
-  result=out.str();return result.c_str();
+  Layout();
+  std::ostringstream s;
+  auto main_id = main_window ? main_window.windowNumber : 0,
+       float_id = float_window ? float_window.windowNumber : 0;
+  auto dpi = [](NSWindow *w) {
+    return w ? int(w.backingScaleFactor * 96) : 96;
+  };
+  int count = (views[0] ? 1 : 0) + (views[1] ? 1 : 0);
+  s << "{\"initialized\":" << (running ? "true" : "false")
+    << ",\"created\":" << count << ",\"closed\":" << closed_count
+    << ",\"parentAttached\":"
+    << (views[0] && [(NSView *)views[0]->GetHost()->GetWindowHandle() window] ==
+                        main_window
+            ? "true"
+            : "false")
+    << ",\"windowId\":\"" << main_id << "\",\"main\":{\"hwnd\":" << main_id
+    << ",\"windowId\":\"" << main_id << "\",\"dpi\":" << dpi(main_window)
+    << "},\"float\":{\"hwnd\":" << float_id << ",\"windowId\":\"" << float_id
+    << "\",\"dpi\":" << dpi(float_window) << ",\"visible\":"
+    << (float_window && float_window.visible ? "true" : "false")
+    << "},\"guestRunning\":" << (running && closed_count < 2 ? "true" : "false")
+    << ",\"guestPID\":" << getpid() << ",\"selected\":\""
+    << (selected ? "B" : "A")
+    << "\",\"covered\":" << (covered ? "true" : "false")
+    << ",\"floating\":" << (floating ? "true" : "false") << ",\"tabs\":[";
+  for (int i = 0; i < 2; i++) {
+    if (i)
+      s << ",";
+    NSView *v =
+        views[i] ? (NSView *)views[i]->GetHost()->GetWindowHandle() : nil;
+    NSWindow *w = v.window;
+    s << "{\"name\":\"" << (i ? "B" : "A") << "\",\"hwnd\":" << (uintptr_t)v
+      << ",\"parentHWND\":" << (w ? w.windowNumber : 0) << ",\"visible\":"
+      << (v && w.visible && !v.hiddenOrHasHiddenAncestor ? "true" : "false")
+      << ",\"dpi\":" << dpi(w)
+      << ",\"fault\":" << (faults[i] ? "true" : "false") << "}";
+  }
+  s << "],\"guestTopLevelWindows\":[";
+  for (size_t i = 0; i < popups.size(); i++) {
+    if (i)
+      s << ",";
+    NSView *v = (NSView *)popups[i]->GetHost()->GetWindowHandle();
+    NSWindow *w = v.window;
+    s << "{\"hwnd\":" << (w ? w.windowNumber : 0)
+      << ",\"parentHWND\":0,\"visible\":" << (w && w.visible ? "true" : "false")
+      << ",\"title\":\"\"}";
+  }
+  s << "]}";
+  result = s.str();
+  return result.c_str();
 }
-LAB_EXPORT void lab_close() { OnUI([]{if(browser)browser->GetHost()->CloseBrowser(true);}); }
-LAB_EXPORT int lab_closed() { return created>0 && created==closed; }
+LAB_EXPORT void lab_close() {
+  auto extras = popups;
+  for (auto b : extras)
+    b->GetHost()->CloseBrowser(true);
+  for (auto b : views)
+    if (b)
+      b->GetHost()->CloseBrowser(true);
+}
+LAB_EXPORT int lab_closed() { return closed_count == 2 && popups.empty(); }
 LAB_EXPORT void lab_shutdown() {
-  running=false;
-#if defined(__APPLE__)
-  [pump_timer invalidate];pump_timer=nil;
-#endif
+  running = false;
+  [pump_timer invalidate];
+  pump_timer = nil;
   CefShutdown();
 }
-LAB_EXPORT const char* lab_error() {return last_error.c_str();}
+LAB_EXPORT const char *lab_error() { return last_error.c_str(); }

@@ -20,11 +20,11 @@ export const cases = [
  c('overlay.presentation', '遮挡禁控、恢复后重新观察', 'overlay'),
  c('overlay.queued', 'inspect 后遮挡阻止最终 dispatch', 'overlay'),
  c('recovery.renderer', '单页崩溃隔离与显式重新加载', 'faultInjection'),
- c('recovery.broker', 'broker 退出隔离与显式重启', 'faultInjection'),
+ c('recovery.broker', 'broker 退出隔离与显式重启', 'faultInjection', {platformGaps:{darwin:'R78-macos-shared-broker'}}),
  c('isolation.guest', 'guest 无宿主能力且控制面拒绝未认证请求', 'browser'),
  c('isolation.artifact-root', 'HTML root 阻止目录及 junction 逃逸', 'artifactRoot'),
  c('profile.same-origin', '同 origin CEF 与宿主存储隔离', 'hostStorage'),
- c('profile.persistence', '正常重启保留 persistent profile', 'profileRestart'),
+ c('profile.persistence', '正常重启保留 persistent profile', 'profileRestart', {platformGaps:{darwin:'R78-macos-shared-broker'}}),
  c('popup.window-open', 'window.open 进入受控页面生命周期', 'popup', {knownGap: 'R78-popup-window-open'}),
  c('popup.target-blank', '_blank 不产生未托管顶层窗口', 'popup', {knownGap: 'R78-popup-unmanaged'}),
  c('download.attached-default', '附加自动化不绕过下载目的地授权', 'download', {knownGap: 'R78-download-auto-save'}),
@@ -36,6 +36,7 @@ export const cases = [
  c('dpi.mixed-monitors', '真实不同缩放显示器之间移动', 'mixedDPI', {manual: true}),
 ];
 export const knownGaps = {
+ 'R78-macos-shared-broker':'当前Mac CEF与Wails同进程，broker故障/冷重启无法保留Wails；必须实际终止及重启后记录该缺口。',
  'R78-popup-window-open': 'CEF 样例产生未初始化 popup，点击 ACK 超时；需托管或明确拒绝。',
  'R78-popup-unmanaged': 'CEF 默认新窗口不在 Wails tab/admission 中。',
  'R78-download-auto-save': 'Playwright 1.58.2 附加默认 allowAndName；未形成原生下载许可。',

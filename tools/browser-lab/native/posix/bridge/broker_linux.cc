@@ -1,26 +1,48 @@
-// Standalone CEF UI loop: no GTK4/Wails main-context ownership in this process.
+// Standalone sandboxed CEF owner; GTK4 and CEF never share a main context.
 #include "include/cef_app.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_task.h"
+#include "include/views/cef_display.h"
+#include <array>
 #include <iostream>
 #include <string>
 #include <thread>
-
-static CefRefPtr<CefBrowser> browser;
-static bool saw_close = false;
+#include <vector>
+static std::array<CefRefPtr<CefBrowser>, 2> views;
+static std::vector<CefRefPtr<CefBrowser>> popups;
+static int closed_count = 0;
 class Client final : public CefClient, public CefLifeSpanHandler {
+  int index_;
+
 public:
+  explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-  void OnAfterCreated(CefRefPtr<CefBrowser> value) override {
-    browser = value;
-    std::cout << "CREATED " << value->GetHost()->GetWindowHandle() << std::endl;
+  void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    if (!views[index_]) {
+      views[index_] = b;
+      auto display = CefDisplay::GetPrimaryDisplay();
+      std::cout << "CREATED " << index_ << " "
+                << b->GetHost()->GetWindowHandle() << " "
+                << (display ? display->GetDeviceScaleFactor() : 0) << std::endl;
+    } else {
+      popups.push_back(b);
+      std::cout << "POPUP " << b->GetHost()->GetWindowHandle() << std::endl;
+    }
   }
-  void OnBeforeClose(CefRefPtr<CefBrowser> value) override {
-    browser = nullptr;
-    saw_close = true;
-    std::cout << "CLOSED" << std::endl;
-    CefQuitMessageLoop();
+  void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    if (views[index_] && views[index_]->IsSame(b)) {
+      views[index_] = nullptr;
+      closed_count++;
+      std::cout << "CLOSED " << index_ << std::endl;
+    } else
+      for (auto it = popups.begin(); it != popups.end(); ++it)
+        if ((*it)->IsSame(b)) {
+          popups.erase(it);
+          break;
+        }
+    if (closed_count == 2 && popups.empty())
+      CefQuitMessageLoop();
   }
 
 private:
@@ -32,16 +54,20 @@ public:
     return this;
   }
   void OnContextInitialized() override {
-    auto command = CefCommandLine::GetGlobalCommandLine();
-    CefWindowInfo info;
-    info.SetAsChild(
-        std::stoull(command->GetSwitchValue("parent-xid").ToString()),
-        CefRect(0, 0, 700, 540));
-    info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-    CefBrowserSettings settings;
-    CefBrowserHost::CreateBrowser(info, new Client(),
-                                  command->GetSwitchValue("url"), settings,
-                                  nullptr, nullptr);
+    auto c = CefCommandLine::GetGlobalCommandLine();
+    for (int i = 0; i < 2; i++) {
+      CefWindowInfo info;
+      info.SetAsChild(
+          std::stoull(
+              c->GetSwitchValue(i ? "parent-b" : "parent-a").ToString()),
+          CefRect(0, 0, 700, 540));
+      info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+      CefBrowserSettings settings;
+      CefBrowserHost::CreateBrowser(info, new Client(i),
+                                    "http://localhost:19478/interactions?tab=" +
+                                        std::string(i ? "B" : "A"),
+                                    settings, nullptr, nullptr);
+    }
   }
 
 private:
@@ -50,8 +76,12 @@ private:
 class CloseTask final : public CefTask {
 public:
   void Execute() override {
-    if (browser)
-      browser->GetHost()->CloseBrowser(true);
+    auto extras = popups;
+    for (auto b : extras)
+      b->GetHost()->CloseBrowser(true);
+    for (auto b : views)
+      if (b)
+        b->GetHost()->CloseBrowser(true);
   }
 
 private:
@@ -62,14 +92,14 @@ int main(int argc, char **argv) {
   int code = CefExecuteProcess(args, nullptr, nullptr);
   if (code >= 0)
     return code;
-  auto command = CefCommandLine::CreateCommandLine();
-  command->InitFromArgv(argc, argv);
+  auto c = CefCommandLine::CreateCommandLine();
+  c->InitFromArgv(argc, argv);
   CefSettings settings;
   settings.no_sandbox = false;
   settings.remote_debugging_port = 19479;
-  CefString(&settings.root_cache_path) = command->GetSwitchValue("cache-path");
-  CefString(&settings.cache_path) = command->GetSwitchValue("cache-path");
-  CefString(&settings.log_file) = command->GetSwitchValue("log-file");
+  CefString(&settings.root_cache_path) = c->GetSwitchValue("cache-path");
+  CefString(&settings.cache_path) = c->GetSwitchValue("cache-path");
+  CefString(&settings.log_file) = c->GetSwitchValue("log-file");
   if (!CefInitialize(args, settings, new App(), nullptr))
     return 1;
   std::thread([] {
@@ -79,7 +109,7 @@ int main(int argc, char **argv) {
   }).detach();
   CefRunMessageLoop();
   CefShutdown();
-  if (saw_close)
+  if (closed_count == 2)
     std::cout << "SHUTDOWN" << std::endl;
-  return saw_close ? 0 : 2;
+  return closed_count == 2 ? 0 : 2;
 }

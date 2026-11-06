@@ -43,7 +43,7 @@ test('manual evidence cannot be silently reused from a prior run',()=>{
  assert.throws(()=>requireManualResult({...value,results:[{id:'input.native-ime',status:'pass'}]},'this-run','input.native-ime'),/requires/);
 });
 test('platform/session: no macOS or Linux placeholder successes, no remote control endpoint',()=>{
- assert(platformSupport('win32').implemented);assert(!platformSupport('darwin').implemented);assert(!platformSupport('linux').implemented);
+ for(const platform of ['win32','darwin','linux']){assert(platformSupport(platform).implemented);assert(platformSupport(platform).module)}assert(!platformSupport('freebsd').implemented);
  const endpoints={fixture:'http://127.0.0.1:19478',cef:'http://127.0.0.1:19479',shell:'http://127.0.0.1:19480',control:'http://127.0.0.1:19481',gateway:'http://127.0.0.1:19482',backend:'http://127.0.0.1:19483',artifact:'http://127.0.0.1:19484'};
  const session={schemaVersion:1,runId:'test',dataRoot:'/private',evidenceRoot:'/evidence',token:'x'.repeat(32),endpoints};assert.equal(validateSession(session),session);assert.throws(()=>validateSession({...session,endpoints:{...endpoints,backend:'https://remote.example'}}),/Unexpected/);
 });

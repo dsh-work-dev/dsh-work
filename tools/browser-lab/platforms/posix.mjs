@@ -1,0 +1,91 @@
+import {spawn,execFileSync} from 'node:child_process';
+import {readFileSync,writeFileSync,openSync,closeSync} from 'node:fs';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {startPosixSmoke} from './posix-smoke.mjs';
+import {normalizeNativeState} from './windows.mjs';
+import {waitFor,sleep} from '../lib/context.mjs';
+const root=fileURLToPath(new URL('../',import.meta.url));
+class Surface{
+ constructor(owner,name){this.owner=owner;this.name=name;this.location='wails://localhost/'+(name==='float'?'float':'')}
+ url(){return this.location}
+ async evaluate(fn,arg){const r=await this.owner.call('control','/ui/eval',{surface:this.name,source:fn.toString(),arg});if(r.error)throw Error(r.error);return r.value}
+ async waitForFunction(fn,arg,options={}){return waitFor(()=>this.evaluate(fn,arg),'trusted '+this.name+' UI predicate',options.timeout||10000)}
+ async goto(url){await this.owner.call('control','/ui/navigate',{surface:this.name,URL:url});await this.waitForFunction(u=>location.href===u&&document.readyState==='complete',url,{timeout:15000});this.location=url}
+ locator(selector){const self=this;return {
+  locator(next){return self.locator(selector+' '+next)},
+  async click(options={}){await waitFor(()=>self.evaluate(s=>{const el=document.querySelector(s);if(!el||el.disabled||!el.getClientRects().length)return false;el.click();return true},selector),'trusted UI button '+selector,options.timeout||7000)},
+  async waitFor(options={}){await self.waitForFunction(({selector,state})=>{const el=document.querySelector(selector),visible=!!el&&el.getClientRects().length>0&&!el.hidden;return state==='hidden'?!visible:visible},{selector,state:options.state},{timeout:options.timeout||7000})}
+ }}
+}
+export async function startNative(options){
+ const manager=await startPosixSmoke({...options,fullNative:true}),children=[];
+ const session={runId:options.runId,runRoot:options.runRoot,dataRoot:join(options.runRoot,'data'),evidenceRoot:options.evidenceRoot,token:options.token,build:manager.build,endpoints:Object.fromEntries(Object.entries({fixture:19478,cef:19479,shell:19480,control:19481,gateway:19482,backend:19483,artifact:19484}).map(([k,p])=>[k,'http://127.0.0.1:'+p]))};
+ writeFileSync(join(options.runRoot,'session.json'),JSON.stringify({control:session.endpoints.control,dataRoot:session.dataRoot}));
+ const a={session,consentChannel:'trusted-Wails-ExecJS-fixture',capabilities:new Set(['browser','gateway','nativeViews','nativeCapture','sandboxProbe','overlay','faultInjection','artifactRoot','hostStorage','profileRestart','popup','download','permissions',...(options.network?['network']:[])]),
+  async api(role,path,body,{authenticate=true,origin}={}){
+   const headers={'Content-Type':'application/json'};if(authenticate)headers['X-Browser-Lab-Token']=options.token;if(origin)headers.Origin=origin;
+   const r=await fetch(session.endpoints[role]+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(45000)});
+   const text=await r.text();let value;try{value=JSON.parse(text)}catch{value={text}}return {ok:r.ok,status:r.status,value};
+  },
+  async call(role,path,body,flags){const r=await this.api(role,path,body,flags);if(!r.ok)throw Error(role+path+': '+JSON.stringify(r.value));return r.value},
+  normalize:normalizeNativeState,
+  async state(){return this.normalize(await this.call('control','/state'))},
+  docs(){return this.call('backend','/documents')},stats(){return this.call('backend','/stats')},
+  async command(action,args={}){await this.call('control','/command?'+new URLSearchParams({action,...args}),{});await sleep(150)},
+  capture:(name,which)=>manager.capture(name,which),visualMarkers:path=>manager.markers(path),
+  async sandboxAssessment(){
+   const processes=(await this.call('backend','/processes')).processInfo,renderers=processes.filter(p=>p.type==='renderer');
+   const rows=[],canary=join(session.dataRoot,'private/outside.txt');
+   for(const p of renderers){
+    if(process.platform==='linux'){const text=readFileSync('/proc/'+p.id+'/status','utf8');const fields=Object.fromEntries(text.split('\n').filter(l=>l.includes(':')).map(l=>{const i=l.indexOf(':');return [l.slice(0,i),l.slice(i+1).trim()]}));rows.push({pid:p.id,noNewPrivs:fields.NoNewPrivs,seccomp:fields.Seccomp,capEff:fields.CapEff,nspid:fields.NSpid});}
+    else rows.push({pid:p.id,...JSON.parse(execFileSync(join(options.bundle,'sandbox-probe'),[String(p.id),canary],{encoding:'utf8'}))});
+   }
+   let brokerPolicy;
+   if(process.platform==='darwin'){const pid=processes.find(p=>p.type==='browser')?.id;if(!pid)throw Error('No browser PID in owned CEF process inventory');brokerPolicy=JSON.parse(execFileSync(join(options.bundle,'sandbox-probe'),[String(pid),canary],{encoding:'utf8'}));}
+   const rendererSandboxed=rows.length>=2&&rows.every(r=>process.platform==='linux'?r.noNewPrivs==='1'&&r.seccomp==='2'&&/^0+$/.test(r.capEff):r.result===1)&&(!brokerPolicy||brokerPolicy.result===0);
+   const evidence={rendererSandboxed,rows,brokerPolicy,scope:process.platform==='linux'?'actual renderer no_new_privs + seccomp-filter + zero effective capabilities':'Seatbelt SPI query denies this lab private canary for renderer and permits broker; not all sandbox operations'};
+   writeFileSync(join(options.evidenceRoot,'sandbox-processes.json'),JSON.stringify(evidence,null,2));return evidence;
+  },
+  async recover(kind){await this.main.locator('#recover-'+kind).waitFor({state:'visible',timeout:10000});await this.main.locator('#recover-'+kind).click();return waitFor(async()=>{const f=await this.call('backend','/fault-state');return f.connected&&f.native.ready&&!f.tabs.some(t=>t.crashed)?{...f,native:this.normalize(f.native)}:false},'native explicit recovery',30000)},
+  async close(){
+   let failure;
+   try{await this.call('gateway','/shutdown',{})}catch(e){failure=e}
+   try{await manager.close()}catch(e){failure=e}
+   try{await this.call('backend','/shutdown',{})}catch(e){failure=e}
+   for(const child of children){if(child.exitCode===null&&!child.signalCode)try{await waitFor(()=>child.exitCode!==null||child.signalCode,'lab sidecar exit',10000)}catch(e){failure=e;child.kill('SIGTERM')}}
+   if(failure)throw failure;
+   const result=JSON.parse(readFileSync(join(options.evidenceRoot,'cleanup.json'),'utf8'));
+   if(!result.normal||result.remainingOwnedGroup)throw Error('Native groups were not fully reclaimed');return result;
+  }
+ };
+ a.main=new Surface(a,'main');a.float=new Surface(a,'float');
+ function launch(name,exe,args){const out=openSync(join(options.evidenceRoot,name+'.stdout.log'),'w'),err=openSync(join(options.evidenceRoot,name+'.stderr.log'),'w');const child=spawn(exe,args,{cwd:options.runRoot,env:manager.env,stdio:['ignore',out,err]});closeSync(out);closeSync(err);children.push(child);return child}
+ try{
+  launch('backend',process.execPath,[join(root,'platforms/shared/backend.mjs')]);await waitFor(async()=>{try{return (await a.call('backend','/health')).ready}catch{return false}},'CEF backend',15000);
+  launch('gateway',join(options.bundle,'gateway'),[]);await waitFor(async()=>{try{return !!(await a.call('gateway','/state')).browserAccess}catch{return false}},'real Go automation Service',20000);
+  await a.main.waitForFunction(()=>!!document.querySelector('#requests'));
+ }catch(e){try{await a.close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e}
+ if(process.platform==='darwin'){
+  async function coldHostTrial(c,normal){
+   const key='browser_lab_'+crypto.randomUUID().replaceAll('-',''),value='cold-'+crypto.randomUUID();
+   if(normal)await a.call('backend','/storage-set',{key,value});
+   const before=await a.state(),oldPID=manager.child.pid;
+   let oldRequest,held,pendingResult;
+   if(!normal){await c.action('browser_type','#entry',{text:'before-broker-fault'});oldRequest=await c.permit(await c.request('browser_type','#entry',{text:'must-not-dispatch',_labHoldMs:10000}));held=await c.hold(oldRequest)}
+   if(normal)await a.call('control','/command?action=quit',{});else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
+   await waitFor(()=>manager.child.exitCode!==null||manager.child.signalCode,'actual shared host termination',20000);
+   const oldExit={pid:oldPID,code:manager.child.exitCode,signal:manager.child.signalCode};
+   if(held){pendingResult=await held.operation;if(pendingResult.ok)throw Error('Pending operation survived shared-host crash')}
+   await manager.restartHost();await a.call('backend','/host-rebind',{});const after=await a.state();
+   if(before.host.id===after.host.id)throw Error('Host-loss trial did not produce a new Wails native window');
+   const stored=normal?await a.call('backend','/storage-get',{key}):undefined;
+   if(normal&&stored.localStorage!==value)throw Error('Cold profile did not persist');
+   const oldPermit=oldRequest?await c.denied(oldRequest):undefined;
+   return {gap:'R78-macos-shared-broker',evidence:{before,after,oldExit,hostPreserved:false,storage:stored,pendingResult,oldPermit,scope:normal?'Actual whole-host normal restart, persistent storage retained; Wails not preserved':'Actual CEF/broker PID kill also terminates Wails in this candidate'}};
+  }
+  a.caseOverrides={'recovery.broker':c=>coldHostTrial(c,false),'profile.persistence':c=>coldHostTrial(c,true)};
+ }
+ return a;
+}
+

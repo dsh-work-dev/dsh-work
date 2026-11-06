@@ -28,8 +28,8 @@ test('Browser Lab native requirements',{timeout:600000},async t=>{
  });
  try{
   if(!support.implemented)throw Error(support.reason);
-  const {startWindows}=await import('../platforms/windows.mjs');
-  adapter=await startWindows(options);ctx=makeContext(adapter,options);
+  const {startNative}=await import(new URL(support.module,new URL('../platforms/',import.meta.url)));
+  adapter=await startNative(options);ctx=makeContext(adapter,options);
   report.data.environment.build=adapter.session.build;
   report.data.environment.runtime=await adapter.call('backend','/version');
  }catch(e){startError=String(e.stack||e);report.data.startupError=startError}
@@ -51,13 +51,13 @@ test('Browser Lab native requirements',{timeout:600000},async t=>{
    if(!adapter.capabilities.has(item.capability)){skip('blocked','Adapter does not provide '+item.capability);return}
    let result;
    try{
-    await ctx.prepare(item.id);result=await nativeCases[item.id](ctx);
+    await ctx.prepare(item.id);result=await (adapter.caseOverrides?.[item.id]||nativeCases[item.id])(ctx);
     if(ctx.consentError)throw Error(ctx.consentError);
     if(result?.gap){
-     if(result.gap!==item.knownGap)throw Error('Unexpected requirement violation: '+result.gap);
-     report.record({id:item.id,status:'known-gap',gap:item.knownGap,evidence:result.evidence,durationMs:Date.now()-started});st.skip('Observed known gap: '+item.knownGap);return;
+     if(result.gap!==item.knownGap&&result.gap!==item.platformGaps?.[process.platform])throw Error('Unexpected requirement violation: '+result.gap);
+     report.record({id:item.id,status:'known-gap',gap:result.gap,evidence:result.evidence,durationMs:Date.now()-started});st.skip('Observed known gap: '+result.gap);return;
     }
-    if(item.knownGap)throw Error('Known gap no longer reproduced; review and remove its expected-gap declaration: '+item.knownGap);
+    if((process.platform==='win32'&&item.knownGap)||item.platformGaps?.[process.platform])throw Error('Known gap no longer reproduced; review its platform baseline');
     report.record({id:item.id,status:'pass',evidence:result?.evidence,durationMs:Date.now()-started});
    }catch(e){report.record({id:item.id,status:'fail',error:String(e.stack||e),durationMs:Date.now()-started});throw e}
    finally{
