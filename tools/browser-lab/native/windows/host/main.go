@@ -280,8 +280,7 @@ func (l *lab) quit() {
 		application.InvokeSync(func() { l.closing = false })
 	}
 	if !running {
-		application.InvokeSync(func() { l.closed = true })
-		l.app.Quit()
+		l.closeHost()
 		return
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -325,7 +324,23 @@ func (l *lab) quit() {
 	}
 	application.InvokeSync(func() { l.closed = true; l.record("CEF process exited", nil) })
 	log.Println("Both CEF tabs closed; broker exited normally")
-	l.app.Quit()
+	l.closeHost()
+}
+
+func (l *lab) closeHost() {
+	// Close() dispatches window events asynchronously. Let both real WebView2
+	// windows finish their native close before ending Wails' message loop.
+	application.InvokeSync(func() { l.closed = true; l.float.Close(); l.main.Close() })
+	for i := 0; i < 100; i++ {
+		a, _, _ := nativeProbeIsWindow.Call(l.mainHWND)
+		b, _, _ := nativeProbeIsWindow.Call(l.floatHWND)
+		if a == 0 && b == 0 {
+			l.app.Quit()
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	log.Print("Native Wails windows did not close; leave the process for diagnosis")
 }
 
 func main() {

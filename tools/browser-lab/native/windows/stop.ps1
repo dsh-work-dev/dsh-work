@@ -25,8 +25,7 @@ foreach($property in $s.processes.PSObject.Properties){
  $null=$actual.WaitForExit(2000)
 }
 $scope=[IO.Path]::GetFullPath($s.dataRoot).TrimEnd('\')+'\'
-$profile=[IO.Path]::GetFullPath((Join-Path $s.dataRoot 'host-profile'))
-$profilePattern='(?i)--user-data-dir(?:=|\s+)"?'+[regex]::Escape($profile)+'(?=["\s]|$)'
+$profilePattern='(?i)--user-data-dir(?:=|\s+)"?'+[regex]::Escape($scope)
 function Test-OwnedProcess($candidate) {
  $staged=$candidate.ExecutablePath -and $candidate.ExecutablePath.StartsWith($scope,[StringComparison]::OrdinalIgnoreCase)
  $webview=$candidate.Name -eq 'msedgewebview2.exe' -and $candidate.CommandLine -and [regex]::IsMatch($candidate.CommandLine.Replace('/','\'),$profilePattern)
@@ -36,7 +35,9 @@ function Test-OwnedProcess($candidate) {
 # this exact private profile, not a port or an unrelated WebView2 installation.
 $deadline=[DateTime]::UtcNow.AddSeconds(10)
 while([DateTime]::UtcNow -lt $deadline) {
- if(!@(Get-CimInstance Win32_Process|Where-Object {Test-OwnedProcess $_}).Count){break}
+ $owned=@(Get-CimInstance Win32_Process|Where-Object {Test-OwnedProcess $_})
+ $ports=@(19478..19484|ForEach-Object {Get-NetTCPConnection -State Listen -LocalPort $_ -ErrorAction SilentlyContinue})
+ if(!$owned.Count -and !$ports.Count){break}
  Start-Sleep -Milliseconds 250
 }
 # If graceful shutdown failed, only staged lab executables (or this profile's
@@ -49,6 +50,7 @@ foreach($candidate in @(Get-CimInstance Win32_Process)){
 }
 $remaining=@(Get-CimInstance Win32_Process|Where-Object {Test-OwnedProcess $_})
 $listeners=@(19478..19484|ForEach-Object {Get-NetTCPConnection -State Listen -LocalPort $_ -ErrorAction SilentlyContinue}|Select-Object LocalPort,OwningProcess)
-@{schemaVersion=1;steps=$steps;forcedRegisteredProcesses=$forced;remainingProcesses=@($remaining|Select-Object ProcessId,Name);remainingListeners=$listeners}|ConvertTo-Json -Depth 7|Set-Content "$RunRoot/evidence/cleanup.json"
+$listenerOwners=@(foreach($listener in $listeners){$p=Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)";@{pid=$listener.OwningProcess;exists=($null -ne $p);name=$p.Name;parent=$p.ParentProcessId;owned=($p -and (Test-OwnedProcess $p))}})
+@{schemaVersion=1;steps=$steps;forcedRegisteredProcesses=$forced;remainingProcesses=@($remaining|Select-Object ProcessId,Name);remainingListeners=$listeners;listenerOwners=$listenerOwners}|ConvertTo-Json -Depth 7|Set-Content "$RunRoot/evidence/cleanup.json"
 if($remaining.Count -or $listeners.Count -or $forced.Count){throw 'Cleanup was not fully graceful; see cleanup.json'}
 Write-Host 'Browser Lab stopped with zero remaining processes/listeners'
