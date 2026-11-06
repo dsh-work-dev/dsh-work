@@ -17,7 +17,7 @@ if(!readFileSync(cmake,'utf8').includes(marker))appendFileSync(cmake,`\n${marker
 const args=['-S',sdk,'-B',build,'-DCMAKE_BUILD_TYPE=Release','-DUSE_SANDBOX=ON'];
 if(process.platform==='darwin')args.push('-DCMAKE_OSX_ARCHITECTURES='+process.arch.replace('x64','x86_64'));
 run('cmake',args);
-run('cmake',['--build',build,'--config','Release','--target','cefsimple','browser_lab_bridge','--parallel','3']);
+run('cmake',['--build',build,'--config','Release','--target','cefsimple','browser_lab_bridge',...(process.platform==='linux'?['browser_lab_broker']:[]),'--parallel','3']);
 const cefOut=join(build,'tests/cefsimple/Release'),bundle=join(work,'bundle');mkdirSync(bundle,{recursive:true});
 let executable,helper,bridge;
 if(process.platform==='darwin'){
@@ -27,7 +27,7 @@ if(process.platform==='darwin'){
  helper=join(app,'Contents/Frameworks/cefsimple Helper.app/Contents/MacOS/cefsimple Helper');
  bridge=join(app,'Contents/Frameworks/libbrowser_lab_bridge.dylib');copyFileSync(join(build,'lab/libbrowser_lab_bridge.dylib'),bridge);
 }else{
- cpSync(cefOut,bundle,{recursive:true});executable=join(bundle,'host');helper=join(bundle,'cefsimple');bridge=join(bundle,'libbrowser_lab_bridge.so');copyFileSync(join(build,'lab/libbrowser_lab_bridge.so'),bridge);
+ cpSync(cefOut,bundle,{recursive:true});executable=join(bundle,'host');helper=join(bundle,'browser_lab_broker');bridge=join(bundle,'libbrowser_lab_bridge.so');copyFileSync(join(build,'lab/libbrowser_lab_bridge.so'),bridge);copyFileSync(join(build,'lab/browser_lab_broker'),helper);
  // The SDK ships its supported setuid sandbox helper. Do not disable sandbox.
  const sandbox=join(bundle,'chrome-sandbox');if(!existsSync(sandbox))throw Error('SDK sandbox helper missing');
  run('sudo',['chown','root:root',sandbox]);run('sudo',['chmod','4755',sandbox]);

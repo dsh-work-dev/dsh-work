@@ -104,7 +104,9 @@ node tools/browser-lab/native/posix/build.mjs
 node tools/browser-lab/cli.mjs smoke
 ```
 
-构建下载固定CEF standard SDK、编译官方helper/wrapper、窄原生bridge与隔离Wails host。Linux使用原生X11 child，macOS使用同进程NSView及CEF外部消息泵；这与Windows独立broker模型不同，是待验证的实验候选。当前Go binding未证明覆盖固定CEF156、macOS事件协议及沙箱/helper生命周期，因此直接复用官方C++ wrapper，仅桥接必要的初始化、parent、状态和关闭。没有改Wails模块缓存或产品实现。
+构建下载固定CEF standard SDK、编译官方wrapper、窄原生bridge与隔离Wails host。Linux使用独立CEF broker、自持消息循环并嵌入原生X11 child；macOS使用同进程NSView及CEF外部消息泵。当前Go binding未证明覆盖固定CEF156、macOS事件协议及沙箱/helper生命周期，因此直接复用官方C++ wrapper，仅桥接必要的初始化、parent、状态和关闭。没有改Wails模块缓存或产品实现。
+
+macOS实验构建仅为Wails的`StatusItemController`加精确编译期命名前缀，避免与CEF的ObjC类冲突；此选项不改CEF或模块缓存。Ubuntu24.04 runner为本次host配置单程序AppArmor userns许可，让WebKit能创建其沙箱；全局限制和浏览器沙箱保留，job结束移除该许可。CEF156 SDK配置deployment target为macOS13，当前Mac CI只验证15，不能据此承诺项目原有macOS12支持。
 
 `smoke` 实际检查Wails与CEF parent关系、原生窗口截图同时包含shell/guest标记、同一document真实输入/点击，以及OnBeforeClose/CefShutdown和进程组回收。只对隔离fixture使用特权CDP，不声称已验证Go Service授权。其余要求报告`not-selected`，qualification保持not-ready。Linux Xvfb只覆盖X11；Wayland需独立compositor验证，真实IME/物理混合DPI保留人工项。
 
