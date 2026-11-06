@@ -1,19 +1,19 @@
-# dsh-work domain context
+# DSH Work domain context
 
-This file is the compact ubiquitous language for the dsh-work desktop host. It
+This file is the compact ubiquitous language for the DSH Work desktop host. It
 contains domain meaning only; product requirements and technical decisions live
 in the documents linked from `docs/README.md`.
 
 ## Bounded contexts
 
-- **dsh-work host** owns the desktop lifecycle, global preferences, Desktop Pet
+- **DSH Work host** owns the desktop lifecycle, global preferences, Desktop Pet
   surface and desktop delivery of notifications.
-- **dsh-work run context** owns the runtime, DSH data directory and profile that
-  dsh-work is currently running or attempting to run, plus verified version snapshots
+- **DSH Work run context** owns the runtime, DSH data directory and profile that
+  DSH Work is currently running or attempting to run, plus verified version snapshots
   used for recovery; it does not own DSH Workspace records.
 - **DSH workspace** owns the agent-facing web experience, Workspace registry
   and feedback that is meaningful only inside a conversation or DSH surface.
-- **DSH runtime** owns its executable and protocol. dsh-work adapts its launch
+- **DSH runtime** owns its executable and protocol. DSH Work adapts its launch
   and readiness behavior but does not redefine DSH session semantics.
 
 ## Canonical terms
@@ -22,69 +22,69 @@ in the documents linked from `docs/README.md`.
 |---|---|---|
 | Daemon | The per-user background process owning Host state, Worker lifetime, tray, Pet and notifications. | The desktop window process or a remote access endpoint. |
 | Desktop UI client | The process owning the workbench window (with its Settings panel) and projecting daemon state. | The owner of background tasks. |
-| Shell | dsh-work's trusted top-level document in the workbench window: top bar, menus, window buttons and startup view. | DSH's own UI or a DSH plugin surface. |
-| DSH frame | The iframe in the shell that shows DSH on its own origin with the Worker role. | A separate native window or a trusted dsh-work surface. |
-| Desktop Pet | A dsh-work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
+| Shell | DSH Work's trusted top-level document in the workbench window: top bar, menus, window buttons and startup view. | DSH's own UI or a DSH plugin surface. |
+| DSH frame | The iframe in the shell that shows DSH on its own origin with the Worker role. | A separate native window or a trusted DSH Work surface. |
+| Desktop Pet | A DSH Work-owned animated surface displayed in a separate native window outside the DSH Workspace. | DSH conversation content or an arbitrary downloaded application. |
 | Pet catalog | The Host-controlled set of validated Pet assets available for selection. | A package execution environment or a DSH plugin registry. |
-| Appearance | dsh-work's persisted theme and light/dark mode for the workbench: startup, Settings and the DSH frame. | DSH's stored appearance preference, which dsh-work leaves unchanged. |
-| Theme | A built-in look for dsh-work windows that changes styling only and declares the light/dark modes it supports. | A layout, a page structure or user-supplied CSS. |
+| Appearance | DSH Work's persisted theme and light/dark mode for the workbench: startup, Settings and the DSH frame. | DSH's stored appearance preference, which DSH Work leaves unchanged. |
+| Theme | A built-in look for DSH Work windows that changes styling only and declares the light/dark modes it supports. | A layout, a page structure or user-supplied CSS. |
 | Pet visibility intent | The user's persisted choice to show or hide the selected Pet. | Proof that a native window is currently visible. |
 | Pet position | A persisted monitor-relative anchor plus native window dimensions and scale. | A DSH Workspace directory or a screen-absolute promise that survives every monitor layout. |
 | Pet preview | A Host-projected frame or safe fallback used by trusted Settings UI. | Direct access by Settings UI to package files. |
-| Notification event | A meaningful occurrence accepted by the dsh-work notification router for possible desktop delivery. | Raw process output or an arbitrary log line. |
-| Desktop notification | A notification delivered through the operating system while dsh-work is not the user's active surface. | A DSH toast or an HTML status message. |
-| In-page notice | Contextual feedback rendered by DSH beside the conversation, composer or DSH-owned surface. | A dsh-work-owned global notification. |
-| Notification preference | A user choice that enables or suppresses a class of dsh-work desktop notifications. | A switch that changes DSH's own conversation UI. |
+| Notification event | A meaningful occurrence accepted by the DSH Work notification router for possible desktop delivery. | Raw process output or an arbitrary log line. |
+| Desktop notification | A notification delivered through the operating system while DSH Work is not the user's active surface. | A DSH toast or an HTML status message. |
+| In-page notice | Contextual feedback rendered by DSH beside the conversation, composer or DSH-owned surface. | A DSH Work-owned global notification. |
+| Notification preference | A user choice that enables or suppresses a class of DSH Work desktop notifications. | A switch that changes DSH's own conversation UI. |
 | Notification policy | The product rule that decides whether an accepted event is delivered, based on its class, preference and window state. | A user-facing setting. |
-| Notification target | The dsh-work or DSH surface the user should return to when acting on a notification. | An arbitrary external URL. |
+| Notification target | The DSH Work or DSH surface the user should return to when acting on a notification. | An arbitrary external URL. |
 | Action-required event | An event that needs a user decision before DSH can continue, such as a question or approval. | A routine status update. |
 | Completion event | An event that indicates a DSH turn or task has finished. | A partial streaming update. |
-| Lifecycle event | A dsh-work or DSH state transition such as startup, unexpected exit or restart. | A successful preference save. |
+| Lifecycle event | A DSH Work or DSH state transition such as startup, unexpected exit or restart. | A successful preference save. |
 | Notification delivery | One attempt to present an accepted event through a selected surface. | The event itself; one event may be eligible for more than one surface. |
 | Notification deduplication | The rule that prevents one logical event from producing repeated desktop deliveries. | Dismissing or handling the source event. |
-| DSH data directory | The user-facing name for the DSH data root that scopes profiles, their plugin associations and related DSH runtime data. | dsh-work application data, an installed runtime, or a Workspace directory. |
-| DSH home | DSH's external technical name for a DSH data directory. dsh-work's domain term is DSH data directory. | A Configured Run context or a Workspace. |
+| DSH data directory | The user-facing name for the DSH data root that scopes profiles, their plugin associations and related DSH runtime data. | DSH Work application data, an installed runtime, or a Workspace directory. |
+| DSH home | DSH's external technical name for a DSH data directory. DSH Work's domain term is DSH data directory. | A Configured Run context or a Workspace. |
 | DSH profile | A named configuration scope inside one DSH data directory. The profile owns the plugin association set used when that profile runs. | A runtime, a Workspace, or a global plugin set. |
-| DSH plugin | An extension package associated with a profile within a DSH data directory. Its association is not global to the runtime or dsh-work. | A runtime component or a dsh-work-global setting. |
+| DSH plugin | An extension package associated with a profile within a DSH data directory. Its association is not global to the runtime or DSH Work. | A runtime component or a DSH Work-global setting. |
 | Disabled plugin | An installed third-party plugin that DSH's plugin manager has deselected, so DSH loads neither its code nor its patches. It stays installed and can be enabled again while the profile runs. | An uninstalled plugin, or a disabled loader entry. |
 | Loader entry | One row of a profile's plugin tree, identified by `id` and naming the package it loads. Official layers insert most entries; later layers and the profile's own patch layer may override them by id. | A plugin package or a profile layer. |
 | Disabled loader entry | An official loader entry that DSH's plugin manager has turned off. Its layer stays in the layer list and every other entry still loads. | A disabled plugin, which removes a whole layer. |
-| DSH Workspace | A DSH-owned persistent record for a canonical directory, its identity/title and associated sessions. | The DSH data directory, a profile, or a dsh-work setting. |
-| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. | A field in dsh-work's run context. |
-| Run context | The complete dsh-work selection of one DSH runtime, Node selection, DSH data directory and profile that defines one Worker generation. | A Workspace context or a durable settings document. |
-| Configured Run context | The Run context persisted as dsh-work's selected context. While dsh-work is running, changing it starts an immediate context switch rather than waiting for another launch. | A deferred or partially selected target. |
+| DSH Workspace | A DSH-owned persistent record for a canonical directory, its identity/title and associated sessions. | The DSH data directory, a profile, or a DSH Work setting. |
+| Workspace context | The DSH Workspace selected or resumed for one active session or Worker generation. | A field in DSH Work's run context. |
+| Run context | The complete DSH Work selection of one DSH runtime, Node selection, DSH data directory and profile that defines one Worker generation. | A Workspace context or a durable settings document. |
+| Configured Run context | The Run context persisted as DSH Work's selected context. While DSH Work is running, changing it starts an immediate context switch rather than waiting for another launch. | A deferred or partially selected target. |
 | Known-good run context | The last run context that reached a healthy ready state whose recorded versions identify a recovery target; restoring it requires an available compatible snapshot. | An unverified candidate. |
 | Current profile | The profile in the current healthy Run context. Only this profile's plugin associations may be modified, apart from the startup-failure plugin actions in ownership rule 5; non-current profiles are read-only. | The profile merely selected for inspection. |
 | Context switch | A user-requested change of runtime, DSH data directory or profile that takes effect by restarting the Worker and completes only after the new context is ready; failure follows the configured recovery policy. | Editing a deferred selection without applying it. |
 | Version record (internal: version snapshot) | Exact DSH and installed plugin versions/sources, dependency groups, bundle order, lock/workspace inputs and verification metadata used to reconstruct an environment. | A copy of installed package trees or conversation data. |
 | Development fixture version | The DSH version in `toolchain.lock.json` that `tools/dsh` installs for development, tests and CI. | The version users run, or a compatibility limit. |
 | Last successful snapshot | The latest verified success record for a profile; a separate last-running pointer identifies the previous successful environment for switches. | Proof that a Worker is currently alive. |
-| DSH Work profile | The profile `dsh-work` that dsh-work creates and runs by default in its managed DSH data directory, titled "DSH Work". It cannot be renamed or deleted. | DSH's built-in `web` profile, or a profile in a user-registered DSH data directory. |
-| Managed DSH data directory | The DSH data directory dsh-work owns: the user-data location (default `~/.dsh-work`), laid out as official DSH lays out a DSH home. | App data, or a user-registered DSH data directory such as `~/.dsh`. |
-| App data | dsh-work's rebuildable storage: runtimes, host plugins, `settings.json`, update files and `state.json`. | User data or the managed DSH data directory. |
-| Profile records | dsh-work's per-profile records in `<profile>/.dsh-work/`: version points, plugin provenance and backups. They move with the profile and are skipped by clone, backup and export. | DSH's own profile files such as `package.json` or `cordis.patch.yml`. |
+| DSH Work profile | The profile `dsh-work` that DSH Work creates and runs by default in its managed DSH data directory, titled "DSH Work". It cannot be renamed or deleted. | DSH's built-in `web` profile, or a profile in a user-registered DSH data directory. |
+| Managed DSH data directory | The DSH data directory DSH Work owns: the user-data location (default `~/.dsh-work`), laid out as official DSH lays out a DSH home. | App data, or a user-registered DSH data directory such as `~/.dsh`. |
+| App data | DSH Work's rebuildable storage: runtimes, host plugins, `settings.json`, update files and `state.json`. | User data or the managed DSH data directory. |
+| Profile records | DSH Work's per-profile records in `<profile>/.dsh-work/`: version points, plugin provenance and backups. They move with the profile and are skipped by clone, backup and export. | DSH's own profile files such as `package.json` or `cordis.patch.yml`. |
 | Import from DSH | A user-confirmed import of selected items from a DSH folder the user picks into the DSH Work profile and the managed DSH data directory: registry plugins, patch entries, session history, workspaces and credentials. It only adds, keeps DSH Work's existing values and never changes the source. | Replacing DSH Work with a copy of another profile. |
-| Host plugin | One of dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), embedded in the application and inserted per launch, outside any profile. | A third-party or profile plugin managed by DSH's PluginManager. |
+| Host plugin | One of DSH Work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), embedded in the application and inserted per launch, outside any profile. | A third-party or profile plugin managed by DSH's PluginManager. |
 | Launch context | The per-generation handoff containing a resolved Run context plus its separately resolved Workspace context. | A durable global configuration document. |
 
 ## Ownership rules
 
 1. DSH remains the source of truth for DSH conversation and session state.
-2. dsh-work remains the source of truth for desktop notification preferences and
+2. DSH Work remains the source of truth for desktop notification preferences and
    desktop delivery decisions.
-3. dsh-work remains the source of truth for Pet selection, visibility, size,
+3. DSH Work remains the source of truth for Pet selection, visibility, size,
    position and native-window behavior.
-4. A dsh-work preference may suppress a dsh-work desktop delivery, but it must not
+4. A DSH Work preference may suppress a DSH Work desktop delivery, but it must not
    remove or alter an in-page notice that DSH needs for context.
 5. The profile in the current run context is the only DSH profile whose plugin
-   associations dsh-work may modify. Non-current profiles are read-only until the
+   associations DSH Work may modify. Non-current profiles are read-only until the
    user switches the run context to that profile. Snapshot recovery may reapply
    recorded plugin inputs while the Worker is stopped. While the profile runs,
    enabling and disabling go through DSH's own plugin manager. When a start
-   fails, dsh-work may also disable or remove third-party plugins of the profile
+   fails, DSH Work may also disable or remove third-party plugins of the profile
    that failed, while no Worker is running and no run context is current.
 6. A context switch changes the runtime, DSH data directory and profile as one
    unit. It becomes current only after the new Worker is healthy; a failed
    switch follows the configured recovery policy.
-7. dsh-work remains the source of truth for the appearance of its own windows.
+7. DSH Work remains the source of truth for the appearance of its own windows.
    It never writes DSH's appearance preference.

@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-dsh-work owns the Desktop Pet as a Host-managed native surface outside the
+DSH Work owns the Desktop Pet as a Host-managed native surface outside the
 DSH Workspace WebView. This document records the current activity, presentation and Settings behavior.
 
 Native release acceptance remains open. Windows is the reference platform. Browser verification and a
@@ -54,7 +54,7 @@ isolate Worker replacements.
 The plugin's Client half reports session titles and parent sessions to the
 plugin only when the session list changes. The pet reflects current state and
 keeps no read tracking: when the leading conversation finishes a turn while
-dsh-work is running, the pet plays its completion action once for that turn;
+DSH Work is running, the pet plays its completion action once for that turn;
 and the bubble shows "Completed" with the summary for eight seconds. Turns
 restored from session history at startup replay neither. Opening a conversation from the pet shows the
 most recently focused workbench window and sends that window a

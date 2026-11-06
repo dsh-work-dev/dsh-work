@@ -586,6 +586,8 @@ Section "Program files" SEC_PROGRAM_FILES
     ClearErrors
     !insertmacro wails.files
     !insertmacro dshwork.cli
+    File "..\..\..\LICENSE"
+    File "..\..\..\COMMERCIAL.md"
     IfErrors packageStageFailed
     StrCpy $DshWorkFailureStage "verify GUI executable $DshWorkStagingDir\${PRODUCT_EXECUTABLE}"
     IfFileExists "$DshWorkStagingDir\${PRODUCT_EXECUTABLE}" 0 packageStageFailed

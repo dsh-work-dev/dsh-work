@@ -548,7 +548,7 @@ jobs:
           wails3 updater manifest \
             -version "$VERSION" \
             -channel "$CHANNEL" \
-            -name "dsh-work $VERSION" \
+            -name "DSH Work $VERSION" \
             -url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}" \
             -output feed/manifest.json \
             "$installer"

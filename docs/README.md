@@ -1,6 +1,6 @@
-# dsh-work documentation
+# DSH Work documentation
 
-This directory contains the accepted project knowledge for dsh-work. It
+This directory contains the accepted project knowledge for DSH Work. It
 describes the product as it exists and the rules current implementation must
 preserve.
 
@@ -23,6 +23,12 @@ preserve.
    over CDP instead of taking over the desktop.
 9. [Set up browser control](browser-setup.md) — enable, install, bind, repair and
    update the Chrome/Edge extension and its components.
+10. [Licensing](licensing.md) — AGPL and commercial options, contribution rights
+    and release obligations.
+11. [Responding to suspected infringement](enforcement.md) — ownership records,
+    evidence preservation, compliance notices and escalation.
+12. [Name and brand use](branding.md) — DSH Work spelling, technical identifiers,
+    visual assets, attribution and third-party distributions.
 
 Design decisions live with the feature or boundary they govern: each section
 states the current choice, why it was made, what was rejected and when to

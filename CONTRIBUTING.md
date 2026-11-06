@@ -1,4 +1,18 @@
-# Contributing to dsh-work
+# Contributing to DSH Work
+
+## Contribution licensing
+
+The project uses AGPL-3.0-only and reserves discretionary written exceptions.
+Before submitting copyrightable code, contact the maintainer through a
+[licensing inquiry](https://github.com/dsh-work-dev/dsh-work/issues) to arrange
+a contributor agreement covering AGPL distribution and separate licensing.
+The agreement must identify the contributor and contributions, confirm their
+authority (including employer permission where needed), and expressly address
+commercial relicensing rights. Maintainers must not
+merge external copyrightable contributions until the agreement has been
+executed and retained. A PR submission or sign-off alone does not grant
+commercial relicensing rights. Agreements are retained privately, not in public
+PRs. See [Licensing](docs/licensing.md).
 
 ## Toolchain
 
@@ -114,7 +128,7 @@ bin\dsh-work-cli.exe plugin list --data-directory dsh-work --profile web
 
 Use `main` for DSH release candidates and stable releases. Use the literal
 `dsh-preview` branch for DSH alpha releases; it has no `codex/` prefix. Land
-ordinary dsh-work changes on `main` and merge them into `dsh-preview` so alpha
+ordinary DSH Work changes on `main` and merge them into `dsh-preview` so alpha
 compatibility work stays current. Pin and verify an exact DSH version on each
 branch before changing its runtime.
 
@@ -131,7 +145,7 @@ branch before changing its runtime.
 - Give every process, goroutine, timer, subscription and buffer one owner and a
   bounded lifetime.
 - Propagate cancellation and verify cleanup on every terminal path.
-- Preserve user-owned DSH data by default. Safely replace persisted dsh-work
+- Preserve user-owned DSH data by default. Safely replace persisted DSH Work
   state; the manager State follows the field-compatible contract in
   [Manager persistence](docs/architecture.md#manager-persistence),
   while global Host preferences remain versioned.

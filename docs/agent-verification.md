@@ -1,6 +1,6 @@
 # Verifying the running app without taking over the desktop
 
-Agents and scripts check dsh-work's UI by talking to the app, not by moving the
+Agents and scripts check DSH Work's UI by talking to the app, not by moving the
 user's mouse or reading the screen. Screen-driving tools fight the user for
 focus. They also cannot see the workbench: it uses WebView2 composition
 hosting, which screen-capture and click tools treat as an opaque region.

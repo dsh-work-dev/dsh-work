@@ -2,7 +2,7 @@
 
 ## Purpose
 
-dsh-work provides the trusted desktop lifecycle around DeepSeek Harness. It
+DSH Work provides the trusted desktop lifecycle around DeepSeek Harness. It
 makes a versioned external DSH runtime startable, observable and recoverable
 without turning the Host into another agent runtime.
 
@@ -20,11 +20,12 @@ metadata. `dsh-work` remains the technical identifier for the repository, Go
 module, executables, CLI commands, data directories, registry keys, the
 `dsh-work://` scheme and `@dsh-work/*` plugins, so renaming the display never
 moves data or installations. Development builds name their notifications DSH
-Work Dev. The project documentation uses `dsh-work` for the codebase.
+Work Dev. Documentation prose uses DSH Work; exact technical identifiers keep
+their existing spelling. See [Name and brand use](branding.md).
 
 ## Ownership boundary
 
-dsh-work owns:
+DSH Work owns:
 
 - application windows, tray behavior and explicit Quit;
 - trusted settings and native desktop integrations;
@@ -47,10 +48,10 @@ DSH owns:
 
 The Run context contains one DSH runtime, Node selection, DSH data directory and profile.
 Workspace context is selected separately through DSH and is scoped to a Worker
-generation. dsh-work must not infer a Workspace from its current directory or
+generation. DSH Work must not infer a Workspace from its current directory or
 silently mutate DSH-owned data.
 
-dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, session history, workspaces and credentials from an existing DSH folder.
+DSH Work runs its own DSH profile, DSH Work, and can import plugins, settings, session history, workspaces and credentials from an existing DSH folder.
 
 ## Current capabilities
 
@@ -76,7 +77,7 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   packages cannot be disabled as a whole. Non-current profiles are read-only.
 - Plugin update availability comes from a registry check that runs whenever
   the current profile is running. A failed check is retried with backoff (2 s
-  doubling to 60 s). Plugins dsh-work installed show their recorded source
+  doubling to 60 s). Plugins DSH Work installed show their recorded source
   (official, mirror, custom registry) before the check completes.
 - Upgrade all applies every available plugin upgrade in one Run-context
   change: one Worker stop, ordered upgrades, one health check, and rollback of
@@ -96,8 +97,8 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   configured, current or known-good environment cannot be removed.
 - DSH's DeepSeek account sign-in works in the Workspace. Starting sign-in
   opens the authorization page in the system browser. After authorization,
-  the browser shows a result page with a link back to dsh-work.
-- dsh-work handles `dsh://open` and its own `dsh-work://open` links by
+  the browser shows a result page with a link back to DSH Work.
+- DSH Work handles `dsh://open` and its own `dsh-work://open` links by
   focusing or opening the Workspace. The installer takes over the `dsh://`
   scheme and restores the previous handler on uninstall.
 - Settings persist locale, recovery, Pet and notification preferences.
@@ -117,7 +118,7 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   Notification preferences do not hide DSH-owned in-page notices. A failed
   native delivery is recorded as a diagnostic and does not change the outcome
   of the event that caused it.
-- dsh-work persists the appearance of its own windows (General → Theme and
+- DSH Work persists the appearance of its own windows (General → Theme and
   Appearance). A theme offers only the light/dark modes it supports; choosing
   a theme without the current mode switches to one it supports. It does not change DSH's appearance, and DSH
   content windows keep DSH's own light/dark preference.
@@ -132,7 +133,7 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   tray and remaining UI. When a task is running or a scheduled reminder is armed,
   it first asks for confirmation and says which of them would be lost.
 - The workbench is a single window without a system title bar. DSH runs inside
-  it below a dsh-work top bar that follows DSH's surface colour and holds the
+  it below a DSH Work top bar that follows DSH's surface colour and holds the
   menus 文件 (new session, workspace, terminal and browser; close, quit), 视图
   (sidebars, zoom, full screen, desktop pet), 运行 (refresh, restart DSH, safe
   mode), 设置 (each Settings section and DSH settings) and 帮助 (docs, keyboard
@@ -141,7 +142,7 @@ dsh-work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   (with Windows 11 Snap layouts) and close buttons. Alt or F10 focuses the menus, also while typing in DSH.
 - Each process keeps a bounded local log. Settings › Diagnostics lists recent
   problems with a plain title and the action that usually fixes them, copies
-  an anonymized Markdown report, opens a prefilled dsh-work GitHub issue form
+  an anonymized Markdown report, opens a prefilled DSH Work GitHub issue form
   for pasting it, exports a diagnostics bundle the user attaches themselves,
   opens the log folder and turns detailed logging on until it is turned off.
   Nothing is uploaded automatically.

@@ -1,6 +1,6 @@
-# dsh-work
+# DSH Work
 
-dsh-work is a local-first desktop host for
+DSH Work is a local-first desktop host for
 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It
 turns a separately managed DSH runtime into a dependable desktop application
 while leaving agents, plugins, conversations and Workspaces under DSH ownership.
@@ -33,10 +33,10 @@ workbench menu, or “停止后台并退出” in the tray, to stop background w
 
 ## Project boundary
 
-dsh-work owns desktop lifecycle, native integration, trusted settings and the
+DSH Work owns desktop lifecycle, native integration, trusted settings and the
 boundary through which DSH reaches the desktop. DSH owns agent behaviour,
 profiles and plugin composition, Workspace identity, sessions and conversation
-state. dsh-work does not rewrite those systems or inject Host UI into the DSH
+state. DSH Work does not rewrite those systems or inject Host UI into the DSH
 Workspace.
 
 ## Status
@@ -49,3 +49,18 @@ release signing and update-feed publication remain in the next delivery stage.
 See the [project documentation](docs/README.md) for the accepted product and
 architecture baseline. Build, test and contribution instructions are in
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Except where a file or component specifies another license, DSH Work is
+licensed under the [GNU Affero General Public License, version 3 only](LICENSE)
+(`AGPL-3.0-only`). Commercial use is permitted under that license.
+
+A [separate written exception](COMMERCIAL.md) may be granted at the relevant
+copyright holders' discretion for uses requiring different terms, including
+proprietary integration. Third-party components retain their own licenses.
+See [Licensing](docs/licensing.md) for scope, contributions and release guidance.
+Rights not granted by the applicable licenses are reserved; see the
+[reservation of rights and legal remedies](COMMERCIAL.md#copyright-and-legal-remedies).
+The product name is **DSH Work**; `dsh-work` remains the technical identifier.
+See [Name and brand use](docs/branding.md) for logos and third-party distributions.
