@@ -17,7 +17,11 @@ if($PSCmdlet.ParameterSetName -eq 'SDK'){
  $sdkCopy=Join-Path $work 'cef-sdk';Copy-Item $CefSdk $sdkCopy -Recurse
  Copy-Item "$PSScriptRoot/cef-overlay/*.cc","$PSScriptRoot/cef-overlay/startup_trace.h" "$sdkCopy/tests/cefsimple" -Force
  if(Get-Command cmake -ErrorAction SilentlyContinue){$cmake='cmake';$prefix=@()}else{$cmake='python';$prefix=@('-m','cmake')}
- & $cmake @prefix -S $sdkCopy -B "$work/cef-build" -G 'Visual Studio 17 2022' -A x64 -DUSE_SANDBOX=ON
+ $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+ if(!(Test-Path $vswhere)){throw 'Visual Studio discovery tool is required'}
+ $major=([version](& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion)).Major
+ $generator=switch($major){17 {'Visual Studio 17 2022'} 18 {'Visual Studio 18 2026'} default {throw "Unsupported installed Visual Studio major: $major"}}
+ & $cmake @prefix -S $sdkCopy -B "$work/cef-build" -G $generator -A x64 -DUSE_SANDBOX=ON
  if($LASTEXITCODE -ne 0){throw 'CEF configure failed'}
  & $cmake @prefix --build "$work/cef-build" --config Release --target cefsimple --parallel 8
  if($LASTEXITCODE -ne 0){throw 'CEF build failed'}

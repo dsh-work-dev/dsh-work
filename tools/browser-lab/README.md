@@ -67,7 +67,7 @@ node tools/browser-lab/cli.mjs run --profile regression --consent scripted --net
 npm run --prefix tools/browser-lab qualify
 ```
 
-32 个稳定 requirement ID 在 `catalog.mjs`，28 个可执行场景在 `cases/native.mjs`。2 个尚未实现的要求为下载授权生命周期及站点权限原生管理；2 个人工要求为真实原生输入／IME和实际混合 DPI。人工记录须包含同一 run ID、操作者、时间与具体观察；用 `--run-id` 和 `--manual-evidence` 提供，不能拿上次报告或 CDP 填字替代真人输入。
+目录 v2 有 34 个稳定 requirement ID：32 个自动场景与 2 个人工场景。自动项覆盖原有 Windows 场景，并单列窗口缩放、原生焦点及定向 ASCII 事件；权限与下载授权生命周期会实际请求，再报告当前能力缺口，不再静态跳过。原生键盘合成只在本次 GitHub runner 桌面执行，不代表物理键盘或 IME。人工记录须包含同一 run ID、操作者、时间与具体观察；用 `--run-id` 和 `--manual-evidence` 提供，不能拿上次报告或 CDP 填字替代真人输入。
 
 在 Windows 交互终端先收集真实输入证据，再对同一候选构建运行自动测试：
 
@@ -85,47 +85,48 @@ catalog.mjs / cases/native.mjs     跨平台要求与逻辑
 lib/context.mjs / lib/report.mjs   实际授权调用、报告与门禁
 platforms/index.mjs                平台能力登记；缺实现返回 blocked
 platforms/windows.mjs              Windows 启停、状态归一化、WGC、沙箱探针
-platforms/windows/                单 owner Playwright adapter 与固定观察端点
+platforms/shared/                 三平台单 owner CEF backend 与固定观察端点
+platforms/posix.mjs               Linux/macOS 全套 adapter、可信 Wails UI fixture
 native/windows/                   Wails/Win32 lab host、bootstrap overlay、WGC helper
 native/gateway/                   复用项目真实 automation.Service 的隔离网关
 fixtures/                        固定 HTML/JS/CSS/SVG、弹窗、无害文本下载
 ```
 
-公共场景按逻辑 view ID、document identity、host 状态断言，不按 HWND 写业务测试。Windows 适配器把 HWND 归一化为 view ID，只有本平台层查询 Win32／WGC。未来 macOS/Linux 适配器需提供同样的 `state / command / capture / sandboxAssessment / recover` 与固定 backend 契约，声明真实能力；不能只复用 Windows 的成功结果。
+公共场景按逻辑 view ID、document identity、host 状态断言，不按 HWND 写业务测试。Windows 适配器把 HWND 归一化为 view ID，只有本平台层查询 Win32／WGC。macOS/Linux 适配器提供同样的 `state / command / capture / sandboxAssessment / recover` 与固定 backend 契约，声明真实能力；不能只复用 Windows 的成功结果。
 
-完整32项的 macOS/Linux 适配器尚未实现，`run` 入口仍会明确 blocked。另有独立 `smoke` 原生最小闭环，用来先证明这两个平台能实际同窗与同页操作，不替代全套资格验收。
+三平台共用 `run` 全套入口和真实 Go Service 授权/permit 逻辑。POSIX 的可信 Wails 面板由测试专用 ExecJS 回传通道操作；该通道不授予外页宿主能力。单 owner CEF backend 负责页面操作与取证。`smoke` 仍保留为定向诊断入口，只运行最小闭环，报告其余要求 `not-selected`。
 
-## Linux/X11 与 macOS 原生最小闭环
+## Linux/X11 与 macOS 全套原生回归
 
 在对应平台运行（Linux需GTK4/WebKitGTK 6、X11桌面；CI安装命令见workflow）：
 
 ```sh
 node tools/browser-lab/native/posix/build.mjs
-node tools/browser-lab/cli.mjs smoke
+node tools/browser-lab/cli.mjs run --profile regression --consent scripted --network
 ```
 
 构建下载固定CEF standard SDK、编译官方wrapper、窄原生bridge与隔离Wails host。Linux使用独立CEF broker、自持消息循环并嵌入原生X11 child；macOS使用同进程NSView及CEF外部消息泵。当前Go binding未证明覆盖固定CEF156、macOS事件协议及沙箱/helper生命周期，因此直接复用官方C++ wrapper，仅桥接必要的初始化、parent、状态和关闭。没有改Wails模块缓存或产品实现。
 
 macOS实验构建仅为Wails的`StatusItemController`加精确编译期命名前缀，避免与CEF的ObjC类冲突；此选项不改CEF或模块缓存。Ubuntu24.04 runner为本次host配置单程序AppArmor userns许可，让WebKit能创建其沙箱；全局限制和浏览器沙箱保留，job结束移除该许可。CEF156 SDK配置deployment target为macOS13，当前Mac CI只验证15，不能据此承诺项目原有macOS12支持。
 
-`smoke` 实际检查Wails与CEF parent关系、原生窗口截图同时包含shell/guest标记、同一document真实输入/点击，以及OnBeforeClose/CefShutdown和进程组回收。只对隔离fixture使用特权CDP，不声称已验证Go Service授权。其余要求报告`not-selected`，qualification保持not-ready。Linux Xvfb只覆盖X11；Wayland需独立compositor验证，真实IME/物理混合DPI保留人工项。
+完整入口执行 HTML/localhost/HTTPS、双标签保活、浮动/停靠/缩放、当前屏 DPI、原生 ASCII 焦点路由、真实授权与精确目标绑定、导航/切页/撤销/遮挡防误操作、故障恢复、外页能力与 profile/文件 root 隔离，以及弹窗、下载和权限探测。macOS 候选的 CEF 与 Wails 同进程：真实 broker 故障会连宿主退出，测试记录该隔离缺口，随后重建整个隔离宿主继续；全宿主重启的持久化不能冒充“保留 Wails 的 CEF 冷重启”。Linux Xvfb 只覆盖 X11，未覆盖 Wayland。真实中文 IME 候选框和物理混合 DPI 保留人工项。实际各平台通过/失败以对应运行的 report.json 为准。
 
 ## CI 分层
 
 `.github/workflows/browser-lab.yml`：
 
 1. push/PR：Windows、macOS、Ubuntu 的 contract/fixture matrix，不启动 GUI。
-   另有 `native-posix-smoke` job，在Ubuntu 24.04的Xvfb/Openbox与macOS 15上构建并运行真实原生最小闭环，上传JSON/JUnit/原生图/回收证据；不会把纯CDP页面截图当同窗通过。
+   原生 full jobs 在 Windows 2025、Ubuntu 24.04/Xvfb/Openbox 与 macOS 15 上构建并运行完整自动目录，上传 JSON/JUnit、原生窗口图和回收证据。Windows 保留原交互桌面与未打包检查；hosted 环境不满足时报告实际阻断，不绕过或用页面图代替原生同窗图。
 2. 手动触发 native：仅 main，使用 `[self-hosted, Windows, X64, browser-lab]` 的已准备 runner。runner 要在普通、已解锁的交互用户会话运行，不能是 session 0 服务；需配置 `BROWSER_LAB_CEF_BUNDLE`、原生 MSVC/SDK。native job 串行占用固定 19478–19484 端口。
 3. native regression 与 strict qualification 名称分开；不会把 hosted contract matrix 当成三平台原生验收。
 
-原生Windows self-hosted runner需另行准备；不要让它执行不可信PR代码。Linux/macOS最小闭环使用GitHub托管runner。
+准备好的 Windows self-hosted runner 仍可补充托管环境无法验证的场景；不要让它执行不可信 PR 代码。托管原生作业使用隔离 runner，不接管用户本机桌面。
 
 ## 隔离、回收和证据含义
 
 - 每次运行在新 TEMP 子目录复制执行文件，使用专用 CEF/WebView2 profile、fixture 文件和真实 Service scratch settings。端口已占用时停止，不终止占用者。
-- 单个 Playwright owner 操作和观察 CEF；Wails 是独立 CDP surface。显示、操作 permit、presentation/document/generation 和故障撤销分别验证。
-- renderer 沙箱结果来自实际 token 探针，不把 SDK 全进程都宣称为 AppContainer。保留沙箱、TLS及站点安全机制。
+- 单个 Playwright owner 操作和观察 CEF；Windows Wails 使用独立 CDP surface；POSIX 使用可信面板 ExecJS 通道。显示、操作 permit、presentation/document/generation 和故障撤销分别验证。
+- renderer 沙箱逐平台取证：Windows restricted token/Untrusted、Linux renderer 的 no_new_privs/seccomp/capabilities、macOS Seatbelt 对隔离 canary 的策略查询与 broker 对照。探针范围写入证据，不扩称所有进程和所有资源都已覆盖。保留沙箱、TLS及站点安全机制。
 - native composition 截图必须同时含 shell/guest 的固定颜色 landmark，防止“DOM 输入成功但 native guest 被遮住”的假通过。图片仍保留供人工判读；该像素检查不是完整视觉或辅助功能验收。
 - scripted consent 只用于独立测试 profile。Go Service/permit是真实逻辑，CEF admission 仍为 lab metadata fixture；CDP 是实验特权传输，非正式产品安全边界。
 - popup 与自动下载的现有缺口有稳定 ID。恢复 native download default 后的取消，不冒充批准保存/路径/活跃下载撤销已经实现；权限 query 不读取真实敏感数据。

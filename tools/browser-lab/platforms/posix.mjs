@@ -74,7 +74,7 @@ export async function startNative(options){
   launch('backend',process.execPath,[join(root,'platforms/shared/backend.mjs')]);await waitFor(async()=>{try{return (await a.call('backend','/health')).ready}catch{return false}},'CEF backend',15000);
   launch('gateway',join(options.bundle,'gateway'),[]);await waitFor(async()=>{try{return !!(await a.call('gateway','/state')).browserAccess}catch{return false}},'real Go automation Service',20000);
   await a.main.waitForFunction(()=>!!document.querySelector('#requests'));
- }catch(e){try{await a.close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e}
+ }catch(e){try{await manager.capture('startup-trusted-ui')}catch(capture){writeFileSync(join(options.evidenceRoot,'startup-capture.log'),String(capture))}try{await a.close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e}
  if(process.platform==='darwin'){
   async function coldHostTrial(c,normal){
    const key='browser_lab_'+crypto.randomUUID().replaceAll('-',''),value='cold-'+crypto.randomUUID();
