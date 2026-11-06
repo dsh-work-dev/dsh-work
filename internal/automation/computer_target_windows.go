@@ -77,13 +77,13 @@ func InspectComputerTarget(pid uint32, hwnd uint64) (ComputerTarget, error) {
 	if ok, _, _ := computerUser32.NewProc("GetWindowRect").Call(uintptr(hwnd), uintptr(unsafe.Pointer(&rect))); ok == 0 {
 		return fail()
 	}
-	level := computerDefaultLevel(exe)
+	kind, level := windowsComputerAppPolicy(exe)
 	self, _ := os.Executable()
 	if pid == uint32(os.Getpid()) || strings.EqualFold(self, exe) || strings.Contains(strings.ToLower(filepath.Base(exe)), "dsh-work") || computerOwnDescendant(pid) {
 		level = "blocked"
 	}
 	identity := computerAppIdentity(h, exe)
-	return ComputerTarget{Identity: identity, PID: pid, WindowID: hwnd, Executable: exe, Created: uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime), WindowIdentity: fmt.Sprintf("%d/%s/%s/%d,%d,%d,%d", generation, windows.UTF16ToString(class), windows.UTF16ToString(title), rect.Left, rect.Top, rect.Right, rect.Bottom), App: strings.TrimSuffix(filepath.Base(exe), filepath.Ext(exe)), Title: windows.UTF16ToString(title), Level: level}, nil
+	return ComputerTarget{kind: kind, Identity: identity, PID: pid, WindowID: hwnd, Executable: exe, Created: uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime), WindowIdentity: fmt.Sprintf("%d/%s/%s/%d,%d,%d,%d", generation, windows.UTF16ToString(class), windows.UTF16ToString(title), rect.Left, rect.Top, rect.Right, rect.Bottom), App: strings.TrimSuffix(filepath.Base(exe), filepath.Ext(exe)), Title: windows.UTF16ToString(title), Level: level}, nil
 }
 func computerOwnDescendant(pid uint32) bool {
 	snap, e := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/local/dsh-work/internal/settings"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -21,7 +20,19 @@ type ComputerElementIdentity struct {
 type ComputerElementProbe func(context.Context, ComputerTarget, map[string]any) (ComputerElementIdentity, error)
 
 type ComputerFactory func(context.Context, string) (Resource, error)
+
+// computerAppKind is supplied by the native inspector, not inferred from a
+// process path by the shared authorization gateway.
+type computerAppKind uint8
+
+const (
+	computerAppOrdinary computerAppKind = iota
+	computerAppBrowser
+	computerAppTerminal
+)
+
 type ComputerTarget struct {
+	kind           computerAppKind
 	Identity       string `json:"identity"`
 	Warning        bool   `json:"warning"`
 	PID            uint32 `json:"pid"`
@@ -509,7 +520,7 @@ func (s *Service) AuthorizeComputer(ctx context.Context, r Request) (BrowserDeci
 		if t.Level == "blocked" {
 			return BrowserDecision{}, errors.New("COMPUTER_APP_BLOCKED")
 		}
-		if computerBrowser(t.Executable) {
+		if t.kind == computerAppBrowser {
 			return BrowserDecision{}, errors.New("COMPUTER_BROWSER_TOOLS_REQUIRED: Use the browser tools for web pages.")
 		}
 		if r.Tool != "computer_observe" && t.Level == "view" {
@@ -638,7 +649,7 @@ func computerCategory(r Request, t ComputerTarget, o *computerObservation) (stri
 	name, _ := el["label"].(string)
 	if r.Tool == "computer_type" {
 		text, _ := r.Arguments["text"].(string)
-		if computerTerminal(t.Executable) && strings.ContainsAny(text, "\n\r") {
+		if t.kind == computerAppTerminal && strings.ContainsAny(text, "\n\r") {
 			return "command", nil
 		}
 	}
@@ -664,7 +675,7 @@ func computerCategory(r Request, t ComputerTarget, o *computerObservation) (stri
 		if alt && key == "f4" {
 			return "close", nil
 		}
-		if computerTerminal(t.Executable) && (key == "enter" || key == "return") {
+		if t.kind == computerAppTerminal && (key == "enter" || key == "return") {
 			return "command", nil
 		}
 	}
@@ -919,19 +930,6 @@ func computerObservationText(target ComputerTarget, content map[string]any, elem
 	})
 }
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
-func computerDefaultLevel(executable string) string {
-	n := strings.ToLower(filepath.Base(executable))
-	switch n {
-	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "arc.exe", "chromium.exe":
-		return "view"
-	case "windowsterminal.exe", "wt.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "openconsole.exe", "wsl.exe", "mintty.exe", "alacritty.exe", "wezterm-gui.exe", "code.exe", "code - insiders.exe", "cursor.exe", "windsurf.exe", "zed.exe", "devenv.exe", "idea64.exe", "pycharm64.exe", "goland64.exe", "webstorm64.exe", "rider64.exe", "clion64.exe":
-		return "click"
-	case "1password.exe", "bitwarden.exe", "keepass.exe", "keepassxc.exe", "enpass.exe", "dashlane.exe", "proton pass.exe", "nordpass.exe", "consent.exe", "credentialuibroker.exe", "logonui.exe", "sechealthui.exe":
-		return "blocked"
-	}
-	return "full"
-}
-
 func validateComputerArguments(r Request, engine ...string) error {
 	if !computerAllowed(r.Tool) || r.Arguments == nil {
 		return errors.New("COMPUTER_INVALID_ARGUMENT")
@@ -1215,14 +1213,6 @@ func computerBounds(content map[string]any) map[string]any {
 	b, _ := content["window_bounds"].(map[string]any)
 	return b
 }
-func computerTerminal(executable string) bool {
-	switch strings.ToLower(filepath.Base(executable)) {
-	case "windowsterminal.exe", "wt.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "openconsole.exe", "wsl.exe", "mintty.exe", "alacritty.exe", "wezterm-gui.exe":
-		return true
-	}
-	return false
-}
-
 func computerDisplayReason(category, name, app string, r Request) map[string]string {
 	if len([]rune(name)) > 40 {
 		name = string([]rune(name)[:40]) + "…"
@@ -1306,14 +1296,6 @@ func (s *Service) ReleaseComputer(session, lifetime string) error {
 	}
 	return nil
 }
-func computerBrowser(executable string) bool {
-	switch strings.ToLower(filepath.Base(executable)) {
-	case "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe", "arc.exe", "chromium.exe":
-		return true
-	}
-	return false
-}
-
 func (s *Service) probeComputerElement(ctx context.Context, g *computerGateway, target ComputerTarget, element map[string]any) (ComputerElementIdentity, error) {
 	s.mu.Lock()
 	if g.runCtx == nil || g.runCtx.Err() != nil {

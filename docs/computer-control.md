@@ -63,6 +63,21 @@ installation, settings, commands, closing, submitting, saving and unrecognized
 actions default to confirmation. The trusted DSH pre-execute/approval path must
 complete before a one-use, argument-bound Host permit can be consumed.
 
+Windows process-path parsing and executable-name classification live in the
+native inspector. It supplies application kind (ordinary, browser or terminal)
+and the default access level; the shared gateway consumes those results without
+parsing executable paths. App-policy overrides do not change the native kind:
+browser content remains refused, and terminal submission retains command
+confirmation even when an app is granted full access. The kind is internal
+inspection metadata, not a user-editable setting or a wire field. Native
+reinspection includes it when comparing a target against an issued permit.
+
+This boundary keeps Windows path rules in Windows builds, using Go's standard
+`filepath` implementation. Host-dependent parsing in the shared gateway was
+rejected because a Windows process path must not change meaning when a shared
+test runs on another OS. Revisit the classification boundary when implementing
+an actual native backend for another platform.
+
 Cua 0.28.1 does not publish UIA `IsPassword` or `RuntimeId`. For text/key actions,
 the Host first refreshes the Cua snapshot and uniquely matches the previously
 observed control. A short-lived Job-owned helper reads the same HWND's UIA tree,
@@ -135,6 +150,16 @@ screenshot dimensions. Coordinate clicks use window-local screenshot pixels
 from the top-left; the model need not read hidden structured output to continue.
 
 ## Verification status
+
+The CI Shared contracts matrix exercises shared authorization and lifecycle
+logic with injected inspected targets and resources. It does not execute
+Windows binaries on macOS/Linux. Windows-only policy tests use drive, UNC,
+extended and mixed-case process image paths and pass their classification into
+the real authorization gateway. Non-Windows tests exercise the native
+unsupported inspector, desktop lease and preparer, and verify that enabling
+either engine publishes no computer tools and authorizes no backend launch.
+These checks are distinct from the opt-in native interaction tests below;
+ordinary CI does not provide their owned application/SDK fixtures.
 
 The opt-in Windows tests exercise the real rc.5 Agent/tool registry, Host app
 consent and DSH action approval, official SDK/driver, native fixture state,

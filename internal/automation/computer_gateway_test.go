@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/local/dsh-work/internal/settings"
 )
 
 type computerFixture struct {
@@ -46,7 +47,9 @@ func computerTestService(t *testing.T) (*Service, *computerFixture, *ComputerTar
 	s.slots[Computer].state.Enabled = true
 	s.slots[Computer].state.Dependency = "prepared"
 	f := &computerFixture{}
-	target := &ComputerTarget{PID: 10, WindowID: 20, Executable: `C:\fixture.exe`, Created: 1, WindowIdentity: "unique", App: "Fixture", Title: "Owned", Level: "full"}
+	// Shared tests inject an inspected application; the executable is an opaque
+	// identity value here, not a path for the gateway to classify.
+	target := &ComputerTarget{PID: 10, WindowID: 20, Executable: "fixture-application", Created: 1, WindowIdentity: "unique", App: "Fixture", Title: "Owned", Level: "full"}
 	s.ConfigureComputerGateway(ComputerGatewayConfig{Probe: func(context.Context, ComputerTarget, map[string]any) (ComputerElementIdentity, error) {
 		return ComputerElementIdentity{RuntimeID: "fixture"}, nil
 	}, Factory: func(context.Context, string) (Resource, error) { return f, nil }, Inspect: func(pid uint32, hwnd uint64) (ComputerTarget, error) {
@@ -259,7 +262,9 @@ func TestComputerReleaseDropsTemporaryGrantWithoutStoppingConversation(t *testin
 }
 func TestComputerBrowserReadCannotBypassBrowserPolicy(t *testing.T) {
 	s, f, target := computerTestService(t)
-	target.Executable = filepath.Join("fixture", "chrome.exe")
+	// Classification comes from the native inspector, even when the path carries
+	// no recognizable browser name and the inspected target reports full access.
+	target.kind = computerAppBrowser
 	r := computerRequest(s, "computer_observe")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -270,6 +275,49 @@ func TestComputerBrowserReadCannotBypassBrowserPolicy(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.calls) != 0 || s.Snapshot().ComputerAccess.Use != nil {
 		t.Fatal("browser content read or desktop retained")
+	}
+}
+func TestComputerTerminalClassificationRequiresCommandConfirmation(t *testing.T) {
+	for _, tool := range []string{"computer_key", "computer_type"} {
+		t.Run(tool, func(t *testing.T) {
+			s, f, target := computerTestService(t)
+			target.kind, target.Level, target.Identity = computerAppTerminal, "click", "fixture-terminal"
+			r := computerRequest(s, tool)
+			r.Arguments["snapshot_id"] = "s00000001"
+			r.Arguments["element_index"] = float64(0)
+			if tool == "computer_key" {
+				r.Arguments["key"] = "enter"
+			} else {
+				r.Arguments["text"] = "run\n"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if _, err := s.AuthorizeComputer(ctx, r); err == nil || !strings.Contains(err.Error(), "COMPUTER_ACCESS_LEVEL") {
+				t.Fatalf("terminal default must reject text/key input: %v", err)
+			}
+			s.computer.policy.Apps = append(s.computer.policy.Apps, settings.ComputerAppRule{ID: target.Identity, Level: "full"})
+			observe := computerRequest(s, "computer_observe")
+			computerExecute(t, s, observe, computerAuthorize(t, s, observe))
+			d := computerAuthorize(t, s, r)
+			if d.Kind != "ask" || !strings.HasPrefix(d.Reason, "command:") {
+				t.Fatalf("full-access terminal must retain command confirmation: %+v", d)
+			}
+			// Native classification is part of the bound target, not just a
+			// transient hint used while issuing the permit.
+			f.mu.Lock()
+			callsBeforeDispatch := len(f.calls)
+			f.mu.Unlock()
+			target.kind = computerAppOrdinary
+			r.Permit = d.Permit
+			if _, err := s.Execute(ctx, r); err == nil || !strings.Contains(err.Error(), "COMPUTER_TARGET_CHANGED") {
+				t.Fatalf("changed classification must revoke dispatch: %v", err)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.calls) != callsBeforeDispatch {
+				t.Fatalf("input reached backend after target changed: %v", f.calls)
+			}
+		})
 	}
 }
 func TestComputerSensitiveKeysAndCaptureBounds(t *testing.T) {
