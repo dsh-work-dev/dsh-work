@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -258,9 +259,11 @@ func TestComputerReleaseDropsTemporaryGrantWithoutStoppingConversation(t *testin
 }
 func TestComputerBrowserReadCannotBypassBrowserPolicy(t *testing.T) {
 	s, f, target := computerTestService(t)
-	target.Executable = `C:\chrome.exe`
+	target.Executable = filepath.Join("fixture", "chrome.exe")
 	r := computerRequest(s, "computer_observe")
-	if _, e := s.AuthorizeComputer(context.Background(), r); e == nil || !strings.Contains(e.Error(), "BROWSER_TOOLS_REQUIRED") {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, e := s.AuthorizeComputer(ctx, r); e == nil || !strings.Contains(e.Error(), "BROWSER_TOOLS_REQUIRED") {
 		t.Fatal(e)
 	}
 	f.mu.Lock()
