@@ -83,9 +83,10 @@ export async function startNative(options){
    const before=await a.state(),oldPID=manager.child.pid;
    let oldRequest,held,pendingResult;
    if(!normal){await c.action('browser_type','#entry',{text:'before-broker-fault'});oldRequest=await c.permit(await c.request('browser_type','#entry',{text:'must-not-dispatch',_labHoldMs:10000}));held=await c.hold(oldRequest)}
-   if(normal)await a.call('control','/command?action=quit',{});else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
+   if(normal){await a.call('backend','/profile-detach',{});await a.call('control','/command?action=quit',{})}else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
    await waitFor(()=>manager.child.exitCode!==null||manager.child.signalCode,'actual shared host termination',20000);
    const oldExit={pid:oldPID,code:manager.child.exitCode,signal:manager.child.signalCode};
+   if(normal&&oldExit.code!==0)throw Error('Normal persistent-profile shutdown failed: '+JSON.stringify(oldExit));
    if(held){pendingResult=await held.operation;if(pendingResult.ok)throw Error('Pending operation survived shared-host crash')}
    await manager.restartHost();await a.call('backend','/host-rebind',{});await a.command('float');await a.float.waitForFunction(()=>!!document.querySelector('#requests'));await a.command('dock');const after=await a.state();
    if(before.host.id===after.host.id)throw Error('Host-loss trial did not produce a new Wails native window');

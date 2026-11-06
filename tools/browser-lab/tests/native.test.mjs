@@ -59,7 +59,7 @@ test('Browser Lab native requirements',{timeout:600000},async t=>{
     }
     if((process.platform==='win32'&&item.knownGap)||item.platformGaps?.[process.platform])throw Error('Known gap no longer reproduced; review its platform baseline');
     report.record({id:item.id,status:'pass',evidence:result?.evidence,durationMs:Date.now()-started});
-   }catch(e){report.record({id:item.id,status:'fail',error:String(e.stack||e),durationMs:Date.now()-started});throw e}
+   }catch(e){let native;try{native=await adapter.call('control','/state')}catch(stateError){native={unavailable:String(stateError.message)}}report.record({id:item.id,status:'fail',error:String(e.stack||e),evidence:{native},durationMs:Date.now()-started});throw e}
    finally{
     try{await ctx.revoke()}catch(e){report.data.releaseError=String(e.message)}
    }

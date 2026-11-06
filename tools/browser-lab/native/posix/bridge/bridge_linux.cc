@@ -164,6 +164,7 @@ static bool Spawn() {
     char *line = nullptr;
     size_t size = 0;
     while (getline(&line, &size, f) > 0) {
+      fprintf(stderr, "Browser Lab broker: %s", line);
       std::istringstream s(line);
       std::string event;
       s >> event;
@@ -274,6 +275,11 @@ LAB_EXPORT int lab_command(const char *action, int index) {
     if (!alive)
       return 0;
     return kill(broker_pid, SIGKILL) == 0;
+  } else if (a == "close-broker") {
+    if (!alive || command_fd < 0)
+      return 0;
+    const char cmd[] = "close\n";
+    return write(command_fd, cmd, sizeof(cmd) - 1) == sizeof(cmd) - 1;
   } else if (a == "focus-guest") {
     if (covered || faults[selected] || !alive || !guests[selected])
       return 0;
