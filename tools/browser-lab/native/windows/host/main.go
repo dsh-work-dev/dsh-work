@@ -143,8 +143,8 @@ func (l *lab) dock() error {
 }
 func (l *lab) action(action string, q url.Values) error {
 	switch action {
-	case "native-input":
-		return l.nativeInput(q.Get("target"))
+	case "native-input", "native-focus":
+		return l.nativeInput(q.Get("target"), action == "native-focus")
 	case "renderer-fault", "renderer-recovered":
 		index := 0
 		if q.Get("tab") == "B" {

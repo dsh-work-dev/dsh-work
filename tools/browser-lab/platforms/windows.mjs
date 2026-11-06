@@ -47,7 +47,7 @@ export async function startWindows(options) {
   docs(){return this.call('backend','/documents')},
   stats(){return this.call('backend','/stats')},
   async command(action,args={}) {await this.call('control','/command?'+new URLSearchParams({action,...args}),{});await new Promise(r=>setTimeout(r,100))},
-  async nativeInput(target){if(process.env.GITHUB_ACTIONS!=='true')throw Error('Native keyboard routing requires the owned GitHub desktop');await this.command('native-input',{target});const state=await this.call('control','/state');return {method:'SendInput after owned foreground + native focus-tree validation',transition:state.transitions.filter(e=>e.kind==='native-input').at(-1)}},
+  async nativeInput(target){if(process.env.GITHUB_ACTIONS!=='true')throw Error('Native keyboard routing requires the owned GitHub desktop');await this.command('native-focus',{target});if(target==='guest')await this.call('backend','/native-entry-focus',{});else await main.evaluate(()=>document.querySelector('#shell-input').focus());await this.command('native-input',{target});const state=await this.call('control','/state');return {method:'SendInput after owned foreground + native focus-tree validation',transition:state.transitions.filter(e=>e.kind==='native-input').at(-1)}},
   async capture(name,which='main') {
    const state=await this.call('control','/state'),path=join(options.evidenceRoot,name+'.png');
    const text=execFileSync(join(session.dataRoot,'capture.exe'),[String(state[which].hwnd),path],{encoding:'utf8',windowsHide:true});
