@@ -101,7 +101,7 @@ static void Layout() {
                                               sizes));
       free(e);
     }
-    if (i == selected && !covered && !faults[i])
+    if (i == selected && alive && guests[i] && !closed[i] && !covered && !faults[i])
       XMapWindow(display, slots[i]);
     else
       XUnmapWindow(display, slots[i]);
