@@ -9,21 +9,27 @@ import (
 	"unsafe"
 )
 
-type inputSearch struct{ root, excluded, found uintptr }
+type inputSearch struct {
+	root, found uintptr
+	excluded    [2]uintptr
+}
+
 // INPUT has an 8-byte header and 32-byte union on the supported Windows x64.
 type nativeKeyInput struct {
-	Kind uint32
-	Pad uint32
-	VK, Scan uint16
+	Kind               uint32
+	Pad                uint32
+	VK, Scan           uint16
 	Flags, Time, Align uint32
-	Extra uintptr
-	Unused [8]byte
+	Extra              uintptr
+	Unused             [8]byte
 }
 
 var inputSearchCallback = syscall.NewCallback(func(h, p uintptr) uintptr {
 	s := (*inputSearch)(unsafe.Pointer(p))
-	if s.excluded != 0 && nativeProbeInTree(s.excluded, h) {
-		return 1
+	for _, excluded := range s.excluded {
+		if excluded != 0 && nativeProbeInTree(excluded, h) {
+			return 1
+		}
 	}
 	name := make([]uint16, 256)
 	classOf.Call(h, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
@@ -40,14 +46,15 @@ func (l *lab) nativeInput(target string) error {
 	if os.Getenv("GITHUB_ACTIONS") != "true" {
 		return fmt.Errorf("native synthetic input requires owned GitHub desktop")
 	}
-	root, excluded := l.tabs[l.selected].HWND, uintptr(0)
+	root := l.tabs[l.selected].HWND
+	var excluded [2]uintptr
 	parent := l.mainHWND
 	if l.floating {
 		parent = l.floatHWND
 	}
 	if target == "host" {
 		root = l.mainHWND
-		excluded = l.tabs[l.selected].HWND
+		excluded = [2]uintptr{l.tabs[0].HWND, l.tabs[1].HWND}
 		parent = l.mainHWND
 	} else if target != "guest" {
 		return fmt.Errorf("invalid input target")
@@ -77,14 +84,25 @@ func (l *lab) nativeInput(target string) error {
 	if f["focusInRequestedTree"] != true {
 		return fmt.Errorf("native focus outside owned target: %v", f)
 	}
+	if target == "host" {
+		for _, guest := range excluded {
+			if nativeProbeInTree(guest, f["focusHWND"].(uintptr)) {
+				return fmt.Errorf("host input resolved to a guest widget")
+			}
+		}
+	}
 	foreground, _, _ := user.NewProc("GetForegroundWindow").Call()
 	if foreground != parent {
 		return fmt.Errorf("refusing input outside owned foreground window")
 	}
-	keys := [2]nativeKeyInput{{Kind:1,VK:0x52},{Kind:1,VK:0x52,Flags:2}}
-	if unsafe.Sizeof(keys[0])!=40 {return fmt.Errorf("unsupported native INPUT layout")}
-	ok, _, e := user.NewProc("SendInput").Call(2,uintptr(unsafe.Pointer(&keys[0])),unsafe.Sizeof(keys[0]))
-	if ok != 2 {return fmt.Errorf("owned-desktop native key: %v",e)}
+	keys := [2]nativeKeyInput{{Kind: 1, VK: 0x52}, {Kind: 1, VK: 0x52, Flags: 2}}
+	if unsafe.Sizeof(keys[0]) != 40 {
+		return fmt.Errorf("unsupported native INPUT layout")
+	}
+	ok, _, e := user.NewProc("SendInput").Call(2, uintptr(unsafe.Pointer(&keys[0])), unsafe.Sizeof(keys[0]))
+	if ok != 2 {
+		return fmt.Errorf("owned-desktop native key: %v", e)
+	}
 	l.record("native-input", map[string]any{"target": target, "focus": f, "method": "SendInput after owned foreground + focus-tree validation"})
 	return nil
 }
