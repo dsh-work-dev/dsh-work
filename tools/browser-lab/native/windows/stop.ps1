@@ -25,17 +25,29 @@ foreach($property in $s.processes.PSObject.Properties){
  $null=$actual.WaitForExit(2000)
 }
 $scope=[IO.Path]::GetFullPath($s.dataRoot).TrimEnd('\')+'\'
+$profile=[IO.Path]::GetFullPath((Join-Path $s.dataRoot 'host-profile'))
+$profilePattern='(?i)--user-data-dir(?:=|\s+)"?'+[regex]::Escape($profile)+'(?=["\s]|$)'
+function Test-OwnedProcess($candidate) {
+ $staged=$candidate.ExecutablePath -and $candidate.ExecutablePath.StartsWith($scope,[StringComparison]::OrdinalIgnoreCase)
+ $webview=$candidate.Name -eq 'msedgewebview2.exe' -and $candidate.CommandLine -and [regex]::IsMatch($candidate.CommandLine.Replace('/','\'),$profilePattern)
+ return $staged -or $webview
+}
+# WebView2 exits asynchronously after its last controller is released. Wait for
+# this exact private profile, not a port or an unrelated WebView2 installation.
+$deadline=[DateTime]::UtcNow.AddSeconds(10)
+while([DateTime]::UtcNow -lt $deadline) {
+ if(!@(Get-CimInstance Win32_Process|Where-Object {Test-OwnedProcess $_}).Count){break}
+ Start-Sleep -Milliseconds 250
+}
 # If graceful shutdown failed, only staged lab executables (or this profile's
 # WebView2 children) are eligible for forced cleanup. Still fail the gate.
 foreach($candidate in @(Get-CimInstance Win32_Process)){
- $owned=($candidate.ExecutablePath -and $candidate.ExecutablePath.StartsWith($scope,[StringComparison]::OrdinalIgnoreCase))
- $webview=($candidate.Name -eq 'msedgewebview2.exe' -and $candidate.CommandLine -and $candidate.CommandLine.Contains($s.dataRoot))
- if(!$owned -and !$webview){continue}
+ if(!(Test-OwnedProcess $candidate)){continue}
  try{$actual=Get-Process -Id $candidate.ProcessId -ErrorAction Stop}catch{continue}
  if([Math]::Abs(($actual.StartTime.ToUniversalTime()-$candidate.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 1){throw 'Scoped process identity changed; left intact'}
  $forced+=$candidate.Name;Stop-Process -Id $candidate.ProcessId -ErrorAction Stop;$null=$actual.WaitForExit(2000)
 }
-$remaining=@(Get-CimInstance Win32_Process|Where-Object {($_.ExecutablePath -and $_.ExecutablePath.StartsWith($scope,[StringComparison]::OrdinalIgnoreCase)) -or ($_.CommandLine -and $_.CommandLine.Contains($s.dataRoot))})
+$remaining=@(Get-CimInstance Win32_Process|Where-Object {Test-OwnedProcess $_})
 $listeners=@(19478..19484|ForEach-Object {Get-NetTCPConnection -State Listen -LocalPort $_ -ErrorAction SilentlyContinue}|Select-Object LocalPort,OwningProcess)
 @{schemaVersion=1;steps=$steps;forcedRegisteredProcesses=$forced;remainingProcesses=@($remaining|Select-Object ProcessId,Name);remainingListeners=$listeners}|ConvertTo-Json -Depth 7|Set-Content "$RunRoot/evidence/cleanup.json"
 if($remaining.Count -or $listeners.Count -or $forced.Count){throw 'Cleanup was not fully graceful; see cleanup.json'}
