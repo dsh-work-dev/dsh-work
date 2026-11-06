@@ -25,7 +25,7 @@ function invalidate(reason){
 }
 async function connectTargets(){
  await waitUntil(async()=>{try{const rows=await(await fetch('http://127.0.0.1:19479/json/list')).json();return ['A','B'].every(name=>rows.some(p=>p.type==='page'&&new URL(p.url).searchParams.get('tab')===name))}catch{return false}},'named CEF targets');
- browser=await attach(19479);const own=browser;connectionEpoch++;connected=true;tabs.clear();
+ browser=await attach(19479);const own=browser;connectionEpoch++;connected=false;tabs.clear();
  browser.on('disconnected',()=>{if(browser!==own)return;connected=false;invalidate('broker-disconnected')});
  for(const page of browser.contexts().flatMap(c=>c.pages())){
   const name=new URL(page.url()).searchParams.get('tab');if(!['A','B'].includes(name))throw Error('Unknown initial CEF target');
@@ -36,7 +36,7 @@ async function connectTargets(){
   page.on('crash',()=>{tab.crashed=true;tab.faultEpoch++;record('renderer-crashed',{tab:name,targetId:tab.targetId});native('renderer-fault',{tab:name}).catch(e=>record('native-fault-report-error',{error:e.message}));invalidate('renderer-crashed-'+name)});
   tabs.set(name,tab);
  }
- if(tabs.size!==2)throw Error('Expected two CEF tabs');record('targets-attached',{connectionEpoch,targets:[...tabs.values()].map(t=>({name:t.name,targetId:t.targetId}))});
+ if(tabs.size!==2)throw Error('Expected two CEF tabs');connected=true;record('targets-attached',{connectionEpoch,targets:[...tabs.values()].map(t=>({name:t.name,targetId:t.targetId}))});
 }
 await connectTargets();
 function requireControl(tab){if(faultError)throw Error('CEF_FAULT_INVALIDATION_FAILED');if(!connected)throw Error('CEF_BROKER_DISCONNECTED');if(!controlReady)throw Error('CEF_CONTROL_INVALIDATING');if(!tab||tab.crashed)throw Error('CEF_RENDERER_CRASHED')}

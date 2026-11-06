@@ -66,7 +66,7 @@ if(Get-Command cl.exe -ErrorAction SilentlyContinue){$setup=''}else{
  $setup='call "'+$vs+'\VC\Auxiliary\Build\vcvars64.bat" >nul && '
 }
 foreach($path in @($PSScriptRoot,$bundle,$work)){if($path.Contains('"')){throw 'Build paths must not contain quotes'}}
-$compile=$setup+'cl /nologo /std:c++17 /EHsc /W4 /O2 /DUNICODE /D_UNICODE "'+$PSScriptRoot+'\capture.cpp" /Fo:"'+$work+'\capture.obj" /Fe:"'+$bundle+'\capture.exe" /link d3d11.lib dxgi.lib windowsapp.lib windowscodecs.lib ole32.lib user32.lib'
+$compile=$setup+'cl /nologo /std:c++20 /EHsc /W4 /O2 /DUNICODE /D_UNICODE "'+$PSScriptRoot+'\capture.cpp" /Fo:"'+$work+'\capture.obj" /Fe:"'+$bundle+'\capture.exe" /link d3d11.lib dxgi.lib windowsapp.lib windowscodecs.lib ole32.lib user32.lib'
 & cmd.exe /d /s /c $compile
 if($LASTEXITCODE -ne 0){throw 'Scoped WGC capture helper build failed'}
 $gitRef=git -C $repo rev-parse HEAD
