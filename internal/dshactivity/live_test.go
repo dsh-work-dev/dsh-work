@@ -51,13 +51,13 @@ func TestLiveDSHWorkerActivity(t *testing.T) {
 	}
 	defer b.Close()
 	fixture := filepath.Join(home, "fixture.mjs")
-	source := `export const inject=['sessions','sessionController','webServer','sessionPersistence'];
+	source := `export const inject=['sessions','sessionController','sessionQuery','webServer','sessionPersistence'];
 export function apply(ctx,config){
 let pending, resolve, answered;
 ctx.effect(()=>ctx.webServer.register({kind:'exact',path:'/__dshwork/test',handler:async(req,res)=>{
 if(req.headers['x-dsh-work-token']!==config.token){res.writeHead(403);res.end();return;}
 const action=new URL(req.url,'http://localhost').searchParams.get('action');
-try {if(action==='history') {const list=await ctx.sessionController.list({});const inspection=await ctx.sessionController.inspect('pet-cold-fixture');res.writeHead(200);res.end(JSON.stringify({ids:list.items.map(item=>item.sessionId),eventCount:inspection.events.length,header:inspection.meta}));return;}
+try {if(action==='history') {const signal=AbortSignal.timeout(2000);const list=await ctx.sessionController.list({},signal);const observation=await ctx.sessionQuery.observeSession('pet-cold-fixture',{signal,projectionMode:'none'});try{res.writeHead(200);res.end(JSON.stringify({ids:list.items.map(item=>item.sessionId),eventCount:observation.events.length,header:observation.header,source:observation.source,attached:!!ctx.sessions.get('pet-cold-fixture')}));}finally{observation[Symbol.dispose]();}return;}
 let session=ctx.sessions.get('pet-live-fixture');if(!session)session=ctx.sessions.create('pet-live-fixture',{meta:{cwd:config.cwd}});
 if(action==='prepare-cold') {let cold=ctx.sessions.get('pet-cold-fixture');if(!cold){await ctx.sessionController.create({sessionId:'pet-cold-fixture',cwd:config.cwd});cold=ctx.sessions.get('pet-cold-fixture');}cold.append('turn/start',{turn:1});cold.append('turn/end',{turn:1,reason:{kind:'completed'}});}
 else if(action==='phase-thinking') {session.append('turn/start',{turn:2});session.append('step/start',{turn:2,step:1});}
@@ -383,7 +383,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	}
 	request("prepare-cold")
 	// A new Worker sees the completed Session only through persistence. This
-	// exercises the RC1 cold-safe inspect path rather than attached Session.events.
+	// exercises the RC1 cold-safe query observation rather than attached Session.events.
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("stop first DSH Worker: %v", err)
 	}
@@ -481,19 +481,21 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	var coldHistory struct {
 		IDs        []string `json:"ids"`
 		EventCount int      `json:"eventCount"`
+		Source     string   `json:"source"`
+		Attached   bool     `json:"attached"`
 		Header     struct {
 			Version int `json:"version"`
 		} `json:"header"`
 	}
-	if err := json.Unmarshal(historyBody, &coldHistory); err != nil || coldHistory.EventCount == 0 || coldHistory.Header.Version != 4 || !slices.Contains(coldHistory.IDs, "pet-cold-fixture") {
-		t.Fatalf("cold Session Controller inspection returned invalid history: %s (%v)", historyBody, err)
+	if err := json.Unmarshal(historyBody, &coldHistory); err != nil || coldHistory.EventCount == 0 || coldHistory.Header.Version != 4 || coldHistory.Source != "prepared" || coldHistory.Attached || !slices.Contains(coldHistory.IDs, "pet-cold-fixture") {
+		t.Fatalf("cold Session Query observation returned invalid history: %s (%v)", historyBody, err)
 	}
-	t.Logf("cold Session Controller inspection: %s", historyBody)
+	t.Logf("cold Session Query observation: %s", historyBody)
 	deadline = time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		for _, session := range b.Snapshot().Sessions {
 			if session.SessionID == "pet-cold-fixture" && session.Outcome == "completed" && session.State == "idle" && session.Seq >= 0 {
-				t.Log("RC1 cold Session history was restored through sessionController.inspect")
+				t.Log("RC1 cold Session history was restored through sessionQuery.observeSession")
 				return
 			}
 		}

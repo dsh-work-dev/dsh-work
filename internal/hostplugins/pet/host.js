@@ -89,9 +89,21 @@ export function apply(ctx, config, timers = globalThis) {
     if (!r || seeding.has(sessionId)) return seeding.get(sessionId);
     r.seeding = true;
     r.seedEvents = [];
-    const work = ctx.sessionController.inspect(sessionId, AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)]))
-      .then(inspection => {
-        for (const event of inspection.events.slice(-512)) onEvent({id: sessionId}, event, true);
+    const work = Promise.resolve().then(async () => {
+        const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)]);
+        let observation;
+        try {
+          // RC1 moved raw cold history to a caller-owned query observation.
+          // The Remote events API returns message records, not the domain log
+          // needed for activity. Earlier runtimes retain Controller.inspect.
+          const inspection = typeof ctx.sessionController.inspect === 'function'
+            ? await ctx.sessionController.inspect(sessionId, signal)
+            : observation = await ctx.get('sessionQuery').observeSession(sessionId, {signal, projectionMode: 'none'});
+          signal.throwIfAborted();
+          for (const event of inspection.events.slice(-512)) onEvent({id: sessionId}, event, true);
+        } finally {
+          observation?.[Symbol.dispose]();
+        }
       })
       .catch(() => { /* Live events remain available if persisted history cannot be read. */ })
       .finally(() => {

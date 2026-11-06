@@ -40,18 +40,18 @@ class Response extends EventEmitter {
   body() { return this.chunks.join(''); }
 }
 
-function setup(inspectedEvents = []) {
+function setup(inspectedEvents = [], sessionQuery) {
   const routes = new Map(), listeners = new Map(), cleanups = [];
   const clock = new FakeClock();
   const ctx = {
     webServer: {register(route) { routes.set(route.path, route.handler); return () => routes.delete(route.path); }},
     connection: {requestRejection: () => undefined},
     sessions: {list: () => [], get: () => null},
-    sessionController: {inspect: async () => ({events: inspectedEvents}), list: async () => ({items: []})},
+    sessionController: {list: async () => ({items: []}), ...(sessionQuery ? {} : {inspect: async () => ({events: inspectedEvents})})},
     sessionProjections: {snapshot: () => ({values: {}})},
     agents: {get: () => null, list: () => []},
     waterfall: async (_name, _input, fallback) => fallback(),
-    get: () => undefined,
+    get: name => name === 'sessionQuery' ? sessionQuery : undefined,
     on(name, listener) { listeners.set(name, listener); },
     effect(effect) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); },
     inject(_dependencies, callback) {
@@ -212,4 +212,50 @@ test('pet celebrates only live completion events and resets at the next turn', a
   await clock.tick(100);
   snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
   assert.equal(snapshots.at(-1).sessions[0].liveCompletion, false);
+});
+
+test('RC1 cold history replays raw query events and releases the observation lease', async () => {
+  let disposed = 0;
+  const {routes, listeners, clock} = setup([], {
+    async observeSession(id, {signal, projectionMode}) {
+      assert.equal(id, 'cold');
+      assert.equal(projectionMode, 'none');
+      assert.equal(signal.aborted, false);
+      return {
+        events: [
+          {seq: 1, type: 'turn/start', time: 1, data: {turn: 1}},
+          {seq: 2, type: 'turn/end', time: 2, data: {reason: {kind: 'completed'}}},
+        ],
+        [Symbol.dispose]() {disposed++;},
+      };
+    },
+  });
+  const stream = new Response();
+  await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
+  await listeners.get('session/created')('cold');
+  await clock.tick(100);
+  const snapshot = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1])).at(-1);
+  assert.equal(snapshot.sessions[0].outcome, 'completed');
+  assert.equal(snapshot.sessions[0].liveCompletion, false);
+  assert.equal(disposed, 1);
+});
+
+test('late query observations are released after plugin cancellation without replay', async () => {
+  let resolve, signal, disposed = 0;
+  const {routes, listeners, clock, cleanups} = setup([], {
+    observeSession(_id, options) {signal = options.signal; return new Promise(done => {resolve = done;});},
+  });
+  const stream = new Response();
+  await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
+  const seeded = listeners.get('session/created')('cold');
+  await Promise.resolve();
+  for (const cleanup of cleanups) cleanup();
+  assert.equal(signal.aborted, true);
+  resolve({
+    get events() {throw new Error('canceled observation must not replay');},
+    [Symbol.dispose]() {disposed++;},
+  });
+  await seeded;
+  await clock.tick(100);
+  assert.equal(disposed, 1);
 });
