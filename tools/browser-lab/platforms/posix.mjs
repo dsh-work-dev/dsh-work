@@ -74,6 +74,7 @@ export async function startNative(options){
   launch('backend',process.execPath,[join(root,'platforms/shared/backend.mjs')]);await waitFor(async()=>{try{return (await a.call('backend','/health')).ready}catch{return false}},'CEF backend',15000);
   launch('gateway',join(options.bundle,'gateway'),[]);await waitFor(async()=>{try{return !!(await a.call('gateway','/state')).browserAccess}catch{return false}},'real Go automation Service',20000);
   await a.main.waitForFunction(()=>!!document.querySelector('#requests'));
+  await a.command('float');await a.float.waitForFunction(()=>!!document.querySelector('#requests'));await a.command('dock');
  }catch(e){try{await manager.capture('startup-trusted-ui')}catch(capture){writeFileSync(join(options.evidenceRoot,'startup-capture.log'),String(capture))}try{await a.close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e}
  if(process.platform==='darwin'){
   async function coldHostTrial(c,normal){
@@ -86,7 +87,7 @@ export async function startNative(options){
    await waitFor(()=>manager.child.exitCode!==null||manager.child.signalCode,'actual shared host termination',20000);
    const oldExit={pid:oldPID,code:manager.child.exitCode,signal:manager.child.signalCode};
    if(held){pendingResult=await held.operation;if(pendingResult.ok)throw Error('Pending operation survived shared-host crash')}
-   await manager.restartHost();await a.call('backend','/host-rebind',{});const after=await a.state();
+   await manager.restartHost();await a.call('backend','/host-rebind',{});await a.command('float');await a.float.waitForFunction(()=>!!document.querySelector('#requests'));await a.command('dock');const after=await a.state();
    if(before.host.id===after.host.id)throw Error('Host-loss trial did not produce a new Wails native window');
    const stored=normal?await a.call('backend','/storage-get',{key}):undefined;
    if(normal&&stored.localStorage!==value)throw Error('Cold profile did not persist');

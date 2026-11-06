@@ -64,7 +64,7 @@ public:
       info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
       CefBrowserSettings settings;
       CefBrowserHost::CreateBrowser(info, new Client(i),
-                                    "http://localhost:19478/interactions?tab=" +
+                                    "http://127.0.0.1:19478/interactions?tab=" +
                                         std::string(i ? "B" : "A"),
                                     settings, nullptr, nullptr);
     }

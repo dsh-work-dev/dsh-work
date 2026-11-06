@@ -34,7 +34,12 @@ Copy-Item "$CefBundle/*" "$bundle/cef" -Recurse -Force
 Copy-Item "$PSScriptRoot/host/*" "$work/host" -Recurse
 if($Composition -eq 'bottom'){
  Push-Location $repo
- try{$module=go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v3;if($LASTEXITCODE -ne 0){throw 'Cannot resolve pinned Wails module'}}finally{Pop-Location}
+ try{
+  go mod download github.com/wailsapp/wails/v3
+  if($LASTEXITCODE -ne 0){throw 'Cannot download pinned Wails module'}
+  $module=go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v3
+  if($LASTEXITCODE -ne 0 -or !$module -or !(Test-Path $module)){throw 'Cannot resolve pinned Wails module directory'}
+ }finally{Pop-Location}
  Copy-Item $module "$work/wails-fork" -Recurse
  $file=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/composition_host.go'
  (Get-Item $file).IsReadOnly=$false
