@@ -127,8 +127,15 @@ func (l *lab) quit() {
 	}
 	application.InvokeSync(func() { C.lab_close() })
 	for i := 0; i < 300; i++ {
-		if C.lab_closed() != 0 {
-			application.InvokeSync(func() { C.lab_shutdown() })
+		done := false
+		application.InvokeSync(func() {
+			// On Cocoa, never re-enter CefShutdown from an active message pump.
+			if C.lab_closed() != 0 {
+				C.lab_shutdown()
+				done = true
+			}
+		})
+		if done {
 			if e := os.WriteFile(filepath.Join(l.root, "evidence", "host-closed.json"), []byte("{\"createdClosed\":true,\"cefShutdownReturned\":true}"), 0600); e != nil {
 				log.Fatal(e)
 			}

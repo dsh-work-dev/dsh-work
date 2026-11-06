@@ -311,7 +311,9 @@ LAB_EXPORT void lab_close() {
     if (b)
       b->GetHost()->CloseBrowser(true);
 }
-LAB_EXPORT int lab_closed() { return closed_count == 2 && popups.empty(); }
+LAB_EXPORT int lab_closed() {
+  return closed_count == 2 && popups.empty() && !pumping;
+}
 LAB_EXPORT void lab_shutdown() {
   running = false;
   [pump_timer invalidate];
