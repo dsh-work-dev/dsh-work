@@ -47,6 +47,6 @@ if(command==='list'){
  }
  }
 }else{
- console.log('node cli.mjs list\nnode cli.mjs run --profile regression|qualification --consent manual|scripted [--bundle PATH] [--network] [--case ID,ID] [--output PATH]\nnode cli.mjs manual --operator NAME --run-id ID [--bundle PATH]');
+ console.log('node cli.mjs list\nnode cli.mjs run --profile regression|qualification --consent manual|scripted [--bundle PATH] [--network] [--case ID,ID] [--output PATH]\nnode cli.mjs smoke [--bundle PATH] [--output PATH] (Linux/X11 or macOS)\nnode cli.mjs manual --operator NAME --run-id ID [--bundle PATH]');
  if(command)process.exitCode=1;
 }

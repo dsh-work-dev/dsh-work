@@ -133,7 +133,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
       - run: npm ci --ignore-scripts
       - name: Build actual Wails and sandbox-enabled CEF candidate
         run: node native/posix/build.mjs
