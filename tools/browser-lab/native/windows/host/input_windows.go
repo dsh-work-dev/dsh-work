@@ -10,6 +10,15 @@ import (
 )
 
 type inputSearch struct{ root, excluded, found uintptr }
+// INPUT has an 8-byte header and 32-byte union on the supported Windows x64.
+type nativeKeyInput struct {
+	Kind uint32
+	Pad uint32
+	VK, Scan uint16
+	Flags, Time, Align uint32
+	Extra uintptr
+	Unused [8]byte
+}
 
 var inputSearchCallback = syscall.NewCallback(func(h, p uintptr) uintptr {
 	s := (*inputSearch)(unsafe.Pointer(p))
@@ -68,10 +77,14 @@ func (l *lab) nativeInput(target string) error {
 	if f["focusInRequestedTree"] != true {
 		return fmt.Errorf("native focus outside owned target: %v", f)
 	}
-	ok, _, e := user.NewProc("PostMessageW").Call(s.found, 0x0102, uintptr('r'), 1)
-	if ok == 0 {
-		return fmt.Errorf("targeted WM_CHAR: %v", e)
+	foreground, _, _ := user.NewProc("GetForegroundWindow").Call()
+	if foreground != parent {
+		return fmt.Errorf("refusing input outside owned foreground window")
 	}
-	l.record("native-input", map[string]any{"target": target, "focus": f, "method": "targeted WM_CHAR"})
+	keys := [2]nativeKeyInput{{Kind:1,VK:0x52},{Kind:1,VK:0x52,Flags:2}}
+	if unsafe.Sizeof(keys[0])!=40 {return fmt.Errorf("unsupported native INPUT layout")}
+	ok, _, e := user.NewProc("SendInput").Call(2,uintptr(unsafe.Pointer(&keys[0])),unsafe.Sizeof(keys[0]))
+	if ok != 2 {return fmt.Errorf("owned-desktop native key: %v",e)}
+	l.record("native-input", map[string]any{"target": target, "focus": f, "method": "SendInput after owned foreground + focus-tree validation"})
 	return nil
 }
