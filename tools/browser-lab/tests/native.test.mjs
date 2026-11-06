@@ -37,6 +37,7 @@ test('Browser Lab native requirements',{timeout:600000},async t=>{
    const started=Date.now();
    function skip(status,reason){report.record({id:item.id,status,reason,durationMs:Date.now()-started});st.skip(reason)}
    if(options.selectedCases&&!options.selectedCases.includes(item.id)){skip('not-selected','Not selected by --case; not a full-suite run.');return}
+   if(item.ciDesktopOnly&&process.env.GITHUB_ACTIONS!=='true'){skip('not-selected','Synthetic native keyboard routing runs on the owned CI desktop; use the physical input checklist on a user desktop.');return}
    if(item.manual){
     if(options.manualEvidence){
      try{const input=JSON.parse(readFileSync(options.manualEvidence,'utf8'));

@@ -132,6 +132,14 @@ func (l *lab) quit() {
 		application.InvokeSync(func() {
 			// On Cocoa, never re-enter CefShutdown from an active message pump.
 			if C.lab_closed() != 0 {
+				if runtime.GOOS == "darwin" {
+					if e := nativeCommand("stop-host-loop", 0); e != nil {
+						log.Print(e)
+						return
+					}
+					done = true
+					return
+				}
 				log.Print("CEF shutdown beginning after native close callbacks and pump return")
 				C.lab_shutdown()
 				log.Print("CEF shutdown returned")
@@ -139,6 +147,9 @@ func (l *lab) quit() {
 			}
 		})
 		if done {
+			if runtime.GOOS == "darwin" {
+				return
+			}
 			if e := os.WriteFile(filepath.Join(l.root, "evidence", "host-closed.json"), []byte("{\"createdClosed\":true,\"cefShutdownReturned\":true}"), 0600); e != nil {
 				log.Fatal(e)
 			}
@@ -382,6 +393,16 @@ func main() {
 	go server.Serve(listener)
 	if e := l.app.Run(); e != nil {
 		log.Fatal(e)
+	}
+	if runtime.GOOS == "darwin" && l.quitting.Load() {
+		// Wails' Cocoa run loop and its autorelease pool have now returned.
+		// NSApplication.terminate would exit before this CEF teardown could run.
+		log.Print("CEF shutdown beginning after Cocoa run-loop return")
+		C.lab_shutdown()
+		log.Print("CEF shutdown returned")
+		if e := os.WriteFile(filepath.Join(l.root, "evidence", "host-closed.json"), []byte("{\"createdClosed\":true,\"cefShutdownReturned\":true}"), 0600); e != nil {
+			log.Fatal(e)
+		}
 	}
 	server.Close()
 }

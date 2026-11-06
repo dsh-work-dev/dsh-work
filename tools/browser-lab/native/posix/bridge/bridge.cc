@@ -236,6 +236,23 @@ LAB_EXPORT int lab_command(const char *command, int index) {
                               isARepeat:NO
                                 keyCode:15];
     [w sendEvent:e];
+  } else if (a == "stop-host-loop") {
+    if (closed_count != 2 || !popups.empty() || pumping)
+      return 0;
+    running = false;
+    [pump_timer invalidate];
+    [NSApp stop:nil];
+    [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                        location:NSZeroPoint
+                                   modifierFlags:0
+                                       timestamp:0
+                                    windowNumber:0
+                                         context:nil
+                                         subtype:0
+                                           data1:0
+                                           data2:0]
+             atStart:NO];
+    return 1;
   } else if (a != "layout")
     return 0;
   Layout();

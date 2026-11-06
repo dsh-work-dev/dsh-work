@@ -69,6 +69,8 @@ npm run --prefix tools/browser-lab qualify
 
 目录 v2 有 34 个稳定 requirement ID：32 个自动场景与 2 个人工场景。自动项覆盖原有 Windows 场景，并单列窗口缩放、原生焦点及定向 ASCII 事件；权限与下载授权生命周期会实际请求，再报告当前能力缺口，不再静态跳过。原生键盘合成只在本次 GitHub runner 桌面执行，不代表物理键盘或 IME。人工记录须包含同一 run ID、操作者、时间与具体观察；用 `--run-id` 和 `--manual-evidence` 提供，不能拿上次报告或 CDP 填字替代真人输入。
 
+本机运行时，新增的合成原生键盘项标为 `not-selected`，其余原有回归照常执行；该项会在 GitHub 的独占测试桌面实跑。真实键盘／中文 IME 仍走人工入口。
+
 在 Windows 交互终端先收集真实输入证据，再对同一候选构建运行自动测试：
 
 ```powershell
@@ -108,6 +110,8 @@ node tools/browser-lab/cli.mjs run --profile regression --consent scripted --net
 构建下载固定CEF standard SDK、编译官方wrapper、窄原生bridge与隔离Wails host。Linux使用独立CEF broker、自持消息循环并嵌入原生X11 child；macOS使用同进程NSView及CEF外部消息泵。当前Go binding未证明覆盖固定CEF156、macOS事件协议及沙箱/helper生命周期，因此直接复用官方C++ wrapper，仅桥接必要的初始化、parent、状态和关闭。没有改Wails模块缓存或产品实现。
 
 macOS实验构建仅为Wails的`StatusItemController`加精确编译期命名前缀，避免与CEF的ObjC类冲突；此选项不改CEF或模块缓存。Ubuntu24.04 runner为本次host配置单程序AppArmor userns许可，让WebKit能创建其沙箱；全局限制和浏览器沙箱保留，job结束移除该许可。CEF156 SDK配置deployment target为macOS13，当前Mac CI只验证15，不能据此承诺项目原有macOS12支持。
+
+Mac正常退出先关闭两个CEF view，停止外部泵与Cocoa run loop，待Wails原生run及其autorelease pool返回后，在原主线程执行CefShutdown并记录实际返回，最后退出进程。原来在仍运行的Cocoa循环中直接teardown曾出现Chromium watchdog code2；报告要求正常exit0，不把watchdog退出当正常持久化。watchdog、沙箱及TLS保持默认。
 
 完整入口执行 HTML/localhost/HTTPS、双标签保活、浮动/停靠/缩放、当前屏 DPI、原生 ASCII 焦点路由、真实授权与精确目标绑定、导航/切页/撤销/遮挡防误操作、故障恢复、外页能力与 profile/文件 root 隔离，以及弹窗、下载和权限探测。macOS 候选的 CEF 与 Wails 同进程：真实 broker 故障会连宿主退出，测试记录该隔离缺口，随后重建整个隔离宿主继续；全宿主重启的持久化不能冒充“保留 Wails 的 CEF 冷重启”。Linux Xvfb 只覆盖 X11，未覆盖 Wayland。真实中文 IME 候选框和物理混合 DPI 保留人工项。实际各平台通过/失败以对应运行的 report.json 为准。
 

@@ -207,12 +207,15 @@ jobs:
           path: |
             tools/browser-lab/results/*/report.json
             tools/browser-lab/results/*/junit.xml
+            tools/browser-lab/results/*/manual-checklist.json
             tools/browser-lab/results/*/evidence/*.png
             tools/browser-lab/results/*/evidence/*.log
             tools/browser-lab/results/*/evidence/cleanup.json
             tools/browser-lab/results/*/evidence/host-closed.json
             tools/browser-lab/results/*/evidence/startup-state.json
             tools/browser-lab/results/*/evidence/host-exit.json
+            tools/browser-lab/results/*/evidence/host-*-exit.json
+            tools/browser-lab/results/*/evidence/sandbox-processes.json
       - name: Remove the isolated namespace grant
         if: always() && runner.os == 'Linux'
         run: |
