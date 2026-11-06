@@ -18,5 +18,7 @@ else()
   # SDK sample logical imports are directory-scoped; create our own import.
   ADD_LOGICAL_TARGET(browser_lab_cef "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
   target_link_libraries(browser_lab_bridge browser_lab_cef PkgConfig::GTK4 X11)
-  set_target_properties(browser_lab_bridge PROPERTIES BUILD_RPATH "${CEF_ROOT}/Release" INSTALL_RPATH "$ORIGIN")
+  # Load the staged runtime beside the bridge, not SDK/Release (which lacks
+  # the staged ICU/resources). Match the official cefsimple runtime layout.
+  set_target_properties(browser_lab_bridge PROPERTIES INSTALL_RPATH "$ORIGIN" BUILD_WITH_INSTALL_RPATH TRUE)
 endif()

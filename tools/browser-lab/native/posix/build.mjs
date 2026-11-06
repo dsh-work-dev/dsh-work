@@ -32,7 +32,15 @@ if(process.platform==='darwin'){
  const sandbox=join(bundle,'chrome-sandbox');if(!existsSync(sandbox))throw Error('SDK sandbox helper missing');
  run('sudo',['chown','root:root',sandbox]);run('sudo',['chmod','4755',sandbox]);
 }
-run('go',['build','-o',executable,'.'],{cwd:join(root,'native/posix/host')});
+const hostDirectory=join(root,'native/posix/host');
+const env={...process.env};
+if(process.platform==='darwin'){
+ // Both Wails beta.16 and CEF define this unprefixed Objective-C class.
+ // Namespace Wails only in this lab build; leave the module cache untouched.
+ const flags=execFileSync('go',['env','CGO_CFLAGS'],{cwd:hostDirectory,encoding:'utf8'}).trim();
+ env.CGO_CFLAGS=flags+' -DStatusItemController=BrowserLabWailsStatusItemController';
+}
+run('go',['build','-o',executable,'.'],{cwd:hostDirectory,env});
 if(process.platform==='darwin')run('codesign',['--force','--deep','--sign','-',join(bundle,'cefsimple.app')]);
 writeFileSync(join(bundle,'build.json'),JSON.stringify({schemaVersion:1,kind:'browser-lab-posix-smoke',platform:process.platform,arch:process.arch,version,wails:'v3.0.0-beta.16',created:new Date().toISOString(),sourceCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),executable,helper,bridge},null,2));
 console.log('Native POSIX bundle: '+bundle);

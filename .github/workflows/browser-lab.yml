@@ -156,3 +156,4 @@ jobs:
             tools/browser-lab/results/*/evidence/*.log
             tools/browser-lab/results/*/evidence/cleanup.json
             tools/browser-lab/results/*/evidence/host-closed.json
+            tools/browser-lab/results/*/evidence/startup-state.json

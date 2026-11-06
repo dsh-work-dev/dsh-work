@@ -44,6 +44,7 @@ func main() {
 	if C.lab_initialize(cache, helper, logPath) == 0 {
 		log.Fatal(C.GoString(C.lab_error()))
 	}
+	log.Print("CEF initialized on locked main thread")
 	app := application.New(application.Options{Name: "Browser Lab POSIX", Assets: application.AssetOptions{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#16273f;color:white;font:22px system-ui}header{height:80px;padding:12px}i{display:inline-block;width:24px;height:24px;background:#39e2b5}aside{width:220px;padding:12px}</style><header><i></i> Browser Lab</header><aside>Wails 宿主</aside>`)
 	})}})
@@ -51,16 +52,19 @@ func main() {
 	var once sync.Once
 	var createError string
 	go func() {
+		log.Print("Waiting for Wails native window")
 		for i := 0; i < 200; i++ {
 			ready := false
 			application.InvokeSync(func() {
 				if p := window.NativeWindow(); p != nil {
 					once.Do(func() {
+						log.Print("Wails native window found; creating CEF child")
 						url := cstr("http://127.0.0.1:19478/interactions?tab=A")
 						defer C.free(unsafe.Pointer(url))
 						if C.lab_create(p, url) == 0 {
 							createError = C.GoString(C.lab_error())
 						}
+						log.Printf("CEF child request returned; error=%q", createError)
 					})
 					ready = true
 				}
@@ -78,7 +82,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		var raw string
-		application.InvokeSync(func() { raw = C.GoString(C.lab_state()) })
+		application.InvokeSync(func() { raw = C.GoString(C.lab_state()); log.Print("Native state: ", raw) })
 		if createError != "" {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(map[string]string{"error": createError})
@@ -110,6 +114,7 @@ func main() {
 		mux.ServeHTTP(w, r)
 	}), ReadHeaderTimeout: 5 * time.Second}
 	go server.Serve(listener)
+	log.Print("Entering Wails run loop")
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
