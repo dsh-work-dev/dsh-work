@@ -1,0 +1,158 @@
+name: Browser Lab
+
+on:
+  push:
+    paths: ['tools/browser-lab/**', 'internal/automation/**', '.github/workflows/browser-lab.yml']
+  pull_request:
+    paths: ['tools/browser-lab/**', 'internal/automation/**', '.github/workflows/browser-lab.yml']
+  workflow_dispatch:
+    inputs:
+      native:
+        description: Run native Windows tests on the prepared interactive runner
+        type: boolean
+        default: false
+      profile:
+        type: choice
+        options: [regression, qualification]
+        default: regression
+      network:
+        description: Include public HTTPS and invalid-certificate probes
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Browser Lab contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        working-directory: tools/browser-lab
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - run: node -e "require('node:fs').mkdirSync('results/contracts', {recursive:true})"
+      - name: Contract and real local HTTP fixture tests (not native GUI)
+        run: node --test --test-reporter=spec --test-reporter=junit --test-reporter-destination=stdout --test-reporter-destination=results/contracts/junit.xml tests/contracts.test.mjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: browser-lab-contracts-${{ matrix.os }}
+          path: tools/browser-lab/results/contracts/junit.xml
+
+  native-windows:
+    name: Browser Lab native Windows (${{ inputs.profile }})
+    if: github.event_name == 'workflow_dispatch' && inputs.native && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64, browser-lab]
+    # Fixed lab ports and one interactive desktop are a shared resource.
+    concurrency:
+      group: browser-lab-native-windows
+      cancel-in-progress: false
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: tools/browser-lab
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/browser-lab/native/windows/host/go.sum
+            tools/browser-lab/native/gateway/go.sum
+      - run: npm ci --ignore-scripts
+      - name: Build isolated candidate (runner-provisioned CEF bundle)
+        run: |
+          if (!$env:BROWSER_LAB_CEF_BUNDLE) { throw 'Configure BROWSER_LAB_CEF_BUNDLE on the prepared interactive runner' }
+          & ./native/windows/build.ps1 -CefBundle $env:BROWSER_LAB_CEF_BUNDLE
+      - name: Run native regression or strict qualification
+        env:
+          LAB_PROFILE: ${{ inputs.profile }}
+          LAB_NETWORK: ${{ inputs.network }}
+        run: |
+          $arguments=@('cli.mjs','run','--profile',$env:LAB_PROFILE,'--consent','scripted')
+          if ($env:LAB_NETWORK -eq 'true') { $arguments+='--network' }
+          & node @arguments
+          exit $LASTEXITCODE
+      # Only public evidence. Never upload private-session.json, session.json,
+      # TEMP profiles, dumps, tokens, or the entire run root.
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: browser-lab-native-windows
+          path: |
+            tools/browser-lab/results/*/report.json
+            tools/browser-lab/results/*/junit.xml
+            tools/browser-lab/results/*/manual-checklist.json
+            tools/browser-lab/results/*/evidence/*.png
+            tools/browser-lab/results/*/evidence/*.log
+            tools/browser-lab/results/*/evidence/cleanup.json
+            tools/browser-lab/results/*/evidence/sandbox-processes.json
+
+  native-posix-smoke:
+    name: Browser Lab native minimum (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    defaults:
+      run:
+        working-directory: tools/browser-lab
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+          cache-dependency-path: tools/browser-lab/native/posix/host/go.sum
+      - name: Install Linux native desktop/build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build
+      - run: npm ci --ignore-scripts
+      - name: Build actual Wails and sandbox-enabled CEF candidate
+        run: node native/posix/build.mjs
+      - name: Run actual Linux X11 native loop
+        if: runner.os == 'Linux'
+        env:
+          GDK_BACKEND: x11
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-openbox.log 2>&1 & node cli.mjs smoke'
+      - name: Run actual macOS Cocoa native loop
+        if: runner.os == 'macOS'
+        run: node cli.mjs smoke
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: browser-lab-native-minimum-${{ matrix.os }}
+          path: |
+            tools/browser-lab/results/*/report.json
+            tools/browser-lab/results/*/junit.xml
+            tools/browser-lab/results/*/evidence/*.png
+            tools/browser-lab/results/*/evidence/*.log
+            tools/browser-lab/results/*/evidence/cleanup.json
+            tools/browser-lab/results/*/evidence/host-closed.json
