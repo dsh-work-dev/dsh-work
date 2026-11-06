@@ -143,6 +143,10 @@ func (l *lab) quit() {
 const shellHTML = "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><script type=\"module\" src=\"/wails/runtime.js\"></script><style>*{box-sizing:border-box}body{margin:0;background:#16273f;color:white;font:18px system-ui}header{height:90px;padding:12px}i{display:inline-block;width:24px;height:24px;background:#39e2b5}button,input{font:inherit;padding:7px;margin:4px}aside{width:230px;padding:12px}output{display:block;white-space:pre-wrap}#cover{position:absolute;left:240px;top:100px;right:20px;bottom:20px;background:#16273f;z-index:10}#placeholder{width:100%;height:100%;object-fit:contain;opacity:.35}#cover section{position:absolute;left:20px;right:20px;top:20px;background:white;color:#18273e;padding:20px}</style><header><i></i> Browser Lab<div><button onclick=\"act('tab',{tab:'A'})\">标签 A</button><button onclick=\"act('tab',{tab:'B'})\">标签 B</button><button onclick=\"act('float')\">浮动</button><button onclick=\"act('dock')\">停靠</button></div></header><aside><label>宿主输入区<input id=\"shell-input\" style=\"width:200px\"></label></aside><template id=\"grant-template\">" + businessControls + "</template><section id=\"fault-panel\" hidden style=\"position:absolute;left:260px;top:150px\"><h2 id=\"fault-title\"></h2><button id=\"recover-renderer\" onclick=\"recover('renderer')\">重新加载页面</button><button id=\"recover-broker\" onclick=\"recover('broker')\">重新启动浏览器</button><output id=\"recovery-message\"></output></section><div id=\"cover\" hidden><img id=\"placeholder\" alt=\"页面暂停画面\"><section><b>页面已暂停</b><button id=\"close-cover\" onclick=\"act('uncover')\">返回页面</button></section></div>"
 
 func (l *lab) assets(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/lab/ui/result/") {
+		l.receiveResult(w, r, strings.TrimPrefix(r.URL.Path, "/lab/ui/result/"))
+		return
+	}
 	if businessProxy(w, r, l.token) {
 		return
 	}
@@ -170,6 +174,21 @@ type evaluation struct {
 	Surface string
 	Source  string
 	Arg     json.RawMessage
+}
+
+func (l *lab) receiveResult(w http.ResponseWriter, r *http.Request, id string) {
+	v, ok := l.results.LoadAndDelete(id)
+	if !ok || r.Method != "POST" {
+		http.Error(w, "invalid return ticket", 403)
+		return
+	}
+	var raw json.RawMessage
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 65536)).Decode(&raw) != nil {
+		http.Error(w, "invalid result", 400)
+		return
+	}
+	v.(chan json.RawMessage) <- raw
+	w.WriteHeader(204)
 }
 
 func (l *lab) routes(w http.ResponseWriter, r *http.Request, asset bool) {
@@ -243,7 +262,7 @@ func (l *lab) routes(w http.ResponseWriter, r *http.Request, asset bool) {
 			arg = "null"
 		}
 		// One-shot return ticket, not the control token, enters the owned WebView.
-		script := fmt.Sprintf("Promise.resolve().then(()=> (%s)(%s)).then(value=>({value}),e=>({error:String(e)})).then(value=>fetch('http://127.0.0.1:19481/ui/result/%s',{method:'POST',body:JSON.stringify(value)})).catch(()=>{})", v.Source, arg, id)
+		script := fmt.Sprintf("Promise.resolve().then(()=> (%s)(%s)).then(value=>({value}),e=>({error:String(e)})).then(value=>fetch((location.protocol==='wails:'?'/lab':'http://127.0.0.1:19481')+'/ui/result/%s',{method:'POST',body:JSON.stringify(value)})).catch(()=>{})", v.Source, arg, id)
 		application.InvokeSync(func() { target.ExecJS(script) })
 		select {
 		case out := <-ch:
@@ -325,19 +344,7 @@ func main() {
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/ui/result/") {
-			id := strings.TrimPrefix(r.URL.Path, "/ui/result/")
-			v, ok := l.results.LoadAndDelete(id)
-			if !ok || r.Method != "POST" {
-				http.Error(w, "invalid return ticket", 403)
-				return
-			}
-			var raw json.RawMessage
-			if json.NewDecoder(http.MaxBytesReader(w, r.Body, 65536)).Decode(&raw) != nil {
-				http.Error(w, "invalid result", 400)
-				return
-			}
-			v.(chan json.RawMessage) <- raw
-			w.WriteHeader(204)
+			l.receiveResult(w, r, strings.TrimPrefix(r.URL.Path, "/ui/result/"))
 			return
 		}
 		if r.Header.Get("X-Browser-Lab-Token") != token || r.Header.Get("Origin") != "" {

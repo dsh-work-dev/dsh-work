@@ -5,9 +5,12 @@
 #include "include/cef_task.h"
 #include "include/views/cef_display.h"
 #include <array>
+#include <atomic>
 #include <iostream>
+#include <poll.h>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 static std::array<CefRefPtr<CefBrowser>, 2> views;
 static std::vector<CefRefPtr<CefBrowser>> popups;
@@ -102,12 +105,21 @@ int main(int argc, char **argv) {
   CefString(&settings.log_file) = c->GetSwitchValue("log-file");
   if (!CefInitialize(args, settings, new App(), nullptr))
     return 1;
-  std::thread([] {
-    std::string line;
-    if (std::getline(std::cin, line) && line == "close")
-      CefPostTask(TID_UI, new CloseTask());
-  }).detach();
+  std::atomic<bool> running{true};
+  std::thread input([&running] {
+    while (running) {
+      pollfd fd{STDIN_FILENO, POLLIN, 0};
+      if (poll(&fd, 1, 100) > 0) {
+        std::string line;
+        if (std::getline(std::cin, line) && line == "close")
+          CefPostTask(TID_UI, new CloseTask());
+        break;
+      }
+    }
+  });
   CefRunMessageLoop();
+  running = false;
+  input.join();
   CefShutdown();
   if (closed_count == 2)
     std::cout << "SHUTDOWN" << std::endl;
