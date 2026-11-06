@@ -88,13 +88,20 @@ func main() {
 		log.Fatal(err)
 	}
 	mux := http.NewServeMux()
+	lastNativeState := ""
 	mux.HandleFunc("GET /state", func(w http.ResponseWriter, r *http.Request) {
 		if !started.Load() {
 			http.Error(w, "Wails is starting", 503)
 			return
 		}
 		var raw string
-		application.InvokeSync(func() { raw = C.GoString(C.lab_state()); log.Print("Native state: ", raw) })
+		application.InvokeSync(func() {
+			raw = C.GoString(C.lab_state())
+			if raw != lastNativeState {
+				log.Print("Native state: ", raw)
+				lastNativeState = raw
+			}
+		})
 		if createError != "" {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(map[string]string{"error": createError})

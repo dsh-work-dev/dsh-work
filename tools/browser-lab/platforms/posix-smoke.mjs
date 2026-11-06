@@ -14,7 +14,8 @@ export async function startPosixSmoke(options){
  const token=options.token,headers={'X-Browser-Lab-Token':token};
  const out=openSync(join(options.evidenceRoot,'host.stdout.log'),'w'),err=openSync(join(options.evidenceRoot,'host.stderr.log'),'w');
  const child=spawn(build.executable,[],{cwd:options.runRoot,detached:true,stdio:['ignore',out,err],env:{...process.env,BROWSER_LAB_RUN_ROOT:options.runRoot,BROWSER_LAB_TOKEN:token,BROWSER_LAB_BRIDGE:build.bridge,BROWSER_LAB_HELPER:build.helper,LD_LIBRARY_PATH:process.platform==='linux'?options.bundle:process.env.LD_LIBRARY_PATH}});closeSync(out);closeSync(err);
- let browser,closed=false,spawnError;child.on('error',e=>{spawnError=e});child.on('exit',(code,signal)=>writeFileSync(join(options.evidenceRoot,'host-exit.json'),JSON.stringify({pid:child.pid,code,signal},null,2)));
+ let browser,closed=false,spawnError,lastState;child.on('error',e=>{spawnError=e});child.on('exit',(code,signal)=>writeFileSync(join(options.evidenceRoot,'host-exit.json'),JSON.stringify({pid:child.pid,code,signal},null,2)));
+ function captureState(s,name){if(!/^\d+$/.test(s.windowId)||s.windowId==='0')throw Error('Invalid owned window capture ID');const path=join(options.evidenceRoot,name+'.png');if(process.platform==='linux')execFileSync('import',['-window',s.windowId,path]);else execFileSync('/usr/sbin/screencapture',['-x','-o','-l',s.windowId,path]);return path}
  const groupAlive=()=>{try{process.kill(-child.pid,0);return true}catch(e){if(e.code==='ESRCH')return false;throw e}};
  async function call(path,method='GET'){
   if(spawnError)throw spawnError;if(child.exitCode!==null||child.signalCode)throw Error('Native host exited before '+path);
@@ -33,14 +34,15 @@ export async function startPosixSmoke(options){
   if(failure)throw failure;
  }
  try{
-  await waitFor(async()=>{try{const s=await call('/state');writeFileSync(join(options.evidenceRoot,'startup-state.json'),JSON.stringify(s,null,2));return s.parentAttached&&s.created===1}catch(e){writeFileSync(join(options.evidenceRoot,'startup-state.json'),JSON.stringify({error:String(e.message)},null,2));if(child.exitCode!==null||spawnError)throw e;return false}},'native attached CEF browser',45000);
+  await waitFor(async()=>{try{const s=await call('/state');lastState=s;writeFileSync(join(options.evidenceRoot,'startup-state.json'),JSON.stringify(s,null,2));return s.parentAttached&&s.created===1}catch(e){writeFileSync(join(options.evidenceRoot,'startup-state.json'),JSON.stringify({error:String(e.message)},null,2));if(child.exitCode!==null||spawnError)throw e;return false}},'native attached CEF browser',45000);
   browser=await attach(19479);const page=browser.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('/interactions'));
   if(!page)throw Error('Missing live embedded CEF page');await page.waitForFunction(()=>!!window.lab?.instance);
   return {build,page,call,close,
-   async capture(name){const s=await call('/state');if(!/^\d+$/.test(s.windowId)||s.windowId==='0')throw Error('Invalid owned window capture ID');const path=join(options.evidenceRoot,name+'.png');if(process.platform==='linux')execFileSync('import',['-window',s.windowId,path]);else execFileSync('/usr/sbin/screencapture',['-x','-o','-l',s.windowId,path]);return path},
+   async capture(name){return captureState(await call('/state'),name)},
    markers(path){const p=PNG.sync.read(readFileSync(path));let shell=0,guest=0;for(let i=0;i<p.data.length;i+=4){const[r,g,b]=p.data.subarray(i,i+3);if(Math.abs(r-57)<3&&Math.abs(g-226)<3&&Math.abs(b-181)<3)shell++;if(Math.abs(r-237)<3&&Math.abs(g-60)<3&&Math.abs(b-165)<3)guest++}return {shellPixels:shell,guestPixels:guest,width:p.width,height:p.height}}
   };
  }catch(e){
+  if(lastState?.windowId&&lastState.windowId!=='0')try{captureState(lastState,'startup-native')}catch(capture){writeFileSync(join(options.evidenceRoot,'startup-capture.log'),capture.message)}
   if(process.platform==='darwin'&&child.pid&&child.exitCode===null)try{execFileSync('/usr/bin/sample',[String(child.pid),'3','-file',join(options.evidenceRoot,'startup-native-sample.log')],{timeout:15000})}catch{}
   try{await close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e
  }

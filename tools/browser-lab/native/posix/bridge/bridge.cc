@@ -24,6 +24,9 @@
 static CefScopedLibraryLoader loader;
 static NSWindow* host_window;
 static NSView* slot;
+static NSTimer* pump_timer;
+static bool pumping=false;
+static std::atomic<uint64_t> pump_epoch{0};
 #else
 #include <gtk/gtk.h>
 #include <gdk/x11/gdkx.h>
@@ -35,6 +38,12 @@ static CefRefPtr<CefBrowser> browser;
 static std::atomic<int> created{0}, closed{0};
 static std::string last_error;
 #define LAB_EXPORT extern "C" __attribute__((visibility("default")))
+#if defined(__APPLE__)
+static void PumpWork() {
+  if(!running || pumping)return;
+  pumping=true;CefDoMessageLoopWork();pumping=false;
+}
+#endif
 class Task final : public CefTask {
  public:
   explicit Task(std::function<void()> work) : work_(std::move(work)) {}
@@ -54,7 +63,8 @@ class App final : public CefApp, public CefBrowserProcessHandler {
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
   void OnScheduleMessagePumpWork(int64_t delay_ms) override {
 #if defined(__APPLE__)
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, std::max<int64_t>(delay_ms,0)*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ if(running) CefDoMessageLoopWork(); });
+    const auto epoch=++pump_epoch;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, std::clamp<int64_t>(delay_ms,0,33)*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ if(epoch==pump_epoch)PumpWork(); });
 #endif
   }
  private:
@@ -69,7 +79,8 @@ class Client final : public CefClient, public CefLifeSpanHandler {
 #if defined(__APPLE__)
     NSView* view=(NSView*)value->GetHost()->GetWindowHandle(); [view removeFromSuperview];
 #else
-    Display* display=XOpenDisplay(nullptr); XDestroyWindow(display,value->GetHost()->GetWindowHandle()); XSync(display,False); XCloseDisplay(display);
+    // CEF's X11 CloseHostWindow closes its own child, not the native parent.
+    return false;
 #endif
     return true;
   }
@@ -100,6 +111,12 @@ LAB_EXPORT int lab_init(const char* cache, const char* helper, const char* log) 
   char arg0[]="browser-lab";char* argv[]={arg0,nullptr};CefMainArgs args(1,argv);
   running=true;
   if(!CefInitialize(args,settings,new App(),nullptr)){running=false;last_error="CefInitialize failed";return 0;}
+#if defined(__APPLE__)
+  // The official external-pump sample bounds idle work to 30Hz as well as
+  // servicing schedule callbacks. Without this idle timer IPC can stall.
+  pump_timer=[NSTimer timerWithTimeInterval:1.0/30.0 repeats:YES block:^(NSTimer*){PumpWork();}];
+  [[NSRunLoop mainRunLoop] addTimer:pump_timer forMode:NSRunLoopCommonModes];
+#endif
   return 1;
 }
 LAB_EXPORT int lab_create(void* native, const char* url) {
@@ -122,24 +139,41 @@ LAB_EXPORT int lab_create(void* native, const char* url) {
 }
 LAB_EXPORT const char* lab_state() {
   static thread_local std::string result;
-  bool attached=false;uintptr_t id=0,guest=0;
+  bool attached=false;uintptr_t id=0,guest=0;std::string ancestry="[]";
   OnUI([&]{
     if(browser){
       guest=(uintptr_t)browser->GetHost()->GetWindowHandle();
 #if defined(__APPLE__)
       id=host_window.windowNumber;attached=[(NSView*)guest isDescendantOf:slot] && [(NSView*)guest window]==host_window;
 #else
-      id=host_xid;Display* display=XOpenDisplay(nullptr);Window root,parent,*children=nullptr;unsigned count=0;
-      if(XQueryTree(display,guest,&root,&parent,&children,&count))attached=parent==host_xid;
-      if(children) { XFree(children); }
+      id=host_xid;Display* display=XOpenDisplay(nullptr);Window current=guest;
+      std::ostringstream chain;chain<<"[";
+      for(int depth=0;depth<16;depth++){
+        Window root,parent,*children=nullptr;unsigned count=0;
+        bool found=XQueryTree(display,current,&root,&parent,&children,&count);
+        if(children) { XFree(children); }
+        if(!found)break;
+        if(depth) { chain<<","; }
+        chain<<parent;
+        if(parent==host_xid){attached=true;break;}
+        if(parent==root || parent==0 || parent==current)break;
+        current=parent;
+      }
+      chain<<"]";ancestry=chain.str();
       XCloseDisplay(display);
 #endif
     }
   });
-  std::ostringstream out;out<<"{\"initialized\":"<<(running?"true":"false")<<",\"created\":"<<created<<",\"closed\":"<<closed<<",\"parentAttached\":"<<(attached?"true":"false")<<",\"windowId\":\""<<id<<"\",\"guestId\":\""<<guest<<"\"}";
+  std::ostringstream out;out<<"{\"initialized\":"<<(running?"true":"false")<<",\"created\":"<<created<<",\"closed\":"<<closed<<",\"parentAttached\":"<<(attached?"true":"false")<<",\"windowId\":\""<<id<<"\",\"guestId\":\""<<guest<<"\",\"guestAncestors\":"<<ancestry<<"}";
   result=out.str();return result.c_str();
 }
 LAB_EXPORT void lab_close() { OnUI([]{if(browser)browser->GetHost()->CloseBrowser(true);}); }
 LAB_EXPORT int lab_closed() { return created>0 && created==closed; }
-LAB_EXPORT void lab_shutdown() {running=false;CefShutdown();}
+LAB_EXPORT void lab_shutdown() {
+  running=false;
+#if defined(__APPLE__)
+  [pump_timer invalidate];pump_timer=nil;
+#endif
+  CefShutdown();
+}
 LAB_EXPORT const char* lab_error() {return last_error.c_str();}
