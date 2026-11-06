@@ -2,14 +2,19 @@
 #include "include/cef_app.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
+#include "include/cef_process_message.h"
+#include "include/cef_render_process_handler.h"
 #include "include/cef_task.h"
 #include "include/views/cef_display.h"
 #include <array>
+#include <csignal>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 static std::array<CefRefPtr<CefBrowser>, 2> views;
+static std::array<int, 2> renderer_pids{};
 static std::vector<CefRefPtr<CefBrowser>> popups;
 static int closed_count = 0;
 class Client final : public CefClient, public CefLifeSpanHandler {
@@ -18,6 +23,18 @@ class Client final : public CefClient, public CefLifeSpanHandler {
 public:
   explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser> b, CefRefPtr<CefFrame>,
+                                CefProcessId source,
+                                CefRefPtr<CefProcessMessage> message) override {
+    if (source != PID_RENDERER ||
+        message->GetName() != "BROWSER_LAB_RENDERER_PID" || !views[index_] ||
+        !views[index_]->IsSame(b))
+      return false;
+    renderer_pids[index_] = message->GetArgumentList()->GetInt(0);
+    std::cout << "RENDERER " << index_ << " " << renderer_pids[index_]
+              << std::endl;
+    return true;
+  }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
     if (!views[index_]) {
       views[index_] = b;
@@ -48,8 +65,20 @@ public:
 private:
   IMPLEMENT_REFCOUNTING(Client);
 };
-class App final : public CefApp, public CefBrowserProcessHandler {
+class App final : public CefApp,
+                  public CefBrowserProcessHandler,
+                  public CefRenderProcessHandler {
 public:
+  CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
+    return this;
+  }
+  void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                        CefRefPtr<CefV8Context>) override {
+    if (!frame->IsMain()) return;
+    auto message = CefProcessMessage::Create("BROWSER_LAB_RENDERER_PID");
+    message->GetArgumentList()->SetInt(0, getpid());
+    frame->SendProcessMessage(PID_BROWSER, message);
+  }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
   }
@@ -87,9 +116,22 @@ public:
 private:
   IMPLEMENT_REFCOUNTING(CloseTask);
 };
+class CrashRendererTask final : public CefTask {
+  int index_;
+
+public:
+  explicit CrashRendererTask(int index) : index_(index) {}
+  void Execute() override {
+    if (renderer_pids[index_] > 1 && views[index_])
+      kill(renderer_pids[index_], SIGKILL);
+  }
+
+private:
+  IMPLEMENT_REFCOUNTING(CrashRendererTask);
+};
 int main(int argc, char **argv) {
   CefMainArgs args(argc, argv);
-  int code = CefExecuteProcess(args, nullptr, nullptr);
+  int code = CefExecuteProcess(args, new App(), nullptr);
   if (code >= 0)
     return code;
   auto c = CefCommandLine::CreateCommandLine();
@@ -104,8 +146,14 @@ int main(int argc, char **argv) {
     return 1;
   std::thread([] {
     std::string line;
-    if (std::getline(std::cin, line) && line == "close")
-      CefPostTask(TID_UI, new CloseTask());
+    while (std::getline(std::cin, line)) {
+      if (line == "close") {
+        CefPostTask(TID_UI, new CloseTask());
+        break;
+      }
+      if (line == "crash-renderer-A" || line == "crash-renderer-B")
+        CefPostTask(TID_UI, new CrashRendererTask(line.back() == 'B' ? 1 : 0));
+    }
   }).detach();
   CefRunMessageLoop();
   CefShutdown();
