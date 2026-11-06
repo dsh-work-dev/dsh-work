@@ -24,7 +24,7 @@ func TestOpenProfileWaitsForExactBindingAndSelectionCancels(t *testing.T) {
 			s := New(managerForTest(t), nil)
 			defer s.Close()
 			s.Worker("launch", true, true)
-			if _, err := s.SetEnabled(context.Background(), Browser, true); err != nil {
+			if _, err := enableAndInstallForTest(s, context.Background(), Browser, true); err != nil {
 				t.Fatal(err)
 			}
 			a := mustConnect(t, s, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")

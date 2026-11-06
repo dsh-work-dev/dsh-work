@@ -157,6 +157,13 @@ type RuntimeVerifierWithEnvironment interface {
 	VerifyWithEnvironment(ctx context.Context, path string, env map[string]string) (string, error)
 }
 
+// RuntimeNodeCompatibilityVerifier lets the DSH adapter own release-specific
+// Node engine requirements without making the platform Node resolver filter
+// versions that remain valid for older DSH runtimes.
+type RuntimeNodeCompatibilityVerifier interface {
+	VerifyNodeCompatibility(runtimeVersion, nodeVersion string) error
+}
+
 // RuntimeProfileVerifier is an optional DSH-adapter seam for compatibility
 // checks that depend on both the selected runtime and profile. The manager
 // still validates the catalog identities itself; the adapter owns any
@@ -1645,6 +1652,9 @@ func (m *Manager) resolvePluginTarget(ctx context.Context, target PluginTarget, 
 	if runtime, err = m.observeRuntimeVersion(ctx, runtime, observed); err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, nil, err
 	}
+	if err := verifyRuntimeNodeCompatibility(config.RuntimeVerifier, runtime.Version, node.Version); err != nil {
+		return DataDirectoryInfo{}, RuntimeInfo{}, nil, err
+	}
 	if err := verifyRuntimeProfile(ctx, config.RuntimeVerifier, runtime, dataDirectory, current.Profile); err != nil {
 		return DataDirectoryInfo{}, RuntimeInfo{}, nil, err
 	}
@@ -1700,6 +1710,9 @@ func (m *Manager) ResolveLaunch(ctx context.Context, request LaunchRequest) (Res
 		return ResolvedLaunch{}, err
 	}
 	if runtime, err = m.observeRuntimeVersion(ctx, runtime, observed); err != nil {
+		return ResolvedLaunch{}, err
+	}
+	if err := verifyRuntimeNodeCompatibility(config.RuntimeVerifier, runtime.Version, resolvedNode.Version); err != nil {
 		return ResolvedLaunch{}, err
 	}
 	runtime.Installed = true
@@ -2573,6 +2586,17 @@ func verifyRuntimeWithEnvironment(ctx context.Context, verifier RuntimeVerifier,
 		return "", preserveFailure(err, lifecycle.ErrorDSHVersionCheckFailed, "The selected DSH runtime could not be verified.", "the DSH adapter rejected the selected runtime", false, false)
 	}
 	return observed, nil
+}
+
+func verifyRuntimeNodeCompatibility(verifier RuntimeVerifier, runtimeVersion, nodeVersion string) error {
+	compatibility, ok := verifier.(RuntimeNodeCompatibilityVerifier)
+	if !ok {
+		return nil
+	}
+	if err := compatibility.VerifyNodeCompatibility(runtimeVersion, nodeVersion); err != nil {
+		return preserveFailure(err, lifecycle.ErrorRuntimeProfileIncompatible, "The selected DSH runtime and Node version are incompatible.", "choose a Node version supported by this DSH runtime", false, false)
+	}
+	return nil
 }
 
 func runtimeChildEnvironment(runtime RuntimeInfo) map[string]string {

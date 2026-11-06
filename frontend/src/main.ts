@@ -7,6 +7,7 @@ import {mountShell} from "./shell";
 import {applyLocale, defaultLocale, mountLocale} from "./i18n";
 import {mountManager} from "./manager";
 import {mountPetOverlay} from "./pet_overlay";
+import {mountComputerControl} from "./computer-control";
 import {mountBrowserPermission} from "./browser-permission";
 import {mountAppearance} from "./theme";
 import {appLog} from "./app-log";
@@ -21,7 +22,9 @@ applyLocale(defaultLocale);
 mountLocale();
 document.title = surface === "pet" ? "DSH Work Pet" : "DSH Work";
 
-if (surface === "browser-permission") {
+if(surface==="computer-control"||surface==="computer-pointer"){
+ mountComputerControl(surface==="computer-pointer");
+} else if (surface === "browser-permission") {
   mountBrowserPermission();
 } else if (surface === "pet") {
   document.getElementById("host-surface")?.setAttribute("hidden", "true");

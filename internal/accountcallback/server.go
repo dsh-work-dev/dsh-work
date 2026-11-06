@@ -102,8 +102,20 @@ func (s *AccountCallbackServer) serveHTTP(w http.ResponseWriter, r *http.Request
 		result.status = http.StatusOK
 	}
 	// DSH completes a successful browser sign-in by redirecting to its platform
-	// completion page. That redirect is an accepted terminal callback response.
+	// completion page. Let the browser follow that redirect after code exchange,
+	// rather than replacing it with our local success page.
 	if query.Get("error") == "" && result.status >= http.StatusOK && result.status < 400 {
+		if location := result.header.Get("Location"); result.status >= 300 && location != "" {
+			target, err := url.Parse(location)
+			if err != nil || target.Scheme != "https" || target.Hostname() == "" || target.User != nil {
+				writeAccountCallbackPage(w, http.StatusBadGateway, accountCallbackErrorPage)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			http.Redirect(w, r, location, result.status)
+			return
+		}
 		writeAccountCallbackPage(w, http.StatusOK, accountCallbackSuccessPage)
 		return
 	}
@@ -117,8 +129,9 @@ func (s *AccountCallbackServer) serveHTTP(w http.ResponseWriter, r *http.Request
 }
 
 // Account OAuth responses are short RPC acknowledgements. Capture only their
-// status so the callback listener can replace an empty/raw backend response
-// with a safe page; never buffer an upstream body that may contain secrets.
+// status and headers so the callback listener can preserve the completion
+// redirect or replace an empty/raw response with a page. Never buffer an
+// upstream body that may contain secrets.
 type accountCallbackResponse struct {
 	header http.Header
 	status int

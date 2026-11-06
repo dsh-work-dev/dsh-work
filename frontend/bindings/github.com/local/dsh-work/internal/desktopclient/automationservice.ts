@@ -23,8 +23,16 @@ export function AnswerBrowserPermission(id: string, choice: string): $Cancellabl
     return $Call.ByID(3454275000, id, choice);
 }
 
+export function AnswerComputerConsent(id: string, choice: string): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(1797951098, id, choice);
+}
+
 export function CancelBrowserBinding(id: string): $CancellablePromise<automation$0.Snapshot> {
     return $Call.ByID(3334791000, id);
+}
+
+export function CheckAutomationComponents(force: boolean): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(2250840902, force);
 }
 
 export function ClearBrowserLaunch(id: string): $CancellablePromise<automation$0.Snapshot> {
@@ -49,6 +57,14 @@ export function GetAutomation(): $CancellablePromise<automation$0.Snapshot> {
 
 export function GetBrowserPermission(): $CancellablePromise<app$0.BrowserPermissionPanel> {
     return $Call.ByID(2723533008);
+}
+
+export function GetComputerControl(): $CancellablePromise<app$0.ComputerControlPanel> {
+    return $Call.ByID(4069882317);
+}
+
+export function InstallAutomationComponent(id: string, repair: boolean): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(4006226208, id, repair);
 }
 
 export function OpenBrowserConversation(session: string): $CancellablePromise<void> {
@@ -91,10 +107,22 @@ export function SetBrowserPolicy(revision: number, policy: settings$0.BrowserPol
     return $Call.ByID(1610169685, revision, policy);
 }
 
+export function SetComputerEngine(engine: string): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(2213577054, engine);
+}
+
+export function SetComputerPolicy(revision: number, policy: settings$0.ComputerPolicy): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(825307790, revision, policy);
+}
+
 export function SetDefaultBrowserEnabled(enabled: boolean): $CancellablePromise<automation$0.Snapshot> {
     return $Call.ByID(1398015051, enabled);
 }
 
 export function StopBrowserUse(session: string, lifetime: string): $CancellablePromise<automation$0.Snapshot> {
     return $Call.ByID(653438240, session, lifetime);
+}
+
+export function StopComputerUse(session: string, lifetime: string): $CancellablePromise<automation$0.Snapshot> {
+    return $Call.ByID(1581694525, session, lifetime);
 }

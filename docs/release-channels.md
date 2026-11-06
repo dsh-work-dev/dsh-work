@@ -1,6 +1,6 @@
 # Release channels, update feeds and promotion
 
-dsh-work ships three release channels. Each channel has one version shape, one
+DSH Work ships three release channels. Each channel has one version shape, one
 Windows installer, one GitHub Release, and one update feed document that a
 released build reads at runtime.
 
@@ -66,7 +66,7 @@ build passes no identity at all and stays non-updatable on purpose.
 
 ## Update trust
 
-dsh-work is distributed through GitHub without a code-signing certificate. An
+DSH Work is distributed through GitHub without a code-signing certificate. An
 unsigned release trusts an update because it came from the feed compiled into
 the build, over HTTPS, from the project's GitHub Releases.
 Before the installer runs, `internal/selfupdate` requires:
@@ -150,7 +150,7 @@ The document is a Wails update manifest, schema version 1:
   "schemaVersion": 1,
   "version": "0.2.0-beta.1",
   "channel": "beta",
-  "name": "dsh-work 0.2.0-beta.1",
+  "name": "DSH Work 0.2.0-beta.1",
   "publishedAt": "2026-10-13T00:00:00Z",
   "artifacts": [
     {

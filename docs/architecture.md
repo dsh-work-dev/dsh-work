@@ -58,7 +58,7 @@ system-wide Windows service.
 | `internal/workeripc` | current-user authenticated OS pipe carrying upstream HTTP bytes |
 | `internal/desktopbridge` | Worker resource delivery and HTTP forwarding, the Gateway WebSocket, upload and session-export carriers over Wails byte streams, external-link opening |
 | `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
-| `internal/hostplugins` | dsh-work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
+| `internal/hostplugins` | DSH Work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
 | `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
 | `internal/dshinteraction` | pending DSH questions, approvals and plan reviews reported by each workbench window's DSH page |
 | `internal/settings` | versioned Host preferences and persistence contract |
@@ -214,7 +214,7 @@ WebSocket is faster, but not visibly in the UI.
 
 ### Page bootstrap and host plugins
 
-dsh-work extends DSH only through DSH's own plugin and page interfaces, in three
+DSH Work extends DSH only through DSH's own plugin and page interfaces, in three
 layers:
 
 | Layer | What | Loaded |
@@ -224,7 +224,7 @@ layers:
 | Profile plugins | Third-party bundles in the user's profile, managed by DSH's PluginManager | Only in the selected profile |
 
 The host plugins are ordinary DSH plugins; automation needs only a Host half.
-They are embedded in dsh-work, written below a directory named by application
+They are embedded in DSH Work, written below a directory named by application
 version and content digest, and inserted by a per-launch `--patch` core overlay
 rather than installed into a profile, so profile switches, version recovery and
 uninstalls do not touch them. The daemon installs them once per process
@@ -237,7 +237,7 @@ frame loading) or Not loaded, and offers no switches.
 
 | Plugin | Host half | Client half |
 |---|---|---|
-| `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, dsh-work theme, modal mask reports |
+| `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, DSH Work theme, modal mask reports |
 | `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
 | `@dsh-work/pet` | Streams the session activity snapshot the desktop pet uses, for one generation | Reports session titles and parent sessions when the session list changes, and opens the conversations its workbench window is asked to open |
 | `@dsh-work/automation` | Resolves real ToolExecution agents to their top-level session and forwards browser authorization/execution through the authenticated Host channel | None |
@@ -257,7 +257,7 @@ Under the default DSH theme, DSH keeps its native look: when
 empty tokens and skips the token map, decoration and control samples below.
 `@dsh-work/shell` registers and selects that empty theme like any other, so
 DSH renders exactly as its built-in light or dark theme (whose tokens are also
-empty). Only dsh-work's own surfaces adapt: `frontend/src/ui/themes/dsh.css`
+empty). Only DSH Work's own surfaces adapt: `frontend/src/ui/themes/dsh.css`
 takes its values from native DSH, and the title-bar frame computed from it
 matches DSH's sidebar. Whenever an appearance arrives without
 `--dsh-work-raised`, the plugin removes `body[data-dsh-work-decor]`, every
@@ -307,7 +307,7 @@ and the plugin list's `data-plugin-group` and the task manager's
 shadow, radius and row divider). DSH reads `--dsw-font-mono` without defining
 it; the shell sets it to the theme's monospace stack followed by the interface
 font, so CJK in package rows does not fall back to a serif face.
-DSH controls take the look of dsh-work's own controls. The shell renders hidden
+DSH controls take the look of DSH Work's own controls. The shell renders hidden
 samples of its switch (off and on), button, primary button, text field, select
 and tag, and sends what the theme resolved them to: border, radius, fill,
 background image, shadow, text colour, and the switch's track size and thumb
@@ -324,7 +324,7 @@ theme accent through `accent-color`, and native select option lists the theme
 surface. A chosen answer in a question card (`data-question-key`, ARIA radio or
 checkbox) takes the theme's selected fill, and its number marker the theme's
 done marker. Page titles and section headings outside the conversation take
-the theme's heading font, weight and tracking, measured from dsh-work's own
+the theme's heading font, weight and tracking, measured from DSH Work's own
 page title and section heading. No CSS-module class is used as a hook;
 a test pins that. Themes differ only in token values; no theme has its own DSH
 stylesheet. DSH draws fixed white
@@ -332,9 +332,9 @@ glyphs on some accent fills, so a light accent is darkened there until the
 glyph reaches 4.5:1. Rejected: toggling `data-ds-dark-theme` directly (it
 fights DSH's presenter), `overrideTokens` alone (it cannot choose the light or
 dark base palette), writing DSH's stored preference (it would change DSH outside
-dsh-work), and stylesheet injection through `webserver/index-inject` (it
+DSH Work), and stylesheet injection through `webserver/index-inject` (it
 bypasses DSH's theme composition). Until the plugin loads, DSH paints its stored
-preference, so the first paint of a DSH load can differ from dsh-work's mode.
+preference, so the first paint of a DSH load can differ from DSH Work's mode.
 Revisit the map when DSH renames `--dsw-*` tokens; `exportInspectTokens()`
 lists the current names.
 
@@ -363,7 +363,7 @@ it does not implement HTTP, WebSocket framing or named-pipe security itself.
 DSH Remote calls and streams use DSH's own published `/api/remote.mux`
 WebSocket route, carried by the `worker-websocket` stream like any other
 upgrade. DSH owns the frame format, bidirectional streams, peer admission and
-stream lifetime. dsh-work does not install a private stream adapter or depend
+stream lifetime. DSH Work does not install a private stream adapter or depend
 on version-specific internal stream signatures, and it does not parse Remote
 frames to drive Host behaviour.
 
@@ -377,7 +377,7 @@ spans three owners:
 |---|---|---|
 | Start | DSH account UI | Calls `account/startSignIn` with a loopback callback origin. The call returns before an authorization URL exists. |
 | Open the browser | `@dsh-work/account` | Follows the official `account/watch` stream. When an attempt reaches `waiting-browser`, it calls `window.open` with that attempt's HTTPS `authorizeUrl` once; the shell link policy opens it in the system browser. |
-| Return | Daemon callback listener | Receives the browser redirect, relays it to the current Worker generation and shows a dsh-work result page. |
+| Return | Daemon callback listener | Receives the browser redirect, relays it to the current Worker generation and shows a DSH Work result page. |
 
 The browser must reach the callback, and DSH accepts only an
 `http://localhost|127.0.0.1|[::1]:<port>` origin. The daemon therefore owns one
@@ -414,7 +414,7 @@ that does not need a loopback origin.
 
 ## Storage layout
 
-dsh-work keeps app data and user data in separate places. `config.toml` records where they are, and Settings → Storage can move either one without touching the other.
+DSH Work keeps app data and user data in separate places. `config.toml` records where they are, and Settings → Storage can move either one without touching the other.
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
@@ -423,9 +423,9 @@ dsh-work keeps app data and user data in separate places. `config.toml` records 
 | User data (DSH home) | `%USERPROFILE%\.dsh-work` | `~/.dsh-work` | `~/.dsh-work` |
 | Cache and logs | `%LOCALAPPDATA%\dsh-work` | `~/Library/Caches`, `~/Library/Logs` | `$XDG_CACHE_HOME`, `$XDG_STATE_HOME` |
 
-The user data folder is dsh-work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. dsh-work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only dsh-work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
+The user data folder is DSH Work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. DSH Work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only DSH Work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
 
-App data holds what dsh-work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
+App data holds what DSH Work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
 
 Browser native-host manifests, ownership markers and the stable unpacked
 extension directory live under app data's `browser-native/`. Cache
@@ -435,7 +435,7 @@ may be adopted without modifying it. Browser session adapters and artifacts
 use `automation/browser-sessions/`. Browser bindings and policy are Host
 preferences; browser profile files and extension storage remain browser-owned.
 
-This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. dsh-work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
+This follows the convention that DSH shells keep DSH data in a home dot-folder (`~/.dsh` for official DSH and dsh-tauri) and their own state in the platform application directory. DSH Work uses its own home, `~/.dsh-work`, so it never shares `~/.dsh` with the CLI. An earlier layout kept the DSH home inside app data and patched DSH's session, storage, attachment and credential paths out of it. That missed every directory a plugin or newer DSH release adds, and it rewrote user-registered homes too. `config.toml` uses TOML so people can edit it by hand, and `github.com/pelletier/go-toml/v2` reads and writes it: the library is the maintained mainstream choice and emits comments from struct tags. Revisit this layout if DSH itself starts separating data from its environment.
 
 ## Windows installer and uninstaller
 
@@ -506,23 +506,31 @@ Linux packaging gains an uninstall path.
 
 ## Runtime catalog
 
-dsh-work keeps an external catalog of DSH runtimes and explicit
+DSH Work keeps an external catalog of DSH runtimes and explicit
 Node, data-directory and profile selections. Normal startup resolves local
 files only. Version recovery is the separate path that force-reinstalls the
 recorded DSH version into its managed directory through npm or pnpm and may
 download packages; a matching version alone does not skip repair.
 Each launch runs the selected runtime's `--version`. That observed version is
 authoritative. The catalog's recorded version is a cache, refreshed when it
-differs, and never a reason to refuse a launch. dsh-work refuses only runtimes
+differs, and never a reason to refuse a launch. DSH Work refuses only runtimes
 older than `MinimumVersion` in `internal/dshadapter`, currently `0.2.0-rc.2`.
 That is the first release whose Worker carrier contract
-(`WebServer.listenedPort` and `getOrigin`) dsh-work supports. An explicit
+(`WebServer.listenedPort` and `getOrigin`) DSH Work supports. An explicit
 install of a version must still report that exact version. Revisit the minimum
 when the carrier contract changes.
 Releases and installed runtimes older than that minimum stay listed but are
 marked not supported and cannot be selected; Settings offers only removal for
 such a runtime, startup never preselects one, and an install request below the
 minimum is refused before any download.
+
+Node selection remains independent of runtime discovery, but the final launch
+tuple must satisfy the selected DSH release's Node engine floor. The DSH adapter
+owns this release-specific rule rather than the platform Node resolver, so an
+older supported DSH can keep using an older compatible Node. DSH 0.2.2-rc.1 and
+newer require Node 24.9.0 or newer; the manager checks the observed DSH version
+against the resolved Node version before it accepts the profile or starts a
+Worker.
 
 Each runtime owns independent files. pnpm installs use
 `package-import-method=clone-or-copy` instead of hard-linking from the user's
@@ -542,9 +550,9 @@ delete every installed runtime.
 
 ## DSH Work profile
 
-dsh-work's managed DSH data directory runs the profile `dsh-work`, which the UI titles "DSH Work". dsh-work does not use DSH's `web` profile. DSH auto-initializes only its template names, so `internal/dshadapter` creates the profile files itself: before startup, before preparing a Run context, and before cloning, it writes whichever of the three `initProfile` files are missing. It writes `package.json` last and never touches files that already exist. The bundles are `@deepseek-ai/dsh-base` and `@deepseek-ai/dsh-web-app`, the same layers official DSH Desktop uses. The profile cannot be renamed or deleted, and its name is reserved case-insensitively in the managed directory. User-registered data directories never get this profile.
+DSH Work's managed DSH data directory runs the profile `dsh-work`, which the UI titles "DSH Work". DSH Work does not use DSH's `web` profile. DSH auto-initializes only its template names, so `internal/dshadapter` maintains the three `initProfile` files itself before startup, Run-context preparation, and cloning: it creates missing files and writes `package.json` last. For this app-owned profile, `cordis.patch.yml` enables the sandboxed HTTP(S) side-bar browser, model-facing `web_fetch`, and the file-observation write-safety policy when none has an explicit `disabled` value. It disables `desktop-product-telemetry`, `product-analytics`, OTel Session telemetry, the official-API Session-log contribution and plugin-package inventory, so optional diagnostics and canonical Session history do not leave the machine. `web_fetch` is an agent capability rather than a reporting channel. In RC1 it can reach loopback, private networks and cloud metadata addresses without an address-policy switch, so deployments needing a public-network-only boundary require network isolation rather than a profile flag. Existing patch rows, comments, and `!!js` expressions are preserved; the file is atomically rewritten only when one of these defaults needs to be added or corrected. A malformed or non-list patch stops profile initialization and remains available for user repair. Existing workspace and package files are left as-is. The bundles are `@deepseek-ai/dsh-base` and `@deepseek-ai/dsh-web-app`, the same layers official DSH Desktop uses. This maintenance applies only to the managed `dsh-work` profile; user-registered directories never get this profile or have their profiles changed. The profile cannot be renamed or deleted, and its name is reserved case-insensitively in the managed directory.
 
-"Import from DSH…" in Settings → Profiles brings existing DSH data into DSH Work. The user picks a folder and dsh-work checks it. The folder can be a DSH home such as `~/.dsh`, or an earlier dsh-work app-data folder whose `environment/` is the home; in that case dsh-work reads `user-data.patch.json` to find where sessions, storage, attachments and credentials were redirected. dsh-work then lists what can come along: the chosen profile's registry plugins and patch layer, the home's session history (session folders, projection-cache records, which carry the titles, and attachments), its workspace list, and its credentials. The user ticks items. This is the only way data from another DSH comes in; the Profiles page shows profiles without kinds or data-directory labels, so the user either keeps using DSH Work or imports what they had. Merges only add and DSH Work wins every conflict: existing sessions, cache records and attachment files are skipped, workspaces merge by path, patch entries merge by `id`, plugins DSH Work already has are skipped, and credentials merge entry by entry, with per-home `grant` records never copied. Nothing is backed up because nothing is replaced. The chosen folder is never registered or changed, so importing again brings only what is new. Everything runs in one Host switch on the Ready DSH Work context: data first, then plugins.
+"Import from DSH…" in Settings → Profiles brings existing DSH data into DSH Work. The user picks a folder and DSH Work checks it. The folder can be a DSH home such as `~/.dsh`, or an earlier `dsh-work` app-data folder whose `environment/` is the home; in that case DSH Work reads `user-data.patch.json` to find where sessions, storage, attachments and credentials were redirected. DSH Work then lists what can come along: the chosen profile's registry plugins and patch layer, the home's session history (session folders, projection-cache records, which carry the titles, and attachments), its workspace list, and its credentials. The user ticks items. This is the only way data from another DSH comes in; the Profiles page shows profiles without kinds or data-directory labels, so the user either keeps using DSH Work or imports what they had. Merges only add and DSH Work wins every conflict: existing sessions, cache records and attachment files are skipped, workspaces merge by path, patch entries merge by `id`, plugins DSH Work already has are skipped, and credentials merge entry by entry, with per-home `grant` records never copied. Nothing is backed up because nothing is replaced. The chosen folder is never registered or changed, so importing again brings only what is new. Everything runs in one Host switch on the Ready DSH Work context: data first, then plugins.
 
 Revisit the bundle list when the pinned DSH changes `PROFILE_TEMPLATES.web`.
 
@@ -601,7 +609,7 @@ authenticated session. The Host checks that the session generation matches the
 current Host generation and that the target is the running profile. DSH saves
 and applies the change, including dependency retention and runtime unload.
 Switches appear only where PluginManager reports an item can be toggled; a
-non-running profile or a Worker that is not Ready shows none. dsh-work keeps no
+non-running profile or a Worker that is not Ready shows none. DSH Work keeps no
 disable ledger of its own. Install, upgrade and uninstall use DSH's plugin
 commands through the manager.
 
@@ -648,7 +656,7 @@ cannot repair stored-data or runtime failures, which use the same data or
 runtime in any mode. Revisit if a failure class appears that a persistent disable cannot
 reach, such as a broken profile manifest or home patch.
 
-Using DSH's API keeps dsh-work in step with DSH's deselection, dependency and
+Using DSH's API keeps DSH Work in step with DSH's deselection, dependency and
 unload semantics as they change. The cost is that activation changes need a
 running Worker, apart from the startup-failure path.
 
@@ -660,7 +668,7 @@ tool arguments cannot select a session, lifetime, route or browser binding.
 Each top-level session owns one MCP resource, CDP endpoint and extension route;
 child agents share it. The extension multiplexes those routes over the
 selected profile's native connection and keeps each route in its own tab group.
-The browser starts the same dsh-work executable as a native host, before normal
+The browser starts the same `dsh-work` executable as a native host, before normal
 UI/logging startup. Its stdout contains frames only. Parent-process admission,
 exact extension origin and the current-user authenticated daemon channel
 replace a separate TCP bearer broker or user-managed connection key.
@@ -944,7 +952,7 @@ maximise button and edge resizing work even where the DSH frame covers the
 window. Plain HWND hosting is not used: there Wails detects window edges from
 mouse moves in the top document, which never sees moves over the frame.
 
-dsh-work decides the window frame: the title bar and the DSH sidebar beneath it
+DSH Work decides the window frame: the title bar and the DSH sidebar beneath it
 are one surface, so the bar and the sidebar frame DSH's content together. The
 frame is the theme's navigation fill, or the first quieter fill the theme's text
 reads on, made opaque (`windowFrame` in `frontend/src/dsh-theme.ts`); the shell
@@ -969,7 +977,7 @@ as one modal layer. The mask covers the menus, and Alt or F10 return focus to
 DSH. A click on it is passed to DSH's mask, so it closes the dialog when DSH's
 own mask does. The window buttons sit above the mask, and Windows hit-tests the
 caption area before the page, so dragging, Snap layouts and the window buttons
-keep working. Upstream's Electron build leaves its caption unmasked; dsh-work
+keep working. Upstream's Electron build leaves its caption unmasked; DSH Work
 masks the bar so its menus cannot act behind a DSH dialog. The plugin watches
 dialogs being mounted and the attributes above, not every style change, to stay
 cheap while DSH streams output.
@@ -1009,7 +1017,7 @@ is a checked item; full screen hides the window buttons and is left through
 the same item. Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0 and F11 run the same window
 items, also while DSH has focus, unless DSH binds that chord itself. The zoom
 factor is saved in Host settings and restored when the workbench opens. The
-links open the dsh-work docs and issue tracker and the DeepSeek Harness issue
+links open the DSH Work docs and issue tracker and the DeepSeek Harness issue
 tracker in the system browser. 复制诊断信息 copies the same report as About. 检查更新
 starts a check and reports the outcome in a short status line under the bar;
 when an update is already found, downloading or not configured, it opens About

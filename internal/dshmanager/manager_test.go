@@ -194,6 +194,38 @@ func TestManagerPreservesAdapterRuntimeCompatibilityFailure(t *testing.T) {
 	}
 }
 
+func TestManagerChecksResolvedNodeAgainstObservedRuntime(t *testing.T) {
+	root := t.TempDir()
+	homePath := filepath.Join(root, "dsh-home")
+	if err := os.MkdirAll(filepath.Join(homePath, "profiles", "web"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(root, "dsh.cmd")
+	if err := os.WriteFile(runtimePath, []byte("test runtime"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compatibilityFailure := lifecycle.Failure{Code: lifecycle.ErrorRuntimeProfileIncompatible, Summary: "incompatible Node"}
+	verifier := &recordingRuntimeVerifier{version: "0.2.2-rc.1", nodeCompatibilityErr: compatibilityFailure}
+	manager, err := New(Config{
+		StatePath:       filepath.Join(root, "manager.json"),
+		RuntimeVerifier: verifier,
+		NodeResolver:    &nodeResolverFake{resolved: ResolvedNode{Version: "24.2.0", NodePath: "node.exe"}},
+		ProfileCatalog:  testProfileCatalog{definitions: []ProfileDefinition{{Name: "web", Kind: ProfileKindBuiltIn}}},
+		DataDirectories: []DataDirectoryInfo{{ID: "dsh-work", Name: "dsh-work", Path: homePath, Ownership: DataDirectoryOwnershipDSHWork}},
+		Runtimes:        []RuntimeInfo{{ID: "dsh-test", Version: "0.2.1-rc.5", Path: runtimePath}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.ResolveLaunch(context.Background(), LaunchRequest{
+		RuntimeID: "dsh-test", Node: NodeSelection{Kind: NodeSelectionSystem}, Profile: ProfileRef{DataDirectoryID: "dsh-work", Name: "web"},
+	})
+	assertFailureCode(t, err, lifecycle.ErrorRuntimeProfileIncompatible)
+	if verifier.nodeCompatibilityCalls != 1 || verifier.nodeRuntimeVersion != "0.2.2-rc.1" || verifier.nodeVersion != "24.2.0" || verifier.profileCalls != 0 {
+		t.Fatalf("compatibility calls = %d runtime=%q node=%q profile=%d", verifier.nodeCompatibilityCalls, verifier.nodeRuntimeVersion, verifier.nodeVersion, verifier.profileCalls)
+	}
+}
+
 func TestResolveLaunchRefreshesCatalogVersion(t *testing.T) {
 	root := t.TempDir()
 	homePath := filepath.Join(root, "dsh-home")
@@ -1775,13 +1807,24 @@ func (c testProfileCatalog) BuiltInProfiles() []ProfileDefinition {
 }
 
 type recordingRuntimeVerifier struct {
-	path                 string
-	version              string
-	calls                int
-	env                  map[string]string
-	profileDataDirectory string
-	profileName          string
-	profileCalls         int
+	path                   string
+	version                string
+	calls                  int
+	env                    map[string]string
+	profileDataDirectory   string
+	profileName            string
+	profileCalls           int
+	nodeRuntimeVersion     string
+	nodeVersion            string
+	nodeCompatibilityCalls int
+	nodeCompatibilityErr   error
+}
+
+func (v *recordingRuntimeVerifier) VerifyNodeCompatibility(runtimeVersion, nodeVersion string) error {
+	v.nodeRuntimeVersion = runtimeVersion
+	v.nodeVersion = nodeVersion
+	v.nodeCompatibilityCalls++
+	return v.nodeCompatibilityErr
 }
 
 // Verify records the call and reports the configured runtime version.

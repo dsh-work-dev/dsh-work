@@ -34,7 +34,7 @@ export enum AppearanceMode {
  */
 export interface Automation {
     "browser": AutomationBrowser;
-    "computer": AutomationCapability;
+    "computer": AutomationComputer;
 }
 
 export interface AutomationBrowser {
@@ -45,6 +45,12 @@ export interface AutomationBrowser {
 
 export interface AutomationCapability {
     "enabled": boolean;
+}
+
+export interface AutomationComputer {
+    "policy"?: ComputerPolicy | null;
+    "enabled": boolean;
+    "engine"?: string;
 }
 
 export interface BrowserBinding {
@@ -87,6 +93,19 @@ export interface BrowserProfiles {
 export interface BrowserSiteRule {
     "host": string;
     "rule": string;
+}
+
+export interface ComputerAppRule {
+    "id": string;
+    "name": string;
+    "level": string;
+}
+
+export interface ComputerPolicy {
+    "newApps": string;
+    "grantLasts": string;
+    "apps": ComputerAppRule[] | null;
+    "confirm": { [_ in string]?: string } | null;
 }
 
 /**

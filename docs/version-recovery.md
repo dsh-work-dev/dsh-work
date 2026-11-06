@@ -117,7 +117,7 @@ a currently live Worker.
 ## Compatibility and recovery limits
 
 The reference environment is Windows with the development fixture version in
-`toolchain.lock.json`, together with its pnpm profile workflow. dsh-work accepts
+`toolchain.lock.json`, together with its pnpm profile workflow. DSH Work accepts
 any DSH release at or above `MinimumVersion` in `internal/dshadapter`. Newer
 releases are not guaranteed to work unchanged.
 

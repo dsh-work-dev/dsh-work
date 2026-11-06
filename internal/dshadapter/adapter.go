@@ -24,6 +24,14 @@ import (
 // (WebServer listenedPort and getOrigin) this dsh-work build supports.
 const MinimumVersion = "0.2.0-rc.2"
 
+// DSH 0.2.2-rc.1 raised its Node engine floor. Keep this release-scoped so
+// older supported DSH runtimes can still run with the Node versions they
+// declare, while current and newer runtimes cannot be paired with Node 24.2.
+const (
+	Node24RequirementVersion = "0.2.2-rc.1"
+	MinimumNodeVersion       = "24.9.0"
+)
+
 var exactRuntimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 
 func validRuntimeVersion(version string) bool { return exactRuntimeVersionPattern.MatchString(version) }
@@ -192,6 +200,24 @@ func (a *Adapter) VerifyWithEnvironment(ctx context.Context, path string, env ma
 		return "", err
 	}
 	return runtime.Version, nil
+}
+
+// VerifyNodeCompatibility enforces DSH's release-level Node engine contract
+// after the runtime and selected Node have both been resolved.
+func (a *Adapter) VerifyNodeCompatibility(runtimeVersion, nodeVersion string) error {
+	if !semver.IsValid("v"+runtimeVersion) || semver.Compare("v"+runtimeVersion, "v"+Node24RequirementVersion) < 0 {
+		return nil
+	}
+	nodeVersion = strings.TrimPrefix(strings.TrimSpace(nodeVersion), "v")
+	if semver.IsValid("v"+nodeVersion) && semver.Compare("v"+nodeVersion, "v"+MinimumNodeVersion) >= 0 {
+		return nil
+	}
+	return lifecycle.Failure{
+		Code:      lifecycle.ErrorRuntimeProfileIncompatible,
+		Summary:   "The selected Node version is incompatible with this DSH runtime.",
+		Detail:    "DSH " + runtimeVersion + " requires Node " + MinimumNodeVersion + " or newer; selected Node is " + nodeVersion + ".",
+		Retryable: false,
+	}
 }
 
 // VerifyProfile rejects known non-Web built-ins before the Host stops its

@@ -16,6 +16,7 @@ type browserPermissionWindow struct {
 	service  *automation.Service
 	window   *application.WebviewWindow
 	id       string
+	computer bool
 	revision uint64
 	quitting func() bool
 }
@@ -30,9 +31,14 @@ func (p *browserPermissionWindow) update(state automation.Snapshot) {
 		}
 		p.revision = state.Revision
 		id := ""
-		if state.BrowserAccess != nil && len(state.BrowserAccess.Requests) > 0 {
-			id = state.BrowserAccess.Requests[0].ID
+		browser, request := automation.FirstAutomationPermission(state)
+		computer := request != nil
+		if request != nil {
+			id = request.ID
+		} else if browser != nil {
+			id = browser.ID
 		}
+		p.computer = computer
 		// Do not create a second WebView while the Pet environment is still
 		// starting. The permission window is needed only for a real request.
 		if id == "" {
@@ -52,7 +58,14 @@ func (p *browserPermissionWindow) update(state automation.Snapshot) {
 				id := p.id
 				p.window.Hide()
 				if id != "" {
-					go func() { _, _ = p.service.AnswerBrowserConsent(context.Background(), id, "deny") }()
+					computer := p.computer
+					go func() {
+						if computer {
+							_, _ = p.service.AnswerComputerConsent(context.Background(), id, "deny")
+						} else {
+							_, _ = p.service.AnswerBrowserConsent(context.Background(), id, "deny")
+						}
+					}()
 				}
 			})
 		}

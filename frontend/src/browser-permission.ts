@@ -18,7 +18,8 @@ export function mountBrowserPermission(){
  deny.onclick=()=>void answer('deny');allow.onclick=()=>void answer('allow');always.onclick=()=>void answer('always');
  document.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();void answer('deny')}});
  async function refresh(){if(loading||busy)return;loading=true;try{
-  const panel=await AutomationService.GetBrowserPermission();applyLocale(panel.locale);applyAppearance(panel.appearance);const r=panel.request;const changed=id!==(r?.id??'');id=r?.id??'';
+  const panel=await AutomationService.GetBrowserPermission();applyLocale(panel.locale);applyAppearance(panel.appearance);const c=panel.computerRequest;if(c){const changed=id!==c.id;id=c.id;title.textContent=t('automation.computerAccess.title');body.textContent=t('automation.computerAccess.body',{title:c.title});destination.textContent=`${c.target.app} · ${c.target.title}`;detail.textContent=t('automation.computerAccess.level.'+c.target.level)+(c.target.warning?' · '+t('automation.computerAccess.warning'):'');deny.textContent=t('automation.access.deny');allow.textContent=t('automation.access.allow');always.hidden=false;always.textContent=t("automation.access.always");allow.hidden=false;deny.disabled=allow.disabled=always.disabled=Date.parse(c.expires)<=Date.now();if(changed){error.textContent='';deny.focus()}return}
+  const r=panel.request;const changed=id!==(r?.id??'');id=r?.id??'';
   const expired=!r||Date.parse(r.expires)<=Date.now(),connecting=r?.phase==='connecting';
   deny.textContent=t(connecting?'automation.browser.cancel':'automation.access.deny');allow.textContent=t('automation.access.allow');always.textContent=t('automation.access.always');
   for(const b of [deny,allow,always])b.disabled=expired||busy;

@@ -17,6 +17,7 @@ import (
 
 	"github.com/local/dsh-work/internal/app"
 	"github.com/local/dsh-work/internal/automation/browsernative"
+	"github.com/local/dsh-work/internal/automation/computeruia"
 	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -32,6 +33,13 @@ type Resources struct {
 }
 
 func Run(resources Resources) {
+	if len(os.Args) > 1 && os.Args[1] == "computer-uia-probe" {
+		if err := computeruia.RunHelper(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	// Browser-launched invocations must branch before UI, singleton, maintenance
 	// dialogs or normal application logging can touch their protocol stdout.
 	if len(os.Args) > 1 && (strings.HasPrefix(os.Args[1], "chrome-extension://") || os.Args[1] == "browser-native" || os.Args[1] == "browser-host-remove" || os.Args[1] == "browser-host-refresh") {

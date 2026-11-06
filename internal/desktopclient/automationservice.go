@@ -32,6 +32,27 @@ func (s *AutomationService) GetAutomation(ctx context.Context) (automation.Snaps
 	return value, err
 }
 
+func (s *AutomationService) CheckAutomationComponents(ctx context.Context, force bool) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.CheckAutomationComponents(ctx, force) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "CheckAutomationComponents", []any{force}, &value)
+	return value, err
+}
+
+func (s *AutomationService) SetComputerEngine(ctx context.Context, engine string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.SetComputerEngine(ctx, engine) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "SetComputerEngine", []any{engine}, &value)
+	return value, err
+}
+
+func (s *AutomationService) InstallAutomationComponent(ctx context.Context, id string, repair bool) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.InstallAutomationComponent(ctx, id, repair) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "InstallAutomationComponent", []any{id, repair}, &value)
+	return value, err
+}
+
 func (s *AutomationService) SetAutomationEnabled(ctx context.Context, capability string, enabled bool) (automation.Snapshot, error) {
 	if s.Local != nil { return s.Local.SetAutomationEnabled(ctx, capability, enabled) }
 	var value automation.Snapshot
@@ -154,4 +175,32 @@ func (s *AutomationService) OpenBrowserConversation(ctx context.Context, session
 	if s.Local != nil { return s.Local.OpenBrowserConversation(ctx, session) }
 	err := call(ctx, s.Client, "AutomationService", "OpenBrowserConversation", []any{session}, nil)
 	return err
+}
+
+func (s *AutomationService) AnswerComputerConsent(ctx context.Context, id, choice string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.AnswerComputerConsent(ctx, id, choice) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "AnswerComputerConsent", []any{id, choice}, &value)
+	return value, err
+}
+
+func (s *AutomationService) GetComputerControl(ctx context.Context) (app.ComputerControlPanel, error) {
+	if s.Local != nil { return s.Local.GetComputerControl(ctx) }
+	var value app.ComputerControlPanel
+	err := call(ctx, s.Client, "AutomationService", "GetComputerControl", []any{}, &value)
+	return value, err
+}
+
+func (s *AutomationService) StopComputerUse(ctx context.Context, session, lifetime string) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.StopComputerUse(ctx, session, lifetime) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "StopComputerUse", []any{session, lifetime}, &value)
+	return value, err
+}
+
+func (s *AutomationService) SetComputerPolicy(ctx context.Context, revision uint64, policy settings.ComputerPolicy) (automation.Snapshot, error) {
+	if s.Local != nil { return s.Local.SetComputerPolicy(ctx, revision, policy) }
+	var value automation.Snapshot
+	err := call(ctx, s.Client, "AutomationService", "SetComputerPolicy", []any{revision, policy}, &value)
+	return value, err
 }

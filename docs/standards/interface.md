@@ -2,7 +2,7 @@
 
 ## Ownership and hierarchy
 
-- Trusted dsh-work surfaces must remain usable while DSH is starting, unavailable
+- Trusted DSH Work surfaces must remain usable while DSH is starting, unavailable
   or failed.
 - The DSH Workspace remains DSH-owned and receives no injected Host controls.
 - Host and Workspace ownership must be perceptible without adding decorative
@@ -91,11 +91,11 @@
   and the search field's clear button uses the muted text colour.
 - Selection, focus, warning and failure must remain distinguishable without
   relying on color alone.
-- dsh-work owns the appearance of the whole workbench, DSH included
+- DSH Work owns the appearance of the whole workbench, DSH included
   (`settings.Appearance`: theme id and system/light/dark mode). SettingsService
   is the only writer and publishes each saved change as the `appearance`
   event. Under the DSH theme, DSH receives only the mode and keeps its native
-  look, and dsh-work's own surfaces take DSH's values instead. Under every
+  look, and DSH Work's own surfaces take DSH's values instead. Under every
   other theme, DSH takes the theme's colours, mode, radii, shadows and interface font
   through `@dsh-work/shell` (`frontend/src/dsh-theme.ts` maps the tokens),
   and its cards, menus, dialogs and composer take the theme's borders, shadows,

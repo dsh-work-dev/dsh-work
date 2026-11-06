@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	browserextension "github.com/local/dsh-work/browser-extension"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,27 @@ func PackageRevision(c Capability) string {
 	files, _ := DependencyFiles(c)
 	sum := sha256.Sum256(files["package-lock.json"])
 	return hex.EncodeToString(sum[:16])
+}
+
+func ExtensionComponent(directory string) Component {
+	r := Component{ID: "browser-extension", Name: "DSH Work browser extension", Capability: Browser, Location: directory, ExpectedSource: browserextension.SourceIdentity, ManagedWithApp: true, BackendAvailable: true, State: "missing"}
+	var manifest struct {
+		Version string `json:"version"`
+	}
+	if b, e := browserextension.Files.ReadFile("manifest.json"); e == nil && json.Unmarshal(b, &manifest) == nil {
+		r.SupportedVersion = manifest.Version
+	}
+	if b, e := os.ReadFile(filepath.Join(directory, "manifest.json")); e == nil && json.Unmarshal(b, &manifest) == nil {
+		r.InstalledVersion = manifest.Version
+		r.State = "prepared"
+	}
+	if b, e := os.ReadFile(filepath.Join(directory, "bundle-source.txt")); e == nil {
+		r.Source = strings.TrimSpace(string(b))
+	}
+	if r.InstalledVersion != "" && r.Source != browserextension.SourceIdentity {
+		r.State = "update"
+	}
+	return r
 }
 
 type PackagePublication struct {
@@ -31,6 +53,15 @@ func PackagePointer(cache string, c Capability) string {
 
 // PublishedPackage never resolves outside this capability's owned store.
 func PublishedPackage(cache string, c Capability) (string, error) {
+	return publishedPackage(cache, c, true)
+}
+
+// InstalledPackage resolves the owned publication for read-only inventory, including an older lock.
+func InstalledPackage(cache string, c Capability) (string, error) {
+	return publishedPackage(cache, c, false)
+}
+
+func publishedPackage(cache string, c Capability, current bool) (string, error) {
 	if !c.Valid() {
 		return "", errors.New("unknown automation capability")
 	}
@@ -39,7 +70,7 @@ func PublishedPackage(cache string, c Capability) (string, error) {
 		return "", err
 	}
 	var p PackagePublication
-	if json.Unmarshal(b, &p) != nil || p.Revision != PackageRevision(c) {
+	if json.Unmarshal(b, &p) != nil || (current && p.Revision != PackageRevision(c)) {
 		return "", errors.New("AUTOMATION_PACKAGE_VERSION_MISMATCH")
 	}
 	root := PackageRoot(cache, c)

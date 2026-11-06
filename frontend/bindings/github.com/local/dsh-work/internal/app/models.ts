@@ -15,7 +15,14 @@ import * as pet$0 from "../pet/models.js";
 import * as settings$0 from "../settings/models.js";
 
 export interface BrowserPermissionPanel {
+    "computerRequest"?: automation$0.ComputerConsent | null;
     "request": automation$0.BrowserConsent | null;
+    "locale": settings$0.Locale;
+    "appearance": settings$0.Appearance;
+}
+
+export interface ComputerControlPanel {
+    "state": automation$0.ComputerSnapshot;
     "locale": settings$0.Locale;
     "appearance": settings$0.Appearance;
 }

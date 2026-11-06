@@ -105,6 +105,32 @@ func TestVerifyWithEnvironmentPassesChildToolchainOverlay(t *testing.T) {
 	}
 }
 
+func TestVerifyNodeCompatibilityUsesTheDSHReleaseEngineFloor(t *testing.T) {
+	adapter := New(nil)
+	for _, test := range []struct {
+		runtime string
+		node    string
+		wantErr bool
+	}{
+		{runtime: "0.2.1-rc.5", node: "24.2.0"},
+		{runtime: "0.2.2-rc.1", node: "24.9.0"},
+		{runtime: "0.2.2-rc.1", node: "v24.20.0"},
+		{runtime: "0.2.2-rc.1", node: "24.2.0", wantErr: true},
+		{runtime: "0.3.0", node: "invalid", wantErr: true},
+	} {
+		err := adapter.VerifyNodeCompatibility(test.runtime, test.node)
+		if (err != nil) != test.wantErr {
+			t.Errorf("VerifyNodeCompatibility(%q, %q) error = %v, want error %t", test.runtime, test.node, err, test.wantErr)
+		}
+		if err != nil {
+			var failure lifecycle.Failure
+			if !asFailure(err, &failure) || failure.Code != lifecycle.ErrorRuntimeProfileIncompatible || !strings.Contains(failure.Detail, MinimumNodeVersion) {
+				t.Errorf("compatibility failure = %#v", err)
+			}
+		}
+	}
+}
+
 func TestDiscoverSelectedPathReportsObservedVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dsh.cmd")
 	if err := os.WriteFile(path, []byte("placeholder"), 0o600); err != nil {

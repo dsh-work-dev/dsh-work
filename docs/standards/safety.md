@@ -15,8 +15,14 @@
 
 ## Data and privacy
 
+- Pin optional analytics, telemetry, Session-log contribution and plugin
+  inventory reporting off in the managed DSH Work profile. An upstream default
+  cannot weaken this boundary.
+- Keep task network access attributable to an enabled capability and selected
+  provider. Treat model requests, web retrieval and browser operations as
+  functional data paths, separate from product reporting.
 - Preserve user and DSH-owned data by default.
-- Keep dsh-work application data, installed runtime files, DSH data directories
+- Keep DSH Work application data, installed runtime files, DSH data directories
   and Workspaces as separate ownership domains.
 - Persist manager State (`state.json` and each profile's `.dsh-work/` records)
   using its documented field-compatible contract and replace complete documents
@@ -45,5 +51,5 @@
   boundary is verified clean, or cleanup failure is surfaced.
 - A WebView refresh or renderer failure must not restart the Worker or mutate
   native lifecycle state.
-- Dependency-specific failures become stable dsh-work errors at the adapter that
+- Dependency-specific failures become stable DSH Work errors at the adapter that
   understands them.
