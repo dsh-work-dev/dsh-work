@@ -76,6 +76,8 @@ await run('artifact-partitions','artifact',async({A,B,browser,options,manager,co
  await storage(A,'write','A_ONLY');const bBefore=await storage(B,'read');assert.equal(bBefore.local,null);assert.equal(bBefore.idb,null);assert.equal(bBefore.cache,null);assert.equal(bBefore.cookie,'');
  const a=await storage(A,'read');assert.equal(a.local,'A_ONLY');assert.equal(a.idb,'A_ONLY');assert.equal(a.cache,'A_ONLY');assert.equal(a.session,'A_ONLY');assert(a.cookie.includes('A_ONLY'));
  await storage(B,'write','B_ONLY');const b=await storage(B,'read');assert.equal(b.local,'B_ONLY');assert.equal((await storage(A,'read')).local,'A_ONLY');
+ await A.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await sleep(200);
+ await manager.capture('artifact-partitions');
  const cross=await A.evaluate(async url=>{try{return {body:await(await fetch(url+'/secret')).text()}}catch(e){return {denied:e.name}}},origins[1]);assert(!cross.body?.includes('ROOT_B_ONLY'));
  const worker=await A.evaluate(async()=>{
   const violations=[];const onViolation=e=>violations.push({directive:e.effectiveDirective,blocked:e.blockedURI});document.addEventListener('securitypolicyviolation',onViolation);
@@ -92,10 +94,24 @@ await run('artifact-partitions','artifact',async({A,B,browser,options,manager,co
  const cdp=await A.context().newCDPSession(A);
  await cdp.send('Page.navigate',{url:origins[1]+'/secret'});await sleep(350);
  const direct=await A.locator('body').innerText();assert.equal(direct,'LEASE_DENIED');
- const foreignPartition=await A.evaluate(()=>({local:localStorage.getItem('same'),cookie:document.cookie}));assert.equal(foreignPartition.local,null);assert.equal(foreignPartition.cookie,'');
+ const foreignPartition=await storage(A,'read');assert.equal(foreignPartition.local,null);assert.equal(foreignPartition.cookie,'');assert.equal(foreignPartition.idb,null);assert.equal(foreignPartition.cache,null);
+ await B.evaluate(()=>{window.bcMessages=[];window.bcReader=new BroadcastChannel('lease-probe');window.bcReader.onmessage=e=>bcMessages.push(e.data);window.bcWriter=new BroadcastChannel('lease-probe');bcWriter.postMessage('B_POSITIVE')});
+ await B.waitForFunction(()=>bcMessages.includes('B_POSITIVE'));
+ await A.evaluate(()=>{window.bcWriter=new BroadcastChannel('lease-probe');bcWriter.postMessage('A_CROSS')});await sleep(300);
+ const broadcast=await B.evaluate(()=>bcMessages);assert(!broadcast.includes('A_CROSS'));
  await A.goto(origins[0]+'/?tab=A');assert.equal((await storage(A,'read')).local,'A_ONLY');
  const dataRoot=process.platform==='win32'?manager.session.dataRoot:join(options.runRoot,'data');
+ // A throttled real CEF resource read must stop after revocation. A completed
+ // tiny response would not exercise cancellation of an in-flight resource.
+ await A.evaluate(()=>{
+  window.streamReceived=0;window.streamResult=(async()=>{
+   try{const reader=(await fetch('/slow')).body.getReader();for(;;){const {value,done}=await reader.read();if(done)break;window.streamReceived+=value.byteLength}return {received:window.streamReceived,completed:true}}
+   catch(e){return {received:window.streamReceived,error:e.name}}
+  })();
+ });
+ await A.waitForFunction(()=>window.streamReceived>0);const receivedBeforeRevoke=await A.evaluate(()=>window.streamReceived);
  writeFileSync(join(dataRoot,'arch-revoke-A-'+process.env.BROWSER_LAB_ARCH_NONCE),'revoked');
+ const stream=await A.evaluate(()=>window.streamResult);assert(stream.error&&stream.received>=receivedBeforeRevoke&&stream.received<262144);
  const revoked=await A.evaluate(async()=>{const r=await fetch('/secret');return {status:r.status,body:await r.text()}});assert.equal(revoked.status,403);
  await A.close();assert.equal((await storage(B,'read')).local,'B_ONLY');
  const session=await B.context().newCDPSession(B),{targetInfo}=await session.send('Target.getTargetInfo');
@@ -110,8 +126,8 @@ await run('artifact-partitions','artifact',async({A,B,browser,options,manager,co
  const page=reopenedPages.find(p=>new URL(p.url()).searchParams.get('tab')==='A');
  await page.goto(origins[0]+'/secret');const oldLease=await page.locator('body').innerText();assert.equal(oldLease,'LEASE_DENIED');
  await page.goto('http://a.'+nextNonce+'.localhost/?tab=A');await reopened.close();
- return {origins,positiveControls:{A:a,B:b},BafterAseed:bBefore,cross,worker,direct,foreignPartition,revoked,fresh,oldLease,
-  limits:['Memory fixture, not integrated os.Root service','Revocation denies new reads then closes A; async cancellation barrier not yet implemented','Custom dsh-artifact scheme is not tested; this candidate uses standard HTTP localhost origins']};
+ return {origins,positiveControls:{A:a,B:b},BafterAseed:bBefore,cross,worker,direct,foreignPartition,broadcast,receivedBeforeRevoke,stream,revoked,fresh,oldLease,
+  limits:['Memory fixture, not integrated os.Root service or authenticated Go lease IPC','Resource read cancellation and A close are observed; production cross-process revoke acknowledgement remains to implement','Custom dsh-artifact scheme is not tested; this candidate uses standard HTTP localhost origins']};
 });
 const sameFrame=(a,b)=>String(a).replaceAll('-','').toLowerCase()===String(b).replaceAll('-','').toLowerCase();
 async function mapping(browser,pages,evidenceRoot){
@@ -144,7 +160,6 @@ await run('renderer-shared','shared',async({A,B,browser,options})=>{
  assert(pids.every(Number.isSafeInteger),'Actual main-frame PID mapping required');assert.equal(pids[0],pids[1],'Shared renderer must really be constructed');
  const events=[];A.on('crash',()=>events.push('A'));B.on('crash',()=>events.push('B'));
  const after=await killRenderer(browser,[A,B],pids[0]);assert(after.every(p=>p.unavailable));
- await Promise.all([A,B].map(p=>p.reload({timeout:15000})));
  return {configuration:'process-per-site for this fault fixture; SiteIsolation and sandbox remain enabled',roots,pids,mapping:map,after,crashEvents:events,limits:['Engine fault-set observation; no claim of automatic production control revocation']};
 });
 await run('renderer-oopif','default',async({A,B,browser,options})=>{
@@ -153,12 +168,19 @@ await run('renderer-oopif','default',async({A,B,browser,options})=>{
  await A.evaluate(()=>{const f=document.createElement('iframe');f.src='http://localhost:19478/interactions?tab=child';document.body.append(f)});
  await waitFor(()=>A.frames().length===2,'cross-site frame');await A.frames()[1].waitForFunction(()=>!!window.lab?.instance);
  const map=await mapping(browser,[A,B],options.evidenceRoot),session=await A.context().newCDPSession(A),tree=(await session.send('Page.getFrameTree')).frameTree;
- const rootPid=Number(map.frames.find(f=>sameFrame(f.frame,tree.frame.id))?.processId),childId=tree.childFrames?.[0]?.frame.id,childPid=Number(map.frames.find(f=>sameFrame(f.frame,childId))?.processId);
+ // Page.getFrameTree on the root target can omit remote OOPIF children. Use
+ // the browser-side trace parent relation, cross-checked against the live
+ // Playwright frame URL and the SystemInfo renderer inventory.
+ const child=map.frames.find(f=>sameFrame(f.parent,tree.frame.id)&&f.url==='http://localhost:19478/interactions?tab=child');
+ const rootPid=Number(map.frames.find(f=>sameFrame(f.frame,tree.frame.id))?.processId),childId=child?.frame,childPid=Number(child?.processId);
  assert(Number.isSafeInteger(childPid)&&childPid!==rootPid,'Actual out-of-process iframe required');
+ const mainCrashEvents=[];A.on('crash',()=>mainCrashEvents.push('A'));B.on('crash',()=>mainCrashEvents.push('B'));
  const after=await killRenderer(browser,[A,B],childPid);assert(after.every(p=>!p.unavailable));
  for(let i=0;i<2;i++){assert.equal(after[i].state.instance,before[i].instance);assert.equal(after[i].state.input,before[i].input)}
- let childUnavailable=false;try{await A.frames()[1].evaluate(()=>lab.instance)}catch{childUnavailable=true}assert(childUnavailable);
- return {mapping:map,rootPid,childPid,childId,before,after,childUnavailable,limits:['Main page crash event alone cannot establish iframe health','Actual production frame-fault observer and authorization barrier remain to be validated']};
+ const childProbe=await Promise.race([
+  Promise.resolve().then(()=>A.frames().find(f=>f.url()==='http://localhost:19478/interactions?tab=child').evaluate(()=>lab.instance)).then(()=>({status:'responded'}),e=>({status:'unavailable',error:e.message.split('\n')[0]})),
+  sleep(3000).then(()=>({status:'no-execution-context-response'}))]);assert.notEqual(childProbe.status,'responded');
+ return {configuration:'site-per-process for the OOPIF fixture',mapping:map,rootPid,childPid,childId,before,after,childProbe,mainCrashEvents,limits:['Main page crash event alone cannot establish iframe health','Actual production frame-fault observer and authorization barrier remain to be validated']};
 });
 for(const kind of ['normal','kill',...(process.platform==='win32'?['destroy-parent']:[])]){
  await run('ui-'+kind,'default',async({A,B,browser,manager,state,control,markFault,options})=>{

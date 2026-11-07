@@ -7,10 +7,14 @@
 #include "include/cef_resource_handler.h"
 #include "include/cef_scheme.h"
 #include "include/cef_parser.h"
+#include "include/base/cef_bind.h"
+#include "include/base/cef_callback.h"
+#include "include/wrapper/cef_closure_task.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <string>
 namespace lab_arch {
 inline bool Enabled() { return std::getenv("BROWSER_LAB_ARCH_ARTIFACT") != nullptr; }
@@ -33,12 +37,19 @@ inline std::string Origin(int i) {
 }
 inline std::string URL(int i) { return Origin(i) + "/?tab=" + (i ? "B" : "A"); }
 class Resource final : public CefResourceHandler {
-  std::string body_, mime_;
+  std::string body_, mime_, marker_;
   int status_;
   size_t offset_ = 0;
+  bool slow_ = false, canceled_ = false;
+  bool Revoked() {
+    if (marker_.empty()) return false;
+    FILE* file = std::fopen(marker_.c_str(), "rb");
+    if (!file) return false;
+    std::fclose(file); return true;
+  }
 public:
-  Resource(std::string body, std::string mime, int status)
-      : body_(std::move(body)), mime_(std::move(mime)), status_(status) {}
+  Resource(std::string body, std::string mime, int status, std::string marker = "", bool slow = false)
+      : body_(std::move(body)), mime_(std::move(mime)), marker_(std::move(marker)), status_(status), slow_(slow) {}
   bool Open(CefRefPtr<CefRequest>, bool& handle, CefRefPtr<CefCallback>) override {
     handle = true; return true;
   }
@@ -49,12 +60,25 @@ public:
     h.emplace("Content-Security-Policy", "worker-src 'none'; frame-src 'self'; object-src 'none'");
     r->SetHeaderMap(h); length = static_cast<int64_t>(body_.size());
   }
-  bool Read(void* data, int size, int& read, CefRefPtr<CefResourceReadCallback>) override {
+  bool Read(void* data, int size, int& read, CefRefPtr<CefResourceReadCallback> callback) override {
+    if (Revoked()) { read = -2; return false; }
+    if (slow_ && offset_ < body_.size()) {
+      read = 0;
+      CefPostDelayedTask(TID_IO, base::BindOnce(
+        [](CefRefPtr<Resource> self, uintptr_t out, int size, CefRefPtr<CefResourceReadCallback> callback) {
+          if (self->canceled_) return;
+          if (self->Revoked()) { callback->Continue(-2); return; }
+          const int n = static_cast<int>(std::min({static_cast<size_t>(size), size_t(4096), self->body_.size() - self->offset_}));
+          std::memcpy(reinterpret_cast<void*>(out), self->body_.data() + self->offset_, n);
+          self->offset_ += n; callback->Continue(n);
+        }, CefRefPtr<Resource>(this), reinterpret_cast<uintptr_t>(data), size, callback), 100);
+      return true;
+    }
     read = static_cast<int>(std::min(static_cast<size_t>(size), body_.size() - offset_));
     if (read) std::memcpy(data, body_.data() + offset_, read);
     offset_ += read; return read > 0;
   }
-  void Cancel() override {}
+  void Cancel() override { canceled_ = true; }
 private:
   IMPLEMENT_REFCOUNTING(Resource);
 };
@@ -79,6 +103,7 @@ public:
     if (path == "sw.js") return new Resource("self.addEventListener('fetch',e=>e.respondWith(new Response('HIJACK')));", "text/javascript", 200);
     if (path == "asset.js") return new Resource("window.relativeAsset=true;", "text/javascript", 200);
     if (path == "secret") return new Resource(index_ ? "ROOT_B_ONLY" : "ROOT_A_ONLY", "text/plain", 200);
+    if (path == "slow") return new Resource(std::string(262144, 'x'), "text/plain", 200, marker, true);
     const std::string html = "<!doctype html><meta charset=utf-8><title>Browser Lab Tab " + std::string(index_ ? "B" : "A") + "</title>"
       "<body style='background:#edf0f5'><i style='display:block;width:16px;height:16px;background:#ed60a5'></i>"
       "<h1>Isolated artifact</h1><input id=entry><script src=asset.js></script>"

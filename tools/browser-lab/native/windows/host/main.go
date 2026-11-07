@@ -303,6 +303,20 @@ func (l *lab) quit() {
 	var targets []struct{ ID, Type string }
 	err = json.NewDecoder(response.Body).Decode(&targets)
 	response.Body.Close()
+	// Remote iframe/worker targets are owned by their page lifecycle, not extra
+	// CefBrowser windows. Close the two actual roots and let CEF tear them down.
+	pages := targets[:0]
+	for _, t := range targets {
+		switch t.Type {
+		case "page":
+			pages = append(pages, t)
+		case "iframe", "worker", "service_worker", "shared_worker":
+		default:
+			fail(fmt.Errorf("unexpected target type: %s", t.Type))
+			return
+		}
+	}
+	targets = pages
 	if err != nil || (len(targets) != 2 && os.Getenv("BROWSER_LAB_ARCH_PROBE") != "1") || len(targets) > 2 {
 		fail(fmt.Errorf("expected two targets: %d, %v", len(targets), err))
 		return

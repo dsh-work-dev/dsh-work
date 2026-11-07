@@ -4,6 +4,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstdio>
+#include <fcntl.h>
 #include <gdk/x11/gdkx.h>
 #include <gtk/gtk.h>
 #include <mutex>
@@ -130,7 +131,10 @@ static bool Spawn() {
   covered = false;
   floating = false;
   int input[2], output[2];
-  if (pipe(input) || pipe(output)) {
+  // Wails/WebKit may exec more children after this spawn. They must not keep
+  // the UI's command write end alive after the UI dies. dup2 below deliberately
+  // publishes only the broker's stdin/stdout; all other ends remain CLOEXEC.
+  if (pipe2(input, O_CLOEXEC) || pipe2(output, O_CLOEXEC)) {
     last_error = "broker pipe failed";
     return false;
   }
