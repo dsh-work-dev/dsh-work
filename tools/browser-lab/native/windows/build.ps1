@@ -33,7 +33,7 @@ foreach($file in @('cefsimple.exe','cefsimple.dll','libcef.dll','icudtl.dat')){i
 New-Item -ItemType Directory -Force "$bundle/cef","$work/host"|Out-Null
 Copy-Item "$CefBundle/*" "$bundle/cef" -Recurse -Force
 Copy-Item "$PSScriptRoot/host/*" "$work/host" -Recurse
-if($Composition -eq 'bottom'){
+if($Composition -eq 'bottom' -or $WebView2Loader -eq 'native'){
  Push-Location $repo
  try{
   go mod download github.com/wailsapp/wails/v3
@@ -45,8 +45,10 @@ if($Composition -eq 'bottom'){
  $file=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/composition_host.go'
  (Get-Item $file).IsReadOnly=$false
  $source=[IO.File]::ReadAllText($file)
- if(([regex]::Matches($source,'CreateTargetForHwnd\(hwnd, true\)')).Count -ne 1){throw 'Pinned composition patch does not match exactly once'}
- [IO.File]::WriteAllText($file,$source.Replace('CreateTargetForHwnd(hwnd, true)','CreateTargetForHwnd(hwnd, false)'))
+ if($Composition -eq 'bottom'){
+  if(([regex]::Matches($source,'CreateTargetForHwnd\(hwnd, true\)')).Count -ne 1){throw 'Pinned composition patch does not match exactly once'}
+  [IO.File]::WriteAllText($file,$source.Replace('CreateTargetForHwnd(hwnd, true)','CreateTargetForHwnd(hwnd, false)'))
+ }
  # Diagnostics only in the isolated fork: distinguish an async controller
  # callback stall from CEF startup, without changing WebView2 hosting mode.
  $edgeFile=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/chromium.go'
@@ -58,6 +60,29 @@ if($Composition -eq 'bottom'){
   $edgeSource=$edgeSource.Replace($signature,$signature+"`n"+' log.Printf("[BrowserLabWV] phase='+$phase+' hwnd=%x thread=%d", e.hwnd, windows.GetCurrentThreadId())')
  }
  [IO.File]::WriteAllText($edgeFile,$edgeSource)
+ if($WebView2Loader -eq 'native'){
+  # Wails' Go module excludes the embed DLL. Supply Microsoft's pinned SDK
+  # loader in this private fork, never in the module/tool cache.
+  $sdkVersion='1.0.4314.35'
+  $package=Join-Path $work 'webview2.nupkg'
+  & curl.exe --fail --location --retry 3 --output $package "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$sdkVersion/microsoft.web.webview2.$sdkVersion.nupkg"
+  if($LASTEXITCODE -ne 0){throw 'Official WebView2 SDK download failed'}
+  $loaderDirectory=Join-Path $work 'wails-fork/internal/webview2/webviewloader/x64'
+  New-Item -ItemType Directory -Force $loaderDirectory|Out-Null
+  $zip=[IO.Compression.ZipFile]::OpenRead($package)
+  try{
+   foreach($entry in @(@('build/native/x64/WebView2Loader.dll',"$loaderDirectory/WebView2Loader.dll"),@('LICENSE.txt',"$bundle/WebView2Loader.LICENSE.txt"))){
+    $item=$zip.GetEntry($entry[0]);if(!$item){throw "Missing SDK entry: $($entry[0])"}
+    [IO.Compression.ZipFileExtensions]::ExtractToFile($item,$entry[1],$true)
+   }
+  }finally{$zip.Dispose()}
+  $signature=Get-AuthenticodeSignature "$loaderDirectory/WebView2Loader.dll"
+  if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation,'){throw 'WebView2 loader signature is not valid Microsoft Authenticode'}
+  if((Get-Item "$loaderDirectory/WebView2Loader.dll").VersionInfo.FileVersion -ne $sdkVersion){throw 'WebView2 loader version mismatch'}
+  # beta.16 declares this diagnostic flag only in its Go-loader build. Supply
+  # the truthful native value in the private copy; no loader API is replaced.
+  [IO.File]::WriteAllText((Join-Path $loaderDirectory '../browser_lab_native_version.go'),"//go:build windows && native_webview2loader`n`npackage webviewloader`n`nvar UsingGoWebview2Loader = false`n")
+ }
  Push-Location "$work/host"
  try{go mod edit '-replace=github.com/wailsapp/wails/v3=../wails-fork';if($LASTEXITCODE -ne 0){throw 'Isolated module replace failed'}}finally{Pop-Location}
 }
