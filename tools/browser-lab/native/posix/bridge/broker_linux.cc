@@ -14,30 +14,9 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
-#include <xcb/xcb.h>
 static std::array<CefRefPtr<CefBrowser>, 2> views;
 static std::vector<CefRefPtr<CefBrowser>> popups;
 static int closed_count = 0;
-// CEF's default DoClose notifies the top-level parent. That parent belongs
-// to another process here and may already be gone. Complete only our own
-// native hierarchy, as required by CefLifeSpanHandler's custom-close contract.
-class DestroyChild final : public CefTask {
-  xcb_window_t child_;
-public:
-  explicit DestroyChild(xcb_window_t child) : child_(child) {}
-  void Execute() override {
-    auto* connection = xcb_connect(nullptr, nullptr);
-    if (xcb_connection_has_error(connection)) {
-      std::fprintf(stderr, "ARCH_OWN_CHILD_DESTROY connection failed\n");
-      xcb_disconnect(connection); return;
-    }
-    auto* error = xcb_request_check(connection, xcb_destroy_window_checked(connection, child_));
-    std::fprintf(stderr, "ARCH_OWN_CHILD_DESTROY id=%u error=%d\n", child_, error ? error->error_code : 0);
-    std::free(error); xcb_flush(connection); xcb_disconnect(connection);
-  }
-private:
-  IMPLEMENT_REFCOUNTING(DestroyChild);
-};
 class Client final : public CefClient, public CefLifeSpanHandler {
   int index_;
 
@@ -45,10 +24,6 @@ public:
   BROWSER_LAB_POLICY_CLIENT
   explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-  bool DoClose(CefRefPtr<CefBrowser> b) override {
-    CefPostTask(TID_UI, new DestroyChild(static_cast<xcb_window_t>(b->GetHost()->GetWindowHandle())));
-    return true;
-  }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
     policy_->Register(b, index_);
     if (!views[index_]) {

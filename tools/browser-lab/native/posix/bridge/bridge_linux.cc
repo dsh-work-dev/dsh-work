@@ -1,5 +1,6 @@
 // GTK4 slots and a retained broker PID; no CEF main context inside Wails.
 #include <X11/Xlib.h>
+#include <X11/Xlib-xcb.h>
 #include <array>
 #include <atomic>
 #include <csignal>
@@ -16,11 +17,13 @@
 #include <unistd.h>
 #include <vector>
 #include <xcb/xcb.h>
+#include <xcb/xfixes.h>
 extern char **environ;
 #define LAB_EXPORT extern "C" __attribute__((visibility("default")))
 static std::string cache_path, broker_path, log_path, last_error;
 static Window main_id = 0, float_id = 0;
 static std::array<Window, 2> slots{};
+static std::array<Window, 2> save_set{};
 static Display *display = nullptr;
 static xcb_connection_t *query = nullptr;
 static std::array<std::atomic<unsigned long>, 2> guests{};
@@ -73,6 +76,22 @@ static bool Visible(Window id) {
   free(r);
   return v;
 }
+// A native CEF child belongs to the broker but sits under windows owned by
+// two UI X11 clients (GTK and our slot connection). On either client's death,
+// preserve the CEF native handle, reparent to root and UNMAP it. Otherwise X11
+// destroys the handle without CEF's WM_DELETE handshake and strands the live
+// browser object. Use the maintained XFixes protocol, not a fake destroy event.
+static bool ProtectChild(xcb_connection_t* connection, xcb_window_t child) {
+  xcb_generic_error_t* error = nullptr;
+  auto* version = xcb_xfixes_query_version_reply(connection,
+      xcb_xfixes_query_version(connection, XCB_XFIXES_MAJOR_VERSION, XCB_XFIXES_MINOR_VERSION), &error);
+  bool ok = version && version->major_version >= 1 && !error;
+  free(version); free(error);
+  if (!ok) return false;
+  error = xcb_request_check(connection, xcb_xfixes_change_save_set_checked(connection,
+      XCB_SET_MODE_INSERT, XCB_XFIXES_SAVE_SET_TARGET_ROOT, XCB_XFIXES_SAVE_SET_MAPPING_UNMAP, child));
+  ok = error == nullptr; free(error); xcb_flush(connection); return ok;
+}
 static void Layout() {
   for (int i = 0; i < 2; i++) {
     Window parent = floating && i == selected ? float_id : main_id;
@@ -93,6 +112,15 @@ static void Layout() {
       XReparentWindow(display, slots[i], parent, left, 100);
     XMoveResizeWindow(display, slots[i], left, 100, width, height);
     if (guests[i] && alive && !closed[i]) {
+      if (save_set[i] != guests[i]) {
+        auto* gtk_display = gdk_x11_display_get_xdisplay(gtk_widget_get_display(main_widget));
+        auto* own = XGetXCBConnection(display);
+        auto* gtk = XGetXCBConnection(gtk_display);
+        if (ProtectChild(own, guests[i]) && (own == gtk || ProtectChild(gtk, guests[i]))) {
+          save_set[i] = guests[i];
+          std::fprintf(stderr, "SAVE_SET_UNMAP protected child=%lu\n", guests[i].load());
+        } else last_error = "XFixes child save-set protection failed";
+      }
       uint32_t sizes[] = {static_cast<uint32_t>(width),
                           static_cast<uint32_t>(height)};
       auto e = xcb_request_check(
@@ -119,6 +147,7 @@ static bool Spawn() {
   }
   for (int i = 0; i < 2; i++) {
     guests[i] = 0;
+    save_set[i] = 0;
     closed[i] = false;
     faults[i] = false;
   }
@@ -308,6 +337,8 @@ LAB_EXPORT const char *lab_state() {
   s << "{\"initialized\":true,\"created\":"
     << ((guests[0] ? 1 : 0) + (guests[1] ? 1 : 0))
     << ",\"closed\":" << ((closed[0] ? 1 : 0) + (closed[1] ? 1 : 0))
+    << ",\"saveSetProtected\":"
+    << (alive && guests[0] && guests[1] && save_set[0] == guests[0] && save_set[1] == guests[1] ? "true" : "false")
     << ",\"parentAttached\":"
     << (guests[0] && alive && RootFor(guests[0]) == main_id ? "true" : "false")
     << ",\"windowId\":\"" << main_id << "\",\"main\":{\"hwnd\":" << main_id

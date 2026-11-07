@@ -207,6 +207,7 @@ for(const kind of ['normal','kill',...(process.platform==='win32'?['destroy-pare
   await A.locator('#entry').fill('UNSUBMITTED_A');await B.locator('#entry').fill('UNSUBMITTED_B');
   const before=await Promise.all([A,B].map(p=>p.evaluate(()=>({instance:lab.instance,input:document.querySelector('#entry').value,memory:window.memoryOnly=crypto.randomUUID()}))));
   const nativeBefore=await state();
+  if(process.platform==='linux'&&kind==='kill')assert.equal(nativeBefore.saveSetProtected,true,'Both foreign native children must have acknowledged save-set protection');
   if(process.platform==='linux'&&kind==='kill')writeFileSync(join(options.evidenceRoot,'ui-pipe-owners.json'),JSON.stringify(linuxPipeOwners(manager.child.pid,Number(nativeBefore.guestPID)),null,2));
   if(kind==='normal'){
    if(process.platform==='win32')await control('quit');else await manager.call('/close',{});
