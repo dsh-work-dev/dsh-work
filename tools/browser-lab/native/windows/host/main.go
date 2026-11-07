@@ -34,6 +34,8 @@ var getClient = user.NewProc("GetClientRect")
 var getDPI = user.NewProc("GetDpiForWindow")
 var getLong = user.NewProc("GetWindowLongPtrW")
 var setLong = user.NewProc("SetWindowLongPtrW")
+var getNativeRole = user.NewProc("GetPropW")
+var nativeRoleName = syscall.StringToUTF16Ptr("BrowserLab.NativeRole")
 
 type winRect struct{ Left, Top, Right, Bottom int32 }
 type labTab struct {
@@ -52,6 +54,8 @@ type lab struct {
 	app                                          *application.App
 	main, float                                  *application.WebviewWindow
 	mainHWND, floatHWND                          uintptr
+	initialSlots                                 [2]uintptr
+	nativeSlots                                  bool
 	tabs                                         [2]labTab
 	selected                                     int
 	floating, ready, manualDone, closing, closed bool
@@ -112,10 +116,10 @@ var discoveryCallback = syscall.NewCallback(func(h, data uintptr) uintptr {
 	p, _, _ := parentOf.Call(h)
 	buf := make([]uint16, 128)
 	classOf.Call(h, uintptr(unsafe.Pointer(&buf[0])), 128)
-	if pid == l.guestPID && p == l.mainHWND && windows.UTF16ToString(buf) == "CefBrowserWindow" {
-		title := textAt(h)
+	if pid == l.guestPID && windows.UTF16ToString(buf) == "CefBrowserWindow" {
 		for i, name := range []string{"A", "B"} {
-			if title == "Browser Lab Tab "+name {
+			role, _, _ := getNativeRole.Call(h, uintptr(unsafe.Pointer(nativeRoleName)))
+			if (l.nativeSlots && p == l.initialSlots[i] && role == uintptr(i+1)) || (!l.nativeSlots && p == l.mainHWND && textAt(h) == "Browser Lab Tab "+name) {
 				l.tabs[i] = labTab{Name: name, HWND: h}
 			}
 		}
@@ -384,7 +388,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer artifactServer.Close()
-	l := &lab{viewGeneration: strconv.FormatInt(time.Now().UnixNano(), 36), selectionEpoch: 1, presentationEpoch: 1, tabs: [2]labTab{{Name: "A"}, {Name: "B"}}, guestDone: make(chan error, 1)}
+	l := &lab{nativeSlots: os.Getenv("BROWSER_LAB_NATIVE_PROTOCOL") == "2", viewGeneration: strconv.FormatInt(time.Now().UnixNano(), 36), selectionEpoch: 1, presentationEpoch: 1, tabs: [2]labTab{{Name: "A"}, {Name: "B"}}, guestDone: make(chan error, 1)}
 	var handle http.HandlerFunc
 	shell := func(floating bool) string {
 		heading := "BROWSER_LAB · Windows 集中收尾"

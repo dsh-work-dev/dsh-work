@@ -26,6 +26,8 @@ if($LASTEXITCODE -ne 0){throw 'CEF LPAC ACL setup failed'}
 $env:BROWSER_LAB_ROOT=$RunRoot;$env:BROWSER_LAB_DATA_ROOT=$data
 $env:BROWSER_LAB_CEF_EXE="$data/cef/cefsimple.exe";$env:BROWSER_LAB_CAPTURE_EXE="$data/capture.exe"
 $env:BROWSER_LAB_TOKEN=[guid]::NewGuid().ToString('N')+[guid]::NewGuid().ToString('N')
+$buildInfo=Get-Content "$Bundle/build.json" -Raw|ConvertFrom-Json
+$env:BROWSER_LAB_NATIVE_PROTOCOL=if($buildInfo.nativeProtocol){[string]$buildInfo.nativeProtocol}else{'1'}
 $headers=@{'X-Browser-Lab-Token'=$env:BROWSER_LAB_TOKEN}
 $node=(Get-Command node -ErrorAction Stop).Source
 $session=[ordered]@{schemaVersion=1;runId=$RunId;runRoot=$RunRoot;dataRoot=$data;evidenceRoot="$RunRoot/evidence";token=$env:BROWSER_LAB_TOKEN;cefExe=$env:BROWSER_LAB_CEF_EXE;build=(Get-Content "$Bundle/build.json" -Raw|ConvertFrom-Json);endpoints=@{fixture='http://127.0.0.1:19478';cef='http://127.0.0.1:19479';shell='http://127.0.0.1:19480';control='http://127.0.0.1:19481';gateway='http://127.0.0.1:19482';backend='http://127.0.0.1:19483';artifact='http://127.0.0.1:19484'};processes=@{}}

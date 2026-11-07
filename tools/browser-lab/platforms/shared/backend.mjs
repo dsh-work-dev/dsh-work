@@ -28,9 +28,24 @@ async function connectTargets(){
  await waitUntil(async()=>{try{const rows=await(await fetch('http://127.0.0.1:19479/json/list')).json();return ['A','B'].every(name=>rows.some(p=>p.type==='page'&&new URL(p.url).searchParams.get('tab')===name))}catch{return false}},'named CEF targets');
  browser=await attach(19479);const own=browser;connectionEpoch++;connected=false;tabs.clear();
  browser.on('disconnected',()=>{if(browser!==own)return;connected=false;invalidate('broker-disconnected')});
+ const candidates=[];
  for(const page of browser.contexts().flatMap(c=>c.pages())){
-  const name=new URL(page.url()).searchParams.get('tab');if(!['A','B'].includes(name))throw Error('Unknown initial CEF target');
   const cdp=await page.context().newCDPSession(page);await cdp.send('Page.enable');const info=(await cdp.send('Target.getTargetInfo')).targetInfo;
+  candidates.push({page,cdp,info});
+ }
+ if(candidates.length!==2||new Set(candidates.map(c=>c.info.targetId)).size!==2)throw Error('Expected two distinct CEF page targets');
+ // Discovery and Playwright's initial cached page.url() can disagree while
+ // initial navigation events arrive. Bind from each target's actual root
+ // document after Page.enable, before issuing any observations or permits.
+ await waitUntil(async()=>{
+  for(const c of candidates){
+   c.frame=(await c.cdp.send('Page.getFrameTree')).frameTree.frame;
+   try{c.name=new URL(c.frame.url).searchParams.get('tab')}catch{c.name=null}
+  }
+  return ['A','B'].every(name=>candidates.filter(c=>c.name===name).length===1);
+ },'two distinct named CEF root documents');
+ record('target-root-bindings',{targets:candidates.map(c=>({name:c.name,targetId:c.info.targetId,frameId:c.frame.id,url:c.frame.url,cachedUrl:c.page.url()}))});
+ for(const {name,page,cdp,info} of candidates){
   const tab={name,page,cdp,targetId:info.targetId,navEpoch:0,faultEpoch:0,crashed:false};
   cdp.on('Page.frameNavigated',e=>{if(!e.frame.parentId){tab.navEpoch++;record('navigation',{tab:name,targetId:tab.targetId,navEpoch:tab.navEpoch,url:e.frame.url})}});
   cdp.on('Page.navigatedWithinDocument',()=>{tab.navEpoch++});

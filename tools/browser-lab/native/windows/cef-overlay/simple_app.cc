@@ -173,7 +173,7 @@ void SimpleApp::OnContextInitialized() {
     // On Windows we need to specify certain flags that will be passed to
     // CreateWindowEx().
     if (command_line->HasSwitch("parent-hwnd")) {
-      auto parent = reinterpret_cast<HWND>(std::stoull(command_line->GetSwitchValue("parent-hwnd").ToString()));
+      auto parent = reinterpret_cast<HWND>(std::stoull(command_line->GetSwitchValue(command_line->HasSwitch("parent-a") ? "parent-a" : "parent-hwnd").ToString()));
       RECT rc; GetClientRect(parent, &rc);
       window_info.SetAsChild(parent, CefRect(300, 80, rc.right - 320, rc.bottom - 100));
       window_info.ex_style |= WS_EX_NOACTIVATE;
@@ -192,6 +192,10 @@ void SimpleApp::OnContextInitialized() {
                                   lab_arch::Enabled() ? lab_arch::URL(0) : (two_tabs ? url + "?tab=A" : url),
                                   browser_settings, nullptr, lab_arch::Context(0));
     if (two_tabs) {
+#if defined(OS_WIN)
+      if (command_line->HasSwitch("parent-b"))
+        window_info.parent_window = reinterpret_cast<HWND>(std::stoull(command_line->GetSwitchValue("parent-b").ToString()));
+#endif
       CefBrowserHost::CreateBrowser(window_info, handler, lab_arch::Enabled() ? lab_arch::URL(1) : url + "?tab=B",
                                     browser_settings, nullptr, lab_arch::Context(1));
     }

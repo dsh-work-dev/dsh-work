@@ -26,11 +26,21 @@ if($PSCmdlet.ParameterSetName -eq 'SDK'){
  & $cmake @prefix --build "$work/cef-build" --config Release --target cefsimple --parallel 8
  if($LASTEXITCODE -ne 0){throw 'CEF build failed'}
  $CefBundle="$work/cef-build/tests/cefsimple/Release"
+ @{schemaVersion=1;nativeProtocol=2}|ConvertTo-Json|Set-Content "$CefBundle/browser-lab-overlay.json"
 }
 $CefBundle=[IO.Path]::GetFullPath($CefBundle)
+$nativeProtocol=1
+if(Test-Path "$CefBundle/browser-lab-overlay.json"){
+ $overlay=Get-Content "$CefBundle/browser-lab-overlay.json" -Raw|ConvertFrom-Json
+ if($overlay.schemaVersion -ne 1 -or $overlay.nativeProtocol -ne 2){throw 'Unsupported prepared CEF overlay protocol'}
+ $nativeProtocol=2
+}
 foreach($file in @('cefsimple.exe','cefsimple.dll','libcef.dll','icudtl.dat')){if(!(Test-Path (Join-Path $CefBundle $file))){throw "Missing prepared CEF file: $file"}}
 New-Item -ItemType Directory -Force "$bundle/cef","$work/host"|Out-Null
 Copy-Item "$CefBundle/*" "$bundle/cef" -Recurse -Force
+if($nativeProtocol -eq 1 -and (Test-Path "$bundle/cef/browser-lab-overlay.json")){
+ Remove-Item -LiteralPath "$bundle/cef/browser-lab-overlay.json"
+}
 Copy-Item "$PSScriptRoot/host/*" "$work/host" -Recurse
 if($Composition -eq 'bottom'){
  Push-Location $repo
@@ -81,5 +91,5 @@ $compile=$setup+'cl /nologo /std:c++20 /EHsc /W4 /O2 /DUNICODE /D_UNICODE "'+$PS
 & cmd.exe /d /s /c $compile
 if($LASTEXITCODE -ne 0){throw 'Scoped WGC capture helper build failed'}
 $gitRef=git -C $repo rev-parse HEAD
-@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;composition=$Composition;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
+@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;nativeProtocol=$nativeProtocol;composition=$Composition;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
 Write-Host "Built isolated test bundle: $bundle"

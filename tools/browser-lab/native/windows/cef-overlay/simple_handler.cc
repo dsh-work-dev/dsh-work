@@ -72,7 +72,19 @@ void SimpleHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
            browser->GetHost()->GetRuntimeStyle());
 
   // Add to the list of existing browsers.
-  policy_->Register(browser, static_cast<int>(browser_list_.size()));
+  int index = static_cast<int>(browser_list_.size());
+#if defined(OS_WIN)
+  auto command = CefCommandLine::GetGlobalCommandLine();
+  if (command->HasSwitch("parent-a") && command->HasSwitch("parent-b")) {
+    auto parent = GetParent(browser->GetHost()->GetWindowHandle());
+    auto a = reinterpret_cast<HWND>(std::stoull(command->GetSwitchValue("parent-a").ToString()));
+    auto b = reinterpret_cast<HWND>(std::stoull(command->GetSwitchValue("parent-b").ToString()));
+    CHECK(parent == a || parent == b);
+    index = parent == a ? 0 : 1;
+    CHECK(SetPropW(browser->GetHost()->GetWindowHandle(), L"BrowserLab.NativeRole", reinterpret_cast<HANDLE>(static_cast<INT_PTR>(index + 1))));
+  }
+#endif
+  policy_->Register(browser, index);
   browser_list_.push_back(browser);
 }
 

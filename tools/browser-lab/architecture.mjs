@@ -26,6 +26,7 @@ async function run(name,mode,body){
  if(name==='renderer-oopif')process.env.BROWSER_LAB_ARCH_OOPIF='1';else delete process.env.BROWSER_LAB_ARCH_OOPIF;
  let manager,browser,result={id:name,status:'fail'},faultInjected=false;
  try{
+  if(process.platform==='win32')assert.equal(JSON.parse(readFileSync(join(bundle,'build.json'),'utf8')).nativeProtocol,2,'Architecture probes require the current CEF overlay; rebuild with -CefSdk');
   manager=process.platform==='win32'?await(await import('./platforms/windows.mjs')).startWindows(options):await(await import('./platforms/posix-smoke.mjs')).startPosixSmoke(options);
   browser=await attach(19479);
   const created=await waitFor(()=>{const all=browser.contexts().flatMap(c=>c.pages());return all.length===2?all:false},'two existing CEF pages');
@@ -244,7 +245,7 @@ for(const kind of ['normal','kill',...(process.platform==='win32'?['destroy-pare
    await waitFor(async()=>{try{await fetch('http://127.0.0.1:19481/state',{signal:AbortSignal.timeout(500)});return false}catch{return true}},'old UI endpoint closed',15000);
    const session=manager.session,data=session.dataRoot;
    const host=spawn(join(data,'host.exe'),[],{cwd:data,windowsHide:true,stdio:'ignore',env:{...process.env,
-    BROWSER_LAB_ROOT:options.runRoot,BROWSER_LAB_DATA_ROOT:data,BROWSER_LAB_TOKEN:session.token,
+    BROWSER_LAB_ROOT:options.runRoot,BROWSER_LAB_DATA_ROOT:data,BROWSER_LAB_TOKEN:session.token,BROWSER_LAB_NATIVE_PROTOCOL:String(session.build.nativeProtocol||1),
     BROWSER_LAB_CEF_EXE:join(data,'cef/cefsimple.exe'),BROWSER_LAB_CAPTURE_EXE:join(data,'capture.exe')}});
    let error;host.on('error',e=>error=e);
    await waitFor(async()=>{if(error)throw error;try{return (await state()).ready}catch{return false}},'reopened Windows UI',30000);
