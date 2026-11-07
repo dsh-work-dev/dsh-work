@@ -2,6 +2,7 @@
 // CEF's public CPU OSR API lives exclusively in the broker application.
 #include "osr_surface.h"
 #import <Cocoa/Cocoa.h>
+#import <WebKit/WebKit.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -547,6 +548,40 @@ LAB_EXPORT int lab_command(const char *command, int index) {
                               isARepeat:NO
                                 keyCode:15];
     [w sendEvent:e];
+  } else if (op == "diagnose-presentation") {
+    fprintf(stderr,
+            "Browser Lab host window visible=%d occlusion=%lu root=%s\n",
+            main_window.visible, (unsigned long)main_window.occlusionState,
+            [NSStringFromRect(main_window.contentView.bounds) UTF8String]);
+    for (NSView *child in main_window.contentView.subviews) {
+      fprintf(
+          stderr,
+          "Browser Lab presentation child %s frame=%s hidden=%d opacity=%g\n",
+          [NSStringFromClass(child.class) UTF8String],
+          [NSStringFromRect(child.frame) UTF8String], child.hidden,
+          child.layer.opacity);
+      if (![child isKindOfClass:[WKWebView class]])
+        continue;
+      NSString *path = [[[NSString stringWithUTF8String:log_path.c_str()]
+          stringByDeletingLastPathComponent]
+          stringByAppendingPathComponent:@"host-webkit-diagnostic.png"];
+      [(WKWebView *)child
+          takeSnapshotWithConfiguration:nil
+                      completionHandler:^(NSImage *image, NSError *error) {
+                        if (error) {
+                          fprintf(stderr, "Browser Lab WK snapshot error %s\n",
+                                  [error.localizedDescription UTF8String]);
+                          return;
+                        }
+                        NSBitmapImageRep *rep = [NSBitmapImageRep
+                            imageRepWithData:image.TIFFRepresentation];
+                        NSData *png = [rep
+                            representationUsingType:NSBitmapImageFileTypePNG
+                                         properties:@{}];
+                        [png writeToFile:path atomically:YES];
+                      }];
+    }
+    return 1;
   } else if (op == "stop-host-loop") {
     if (alive || !shutdown_returned || !exited_cleanly)
       return 0;

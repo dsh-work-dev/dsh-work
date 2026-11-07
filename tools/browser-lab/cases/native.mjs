@@ -41,7 +41,13 @@ export const nativeCases={
   await input(c,'live-frame');const typed=await a.call('control','/state');const typedSequence=typed.tabs.find(t=>t.name==='A').presentedSequence;await c.action('browser_click','#apply');assert.equal((await doc(a)).result,'live-frame');
   liveFrame=await waitFor(async()=>{const r=await a.call('control','/state');return r.tabs.find(t=>t.name==='A').presentedSequence>Math.max(before,typedSequence)?r:false},'live OSR frame after real page mutation');
  }
- const p=await picture(a,c.caseId);assert(p.markers.shellPixels>=50&&p.markers.guestPixels>=50,'Native capture must contain both shell and live guest landmarks');return {evidence:{...p,host:s.host,view:view(s,'A'),liveFrame}}},
+ const p=await picture(a,c.caseId);
+ if(raw.rendering==='cef-osr-shared-frame'&&p.markers.shellPixels<50){
+  await a.command('diagnose-presentation');
+  const diagnostic=await a.main.evaluate(()=>({ready:document.readyState,title:document.title,background:getComputedStyle(document.body).backgroundColor,bounds:document.body.getBoundingClientRect().toJSON(),children:document.body.children.length,visibility:document.visibilityState}));
+  throw Error('Native shell pixels missing; owned WK diagnostic='+JSON.stringify(diagnostic));
+ }
+ assert(p.markers.shellPixels>=50&&p.markers.guestPixels>=50,'Native capture must contain both shell and live guest landmarks');return {evidence:{...p,host:s.host,view:view(s,'A'),liveFrame}}},
  async 'sandbox.renderer'(c){const evidence=await c.adapter.sandboxAssessment();assert(evidence.rendererSandboxed);return {evidence}},
  async 'content.html'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:a.session.endpoints.artifact+'/'});const before=await doc(a);await input(c,'HTML-'+c.options.runId);await c.action('browser_click','#apply');const after=await doc(a),assets=await a.call('backend','/artifact-state');assert.equal(after.instance,before.instance);assert.equal(after.result,'HTML-'+c.options.runId);assert(assets.imageLoaded&&assets.js.includes('已加载')&&assets.css==='rgb(18, 62, 80)');return {evidence:{assets,before,after,picture:await picture(a,c.caseId)}}},
  async 'content.localhost'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});await input(c,'localhost');await c.action('browser_click','#apply');const d=await doc(a);assert.equal(d.result,'localhost');return {evidence:d}},
