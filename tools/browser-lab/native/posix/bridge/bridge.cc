@@ -143,7 +143,8 @@ static std::array<BrowserLabFrameView *, 2> views{};
   CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
   CGImageRef image = CGImageCreate(
       h.width, h.height, 8, 32, size_t(h.width) * 4, color,
-      kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst, provider,
+      static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) |
+          static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst), provider,
       nullptr, false, kCGRenderingIntentDefault);
   CGColorSpaceRelease(color);
   CGDataProviderRelease(provider);
