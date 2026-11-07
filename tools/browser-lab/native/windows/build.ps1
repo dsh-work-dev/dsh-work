@@ -15,7 +15,7 @@ if($PSCmdlet.ParameterSetName -eq 'SDK'){
  $versionFile=Join-Path $CefSdk 'include/cef_version.h'
  if(!(Test-Path $versionFile) -or !(Select-String -LiteralPath $versionFile -SimpleMatch '156.0.15+gcf671c0+chromium-156.0.8078.80' -Quiet)){throw 'This overlay is pinned to CEF 156.0.15+gcf671c0+chromium-156.0.8078.80'}
  $sdkCopy=Join-Path $work 'cef-sdk';Copy-Item $CefSdk $sdkCopy -Recurse
- Copy-Item "$PSScriptRoot/cef-overlay/*.cc","$PSScriptRoot/cef-overlay/*.h","$PSScriptRoot/../policy/native_policy.h" "$sdkCopy/tests/cefsimple" -Force
+ Copy-Item "$PSScriptRoot/cef-overlay/*.cc","$PSScriptRoot/cef-overlay/*.h","$PSScriptRoot/../policy/*.h" "$sdkCopy/tests/cefsimple" -Force
  if(Get-Command cmake -ErrorAction SilentlyContinue){$cmake='cmake';$prefix=@()}else{$cmake='python';$prefix=@('-m','cmake')}
  $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
  if(!(Test-Path $vswhere)){throw 'Visual Studio discovery tool is required'}

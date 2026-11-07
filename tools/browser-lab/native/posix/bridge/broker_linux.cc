@@ -1,5 +1,6 @@
 // Standalone sandboxed CEF owner; GTK4 and CEF never share a main context.
 #include "../../policy/native_policy.h"
+#include "../../policy/architecture_probe.h"
 #include "include/cef_app.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
@@ -57,6 +58,9 @@ private:
 };
 class App final : public CefApp, public CefBrowserProcessHandler {
 public:
+  void OnBeforeCommandLineProcessing(const CefString&, CefRefPtr<CefCommandLine> command) override {
+    if (std::getenv("BROWSER_LAB_ARCH_SHARED")) command->AppendSwitch("process-per-site");
+  }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
   }
@@ -71,9 +75,9 @@ public:
       info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
       CefBrowserSettings settings;
       CefBrowserHost::CreateBrowser(info, new Client(i),
-                                    "http://127.0.0.1:19478/interactions?tab=" +
+                                    lab_arch::Enabled() ? lab_arch::URL(i) : "http://127.0.0.1:19478/interactions?tab=" +
                                         std::string(i ? "B" : "A"),
-                                    settings, nullptr, nullptr);
+                                    settings, nullptr, lab_arch::Context(i));
     }
   }
 

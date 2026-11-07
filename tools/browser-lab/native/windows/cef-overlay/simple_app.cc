@@ -5,6 +5,7 @@
 #include "tests/cefsimple/simple_app.h"
 
 #include <string>
+#include "tests/cefsimple/architecture_probe.h"
 
 #include "include/cef_browser.h"
 #include "include/cef_command_line.h"
@@ -188,11 +189,11 @@ void SimpleApp::OnContextInitialized() {
     // The lab creates two actual browsers; this branch leaves baseline usage intact.
     const bool two_tabs = command_line->HasSwitch("demo-two-tabs");
     CefBrowserHost::CreateBrowser(window_info, handler,
-                                  two_tabs ? url + "?tab=A" : url,
-                                  browser_settings, nullptr, nullptr);
+                                  lab_arch::Enabled() ? lab_arch::URL(0) : (two_tabs ? url + "?tab=A" : url),
+                                  browser_settings, nullptr, lab_arch::Context(0));
     if (two_tabs) {
-      CefBrowserHost::CreateBrowser(window_info, handler, url + "?tab=B",
-                                    browser_settings, nullptr, nullptr);
+      CefBrowserHost::CreateBrowser(window_info, handler, lab_arch::Enabled() ? lab_arch::URL(1) : url + "?tab=B",
+                                    browser_settings, nullptr, lab_arch::Context(1));
     }
   }
 }

@@ -44,8 +44,10 @@ export async function startPosixSmoke(options){
   try{
    if(browser)await browser.close();
    if(child.exitCode===null&&!child.signalCode){await call('/close',{});await waitFor(()=>child.exitCode!==null||child.signalCode,'host normal exit',25000)}
-   const closure=JSON.parse(readFileSync(join(options.evidenceRoot,'host-closed.json'),'utf8'));
-   if(!closure.createdClosed||!closure.cefShutdownReturned||child.exitCode!==0)throw Error('CEF/host close lifecycle incomplete');
+   if(!options.architectureFault){
+    const closure=JSON.parse(readFileSync(join(options.evidenceRoot,'host-closed.json'),'utf8'));
+    if(!closure.createdClosed||!closure.cefShutdownReturned||child.exitCode!==0)throw Error('CEF/host close lifecycle incomplete');
+   }
    await waitFor(()=>children.every(p=>!groupAlive(p)),'all owned process groups exited',10000);
   }catch(e){failure=e;
    for(const p of children)if(groupAlive(p))try{process.kill(-p.pid,'SIGTERM');await sleep(1000);if(groupAlive(p))process.kill(-p.pid,'SIGKILL')}catch(signal){writeFileSync(join(options.evidenceRoot,'cleanup-signal.log'),String(signal))}

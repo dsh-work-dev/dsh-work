@@ -1,5 +1,6 @@
 // Standalone sandbox-enabled CEF broker. The Wails process never loads CEF.
 #include "../../policy/native_policy.h"
+#include "../../policy/architecture_probe.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
@@ -156,6 +157,9 @@ private:
 };
 class App final : public CefApp, public CefBrowserProcessHandler {
 public:
+  void OnBeforeCommandLineProcessing(const CefString&, CefRefPtr<CefCommandLine> command) override {
+    if (std::getenv("BROWSER_LAB_ARCH_SHARED")) command->AppendSwitch("process-per-site");
+  }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
   }
@@ -167,9 +171,9 @@ public:
       CefBrowserSettings settings;
       settings.windowless_frame_rate = 30;
       CefBrowserHost::CreateBrowser(info, new Client(i),
-                                    "http://127.0.0.1:19478/interactions?tab=" +
+                                    lab_arch::Enabled() ? lab_arch::URL(i) : "http://127.0.0.1:19478/interactions?tab=" +
                                         std::string(i ? "B" : "A"),
-                                    settings, nullptr, nullptr);
+                                    settings, nullptr, lab_arch::Context(i));
     }
   }
 

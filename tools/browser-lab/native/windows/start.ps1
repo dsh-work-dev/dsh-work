@@ -48,6 +48,7 @@ Wait-Lab ($session.endpoints.cef+'/json/list') $hostProcess|Out-Null
 Wait-Lab ($session.endpoints.shell+'/json/list') $hostProcess|Out-Null
 for($i=0;$i -lt 150 -and !(Test-Path "$RunRoot/session.json");$i++){Start-Sleep -Milliseconds 200}
 if(!(Test-Path "$RunRoot/session.json")){throw 'Native child discovery did not complete'}
+if ($env:BROWSER_LAB_ARCH_PROBE -eq '1') { Write-Host 'Architecture probe: sidecars omitted'; exit 0 }
 $backend=Start-LabProcess 'backend' $node "`"$suite/platforms/windows/backend.mjs`"" "$suite/platforms/windows/backend.mjs"
 Wait-Lab ($session.endpoints.backend+'/health') $backend|Out-Null
 $gateway=Start-LabProcess 'gateway' "$data/gateway.exe" @()

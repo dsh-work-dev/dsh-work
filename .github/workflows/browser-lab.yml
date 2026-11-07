@@ -98,6 +98,9 @@ jobs:
         with:
           name: browser-lab-native-windows
           path: |
+            tools/browser-lab/results/architecture-*/*/ui-survival.json
+            tools/browser-lab/results/architecture-*/*/cleanup.json
+            tools/browser-lab/results/architecture-*/*/*.log
             tools/browser-lab/results/*/report.json
             tools/browser-lab/results/*/junit.xml
             tools/browser-lab/results/*/manual-checklist.json
@@ -135,12 +138,17 @@ jobs:
       - run: ./native/windows/build-ci.ps1
       - name: Attempt unchanged interactive native suite
         run: node cli.mjs run --profile regression --consent scripted --network
+      - name: Probe architectural review boundaries
+        run: node architecture.mjs
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: browser-lab-native-full-windows-2025
           path: |
             tools/browser-lab/results/hosted-context/*.json
+            tools/browser-lab/results/architecture-*/*/ui-survival.json
+            tools/browser-lab/results/architecture-*/*/cleanup.json
+            tools/browser-lab/results/architecture-*/*/*.log
             tools/browser-lab/results/*/report.json
             tools/browser-lab/results/*/junit.xml
             tools/browser-lab/results/*/evidence/*.png
@@ -197,14 +205,25 @@ jobs:
         env:
           GDK_BACKEND: x11
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-openbox.log 2>&1 & node cli.mjs run --profile regression --consent scripted --network'
+      - name: Probe Linux architectural review boundaries
+        if: runner.os == 'Linux'
+        env:
+          GDK_BACKEND: x11
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-arch-openbox.log 2>&1 & node architecture.mjs'
       - name: Run actual macOS Cocoa native loop
         if: runner.os == 'macOS'
         run: node cli.mjs run --profile regression --consent scripted --network
+      - name: Probe macOS architectural review boundaries
+        if: runner.os == 'macOS'
+        run: node architecture.mjs
       - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: browser-lab-native-full-${{ matrix.os }}
           path: |
+            tools/browser-lab/results/architecture-*/*/ui-survival.json
+            tools/browser-lab/results/architecture-*/*/cleanup.json
+            tools/browser-lab/results/architecture-*/*/*.log
             tools/browser-lab/results/*/report.json
             tools/browser-lab/results/*/junit.xml
             tools/browser-lab/results/*/manual-checklist.json

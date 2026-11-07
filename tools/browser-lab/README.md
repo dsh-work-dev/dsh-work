@@ -147,3 +147,14 @@ Ubuntu24.04 runner 为本次 host 配置单程序 AppArmor userns 许可，让 W
 - `private-session.json`、`session.json`、token、profile 与 crash dump 留在私有 TEMP run root，**不上传**。CI 只上传工作流列出的公共报告、日志和 scoped native PNG。
 
 原始 R78 研究记录仍在本机 RED Research；本套件源码、锁文件与 CI 可随 Git 分享，不依赖研究目录或本机绝对路径。
+
+## 架构评审补证
+
+构建同一原生 bundle 后运行 `node tools/browser-lab/architecture.mjs`。三平台 CI 在原全量回归后执行，报告独立放在 `results/architecture-*/report.json`，不计入既有 34 项的 qualification。
+
+该入口只使用隔离 fixture：
+- 两个独立、空 cache_path 的 CEF RequestContext，以每租约不同的标准 HTTP localhost origin 拦截资源请求。实际验证存储正例、跨产物读取／导航拒绝、Worker／Service Worker CSP 拒绝及撤销后的新读取拒绝。它尚不是正式 os.Root 资源服务，也未证明自定义 scheme、完整异步撤销屏障或持久数据迁移。
+- 通过 browser-side trace 与 SystemInfo 的实际 OS PID 构造共享 renderer 和跨站 OOPIF，再终止当前私有 CEF inventory 中的目标进程，核对受损集合及未提交输入。共享进程 fixture 显式启用 process-per-site，保留站点隔离和沙箱；这不是正式进程策略。
+- 正常关闭、强退 UI；Windows 另直接 DestroyWindow 原生父窗。记录销毁前 document nonce／内存状态／未提交输入、销毁后存续和重开后的新 document。强退不执行优雅 detach；故障注入后的清理与正常退出证据分开。
+
+当前 lab 的 broker 由 UI 启动；两 UI 进程共享 daemon-owned broker、自动故障关联和正式授权屏障仍需后续隔离验证。此入口提供实际引擎与生命周期证据，不把这些尚未实现的能力记成通过。架构实验会主动关闭或终止本次专用进程；不要用于用户 profile 或生产工作台。

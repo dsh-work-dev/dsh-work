@@ -143,6 +143,17 @@ func (l *lab) dock() error {
 }
 func (l *lab) action(action string, q url.Values) error {
 	switch action {
+	case "architecture-destroy-parent":
+		if os.Getenv("BROWSER_LAB_ARCH_PROBE") != "1" {
+			return fmt.Errorf("architecture probe not enabled")
+		}
+		l.presentationEpoch++
+		l.record("architecture-parent-destroy", l.mainHWND)
+		r, _, err := user.NewProc("DestroyWindow").Call(l.mainHWND)
+		if r == 0 {
+			return err
+		}
+
 	case "native-input", "native-focus":
 		return l.nativeInput(q.Get("target"), action == "native-focus")
 	case "renderer-fault", "renderer-recovered":
@@ -292,7 +303,7 @@ func (l *lab) quit() {
 	var targets []struct{ ID, Type string }
 	err = json.NewDecoder(response.Body).Decode(&targets)
 	response.Body.Close()
-	if err != nil || len(targets) != 2 {
+	if err != nil || (len(targets) != 2 && os.Getenv("BROWSER_LAB_ARCH_PROBE") != "1") || len(targets) > 2 {
 		fail(fmt.Errorf("expected two targets: %d, %v", len(targets), err))
 		return
 	}
