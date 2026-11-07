@@ -107,7 +107,7 @@ node tools/browser-lab/native/posix/build.mjs
 node tools/browser-lab/cli.mjs run --profile regression --consent scripted --network
 ```
 
-构建下载固定 CEF standard SDK、编译官方 wrapper、窄原生 bridge 与隔离 Wails host。Linux 使用独立 CEF broker 和自持消息循环，嵌入原生 X11 child；macOS 候选采用独立 `broker.app`，官方 CPU OSR 回调写入私有共享帧，Wails 的 NSView 连续呈现并转发原生输入。host.app 不链接 CEF；状态实际枚举 dyld 镜像和 broker PID，测试要求 broker kill、显式恢复和 profile 重启都保留 Wails 窗口。NSView 的逻辑 view ID 表示宿主持有的呈现对象，`cefNativeHandle:0` 明确区分 CEF OSR 没有原生 child handle。原生图、帧序号与实际 DOM 变化一起验证 live presentation。
+构建下载固定 CEF standard SDK、编译官方 wrapper、窄原生 bridge 与隔离 Wails host。Linux 使用独立 CEF broker 和自持消息循环，嵌入原生 X11 child；macOS 候选采用独立 `broker.app`，官方 CPU OSR 回调写入私有共享帧，Wails 的 NSView 通过 Core Animation 连续呈现并转发原生输入。host.app 不链接 CEF；状态实际枚举 dyld 镜像和 broker PID，测试要求 broker kill、显式恢复和 profile 重启都保留 Wails 窗口及 PID。NSView 的逻辑 view ID 表示宿主持有的呈现对象，`cefNativeHandle:0` 明确区分 CEF OSR 没有原生 child handle。原生图、帧序号与实际 DOM 变化一起验证 live presentation；Mac 取图先等待源页绘制和 OSR／宿主发布周期。
 
 CEF 官方 OSR、输入、sandbox/helper 和生命周期接口满足这里的边界；当前 Go binding 未证明覆盖固定 CEF156 的这些要求，故复用官方 C++ wrapper。共享像素只承担有界帧传输，读取不阻塞宿主 UI，进程退出后由内核释放 flock。Mac 中文 IME 的原生转发保留人工验收，ASCII CI 不替代组合输入或候选框验证。
 
@@ -115,9 +115,9 @@ Ubuntu24.04 runner 为本次 host 配置单程序 AppArmor userns 许可，让 W
 
 ## 原生能力独立授权
 
-这组实现仍是待三平台实际报告验证的隔离 demo。可信 Wails 面板与网页点击 permit 分开：
-- 弹窗在 `OnBeforePopup` 取消默认创建。批准后在现有受控标签 B 打开目的页，不产生第三个 target；拒绝、导航或切页后过期的请求不打开页面。该 demo 明确选择复用 B，不承诺完整多窗口浏览器功能。
-- `CanDownload` 拒绝默认下载，包括 DevTools 的 allowAndName。批准后通过 CEF URLRequest 和同一 RequestContext 下载到本次私有 `approved-downloads` 目录。可信面板只接受安全文件名，独占创建 partial，完成后改名；取消／撤销删掉 partial，永不自动打开。单文件上限8MiB，重定向停止，未批准目标不跟随。
+这组实现通过隔离 demo 验证，可信 Wails 面板与网页点击 permit 分开：
+- 弹窗在 `OnBeforePopup` 取消默认创建，window.open 返回 null。批准后在现有受控标签 B 打开目的页，不产生第三个 target，也不保留 opener／postMessage 关系；拒绝、导航或切页后过期的请求不打开页面。
+- `CanDownload` 拒绝默认下载，包括 DevTools 的 allowAndName。批准的 GET 文本样例通过 CEF URLRequest 和同一 RequestContext 下载到本次私有 `approved-downloads` 目录。可信面板只接受安全文件名，独占创建 partial，完成后改名；取消／撤销删掉 partial，永不自动打开。单文件上限8MiB，重定向停止，未批准目标不跟随。自动检查等待实际已接收字节后撤销，并核对 partial 与 final 均未残留。
 - 选择 URLRequest 而非仅覆写 OnBeforeDownload，是因为已实测 DevTools 下载策略可绕过原生目的地回调。网络、TLS、cookies 仍由成熟的 CEF 网络栈管理，未另写 HTTP 客户端或导出浏览器凭据。该有界文件传输是 demo 的策略适配，不是通用下载器。
 - 通知权限实际经过 `CefPermissionHandler` prompt callback；允许、拒绝与 `SetContentSetting` 撤销均在 CEF 内生效。其他媒体／未知权限默认拒绝，本轮不访问设备或剪贴板内容。
 - CEF 通过 token 认证的 URLRequest 请求可信 backend，网页没有 token。请求绑定真实 document/loader、选择、presentation 与 generation；决定一次消费，导航、切页或遮挡后失效。native 回调再核对自己的导航 epoch。
