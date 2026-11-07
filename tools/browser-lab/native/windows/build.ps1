@@ -46,6 +46,17 @@ if($Composition -eq 'bottom'){
  $source=[IO.File]::ReadAllText($file)
  if(([regex]::Matches($source,'CreateTargetForHwnd\(hwnd, true\)')).Count -ne 1){throw 'Pinned composition patch does not match exactly once'}
  [IO.File]::WriteAllText($file,$source.Replace('CreateTargetForHwnd(hwnd, true)','CreateTargetForHwnd(hwnd, false)'))
+ # Diagnostics only in the isolated fork: distinguish an async controller
+ # callback stall from CEF startup, without changing WebView2 hosting mode.
+ $edgeFile=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/chromium.go'
+ (Get-Item $edgeFile).IsReadOnly=$false
+ $edgeSource=[IO.File]::ReadAllText($edgeFile)
+ foreach($signature in @('func (e *Chromium) Embed(hwnd uintptr) bool {','func (e *Chromium) EnvironmentCompleted(res uintptr, env *ICoreWebView2Environment) uintptr {','func (e *Chromium) createCoreWebView2CompositionController(env *ICoreWebView2Environment) error {','func (e *Chromium) CreateCoreWebView2CompositionControllerCompleted(res uintptr, compositionController *ICoreWebView2CompositionController) uintptr {')) {
+  if(($edgeSource.Split([string[]]@($signature),[StringSplitOptions]::None)).Count -ne 2){throw 'WebView2 diagnostic signature drift'}
+  $phase=($signature.Split(') ')[1]).Split('(')[0]
+  $edgeSource=$edgeSource.Replace($signature,$signature+"`n"+' log.Printf("[BrowserLabWV] phase='+$phase+' hwnd=%x thread=%d", e.hwnd, windows.GetCurrentThreadId())')
+ }
+ [IO.File]::WriteAllText($edgeFile,$edgeSource)
  Push-Location "$work/host"
  try{go mod edit '-replace=github.com/wailsapp/wails/v3=../wails-fork';if($LASTEXITCODE -ne 0){throw 'Isolated module replace failed'}}finally{Pop-Location}
 }

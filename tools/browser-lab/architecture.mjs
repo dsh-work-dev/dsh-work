@@ -1,7 +1,7 @@
 // Architectural research, separate from the 34-case product qualification.
 // Only disposable lab processes and synthetic fixture contents are targeted.
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,cpSync,existsSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readlinkSync,readdirSync,cpSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -38,7 +38,7 @@ async function run(name,mode,body){
   await Promise.all([A,B].map(p=>p.waitForFunction(()=>!!window.lab?.instance)));
   const control=async(action,args={})=>process.platform==='win32'?manager.command(action,args):manager.call('/command?'+new URLSearchParams({action,...args}),{});
   const state=async()=>process.platform==='win32'?manager.call('control','/state'):manager.call('/state');
-  const evidence=await body({A,B,browser,options,manager,state,control,markFault(){faultInjected=true;options.architectureFault=true}});
+  const evidence=await body({A,B,browser,options,manager,state,control,markFault(){faultInjected=true;options.architectureFault=true;options.architectureFaultPid=manager.child?.pid}});
   result={id:name,status:'pass',evidence};
  }catch(e){result.error=e.stack;console.error(name,e.message)}
  finally{
@@ -53,8 +53,7 @@ async function run(name,mode,body){
   if(manager)try{await manager.close()}catch(e){
    // A killed UI cannot produce its graceful-close marker. Keep this distinct
    // from a normal cleanup pass; require process/listener inventory below.
-   if(!faultInjected){result.status='fail';result.cleanupError=e.message}
-   else result.injectedExitCleanup=e.message;
+   result.status='fail';result.cleanupError=e.message;
   }
   if(process.platform==='win32'&&existsSync(join(evidenceRoot,'cleanup.json'))){
    const cleanup=JSON.parse(readFileSync(join(evidenceRoot,'cleanup.json'),'utf8').replace(/^\uFEFF/,''));
@@ -152,6 +151,19 @@ async function killRenderer(browser,pages,pid){
  process.kill(pid,'SIGKILL');await sleep(1000);
  return Promise.all(pages.map(async(p)=>{try{return {url:p.url(),state:await p.evaluate(()=>({instance:window.lab?.instance,memory:window.memoryOnly,input:document.querySelector('#entry')?.value}))}}catch(e){return {url:p.url(),unavailable:e.message.split('\n')[0]}}}));
 }
+function linuxPipeOwners(host,broker){
+ const rows=[];let input;try{input=readlinkSync('/proc/'+broker+'/fd/0')}catch(e){return {error:e.code}}
+ const processes=[];for(const name of readdirSync('/proc').filter(n=>/^\d+$/.test(n)))try{
+  const stat=readFileSync('/proc/'+name+'/stat','utf8').split(') ')[1].split(' ');processes.push({pid:Number(name),ppid:Number(stat[1]),group:Number(stat[2])});
+ }catch{}
+ const owned=new Set([host,broker]);let changed=true;while(changed){changed=false;for(const p of processes)if(owned.has(p.ppid)&&!owned.has(p.pid)){owned.add(p.pid);changed=true}}
+ for(const p of processes.filter(p=>owned.has(p.pid)||p.group===host))try{for(const fd of readdirSync('/proc/'+p.pid+'/fd'))try{
+  if(readlinkSync('/proc/'+p.pid+'/fd/'+fd)!==input)continue;
+  const flags=readFileSync('/proc/'+p.pid+'/fdinfo/'+fd,'utf8').match(/^flags:\s+(\d+)/m)?.[1];
+  rows.push({...p,comm:readFileSync('/proc/'+p.pid+'/comm','utf8').trim(),fd,flags});
+ }catch{}}catch{}
+ return {input,rows};
+}
 await run('renderer-shared','shared',async({A,B,browser,options})=>{
  await B.goto('http://127.0.0.1:19478/interactions?tab=B');
  const sA=await A.context().newCDPSession(A),sB=await B.context().newCDPSession(B);
@@ -187,6 +199,7 @@ for(const kind of ['normal','kill',...(process.platform==='win32'?['destroy-pare
   await A.locator('#entry').fill('UNSUBMITTED_A');await B.locator('#entry').fill('UNSUBMITTED_B');
   const before=await Promise.all([A,B].map(p=>p.evaluate(()=>({instance:lab.instance,input:document.querySelector('#entry').value,memory:window.memoryOnly=crypto.randomUUID()}))));
   const nativeBefore=await state();
+  if(process.platform==='linux'&&kind==='kill')writeFileSync(join(options.evidenceRoot,'ui-pipe-owners.json'),JSON.stringify(linuxPipeOwners(manager.child.pid,Number(nativeBefore.guestPID)),null,2));
   if(kind==='normal'){
    if(process.platform==='win32')await control('quit');else await manager.call('/close',{});
   }else{

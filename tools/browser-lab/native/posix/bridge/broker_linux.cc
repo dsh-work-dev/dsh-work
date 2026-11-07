@@ -88,12 +88,15 @@ private:
 class CloseTask final : public CefTask {
 public:
   void Execute() override {
+    if (std::getenv("BROWSER_LAB_ARCH_PROBE")) std::fprintf(stderr, "ARCH_CLOSE_TASK begin\n");
     auto extras = popups;
     for (auto b : extras)
       b->GetHost()->CloseBrowser(true);
     for (auto b : views)
-      if (b)
+      if (b) {
+        if (std::getenv("BROWSER_LAB_ARCH_PROBE")) std::fprintf(stderr, "ARCH_CLOSE_BROWSER id=%d\n", b->GetIdentifier());
         b->GetHost()->CloseBrowser(true);
+      }
   }
 
 private:
@@ -124,7 +127,9 @@ int main(int argc, char **argv) {
         // This demo's UI owns the pipe. EOF means that owner died: close the
         // disposable browsers instead of leaking a live profile singleton.
         // A daemon-owned multi-UI broker needs a different ownership protocol.
-        if (!std::getline(std::cin, line) || line == "close")
+        const bool eof = !std::getline(std::cin, line);
+        if (std::getenv("BROWSER_LAB_ARCH_PROBE")) std::fprintf(stderr, "ARCH_INPUT eof=%d close=%d revents=%d\n", eof ? 1 : 0, line == "close" ? 1 : 0, fd.revents);
+        if (eof || line == "close")
           CefPostTask(TID_UI, new CloseTask());
         break;
       }

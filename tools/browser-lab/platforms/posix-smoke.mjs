@@ -44,7 +44,7 @@ export async function startPosixSmoke(options){
   try{
    if(browser)await browser.close();
    if(child.exitCode===null&&!child.signalCode){await call('/close',{});await waitFor(()=>child.exitCode!==null||child.signalCode,'host normal exit',25000)}
-   if(!options.architectureFault){
+   if(!(options.architectureFault&&child.pid===options.architectureFaultPid)){
     const closure=JSON.parse(readFileSync(join(options.evidenceRoot,'host-closed.json'),'utf8'));
     if(!closure.createdClosed||!closure.cefShutdownReturned||child.exitCode!==0)throw Error('CEF/host close lifecycle incomplete');
    }
