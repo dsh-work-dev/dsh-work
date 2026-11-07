@@ -15,6 +15,16 @@
 namespace lab_arch {
 inline bool Enabled() { return std::getenv("BROWSER_LAB_ARCH_ARTIFACT") != nullptr; }
 inline std::string Nonce() {
+  const auto root = std::getenv("BROWSER_LAB_DATA_ROOT");
+  if (root) {
+    FILE* file = std::fopen((std::string(root) + "/arch-current-lease").c_str(), "rb");
+    if (file) {
+      char value[65] = {};
+      const auto n = std::fread(value, 1, 64, file); std::fclose(file);
+      const std::string nonce(value, n);
+      if (n == 32 && nonce.find_first_not_of("0123456789abcdef") == std::string::npos) return nonce;
+    }
+  }
   const auto p = std::getenv("BROWSER_LAB_ARCH_NONCE");
   return p ? p : "missing-nonce";
 }
@@ -50,14 +60,15 @@ private:
 };
 class Factory final : public CefSchemeHandlerFactory {
   int index_;
+  std::string nonce_, origin_;
 public:
-  explicit Factory(int index) : index_(index) {}
+  explicit Factory(int index) : index_(index), nonce_(Nonce()), origin_(Origin(index)) {}
   CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                                       const CefString&, CefRefPtr<CefRequest> request) override {
     const std::string url = request->GetURL();
-    const std::string prefix = Origin(index_) + "/";
+    const std::string prefix = origin_ + "/";
     const auto root = std::getenv("BROWSER_LAB_DATA_ROOT");
-    const std::string marker = std::string(root ? root : "") + "/arch-revoke-" + (index_ ? "B" : "A");
+    const std::string marker = std::string(root ? root : "") + "/arch-revoke-" + (index_ ? "B-" : "A-") + nonce_;
     FILE* file = std::fopen(marker.c_str(), "rb");
     const bool revoked = file != nullptr;
     if (file) std::fclose(file);
@@ -82,6 +93,9 @@ inline CefRefPtr<CefRequestContext> Context(int i) {
   CefRequestContextSettings settings; // empty cache_path: memory-only
   auto context = CefRequestContext::CreateContext(settings, nullptr);
   context->RegisterSchemeHandlerFactory("http", "", new Factory(i));
+  // A foreign HTTPS document must not enter this temporary partition and
+  // escape its Worker policy. The fixture denies it without network access.
+  context->RegisterSchemeHandlerFactory("https", "", new Factory(i));
   // Hold the first context only until the second is made, not past Shutdown.
   static CefRefPtr<CefRequestContext> first;
   if (i == 0) first = context;

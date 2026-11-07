@@ -21,7 +21,7 @@ export const cases = [
  c('authorization.generation', 'worker generation 使旧授权失效', 'gateway'),
  c('overlay.presentation', '遮挡禁控、恢复后重新观察', 'overlay'),
  c('overlay.queued', 'inspect 后遮挡阻止最终 dispatch', 'overlay'),
- c('recovery.renderer', '单页崩溃隔离与显式重新加载', 'faultInjection'),
+ c('recovery.renderer', '指定样例 renderer 故障与显式重新加载', 'faultInjection'),
  c('recovery.broker', 'broker 退出隔离与显式重启', 'faultInjection'),
  c('isolation.guest', 'guest 无宿主能力且控制面拒绝未认证请求', 'browser'),
  c('isolation.artifact-root', 'HTML root 阻止目录及 junction 逃逸', 'artifactRoot'),

@@ -23,11 +23,17 @@ async function run(name,mode,body){
  process.env.BROWSER_LAB_ARCH_PROBE='1';process.env.BROWSER_LAB_ARCH_NONCE=randomUUID().replaceAll('-','');
  if(mode==='artifact')process.env.BROWSER_LAB_ARCH_ARTIFACT='1';else delete process.env.BROWSER_LAB_ARCH_ARTIFACT;
  if(mode==='shared')process.env.BROWSER_LAB_ARCH_SHARED='1';else delete process.env.BROWSER_LAB_ARCH_SHARED;
+ if(name==='renderer-oopif')process.env.BROWSER_LAB_ARCH_OOPIF='1';else delete process.env.BROWSER_LAB_ARCH_OOPIF;
  let manager,browser,result={id:name,status:'fail'},faultInjected=false;
  try{
   manager=process.platform==='win32'?await(await import('./platforms/windows.mjs')).startWindows(options):await(await import('./platforms/posix-smoke.mjs')).startPosixSmoke(options);
   browser=await attach(19479);
-  const pages=browser.contexts().flatMap(c=>c.pages());assert.equal(pages.length,2);
+  const pages=await waitFor(()=>{
+   const all=browser.contexts().flatMap(c=>c.pages());
+   if(all.length!==2)return false;
+   const names=all.map(p=>{try{return new URL(p.url()).searchParams.get('tab')}catch{return null}});
+   return names.includes('A')&&names.includes('B')?all:false;
+  },'both named documents navigated');
   const A=pages.find(p=>new URL(p.url()).searchParams.get('tab')==='A'),B=pages.find(p=>new URL(p.url()).searchParams.get('tab')==='B');assert(A&&B);
   await Promise.all([A,B].map(p=>p.waitForFunction(()=>!!window.lab?.instance)));
   const control=async(action,args={})=>process.platform==='win32'?manager.command(action,args):manager.call('/command?'+new URLSearchParams({action,...args}),{});
@@ -64,34 +70,65 @@ async function storage(page,action,value){return page.evaluate(async({action,val
  if(action==='write'){document.cookie='same='+value+';path=/';localStorage.setItem('same',value);sessionStorage.setItem('same',value);await idb(true);await c.put('/cache-key',new Response(value))}
  const response=await c.match('/cache-key'),data={cookie:document.cookie,local:localStorage.getItem('same'),session:sessionStorage.getItem('same'),idb:await idb(false),cache:response?await response.text():null,controller:!!navigator.serviceWorker?.controller,secure:isSecureContext,relative:!!window.relativeAsset};db.close();return data;
  },{action,value})}
-await run('artifact-partitions','artifact',async({A,B,browser,options,manager})=>{
+await run('artifact-partitions','artifact',async({A,B,browser,options,manager,control,state})=>{
  const origins=[new URL(A.url()).origin,new URL(B.url()).origin];assert.notEqual(...origins);
  const empty=await storage(B,'read');assert.equal(empty.local,null);assert.equal(empty.idb,null);assert.equal(empty.cache,null);assert(empty.secure&&empty.relative);
  await storage(A,'write','A_ONLY');const bBefore=await storage(B,'read');assert.equal(bBefore.local,null);assert.equal(bBefore.idb,null);assert.equal(bBefore.cache,null);assert.equal(bBefore.cookie,'');
  const a=await storage(A,'read');assert.equal(a.local,'A_ONLY');assert.equal(a.idb,'A_ONLY');assert.equal(a.cache,'A_ONLY');assert.equal(a.session,'A_ONLY');assert(a.cookie.includes('A_ONLY'));
  await storage(B,'write','B_ONLY');const b=await storage(B,'read');assert.equal(b.local,'B_ONLY');assert.equal((await storage(A,'read')).local,'A_ONLY');
  const cross=await A.evaluate(async url=>{try{return {body:await(await fetch(url+'/secret')).text()}}catch(e){return {denied:e.name}}},origins[1]);assert(!cross.body?.includes('ROOT_B_ONLY'));
- const worker=await A.evaluate(async()=>{let sw,worker;try{await navigator.serviceWorker.register('/sw.js');sw='allowed'}catch(e){sw=e.name}try{new Worker('/worker.js');worker='allowed'}catch(e){worker=e.name}return {sw,worker,serviceWorkerAPI:typeof navigator.serviceWorker?.register==='function'}});assert(worker.serviceWorkerAPI);assert.notEqual(worker.sw,'allowed');assert.notEqual(worker.worker,'allowed');
+ const worker=await A.evaluate(async()=>{
+  const violations=[];const onViolation=e=>violations.push({directive:e.effectiveDirective,blocked:e.blockedURI});document.addEventListener('securitypolicyviolation',onViolation);
+  let sw;try{await navigator.serviceWorker.register('/sw.js');sw='allowed'}catch(e){sw=e.name}
+  const worker=await new Promise(resolve=>{
+   let w;const finish=value=>{clearTimeout(timer);w?.terminate();resolve(value)},timer=setTimeout(()=>finish('timeout'),5000);
+   try{w=new Worker('/worker.js');w.onmessage=()=>finish('executed');w.onerror=e=>{e.preventDefault();finish('blocked-error')};w.postMessage('probe')}catch(e){finish(e.name)}
+  });
+  await new Promise(r=>setTimeout(r,50));document.removeEventListener('securitypolicyviolation',onViolation);
+  return {sw,worker,violations,serviceWorkerAPI:typeof navigator.serviceWorker?.register==='function'};
+ });
+ assert(worker.serviceWorkerAPI);assert.notEqual(worker.sw,'allowed');assert.notEqual(worker.worker,'executed');assert.notEqual(worker.worker,'timeout');
+ assert(worker.violations.some(v=>v.directive==='worker-src'),'Actual worker CSP violation required, not a generic network error');
  const cdp=await A.context().newCDPSession(A);
  await cdp.send('Page.navigate',{url:origins[1]+'/secret'});await sleep(350);
  const direct=await A.locator('body').innerText();assert.equal(direct,'LEASE_DENIED');
  const foreignPartition=await A.evaluate(()=>({local:localStorage.getItem('same'),cookie:document.cookie}));assert.equal(foreignPartition.local,null);assert.equal(foreignPartition.cookie,'');
  await A.goto(origins[0]+'/?tab=A');assert.equal((await storage(A,'read')).local,'A_ONLY');
  const dataRoot=process.platform==='win32'?manager.session.dataRoot:join(options.runRoot,'data');
- writeFileSync(join(dataRoot,'arch-revoke-A'),'revoked');
+ writeFileSync(join(dataRoot,'arch-revoke-A-'+process.env.BROWSER_LAB_ARCH_NONCE),'revoked');
  const revoked=await A.evaluate(async()=>{const r=await fetch('/secret');return {status:r.status,body:await r.text()}});assert.equal(revoked.status,403);
  await A.close();assert.equal((await storage(B,'read')).local,'B_ONLY');
- return {origins,positiveControls:{A:a,B:b},BafterAseed:bBefore,cross,worker,direct,foreignPartition,revoked,
-  limits:['Memory fixture, not integrated os.Root service','Revocation denies new reads then closes A; async cancellation barrier not yet implemented','Custom dsh-artifact scheme is not tested; this candidate uses standard HTTP localhost origins','Fresh-context reopen and HTTP-cache lifecycle require separate evidence']};
+ const session=await B.context().newCDPSession(B),{targetInfo}=await session.send('Target.getTargetInfo');
+ await fetch('http://127.0.0.1:19479/json/close/'+targetInfo.targetId);
+ await waitFor(async()=>{try{await fetch('http://127.0.0.1:19479/json/list',{signal:AbortSignal.timeout(500)});return false}catch{return true}},'old artifact broker exit');
+ await waitFor(async()=>!(await state()).guestRunning,'old artifact broker reaped');
+ // Same host/profile/cache directory, fresh lease and memory contexts.
+ const nextNonce=randomUUID().replaceAll('-','');writeFileSync(join(dataRoot,'arch-current-lease'),nextNonce);
+ await control('restart-broker');await waitFor(async()=>{try{return (await state()).ready}catch{return false}},'new artifact contexts');
+ const reopened=await attach(19479),reopenedPages=reopened.contexts().flatMap(c=>c.pages());assert.equal(reopenedPages.length,2);
+ const fresh=[];for(const page of reopenedPages){await page.waitForFunction(()=>!!window.lab?.instance);const v=await storage(page,'read');assert.equal(v.local,null);assert.equal(v.cookie,'');assert.equal(v.idb,null);assert.equal(v.cache,null);assert(!v.controller);fresh.push({origin:new URL(page.url()).origin,...v})}
+ const page=reopenedPages.find(p=>new URL(p.url()).searchParams.get('tab')==='A');
+ await page.goto(origins[0]+'/secret');const oldLease=await page.locator('body').innerText();assert.equal(oldLease,'LEASE_DENIED');
+ await page.goto('http://a.'+nextNonce+'.localhost/?tab=A');await reopened.close();
+ return {origins,positiveControls:{A:a,B:b},BafterAseed:bBefore,cross,worker,direct,foreignPartition,revoked,fresh,oldLease,
+  limits:['Memory fixture, not integrated os.Root service','Revocation denies new reads then closes A; async cancellation barrier not yet implemented','Custom dsh-artifact scheme is not tested; this candidate uses standard HTTP localhost origins']};
 });
 const sameFrame=(a,b)=>String(a).replaceAll('-','').toLowerCase()===String(b).replaceAll('-','').toLowerCase();
-async function mapping(browser,pages){
- const trace=await pages[0].context().newCDPSession(pages[0]),events=[];let complete=false;
- trace.on('Tracing.dataCollected',e=>events.push(...e.value));trace.on('Tracing.tracingComplete',()=>complete=true);
- await trace.send('Tracing.start',{categories:'-*,disabled-by-default-devtools.timeline',transferMode:'ReportEvents'});await sleep(300);await trace.send('Tracing.end');await waitFor(()=>complete,'browser trace');await trace.detach();
+async function mapping(browser,pages,evidenceRoot){
+ const events=[];
+ // CEF's page-target handler may scope initial metadata to its WebContents.
+ // Collect each page's real frame tree instead of assuming one trace lists B.
+ for(const page of pages){
+  const trace=await page.context().newCDPSession(page);let complete=false,started=false;
+  trace.on('Tracing.dataCollected',e=>events.push(...e.value));trace.on('Tracing.tracingComplete',()=>complete=true);
+  try{
+   await trace.send('Tracing.start',{categories:'-*,disabled-by-default-devtools.timeline',transferMode:'ReportEvents'});started=true;
+   await sleep(300);await trace.send('Tracing.end');started=false;await waitFor(()=>complete,'browser trace');
+  }finally{if(started)await trace.send('Tracing.end').catch(()=>{});await trace.detach()}
+ }
  const frames=events.filter(e=>e.name==='TracingStartedInBrowser').flatMap(e=>e.args?.data?.frames||[]);
  const s=await browser.newBrowserCDPSession(),inventory=(await s.send('SystemInfo.getProcessInfo')).processInfo;await s.detach();
- return {frames,inventory};
+ const result={frames,inventory};writeFileSync(join(evidenceRoot,'renderer-mapping.json'),JSON.stringify(result,null,2));return result;
 }
 async function killRenderer(browser,pages,pid){
  const s=await browser.newBrowserCDPSession(),info=(await s.send('SystemInfo.getProcessInfo')).processInfo;await s.detach();
@@ -99,23 +136,23 @@ async function killRenderer(browser,pages,pid){
  process.kill(pid,'SIGKILL');await sleep(1000);
  return Promise.all(pages.map(async(p)=>{try{return {url:p.url(),state:await p.evaluate(()=>({instance:window.lab?.instance,memory:window.memoryOnly,input:document.querySelector('#entry')?.value}))}}catch(e){return {url:p.url(),unavailable:e.message.split('\n')[0]}}}));
 }
-await run('renderer-shared','shared',async({A,B,browser})=>{
+await run('renderer-shared','shared',async({A,B,browser,options})=>{
  await B.goto('http://127.0.0.1:19478/interactions?tab=B');
  const sA=await A.context().newCDPSession(A),sB=await B.context().newCDPSession(B);
  const roots=[(await sA.send('Page.getFrameTree')).frameTree.frame.id,(await sB.send('Page.getFrameTree')).frameTree.frame.id];
- const map=await mapping(browser,[A,B]),pids=roots.map(id=>Number(map.frames.find(f=>sameFrame(f.frame,id))?.processId));
+ const map=await mapping(browser,[A,B],options.evidenceRoot),pids=roots.map(id=>Number(map.frames.find(f=>sameFrame(f.frame,id))?.processId));
  assert(pids.every(Number.isSafeInteger),'Actual main-frame PID mapping required');assert.equal(pids[0],pids[1],'Shared renderer must really be constructed');
  const events=[];A.on('crash',()=>events.push('A'));B.on('crash',()=>events.push('B'));
  const after=await killRenderer(browser,[A,B],pids[0]);assert(after.every(p=>p.unavailable));
  await Promise.all([A,B].map(p=>p.reload({timeout:15000})));
  return {configuration:'process-per-site for this fault fixture; SiteIsolation and sandbox remain enabled',roots,pids,mapping:map,after,crashEvents:events,limits:['Engine fault-set observation; no claim of automatic production control revocation']};
 });
-await run('renderer-oopif','default',async({A,B,browser})=>{
+await run('renderer-oopif','default',async({A,B,browser,options})=>{
  await A.locator('#entry').fill('UNSUBMITTED_A');await B.locator('#entry').fill('UNSUBMITTED_B');
  const before=await Promise.all([A,B].map(p=>p.evaluate(()=>({instance:lab.instance,input:document.querySelector('#entry').value}))));
  await A.evaluate(()=>{const f=document.createElement('iframe');f.src='http://localhost:19478/interactions?tab=child';document.body.append(f)});
  await waitFor(()=>A.frames().length===2,'cross-site frame');await A.frames()[1].waitForFunction(()=>!!window.lab?.instance);
- const map=await mapping(browser,[A,B]),session=await A.context().newCDPSession(A),tree=(await session.send('Page.getFrameTree')).frameTree;
+ const map=await mapping(browser,[A,B],options.evidenceRoot),session=await A.context().newCDPSession(A),tree=(await session.send('Page.getFrameTree')).frameTree;
  const rootPid=Number(map.frames.find(f=>sameFrame(f.frame,tree.frame.id))?.processId),childId=tree.childFrames?.[0]?.frame.id,childPid=Number(map.frames.find(f=>sameFrame(f.frame,childId))?.processId);
  assert(Number.isSafeInteger(childPid)&&childPid!==rootPid,'Actual out-of-process iframe required');
  const after=await killRenderer(browser,[A,B],childPid);assert(after.every(p=>!p.unavailable));
@@ -149,6 +186,13 @@ for(const kind of ['normal','kill',...(process.platform==='win32'?['destroy-pare
    await fetch('http://127.0.0.1:19479/json/close/'+targetInfo.targetId);
   }catch{}
   await browser.close();
+  await waitFor(async()=>{try{await fetch('http://127.0.0.1:19479/json/list',{signal:AbortSignal.timeout(500)});return false}catch{return true}},'old UI broker endpoint gone',20000);
+  // The debug listener can close before CEF releases its singleton/profile
+  // lock. Wait for the actual original broker, not just for its TCP port.
+  const oldBroker=Number(nativeBefore.guestPID);
+  if(Number.isSafeInteger(oldBroker)&&oldBroker>1)await waitFor(()=>{
+   try{process.kill(oldBroker,0);if(process.platform==='linux'&&readFileSync('/proc/'+oldBroker+'/stat','utf8').split(') ')[1]?.startsWith('Z'))return true;return false}catch(e){return e.code==='ESRCH'||e.code==='ENOENT'}
+  },'old UI broker process exited',20000);
   if(process.platform==='win32'){
    // Close a surviving host after raw parent destruction; this is cleanup,
    // after document survival was measured, not a graceful-detach substitute.

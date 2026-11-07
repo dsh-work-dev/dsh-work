@@ -16,6 +16,7 @@ class SimpleApp : public CefApp, public CefBrowserProcessHandler {
 
   void OnBeforeCommandLineProcessing(const CefString&, CefRefPtr<CefCommandLine> command) override {
     if (std::getenv("BROWSER_LAB_ARCH_SHARED")) command->AppendSwitch("process-per-site");
+    if (std::getenv("BROWSER_LAB_ARCH_OOPIF")) command->AppendSwitch("site-per-process");
   }
   // CefApp methods:
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {

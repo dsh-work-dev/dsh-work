@@ -60,6 +60,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
 public:
   void OnBeforeCommandLineProcessing(const CefString&, CefRefPtr<CefCommandLine> command) override {
     if (std::getenv("BROWSER_LAB_ARCH_SHARED")) command->AppendSwitch("process-per-site");
+    if (std::getenv("BROWSER_LAB_ARCH_OOPIF")) command->AppendSwitch("site-per-process");
   }
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
     return this;
@@ -120,7 +121,10 @@ int main(int argc, char **argv) {
       pollfd fd{STDIN_FILENO, POLLIN, 0};
       if (poll(&fd, 1, 100) > 0) {
         std::string line;
-        if (std::getline(std::cin, line) && line == "close")
+        // This demo's UI owns the pipe. EOF means that owner died: close the
+        // disposable browsers instead of leaking a live profile singleton.
+        // A daemon-owned multi-UI broker needs a different ownership protocol.
+        if (!std::getline(std::cin, line) || line == "close")
           CefPostTask(TID_UI, new CloseTask());
         break;
       }

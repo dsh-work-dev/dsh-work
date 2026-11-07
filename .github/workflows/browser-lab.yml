@@ -98,6 +98,7 @@ jobs:
         with:
           name: browser-lab-native-windows
           path: |
+            tools/browser-lab/results/architecture-*/*/renderer-mapping.json
             tools/browser-lab/results/architecture-*/*/ui-survival.json
             tools/browser-lab/results/architecture-*/*/cleanup.json
             tools/browser-lab/results/architecture-*/*/*.log
@@ -146,6 +147,7 @@ jobs:
           name: browser-lab-native-full-windows-2025
           path: |
             tools/browser-lab/results/hosted-context/*.json
+            tools/browser-lab/results/architecture-*/*/renderer-mapping.json
             tools/browser-lab/results/architecture-*/*/ui-survival.json
             tools/browser-lab/results/architecture-*/*/cleanup.json
             tools/browser-lab/results/architecture-*/*/*.log
@@ -221,6 +223,7 @@ jobs:
         with:
           name: browser-lab-native-full-${{ matrix.os }}
           path: |
+            tools/browser-lab/results/architecture-*/*/renderer-mapping.json
             tools/browser-lab/results/architecture-*/*/ui-survival.json
             tools/browser-lab/results/architecture-*/*/cleanup.json
             tools/browser-lab/results/architecture-*/*/*.log
