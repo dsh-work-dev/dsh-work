@@ -2,8 +2,7 @@
 param(
  [Parameter(Mandatory,ParameterSetName='Bundle')][string]$CefBundle,
  [Parameter(Mandatory,ParameterSetName='SDK')][string]$CefSdk,
- [ValidateSet('bottom','stock')][string]$Composition='bottom',
- [ValidateSet('go','native')][string]$WebView2Loader='go'
+ [ValidateSet('bottom','stock')][string]$Composition='bottom'
 )
 $ErrorActionPreference='Stop'
 $suite=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -33,7 +32,7 @@ foreach($file in @('cefsimple.exe','cefsimple.dll','libcef.dll','icudtl.dat')){i
 New-Item -ItemType Directory -Force "$bundle/cef","$work/host"|Out-Null
 Copy-Item "$CefBundle/*" "$bundle/cef" -Recurse -Force
 Copy-Item "$PSScriptRoot/host/*" "$work/host" -Recurse
-if($Composition -eq 'bottom' -or $WebView2Loader -eq 'native'){
+if($Composition -eq 'bottom'){
  Push-Location $repo
  try{
   go mod download github.com/wailsapp/wails/v3
@@ -45,10 +44,8 @@ if($Composition -eq 'bottom' -or $WebView2Loader -eq 'native'){
  $file=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/composition_host.go'
  (Get-Item $file).IsReadOnly=$false
  $source=[IO.File]::ReadAllText($file)
- if($Composition -eq 'bottom'){
-  if(([regex]::Matches($source,'CreateTargetForHwnd\(hwnd, true\)')).Count -ne 1){throw 'Pinned composition patch does not match exactly once'}
-  [IO.File]::WriteAllText($file,$source.Replace('CreateTargetForHwnd(hwnd, true)','CreateTargetForHwnd(hwnd, false)'))
- }
+ if(([regex]::Matches($source,'CreateTargetForHwnd\(hwnd, true\)')).Count -ne 1){throw 'Pinned composition patch does not match exactly once'}
+ [IO.File]::WriteAllText($file,$source.Replace('CreateTargetForHwnd(hwnd, true)','CreateTargetForHwnd(hwnd, false)'))
  # Diagnostics only in the isolated fork: distinguish an async controller
  # callback stall from CEF startup, without changing WebView2 hosting mode.
  $edgeFile=Join-Path $work 'wails-fork/internal/webview2/pkg/edge/chromium.go'
@@ -60,39 +57,6 @@ if($Composition -eq 'bottom' -or $WebView2Loader -eq 'native'){
   $edgeSource=$edgeSource.Replace($signature,$signature+"`n"+' log.Printf("[BrowserLabWV] phase='+$phase+' hwnd=%x thread=%d", e.hwnd, windows.GetCurrentThreadId())')
  }
  [IO.File]::WriteAllText($edgeFile,$edgeSource)
- if($WebView2Loader -eq 'native'){
-  # Wails' Go module excludes the embed DLL. Supply Microsoft's pinned SDK
-  # loader in this private fork, never in the module/tool cache.
-  $sdkVersion='1.0.4314.35'
-  $package=Join-Path $work 'webview2.nupkg'
-  & curl.exe --fail --location --retry 3 --output $package "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$sdkVersion/microsoft.web.webview2.$sdkVersion.nupkg"
-  if($LASTEXITCODE -ne 0){throw 'Official WebView2 SDK download failed'}
-  $loaderDirectory=Join-Path $work 'wails-fork/internal/webview2/webviewloader/x64'
-  New-Item -ItemType Directory -Force $loaderDirectory|Out-Null
-  $zip=[IO.Compression.ZipFile]::OpenRead($package)
-  try{
-   foreach($entry in @(@('build/native/x64/WebView2Loader.dll',"$loaderDirectory/WebView2Loader.dll"),@('LICENSE.txt',"$bundle/WebView2Loader.LICENSE.txt"))){
-    $item=$zip.GetEntry($entry[0]);if(!$item){throw "Missing SDK entry: $($entry[0])"}
-    [IO.Compression.ZipFileExtensions]::ExtractToFile($item,$entry[1],$true)
-   }
-  }finally{$zip.Dispose()}
-  $signature=Get-AuthenticodeSignature "$loaderDirectory/WebView2Loader.dll"
-  if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'CN=Microsoft Corporation,'){throw 'WebView2 loader signature is not valid Microsoft Authenticode'}
-  if((Get-Item "$loaderDirectory/WebView2Loader.dll").VersionInfo.FileVersion -ne $sdkVersion){throw 'WebView2 loader version mismatch'}
-  # beta.16 declares this diagnostic flag only in its Go-loader build. Supply
-  # the truthful native value in the private copy; no loader API is replaced.
-  [IO.File]::WriteAllText((Join-Path $loaderDirectory '../browser_lab_native_version.go'),"//go:build windows && native_webview2loader`n`npackage webviewloader`n`nvar UsingGoWebview2Loader = false`n")
-  # Embed starts async environment creation, then queries the version. beta.16
-  # clears the pending creation's browser args AND private user-data folder in
-  # that read-only query. Keep Create's override protection; remove only the
-  # query's unrelated mutation so the SDK sees the requested isolated options.
-  $nativeModule=Join-Path $loaderDirectory '../native_module.go'
-  (Get-Item $nativeModule).IsReadOnly=$false
-  $nativeSource=[IO.File]::ReadAllText($nativeModule)
-  $queryMutation='preventEnvAndRegistryOverrides(browserPath, nil, "")'
-  if(($nativeSource.Split([string[]]@($queryMutation),[StringSplitOptions]::None)).Count -ne 2){throw 'Native version-query patch drift'}
-  [IO.File]::WriteAllText($nativeModule,$nativeSource.Replace($queryMutation,'// Browser version queries do not mutate pending environment options.'))
- }
  Push-Location "$work/host"
  try{go mod edit '-replace=github.com/wailsapp/wails/v3=../wails-fork';if($LASTEXITCODE -ne 0){throw 'Isolated module replace failed'}}finally{Pop-Location}
 }
@@ -100,8 +64,7 @@ Push-Location "$work/host"
 try{
  go test -run '^TestGuestWindowProbeReusesCallback$' -count=1 .
  if($LASTEXITCODE -ne 0){throw 'Window probe regression failed'}
- $tags=@();if($WebView2Loader -eq 'native'){$tags=@('-tags','native_webview2loader')}
- go build @tags -o "$bundle/host.exe" .
+ go build -o "$bundle/host.exe" .
  if($LASTEXITCODE -ne 0){throw 'Native host build failed'}
 }finally{Pop-Location}
 Push-Location "$suite/native/gateway"
@@ -118,5 +81,5 @@ $compile=$setup+'cl /nologo /std:c++20 /EHsc /W4 /O2 /DUNICODE /D_UNICODE "'+$PS
 & cmd.exe /d /s /c $compile
 if($LASTEXITCODE -ne 0){throw 'Scoped WGC capture helper build failed'}
 $gitRef=git -C $repo rev-parse HEAD
-@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;composition=$Composition;webView2Loader=$WebView2Loader;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
+@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;composition=$Composition;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
 Write-Host "Built isolated test bundle: $bundle"

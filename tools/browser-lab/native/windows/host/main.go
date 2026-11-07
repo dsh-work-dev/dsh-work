@@ -431,6 +431,14 @@ setInterval(async()=>{try{const s=await(await fetch('/lab/state',{headers:{'X-Br
 		w.Write([]byte(shell(r.URL.Path == "/float")))
 	})
 	l.app = application.New(application.Options{Name: "BROWSER_LAB interaction lab", Assets: application.AssetOptions{Handler: assets}, Windows: application.WindowsOptions{WebviewUserDataPath: filepath.Join(data, "host-profile"), AdditionalBrowserArgs: []string{"--remote-debugging-port=19480"}, WndProcInterceptor: func(h uintptr, msg uint32, wp, lp uintptr) (uintptr, bool) {
+		// Initialise composition with a real, visible parent, without taking
+		// keyboard focus. Keeping the sole initial window hidden until after
+		// Embed can strand the async controller callback on a cold desktop.
+		// The floating host stays hidden; CEF/control readiness is unchanged.
+		if msg == 1 && textAt(h) == "BROWSER_LAB · Windows 集中收尾" {
+			showWindow.Call(h, 4)
+			log.Printf("BrowserLab bootstrap: shown owned main HWND %x without activation", h)
+		}
 		if h == l.mainHWND || h == l.floatHWND {
 			if msg == 5 || msg == 0x02e0 {
 				if msg == 0x02e0 {

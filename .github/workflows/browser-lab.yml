@@ -138,10 +138,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force results/hosted-context | Out-Null
           @{sessionId=(Get-Process -Id $PID).SessionId;interactive=[Environment]::UserInteractive;os=[Environment]::OSVersion.VersionString} | ConvertTo-Json | Set-Content results/hosted-context/desktop.json
-      - run: ./native/windows/build-ci.ps1
+      - id: native_build
+        run: ./native/windows/build-ci.ps1
       - name: Attempt unchanged interactive native suite
         run: node cli.mjs run --profile regression --consent scripted --network
       - name: Probe architectural review boundaries
+        if: always() && steps.native_build.outcome == 'success'
         run: node architecture.mjs
       - uses: actions/upload-artifact@v6
         if: always()
@@ -192,6 +194,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-xfixes0-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk xdotool
       - run: npm ci --ignore-scripts
       - name: Build actual Wails and sandbox-enabled CEF candidate
+        id: native_build
         run: node native/posix/build.mjs
       - name: Permit this lab executable to create sandbox user namespaces
         if: runner.os == 'Linux'
@@ -212,7 +215,7 @@ jobs:
           GDK_BACKEND: x11
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-openbox.log 2>&1 & node cli.mjs run --profile regression --consent scripted --network'
       - name: Probe Linux architectural review boundaries
-        if: runner.os == 'Linux'
+        if: always() && runner.os == 'Linux' && steps.native_build.outcome == 'success'
         env:
           GDK_BACKEND: x11
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-arch-openbox.log 2>&1 & node architecture.mjs'
@@ -220,7 +223,7 @@ jobs:
         if: runner.os == 'macOS'
         run: node cli.mjs run --profile regression --consent scripted --network
       - name: Probe macOS architectural review boundaries
-        if: runner.os == 'macOS'
+        if: always() && runner.os == 'macOS' && steps.native_build.outcome == 'success'
         run: node architecture.mjs
       - uses: actions/upload-artifact@v6
         if: always()
