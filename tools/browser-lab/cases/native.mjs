@@ -17,19 +17,24 @@ async function policyRequest(c,selector,kind){
 async function policyChoice(a,p,choice){
  await a.main.locator('[data-native-policy-id="'+p.id+'"] [data-choice="'+choice+'"]').click();
 }
+async function policyPicture(a,p,id){
+ await a.main.locator('[data-native-policy-id="'+p.id+'"] [data-choice="allow"]').waitFor({state:'visible'});
+ await a.main.evaluate(id=>document.querySelector('[data-native-policy-id="'+id+'"]').scrollIntoView({block:'nearest'}),p.id);
+ return picture(a,id);
+}
 async function popup(c,selector){
  const a=c.adapter,initial=await a.state(),before=await doc(a),denied=await policyRequest(c,selector,'popup');
  await policyChoice(a,denied,'deny');await sleep(200);assert(intact(before,await doc(a)));
  const expired=await policyRequest(c,selector,'popup');await a.command('tab',{tab:'B'});await a.command('tab',{tab:'A'});
  await waitFor(async()=>(await policyState(a)).requests.find(p=>p.id===expired.id)?.status==='expired','selection expires popup');
  const stale=await a.api('backend','/native-policy/answer',{id:expired.id,choice:'allow'});assert(!stale.ok);
- const allowed=await policyRequest(c,selector,'popup');await policyChoice(a,allowed,'allow');
+ const allowed=await policyRequest(c,selector,'popup'),approval=await policyPicture(a,allowed,c.caseId+'-approval');await policyChoice(a,allowed,'allow');
  await waitFor(async()=>(await a.state()).selected==='B'&&(await policyState(a)).requests.find(p=>p.id===allowed.id)?.status==='opened','managed popup destination');
  const documents=await a.docs(),state=await a.state();assert(intact(before,documents.A));assert(documents.B.url.includes('/popup'));
  assert.equal(state.host.id,initial.host.id);assert.equal(state.views.length,2);
  for(const name of ['A','B'])assert.equal(view(state,name).id,view(initial,name).id);
  const isolated=await a.call('backend','/policy-popup-state',{});assert.equal(isolated.targetCount,2);assert(isolated.openerNull&&isolated.wails==='undefined');
- return {evidence:{denied,expired,stale,allowed,documents,isolated,picture:await picture(a,c.caseId)}};
+ return {evidence:{denied,expired,stale,allowed,approval,documents,isolated,picture:await picture(a,c.caseId)}};
 }
 
 export const nativeCases={
@@ -45,6 +50,7 @@ export const nativeCases={
  if(raw.rendering==='cef-osr-shared-frame'&&p.markers.shellPixels<50){
   await a.command('diagnose-presentation');
   const diagnostic=await a.main.evaluate(()=>({ready:document.readyState,title:document.title,background:getComputedStyle(document.body).backgroundColor,bounds:document.body.getBoundingClientRect().toJSON(),children:document.body.children.length,visibility:document.visibilityState}));
+  await a.command('cover');await sleep(200);await picture(a,c.caseId+'-without-guest-diagnostic');await a.command('uncover');
   throw Error('Native shell pixels missing; owned WK diagnostic='+JSON.stringify(diagnostic));
  }
  assert(p.markers.shellPixels>=50&&p.markers.guestPixels>=50,'Native capture must contain both shell and live guest landmarks');return {evidence:{...p,host:s.host,view:view(s,'A'),liveFrame}}},
@@ -93,14 +99,14 @@ export const nativeCases={
  const a=c.adapter,old=await policyRequest(c,'#request-notification','notifications');
  await a.call('backend','/display',{tab:'A',url:fixture(a)});
  const stale=await a.api('backend','/native-policy/answer',{id:old.id,choice:'allow'});assert(!stale.ok);
- const p=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,p,'allow');
+ const p=await policyRequest(c,'#request-notification','notifications'),approval=await policyPicture(a,p,c.caseId+'-approval');await policyChoice(a,p,'allow');
  const granted=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='granted'&&r.request?.settled?r:false},'native notification allow');
  await policyChoice(a,p,'revoke');
  const revoked=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='denied'?r:false},'native notification revoke');
  await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});
  const deny=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,deny,'deny');
  const denied=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.request?.settled&&r.state!=='granted'?r:false},'native notification deny');
- return {evidence:{stale,granted,revoked,denied,scope:'real Notification prompt and CEF content-setting revoke; no device access'}};
+ return {evidence:{stale,approval,granted,revoked,denied,scope:'real Notification prompt and CEF content-setting revoke; no device access'}};
  },
  async 'download.authorization'(c){
  const a=c.adapter,p=await policyRequest(c,'#download-traversal','download');
@@ -109,6 +115,7 @@ export const nativeCases={
  }
  await a.main.locator('[data-native-policy-id="'+p.id+'"] input').waitFor({state:'visible'});
  await a.main.evaluate(id=>{document.querySelector('[data-native-policy-id="'+id+'"] input').value='approved-fixture.txt'},p.id);
+ const approval=await policyPicture(a,p,c.caseId+'-approval');
  await policyChoice(a,p,'allow');
  const complete=await waitFor(async()=>{const r=(await policyState(a)).requests.find(r=>r.id===p.id);return r.result?r:false},'authorized native download');
  assert.equal(complete.result.state,'complete');assert.equal(complete.result.filename,'approved-fixture.txt');assert(complete.result.fixtureContent.startsWith('BROWSER_LAB isolated download'));assert.equal(complete.result.autoOpened,false);
@@ -119,6 +126,6 @@ export const nativeCases={
  assert.equal(canceled.result.state,'canceled');assert(canceled.result.bytes>0);const final=await policyState(a);assert(!final.files.some(f=>f.name===slow.filename||f.name===slow.filename+'.partial'));
  const stale=await policyRequest(c,'#download-link','download');await a.call('backend','/display',{tab:'A',url:fixture(a)});
  const expired=await a.api('backend','/native-policy/answer',{id:stale.id,choice:'allow'});assert(!expired.ok);
- return {evidence:{invalid,complete,canceled,expired,files:final.files}};
+ return {evidence:{invalid,approval,complete,canceled,expired,files:final.files}};
  },
 };

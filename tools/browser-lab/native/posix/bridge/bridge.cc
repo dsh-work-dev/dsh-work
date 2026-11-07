@@ -2,6 +2,7 @@
 // CEF's public CPU OSR API lives exclusively in the broker application.
 #include "osr_surface.h"
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #import <WebKit/WebKit.h>
 #include <algorithm>
 #include <array>
@@ -98,6 +99,10 @@ static std::array<BrowserLabFrameView *, 2> views{};
 - (instancetype)initWithIndex:(int)index {
   if ((self = [super initWithFrame:NSMakeRect(240, 20, 890, 680)])) {
     index_ = index;
+    CALayer *layer = [CALayer layer];
+    layer.contentsGravity = kCAGravityResize;
+    layer.backgroundColor = NSColor.blackColor.CGColor;
+    self.layer = layer;
     self.wantsLayer = YES;
     marked_ = [@"" copy];
     selection_ = NSMakeRange(0, 0);
@@ -124,7 +129,7 @@ static std::array<BrowserLabFrameView *, 2> views{};
     CGImageRelease(image_);
   image_ = nullptr;
   presented_ = 0;
-  [self setNeedsDisplay:YES];
+  self.layer.contents = nil;
 }
 - (void)refreshFrame {
   if (!alive || !browser_ids[index_] || self.hiddenOrHasHiddenAncestor)
@@ -156,22 +161,11 @@ static std::array<BrowserLabFrameView *, 2> views{};
     CGImageRelease(image_);
   image_ = image;
   presented_ = h.sequence;
-  [self setNeedsDisplay:YES];
-}
-- (void)drawRect:(NSRect)rect {
-  [[NSColor blackColor] setFill];
-  NSRectFill(rect);
-  if (image_) {
-    NSImage *image =
-        [[NSImage alloc] initWithCGImage:image_ size:self.bounds.size];
-    [image drawInRect:self.bounds
-              fromRect:NSZeroRect
-             operation:NSCompositingOperationCopy
-              fraction:1
-        respectFlipped:YES
-                 hints:nil];
-    [image release];
-  }
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  self.layer.contentsScale = self.window.backingScaleFactor;
+  self.layer.contents = (id)image_;
+  [CATransaction commit];
 }
 - (void)mouse:(NSEvent *)event kind:(NSString *)kind button:(int)button {
   NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
