@@ -72,6 +72,7 @@ void SimpleHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
            browser->GetHost()->GetRuntimeStyle());
 
   // Add to the list of existing browsers.
+  policy_->Register(browser, static_cast<int>(browser_list_.size()));
   browser_list_.push_back(browser);
 }
 
@@ -103,6 +104,7 @@ bool SimpleHandler::DoClose(CefRefPtr<CefBrowser> browser) {
 
 void SimpleHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
+  policy_->Close(browser);
 
 #if defined(OS_WIN)
   r78::Trace("OnBeforeClose");

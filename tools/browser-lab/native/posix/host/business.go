@@ -34,6 +34,9 @@ func startArtifactServer(data string) (*http.Server, error) {
 // pages have neither the virtual Wails origin nor this token/asset transport.
 func businessProxy(w http.ResponseWriter, r *http.Request, token string) bool {
 	target := ""
+	if strings.HasPrefix(r.URL.Path, "/native-policy/") {
+		target = "http://127.0.0.1:19483" + r.URL.Path
+	}
 	if strings.HasPrefix(r.URL.Path, "/gate/") {
 		target = "http://127.0.0.1:19482/" + strings.TrimPrefix(r.URL.Path, "/gate/")
 	}
@@ -77,6 +80,20 @@ async function stopControl(){try{await Promise.all(((await gate('state')).browse
 window.stopControl=stopControl;
 async function updateGrants(){try{const state=await gate('state');const access=state.browserAccess;document.querySelector('#grants').textContent=access?.sessions?.length?'控制会话已授权':'页面可见；控制需授权';const box=document.querySelector('#requests');box.replaceChildren();for(const request of access?.requests||[]){const row=document.createElement('div');row.dataset.consentId=request.id;const label=document.createElement('p');label.textContent=(request.kind==='browser'?'允许本次测试会话控制？':request.kind==='site'?'允许访问此站点？':'确认本次操作？')+' '+(request.site||request.title||'');row.append(label);for(const [text,choice]of [['允许','allow'],['拒绝','deny']]){const b=document.createElement('button');b.textContent=text;b.dataset.choice=choice;b.onclick=()=>gate('answer',{id:request.id,choice}).then(updateGrants).catch(e=>label.textContent=e.message);row.append(b)}box.append(row)}}catch(e){document.querySelector('#grants').textContent='等待授权服务'}}
 setInterval(updateGrants,700);updateGrants();
+
+const nativeBox=document.createElement('section');nativeBox.id='native-policies';document.querySelector('aside').append(nativeBox);
+async function nativePolicy(path,body){const r=await fetch('/native-policy/'+path,{method:'POST',headers:{'X-Browser-Lab-Token':token,'Content-Type':'application/json'},body:JSON.stringify(body||{})});if(!r.ok)throw Error(await r.text());return r.json()}
+let nativePolicyKey='';
+async function updateNativePolicies(){try{
+ const state=await nativePolicy('state'),items=state.requests.filter(p=>p.status==='pending'||p.choice==='allow'&&!p.revoked&&!p.result&&p.kind!=='popup'),key=JSON.stringify(items);
+ if(key===nativePolicyKey)return;nativePolicyKey=key;nativeBox.replaceChildren();
+ for(const p of items){const row=document.createElement('div');row.dataset.nativePolicyId=p.id;row.dataset.kind=p.kind;
+ const title=document.createElement('p');title.textContent=(p.kind==='popup'?'在标签 B 打开':p.kind==='download'?'保存文件':'通知权限')+' '+p.target;row.append(title);
+ let input;if(p.kind==='download'&&p.status==='pending'){input=document.createElement('input');input.value=p.filename;input.dataset.destination='';input.setAttribute('aria-label','文件名');input.style.width='90%';row.append(input)}
+ for(const choice of p.status==='pending'?['allow','deny']:['revoke']){const button=document.createElement('button');button.dataset.choice=choice;button.textContent=choice==='allow'?'允许':choice==='deny'?'拒绝':'撤销';button.onclick=async()=>{try{await nativePolicy(choice==='revoke'?'revoke':'answer',{id:p.id,choice,...(input?{filename:input.value}:{})});await updateNativePolicies()}catch(e){title.textContent=e.message}};row.append(button)}
+ nativeBox.append(row)}
+ }catch{}}
+setInterval(updateNativePolicies,300);updateNativePolicies();
 `
 
 const recoveryJS = `

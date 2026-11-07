@@ -1,4 +1,5 @@
 // Standalone sandboxed CEF owner; GTK4 and CEF never share a main context.
+#include "../../policy/native_policy.h"
 #include "include/cef_app.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
@@ -19,9 +20,11 @@ class Client final : public CefClient, public CefLifeSpanHandler {
   int index_;
 
 public:
+  BROWSER_LAB_POLICY_CLIENT
   explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    policy_->Register(b, index_);
     if (!views[index_]) {
       views[index_] = b;
       auto display = CefDisplay::GetPrimaryDisplay();
@@ -34,6 +37,7 @@ public:
     }
   }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    policy_->Close(b);
     if (views[index_] && views[index_]->IsSame(b)) {
       views[index_] = nullptr;
       closed_count++;

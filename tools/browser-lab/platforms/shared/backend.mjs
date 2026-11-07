@@ -1,4 +1,5 @@
 import {batchOperations} from './probes.mjs';
+import {nativePolicy} from './native-policy.mjs';
 // Shared sole-owner CEF adapter. Policy/permits live in the real Go Service.
 import http from 'node:http';
 import {randomUUID,timingSafeEqual} from 'node:crypto';
@@ -102,16 +103,19 @@ async function cover(){const h=await hostState();if(h.covered)throw Error('ALREA
 async function display(body){if(!['A','B'].includes(body.tab))throw Error('Unknown display tab');const u=new URL(body.url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw Error('DISPLAY_URL_SCHEME_BLOCKED');const tab=tabs.get(body.tab);let security=null;const response=await tab.page.goto(u.href,{waitUntil:'domcontentloaded',timeout:30000});if(response)security=await response.securityDetails();const state=await identity(tab);record('display',{tab:body.tab,url:tab.page.url(),status:response?.status(),security});return {displayed:true,...state,status:response?.status(),security}}
 async function refresh(){const old=browser;browser=null;connected=false;await old.close();await connectTargets()}
 const batchProbe=batchOperations({getBrowser:()=>browser,tabs,hostState,root,session,refresh});
+const policy=nativePolicy({tabs,hostState,identity,display,native,record,dataRoot:process.env.BROWSER_LAB_DATA_ROOT});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');const supplied=Buffer.from(req.headers['x-browser-lab-token']||'');const expected=Buffer.from(token);
  if(req.headers.origin||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){audit.denied++;record('unauthenticated-request',{path:req.url,originPresent:!!req.headers.origin});res.writeHead(403);res.end(JSON.stringify({error:'LAB_AUTH_REQUIRED'}));return}
  try{let body={};if(req.method==='POST'){let text='';for await(const part of req){text+=part;if(text.length>65536)throw Error('Body too large')};body=JSON.parse(text||'{}')}
  let value;
  if(['/batch-start','/batch-finish','/popup-clean','/download-mode','/permissions','/permission-result','/storage-get','/storage-set'].includes(req.url))value=await batchProbe(req.url,body);
+ else if(req.url.startsWith('/native-policy/'))value=await policy(req.url.slice('/native-policy/'.length),body);
  else if(req.url==='/health')value={ready:connected&&controlReady&&!faultError,targets:tabs.size};
  else if(req.url==='/profile-detach'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();value={detached:true}}
  else if(req.url==='/profile-close'){if(process.platform!=='win32'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();await native('close-broker')}else{for(const tab of [...tabs.values()])await tab.page.close();await waitUntil(()=>!connected,'profile graceful disconnect');await faults}await waitUntil(async()=>!(await hostState()).guestRunning,'profile broker exit');value=await faultState()}
  else if(req.url==='/page-text')value=await tabs.get('A').page.evaluate(()=>({text:document.body?.innerText,url:location.href,title:document.title}));
+ else if(req.url==='/policy-popup-state')value={targetCount:(await browser.contexts()[0].pages()).length,...await tabs.get('B').page.evaluate(()=>({openerNull:opener===null,wails:typeof window._wails,url:location.href}))};
  else if(req.url==='/manual-reset'){for(const tab of tabs.values())await tab.page.evaluate(()=>{lab.events=[];if(lab.manualRecorderInstalled)return;lab.manualRecorderInstalled=true;for(const type of ['focusin','focusout','keydown','keyup','compositionstart','compositionupdate','compositionend','beforeinput','input'])document.addEventListener(type,e=>{if(e.target.id!=='entry')return;lab.events.push({time:Date.now(),type,target:e.target.id,data:e.data,trusted:e.isTrusted,value:e.target.value});if(lab.events.length>3000)lab.events.shift()},true)});value={recording:true}}
  else if(req.url==='/manual-events'){value={};for(const [name,tab]of tabs)value[name]=await tab.page.evaluate(()=>({value:document.querySelector('#entry').value,events:lab.events}))}
  else if(req.url==='/native-entry-focus'){const h=await hostState();requireControl(tabs.get(h.selected));if(!h.interactable)throw Error('NOT_INTERACTABLE');await tabs.get(h.selected).page.locator('#entry').focus();value={focused:true}}

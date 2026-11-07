@@ -1,4 +1,5 @@
 // Standalone sandbox-enabled CEF broker. The Wails process never loads CEF.
+#include "../../policy/native_policy.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_client.h"
@@ -58,10 +59,12 @@ class Client final : public CefClient,
   int index_;
 
 public:
+  BROWSER_LAB_POLICY_CLIENT
   explicit Client(int index) : index_(index) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    policy_->Register(b, index_);
     if (!browsers[index_]) {
       browsers[index_] = b;
       Event("created", index_, b->GetIdentifier());
@@ -72,6 +75,7 @@ public:
   }
   bool DoClose(CefRefPtr<CefBrowser>) override { return false; }
   void OnBeforeClose(CefRefPtr<CefBrowser> b) override {
+    policy_->Close(b);
     if (browsers[index_] && browsers[index_]->IsSame(b)) {
       browsers[index_] = nullptr;
       closed_count++;

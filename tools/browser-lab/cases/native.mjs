@@ -8,15 +8,28 @@ const intact=(a,b)=>a.instance===b.instance&&a.value===b.value&&a.result===b.res
 const fixture=(a,name='A',host='127.0.0.1')=>`http://${host}:19478/interactions?tab=${name}`;
 async function input(c,text){return c.action('browser_type','#entry',{text})}
 async function picture(a,id,which){const path=await a.capture(id,which);return {artifact:basename(path),markers:a.visualMarkers(path)}}
-async function popup(c,selector,gap) {
- const a=c.adapter,start=await a.call('backend','/batch-start',{kind:'popup'});
- try{
-  const req=await c.permit(await c.request('browser_click',selector));
-  const action=await a.api('gateway','/execute',req);
-  const observed=await a.call('backend','/batch-finish',{id:start.id});
-  if(observed.addedTargets.length)return {gap,evidence:{action,targets:observed.addedTargets,nativeWindows:observed.guestTopLevelWindows.map(w=>({id:String(w.hwnd),ownerId:String(w.parentHWND),visible:w.visible,title:w.title})),registeredTargets:observed.registeredAdapterTabs}};
-  assert(action.ok,'Click failed without the known popup signature');return {evidence:{action,observed}};
- }finally{await a.call('backend','/popup-clean',{id:start.id})}
+async function policyState(a){return a.call('backend','/native-policy/state',{})}
+async function policyRequest(c,selector,kind){
+ const a=c.adapter,before=new Set((await policyState(a)).requests.map(p=>p.id));
+ await c.action('browser_click',selector);
+ return waitFor(async()=>{const s=await policyState(a);return s.requests.find(p=>!before.has(p.id)&&p.kind===kind)},'native '+kind+' request');
+}
+async function policyChoice(a,p,choice){
+ await a.main.locator('[data-native-policy-id="'+p.id+'"] [data-choice="'+choice+'"]').click();
+}
+async function popup(c,selector){
+ const a=c.adapter,initial=await a.state(),before=await doc(a),denied=await policyRequest(c,selector,'popup');
+ await policyChoice(a,denied,'deny');await sleep(200);assert(intact(before,await doc(a)));
+ const expired=await policyRequest(c,selector,'popup');await a.command('tab',{tab:'B'});await a.command('tab',{tab:'A'});
+ await waitFor(async()=>(await policyState(a)).requests.find(p=>p.id===expired.id)?.status==='expired','selection expires popup');
+ const stale=await a.api('backend','/native-policy/answer',{id:expired.id,choice:'allow'});assert(!stale.ok);
+ const allowed=await policyRequest(c,selector,'popup');await policyChoice(a,allowed,'allow');
+ await waitFor(async()=>(await a.state()).selected==='B'&&(await policyState(a)).requests.find(p=>p.id===allowed.id)?.status==='opened','managed popup destination');
+ const documents=await a.docs(),state=await a.state();assert(intact(before,documents.A));assert(documents.B.url.includes('/popup'));
+ assert.equal(state.host.id,initial.host.id);assert.equal(state.views.length,2);
+ for(const name of ['A','B'])assert.equal(view(state,name).id,view(initial,name).id);
+ const isolated=await a.call('backend','/policy-popup-state',{});assert.equal(isolated.targetCount,2);assert(isolated.openerNull&&isolated.wails==='undefined');
+ return {evidence:{denied,expired,stale,allowed,documents,isolated,picture:await picture(a,c.caseId)}};
 }
 async function download(c,selector,name,cancel=false) {
  const a=c.adapter,start=await a.call('backend','/batch-start',{kind:'download'});
@@ -26,7 +39,15 @@ async function download(c,selector,name,cancel=false) {
 }
 
 export const nativeCases={
- async 'native.composition'(c){const a=c.adapter,s=await a.state();assert(s.ready&&!s.covered&&view(s,'A').visible);const p=await picture(a,c.caseId);assert(p.markers.shellPixels>=50&&p.markers.guestPixels>=50,'Native capture must contain both shell and live guest landmarks');return {evidence:{...p,host:s.host,view:view(s,'A')}}},
+ async 'native.composition'(c){const a=c.adapter,s=await a.state();assert(s.ready&&!s.covered&&view(s,'A').visible);
+ const raw=await a.call('control','/state');let liveFrame;
+ if(raw.rendering==='cef-osr-shared-frame'){
+  assert.equal(raw.cefImagesInHost,0);assert.equal(raw.cefInHost,false);assert.notEqual(raw.hostPID,raw.guestPID);
+  const before=raw.tabs.find(t=>t.name==='A').presentedSequence;
+  await input(c,'live-frame');await c.action('browser_click','#apply');
+  liveFrame=await waitFor(async()=>{const r=await a.call('control','/state');return r.tabs.find(t=>t.name==='A').presentedSequence>before?r:false},'live OSR frame after real page mutation');
+ }
+ const p=await picture(a,c.caseId);assert(p.markers.shellPixels>=50&&p.markers.guestPixels>=50,'Native capture must contain both shell and live guest landmarks');return {evidence:{...p,host:s.host,view:view(s,'A'),liveFrame}}},
  async 'sandbox.renderer'(c){const evidence=await c.adapter.sandboxAssessment();assert(evidence.rendererSandboxed);return {evidence}},
  async 'content.html'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:a.session.endpoints.artifact+'/'});const before=await doc(a);await input(c,'HTML-'+c.options.runId);await c.action('browser_click','#apply');const after=await doc(a),assets=await a.call('backend','/artifact-state');assert.equal(after.instance,before.instance);assert.equal(after.result,'HTML-'+c.options.runId);assert(assets.imageLoaded&&assets.js.includes('已加载')&&assets.css==='rgb(18, 62, 80)');return {evidence:{assets,before,after,picture:await picture(a,c.caseId)}}},
  async 'content.localhost'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});await input(c,'localhost');await c.action('browser_click','#apply');const d=await doc(a);assert.equal(d.result,'localhost');return {evidence:d}},
@@ -51,11 +72,45 @@ export const nativeCases={
  async 'isolation.artifact-root'(c){const a=c.adapter,result=[];for(const path of ['/escape/outside.txt','/%2e%2e/private/outside.txt']){const r=await fetch(a.session.endpoints.artifact+path),body=await r.text();assert(r.status>=400&&!body.includes('BROWSER_LAB_PRIVATE_SENTINEL'));result.push({path,status:r.status})}const file=await a.api('backend','/display',{tab:'A',url:'file:///browser-lab-no-file'});assert(!file.ok);return {evidence:{result,file,scope:'root escape/junction and disallowed file scheme'}}},
  async 'profile.same-origin'(c){const a=c.adapter,key='browser_lab_'+randomUUID().replaceAll('-',''),guest='guest-'+randomUUID(),host='host-'+randomUUID(),original=a.float.url();try{const first=await a.call('backend','/storage-set',{key,value:guest}),peer=await a.call('backend','/storage-get',{key,tab:'B'});assert.equal(peer.localStorage,guest);await a.float.goto(fixture(a,'host'),{waitUntil:'domcontentloaded'});const before=await a.float.evaluate(key=>({storage:localStorage.getItem(key),cookie:document.cookie}),key);assert.equal(before.storage,null);assert(!before.cookie.includes(guest));await a.float.evaluate(({key,value})=>{localStorage.setItem(key,value);document.cookie=key+'='+value+'; Path=/; Max-Age=3600'},{key,value:host});const after=await a.call('backend','/storage-get',{key});assert.equal(after.localStorage,guest);assert(!after.cookie.includes(host));return {evidence:{first,peer,hostBefore:before,guestAfter:after}}}finally{await a.float.goto(original,{waitUntil:'domcontentloaded'})}},
  async 'profile.persistence'(c){const a=c.adapter,key='browser_lab_'+randomUUID().replaceAll('-',''),value='persist-'+randomUUID();await a.call('backend','/storage-set',{key,value});const before=await a.state();await a.call('backend','/profile-close',{});await a.recover('broker');const after=await a.state(),state=await a.call('backend','/storage-get',{key});assert.equal(state.localStorage,value);assert(state.cookie.includes(value));assert.equal(before.host.id,after.host.id);assert.notEqual(before.viewGeneration,after.viewGeneration);return {evidence:{state,beforeGeneration:before.viewGeneration,afterGeneration:after.viewGeneration}}},
- 'popup.window-open':c=>popup(c,'#open-window','R78-popup-window-open'),
- 'popup.target-blank':c=>popup(c,'#open-tab','R78-popup-unmanaged'),
- async 'download.attached-default'(c){const r=await download(c,'#download-link',c.caseId);if(r.downloads.some(d=>d.failure===null))return {gap:'R78-download-auto-save',evidence:r};return {evidence:r}},
- async 'download.native-default'(c){const a=c.adapter;await a.call('backend','/download-mode',{mode:'default'});try{const results=[];for(const [selector,name,cancel] of [['#download-link','normal',false],['#download-traversal','name',false],['#download-cancel','slow',true]]){const r=await download(c,selector,c.caseId+'-'+name,cancel);assert(r.downloads.length&&r.downloads.every(d=>d.failure==='canceled'));results.push(r)}return {evidence:{results,scope:'native-default cancellation; not approved destination or active-download revoke'}}}finally{await a.call('backend','/download-mode',{mode:'deny'})}},
+ 'popup.window-open':c=>popup(c,'#open-window'),
+ 'popup.target-blank':c=>popup(c,'#open-tab'),
+ async 'download.attached-default'(c){
+ const a=c.adapter,before=await policyState(a),p=await policyRequest(c,'#download-link','download');
+ await sleep(500);assert.deepEqual((await policyState(a)).files,before.files);await policyChoice(a,p,'deny');
+ return {evidence:{request:p,before,after:await policyState(a),scope:'actual attachment with DevTools default; no write before destination consent'}};
+ },
+ async 'download.native-default'(c){
+ const a=c.adapter;await a.call('backend','/download-mode',{mode:'default'});
+ try{const results=[];for(const selector of ['#download-link','#download-traversal','#download-cancel']){
+ const before=await policyState(a),p=await policyRequest(c,selector,'download');await policyChoice(a,p,'deny');await sleep(100);
+ assert.deepEqual((await policyState(a)).files,before.files);results.push(p)}return {evidence:{results}}}
+ finally{await a.call('backend','/download-mode',{mode:'deny'})}
+ },
  async 'permissions.defaults'(c){const evidence=await c.adapter.call('backend','/permissions',{});assert(!Object.values(evidence.queried).includes('granted'));return {evidence}},
- async 'permissions.lifecycle'(c){const a=c.adapter;await c.action('browser_click','#request-notification');let result;for(let i=0;i<15;i++){result=await a.call('backend','/permission-result');if(result.request?.settled)break;await sleep(200)}assert(result.request?.started&&result.request.trustedClick);assert.notEqual(result.state,'granted','Unexpected permission grant without a native authorization flow');return {gap:'R78-permission-lifecycle',evidence:{result,observationWindowMs:3000,picture:await picture(a,c.caseId),scope:'Real notification request denied/default or unanswered in observation window; native allow/revoke lifecycle absent; no device access'}}},
- async 'download.authorization'(c){const a=c.adapter;await a.call('backend','/download-mode',{mode:'default'});try{const result=await download(c,'#download-link',c.caseId);assert(result.downloads.length&&result.downloads.every(d=>d.failure==='canceled'),'Unexpected download outcome without native destination authorization');return {gap:'R78-download-authorization',evidence:{result,scope:'Actual download with native policy; canceled without an approved destination; grant/path/revoke UI absent'}}}finally{await a.call('backend','/download-mode',{mode:'deny'})}},
+ async 'permissions.lifecycle'(c){
+ const a=c.adapter,p=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,p,'allow');
+ const granted=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='granted'&&r.request?.settled?r:false},'native notification allow');
+ await policyChoice(a,p,'revoke');
+ const revoked=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='denied'?r:false},'native notification revoke');
+ await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});
+ const deny=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,deny,'deny');
+ const denied=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.request?.settled&&r.state!=='granted'?r:false},'native notification deny');
+ return {evidence:{granted,revoked,denied,scope:'real Notification prompt and CEF content-setting revoke; no device access'}};
+ },
+ async 'download.authorization'(c){
+ const a=c.adapter,p=await policyRequest(c,'#download-traversal','download');
+ const invalid=await a.api('backend','/native-policy/answer',{id:p.id,choice:'allow',filename:'../outside.txt'});assert(!invalid.ok);
+ await a.main.evaluate(id=>{document.querySelector('[data-native-policy-id="'+id+'"] input').value='approved-fixture.txt'},p.id);
+ await policyChoice(a,p,'allow');
+ const complete=await waitFor(async()=>{const r=(await policyState(a)).requests.find(r=>r.id===p.id);return r.result?r:false},'authorized native download');
+ assert.equal(complete.result.state,'complete');assert.equal(complete.result.filename,'approved-fixture.txt');assert(complete.result.fixtureContent.startsWith('BROWSER_LAB isolated download'));assert.equal(complete.result.autoOpened,false);
+ const slow=await policyRequest(c,'#download-cancel','download');await policyChoice(a,slow,'allow');
+ await waitFor(async()=>(await policyState(a)).files.some(f=>f.name===slow.filename+'.partial'),'native streaming download');
+ await policyChoice(a,slow,'revoke');
+ const canceled=await waitFor(async()=>{const r=(await policyState(a)).requests.find(r=>r.id===slow.id);return r.result?r:false},'native active download revoked');
+ assert.equal(canceled.result.state,'canceled');const final=await policyState(a);assert(!final.files.some(f=>f.name===slow.filename||f.name===slow.filename+'.partial'));
+ const stale=await policyRequest(c,'#download-link','download');await a.call('backend','/display',{tab:'A',url:fixture(a)});
+ const expired=await a.api('backend','/native-policy/answer',{id:stale.id,choice:'allow'});assert(!expired.ok);
+ return {evidence:{invalid,complete,canceled,expired,files:final.files}};
+ },
 };

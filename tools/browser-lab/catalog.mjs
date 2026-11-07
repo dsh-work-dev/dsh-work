@@ -1,6 +1,6 @@
 // Stable IDs describe product requirements, not a particular OS or script.
 const c = (id, title, capability, extra = {}) => ({id, title, capability, ...extra});
-export const catalogVersion = 2;
+export const catalogVersion = 3;
 export const cases = [
  c('native.composition', '宿主与 live guest 同窗可见', 'nativeCapture'),
  c('sandbox.renderer', '实际 renderer token 沙箱', 'sandboxProbe'),
@@ -27,13 +27,13 @@ export const cases = [
  c('isolation.artifact-root', 'HTML root 阻止目录及 junction 逃逸', 'artifactRoot'),
  c('profile.same-origin', '同 origin CEF 与宿主存储隔离', 'hostStorage'),
  c('profile.persistence', '正常重启保留 persistent profile', 'profileRestart'),
- c('popup.window-open', 'window.open 进入受控页面生命周期', 'popup', {knownGap: 'R78-popup-window-open'}),
- c('popup.target-blank', '_blank 不产生未托管顶层窗口', 'popup', {knownGap: 'R78-popup-unmanaged'}),
- c('download.attached-default', '附加自动化不绕过下载目的地授权', 'download', {knownGap: 'R78-download-auto-save'}),
+ c('popup.window-open', 'window.open 进入受控页面生命周期', 'popup'),
+ c('popup.target-blank', '_blank 不产生未托管顶层窗口', 'popup'),
+ c('download.attached-default', '附加自动化不绕过下载目的地授权', 'download'),
  c('download.native-default', '恢复 Alloy 默认后观察取消', 'download'),
  c('permissions.defaults', '敏感权限默认未获授予（仅 query）', 'permissions'),
- c('permissions.lifecycle', '站点权限允许/拒绝/撤销的原生流程', 'permissions', {knownGap:'R78-permission-lifecycle'}),
- c('download.authorization', '下载目的地/路径/取消撤销/自动打开契约', 'download', {knownGap:'R78-download-authorization'}),
+ c('permissions.lifecycle', '站点权限允许/拒绝/撤销的原生流程', 'permissions'),
+ c('download.authorization', '下载目的地/路径/取消撤销/自动打开契约', 'download'),
  c('input.native-ime', '真实键盘焦点与中文 IME 组合提交', 'physicalInput', {manual: true}),
  c('dpi.mixed-monitors', '真实不同缩放显示器之间移动', 'mixedDPI', {manual: true}),
 ];
