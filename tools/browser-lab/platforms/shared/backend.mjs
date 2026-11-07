@@ -106,7 +106,11 @@ const batchProbe=batchOperations({getBrowser:()=>browser,tabs,hostState,root,ses
 const policy=nativePolicy({tabs,hostState,identity,display,native,record,dataRoot:process.env.BROWSER_LAB_DATA_ROOT});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');const supplied=Buffer.from(req.headers['x-browser-lab-token']||'');const expected=Buffer.from(token);
- if(req.headers.origin||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){audit.denied++;record('unauthenticated-request',{path:req.url,originPresent:!!req.headers.origin});res.writeHead(403);res.end(JSON.stringify({error:'LAB_AUTH_REQUIRED'}));return}
+ // CEF browser URLRequest sets its initiator to the request URL. Its POSTs
+ // therefore carry our own origin; permit that only on the native RPC route,
+ // still requiring the private broker token. Foreign page origins stay denied.
+ const nativeOrigin=req.url.startsWith('/native-policy/')&&req.headers.origin==='http://127.0.0.1:19483';
+ if((req.headers.origin&&!nativeOrigin)||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){audit.denied++;record('unauthenticated-request',{path:req.url,originPresent:!!req.headers.origin});res.writeHead(403);res.end(JSON.stringify({error:'LAB_AUTH_REQUIRED'}));return}
  try{let body={};if(req.method==='POST'){let text='';for await(const part of req){text+=part;if(text.length>65536)throw Error('Body too large')};body=JSON.parse(text||'{}')}
  let value;
  if(['/batch-start','/batch-finish','/popup-clean','/download-mode','/permissions','/permission-result','/storage-get','/storage-set'].includes(req.url))value=await batchProbe(req.url,body);
