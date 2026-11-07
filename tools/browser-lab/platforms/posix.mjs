@@ -76,29 +76,7 @@ export async function startNative(options){
   await a.main.waitForFunction(()=>!!document.querySelector('#requests'));
   await a.command('float');await a.float.waitForFunction(()=>!!document.querySelector('#requests'));await a.command('dock');
  }catch(e){try{await manager.capture('startup-trusted-ui')}catch(capture){writeFileSync(join(options.evidenceRoot,'startup-capture.log'),String(capture))}try{await a.close()}catch(cleanup){e.message+='; cleanup: '+cleanup.message}throw e}
- if(process.platform==='darwin'){
-  async function coldHostTrial(c,normal){
-   const key='browser_lab_'+crypto.randomUUID().replaceAll('-',''),value='cold-'+crypto.randomUUID();
-   if(normal)await a.call('backend','/storage-set',{key,value});
-   const before=await a.state(),oldPID=manager.child.pid;
-   let oldRequest,held,pendingResult;
-   if(!normal){await c.action('browser_type','#entry',{text:'before-broker-fault'});oldRequest=await c.permit(await c.request('browser_type','#entry',{text:'must-not-dispatch',_labHoldMs:10000}));held=await c.hold(oldRequest)}
-   let sampleTimer;
-   if(normal){await a.call('backend','/profile-detach',{});sampleTimer=setTimeout(()=>{if(manager.child.exitCode===null&&!manager.child.signalCode)try{execFileSync('/usr/bin/sample',[String(oldPID),'3','-file',join(options.evidenceRoot,'normal-shutdown-sample.log')],{timeout:7000})}catch(e){writeFileSync(join(options.evidenceRoot,'normal-shutdown-sample-error.log'),String(e))}},2000);await a.call('control','/command?action=quit',{})}else await a.api('control','/command?action=crash-broker',{}).catch(()=>null);
-   await waitFor(()=>manager.child.exitCode!==null||manager.child.signalCode,'actual shared host termination',20000);
-   if(sampleTimer)clearTimeout(sampleTimer);
-   const oldExit={pid:oldPID,code:manager.child.exitCode,signal:manager.child.signalCode};
-   if(normal&&oldExit.code!==0)throw Error('Normal persistent-profile shutdown failed: '+JSON.stringify(oldExit));
-   if(held){pendingResult=await held.operation;if(pendingResult.ok)throw Error('Pending operation survived shared-host crash')}
-   await manager.restartHost();await a.call('backend','/host-rebind',{});await a.command('float');await a.float.waitForFunction(()=>!!document.querySelector('#requests'));await a.command('dock');const after=await a.state();
-   if(before.host.id===after.host.id)throw Error('Host-loss trial did not produce a new Wails native window');
-   const stored=normal?await a.call('backend','/storage-get',{key}):undefined;
-   if(normal&&stored.localStorage!==value)throw Error('Cold profile did not persist');
-   const oldPermit=oldRequest?await c.denied(oldRequest):undefined;
-   return {gap:'R78-macos-shared-broker',evidence:{before,after,oldExit,hostPreserved:false,storage:stored,pendingResult,oldPermit,scope:normal?'Actual whole-host normal restart, persistent storage retained; Wails not preserved':'Actual CEF/broker PID kill also terminates Wails in this candidate'}};
-  }
-  a.caseOverrides={'recovery.broker':c=>coldHostTrial(c,false),'profile.persistence':c=>coldHostTrial(c,true)};
- }
+
  return a;
 }
 
