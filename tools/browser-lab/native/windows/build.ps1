@@ -82,6 +82,16 @@ if($Composition -eq 'bottom' -or $WebView2Loader -eq 'native'){
   # beta.16 declares this diagnostic flag only in its Go-loader build. Supply
   # the truthful native value in the private copy; no loader API is replaced.
   [IO.File]::WriteAllText((Join-Path $loaderDirectory '../browser_lab_native_version.go'),"//go:build windows && native_webview2loader`n`npackage webviewloader`n`nvar UsingGoWebview2Loader = false`n")
+  # Embed starts async environment creation, then queries the version. beta.16
+  # clears the pending creation's browser args AND private user-data folder in
+  # that read-only query. Keep Create's override protection; remove only the
+  # query's unrelated mutation so the SDK sees the requested isolated options.
+  $nativeModule=Join-Path $loaderDirectory '../native_module.go'
+  (Get-Item $nativeModule).IsReadOnly=$false
+  $nativeSource=[IO.File]::ReadAllText($nativeModule)
+  $queryMutation='preventEnvAndRegistryOverrides(browserPath, nil, "")'
+  if(($nativeSource.Split([string[]]@($queryMutation),[StringSplitOptions]::None)).Count -ne 2){throw 'Native version-query patch drift'}
+  [IO.File]::WriteAllText($nativeModule,$nativeSource.Replace($queryMutation,'// Browser version queries do not mutate pending environment options.'))
  }
  Push-Location "$work/host"
  try{go mod edit '-replace=github.com/wailsapp/wails/v3=../wails-fork';if($LASTEXITCODE -ne 0){throw 'Isolated module replace failed'}}finally{Pop-Location}
