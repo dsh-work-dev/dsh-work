@@ -119,6 +119,13 @@ const server=http.createServer(async(req,res)=>{
  else if(req.url==='/profile-detach'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();value={detached:true}}
  else if(req.url==='/profile-close'){if(process.platform!=='win32'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();await native('close-broker')}else{for(const tab of [...tabs.values()])await tab.page.close();await waitUntil(()=>!connected,'profile graceful disconnect');await faults}await waitUntil(async()=>!(await hostState()).guestRunning,'profile broker exit');value=await faultState()}
  else if(req.url==='/page-text')value=await tabs.get('A').page.evaluate(()=>({text:document.body?.innerText,url:location.href,title:document.title}));
+ else if(req.url==='/presentation-barrier'){
+  const h=await hostState(),tab=tabs.get(h.selected);
+  if(connected&&h.interactable&&tab&&!tab.crashed){
+   await tab.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   value={live:true,selected:h.selected};
+  }else value={live:false,reason:'No live interactable guest to paint'};
+ }
  else if(req.url==='/policy-popup-state')value={targetCount:(await browser.contexts()[0].pages()).length,...await tabs.get('B').page.evaluate(()=>({openerNull:opener===null,wails:typeof window._wails,url:location.href}))};
  else if(req.url==='/manual-reset'){for(const tab of tabs.values())await tab.page.evaluate(()=>{lab.events=[];if(lab.manualRecorderInstalled)return;lab.manualRecorderInstalled=true;for(const type of ['focusin','focusout','keydown','keyup','compositionstart','compositionupdate','compositionend','beforeinput','input'])document.addEventListener(type,e=>{if(e.target.id!=='entry')return;lab.events.push({time:Date.now(),type,target:e.target.id,data:e.data,trusted:e.isTrusted,value:e.target.value});if(lab.events.length>3000)lab.events.shift()},true)});value={recording:true}}
  else if(req.url==='/manual-events'){value={};for(const [name,tab]of tabs)value[name]=await tab.page.evaluate(()=>({value:document.querySelector('#entry').value,events:lab.events}))}

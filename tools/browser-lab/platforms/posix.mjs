@@ -42,7 +42,16 @@ export async function startNative(options){
    else await this.command('native-key');
    return {nativeFocus:state.nativeFocus,method:process.platform==='linux'?'XTEST on owned Xvfb':'NSEvent to owned NSWindow'};
   },
-  capture:(name,which)=>manager.capture(name,which),visualMarkers:path=>manager.markers(path),
+  async capture(name,which){
+   if(process.platform==='darwin'){
+    // Source layout/paint precedes CEF's OSR callback, then the 30Hz host
+    // frame reader and Core Animation commit. Capture the completed action,
+    // rather than an earlier in-flight input/caret frame.
+    await this.call('backend','/presentation-barrier',{});
+    await sleep(150);
+   }
+   return manager.capture(name,which);
+  },visualMarkers:path=>manager.markers(path),
   async sandboxAssessment(){
    const processes=(await this.call('backend','/processes')).processInfo,renderers=processes.filter(p=>p.type==='renderer');
    const rows=[],canary=join(session.dataRoot,'private/outside.txt');
