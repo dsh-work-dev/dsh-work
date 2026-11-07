@@ -144,8 +144,8 @@ static std::array<BrowserLabFrameView *, 2> views{};
   CGImageRef image = CGImageCreate(
       h.width, h.height, 8, 32, size_t(h.width) * 4, color,
       static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Little) |
-          static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst), provider,
-      nullptr, false, kCGRenderingIntentDefault);
+          static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst),
+      provider, nullptr, false, kCGRenderingIntentDefault);
   CGColorSpaceRelease(color);
   CGDataProviderRelease(provider);
   if (!image)
@@ -569,6 +569,26 @@ LAB_EXPORT const char *lab_state() {
   bool inGuest = responder == views[selected];
   NSView *fv =
       [responder isKindOfClass:[NSView class]] ? (NSView *)responder : nil;
+  NSMutableArray *brokerWindows = [NSMutableArray array];
+  CFArrayRef windowInfo = CGWindowListCopyWindowInfo(
+      kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+      kCGNullWindowID);
+  if (windowInfo) {
+    for (NSDictionary *w in (NSArray *)windowInfo) {
+      if ([w[(id)kCGWindowOwnerPID] intValue] != broker_pid)
+        continue;
+      [brokerWindows addObject:@{
+        @"hwnd" : w[(id)kCGWindowNumber] ?: @0,
+        @"parentHWND" : @0,
+        @"visible" : @YES,
+        @"title" : w[(id)kCGWindowName] ?: @""
+      }];
+    }
+    CFRelease(windowInfo);
+  }
+  NSData *windowsJSON = [NSJSONSerialization dataWithJSONObject:brokerWindows
+                                                        options:0
+                                                          error:nullptr];
   std::ostringstream s;
   int cefImages = 0;
   for (uint32_t i = 0; i < _dyld_image_count(); ++i) {
@@ -607,8 +627,10 @@ LAB_EXPORT const char *lab_state() {
       << ",\"dpi\":" << dpi(w)
       << ",\"fault\":" << (faults[i] ? "true" : "false") << "}";
   }
-  s << "],\"guestTopLevelWindows\":[],\"nativeFocus\":{\"inGuest\":"
-    << (inGuest ? "true" : "false") << ",\"inHost\":"
+  s << "],\"guestTopLevelWindows\":"
+    << std::string((const char *)windowsJSON.bytes, windowsJSON.length)
+    << ",\"nativeFocus\":{\"inGuest\":" << (inGuest ? "true" : "false")
+    << ",\"inHost\":"
     << (fv && [fv isDescendantOf:main_window.contentView] && !inGuest ? "true"
                                                                       : "false")
     << "}}";

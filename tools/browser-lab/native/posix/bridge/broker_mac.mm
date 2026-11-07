@@ -1,5 +1,6 @@
 // Standalone sandbox-enabled CEF broker. The Wails process never loads CEF.
 #include "../../policy/native_policy.h"
+#include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/cef_client.h"
@@ -324,6 +325,12 @@ int main(int argc, char **argv) {
         }
         if (pending.size() > 65536)
           break;
+      }
+      if (reading) {
+        auto close = CefDictionaryValue::Create();
+        close->SetString("op", "close");
+        close->SetInt("index", 0);
+        CefPostTask(TID_UI, base::BindOnce(Command, close));
       }
     });
     CefRunMessageLoop();

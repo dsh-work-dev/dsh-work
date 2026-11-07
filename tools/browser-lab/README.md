@@ -67,7 +67,7 @@ node tools/browser-lab/cli.mjs run --profile regression --consent scripted --net
 npm run --prefix tools/browser-lab qualify
 ```
 
-目录 v2 有 34 个稳定 requirement ID：32 个自动场景与 2 个人工场景。自动项覆盖原有 Windows 场景，并单列窗口缩放、原生焦点及定向 ASCII 事件；权限与下载授权生命周期会实际请求，再报告当前能力缺口，不再静态跳过。原生键盘合成只在本次 GitHub runner 桌面执行，不代表物理键盘或 IME。人工记录须包含同一 run ID、操作者、时间与具体观察；用 `--run-id` 和 `--manual-evidence` 提供，不能拿上次报告或 CDP 填字替代真人输入。
+目录 v3 有 34 个稳定 requirement ID：32 个自动场景与 2 个人工场景。自动项覆盖原有 Windows 场景，并单列窗口缩放、原生焦点及定向 ASCII 事件；弹窗、下载与通知权限由真实 CEF 原生回调发起独立授权，测试允许、拒绝、过期和撤销。原生键盘合成只在本次 GitHub runner 桌面执行，不代表物理键盘或 IME。人工记录须包含同一 run ID、操作者、时间与具体观察；用 `--run-id` 和 `--manual-evidence` 提供，不能拿上次报告或 CDP 填字替代真人输入。
 
 本机运行时，新增的合成原生键盘项标为 `not-selected`，其余原有回归照常执行；该项会在 GitHub 的独占测试桌面实跑。真实键盘／中文 IME 仍走人工入口。
 
@@ -107,13 +107,22 @@ node tools/browser-lab/native/posix/build.mjs
 node tools/browser-lab/cli.mjs run --profile regression --consent scripted --network
 ```
 
-构建下载固定CEF standard SDK、编译官方wrapper、窄原生bridge与隔离Wails host。Linux使用独立CEF broker、自持消息循环并嵌入原生X11 child；macOS使用同进程NSView及CEF外部消息泵。当前Go binding未证明覆盖固定CEF156、macOS事件协议及沙箱/helper生命周期，因此直接复用官方C++ wrapper，仅桥接必要的初始化、parent、状态和关闭。没有改Wails模块缓存或产品实现。
+构建下载固定 CEF standard SDK、编译官方 wrapper、窄原生 bridge 与隔离 Wails host。Linux 使用独立 CEF broker 和自持消息循环，嵌入原生 X11 child；macOS 候选采用独立 `broker.app`，官方 CPU OSR 回调写入私有共享帧，Wails 的 NSView 连续呈现并转发原生输入。host.app 不链接 CEF；状态实际枚举 dyld 镜像和 broker PID，测试要求 broker kill、显式恢复和 profile 重启都保留 Wails 窗口。NSView 的逻辑 view ID 表示宿主持有的呈现对象，`cefNativeHandle:0` 明确区分 CEF OSR 没有原生 child handle。原生图、帧序号与实际 DOM 变化一起验证 live presentation。
 
-macOS实验构建仅为Wails的`StatusItemController`加精确编译期命名前缀，避免与CEF的ObjC类冲突；此选项不改CEF或模块缓存。Ubuntu24.04 runner为本次host配置单程序AppArmor userns许可，让WebKit能创建其沙箱；全局限制和浏览器沙箱保留，job结束移除该许可。CEF156 SDK配置deployment target为macOS13，当前Mac CI只验证15，不能据此承诺项目原有macOS12支持。
+CEF 官方 OSR、输入、sandbox/helper 和生命周期接口满足这里的边界；当前 Go binding 未证明覆盖固定 CEF156 的这些要求，故复用官方 C++ wrapper。共享像素只承担有界帧传输，读取不阻塞宿主 UI，进程退出后由内核释放 flock。Mac 中文 IME 的原生转发保留人工验收，ASCII CI 不替代组合输入或候选框验证。
 
-Mac正常退出先关闭两个CEF view，停止外部泵与Cocoa run loop，待Wails原生run及其autorelease pool返回后，在原主线程执行CefShutdown并记录实际返回，最后退出进程。原来在仍运行的Cocoa循环中直接teardown曾出现Chromium watchdog code2；报告要求正常exit0，不把watchdog退出当正常持久化。watchdog、沙箱及TLS保持默认。
+Ubuntu24.04 runner 为本次 host 配置单程序 AppArmor userns 许可，让 WebKit 能创建其沙箱；全局限制保留，job 结束移除该许可。CEF156 SDK deployment target 为 macOS13，当前 Mac CI 只验证15。Linux Xvfb 覆盖 X11；Wayland 尚未实测。Mac 正常关闭等待独立 broker 的两次 OnBeforeClose、CefShutdown 返回和 exit0 后停止宿主 Cocoa loop。沙箱、watchdog 和 TLS 保持默认。
 
-完整入口执行 HTML/localhost/HTTPS、双标签保活、浮动/停靠/缩放、当前屏 DPI、原生 ASCII 焦点路由、真实授权与精确目标绑定、导航/切页/撤销/遮挡防误操作、故障恢复、外页能力与 profile/文件 root 隔离，以及弹窗、下载和权限探测。macOS 候选的 CEF 与 Wails 同进程：真实 broker 故障会连宿主退出，测试记录该隔离缺口，随后重建整个隔离宿主继续；全宿主重启的持久化不能冒充“保留 Wails 的 CEF 冷重启”。Linux Xvfb 只覆盖 X11，未覆盖 Wayland。真实中文 IME 候选框和物理混合 DPI 保留人工项。实际各平台通过/失败以对应运行的 report.json 为准。
+## 原生能力独立授权
+
+这组实现仍是待三平台实际报告验证的隔离 demo。可信 Wails 面板与网页点击 permit 分开：
+- 弹窗在 `OnBeforePopup` 取消默认创建。批准后在现有受控标签 B 打开目的页，不产生第三个 target；拒绝、导航或切页后过期的请求不打开页面。该 demo 明确选择复用 B，不承诺完整多窗口浏览器功能。
+- `CanDownload` 拒绝默认下载，包括 DevTools 的 allowAndName。批准后通过 CEF URLRequest 和同一 RequestContext 下载到本次私有 `approved-downloads` 目录。可信面板只接受安全文件名，独占创建 partial，完成后改名；取消／撤销删掉 partial，永不自动打开。单文件上限8MiB，重定向停止，未批准目标不跟随。
+- 选择 URLRequest 而非仅覆写 OnBeforeDownload，是因为已实测 DevTools 下载策略可绕过原生目的地回调。网络、TLS、cookies 仍由成熟的 CEF 网络栈管理，未另写 HTTP 客户端或导出浏览器凭据。该有界文件传输是 demo 的策略适配，不是通用下载器。
+- 通知权限实际经过 `CefPermissionHandler` prompt callback；允许、拒绝与 `SetContentSetting` 撤销均在 CEF 内生效。其他媒体／未知权限默认拒绝，本轮不访问设备或剪贴板内容。
+- CEF 通过 token 认证的 URLRequest 请求可信 backend，网页没有 token。请求绑定真实 document/loader、选择、presentation 与 generation；决定一次消费，导航、切页或遮挡后失效。native 回调再核对自己的导航 epoch。
+
+完整入口执行 HTML/localhost/HTTPS、双标签保活、浮动/停靠/缩放、当前屏 DPI、原生 ASCII 路由、真实授权与精确目标绑定、导航/切页/撤销/遮挡防误操作、故障恢复、外页能力与 profile/文件 root 隔离，以及上述原生能力。实际通过范围、失败及回收以每次 report.json 为准。
 
 ## CI 分层
 
@@ -133,7 +142,7 @@ Mac正常退出先关闭两个CEF view，停止外部泵与Cocoa run loop，待W
 - renderer 沙箱逐平台取证：Windows restricted token/Untrusted、Linux renderer 的 no_new_privs/seccomp/capabilities、macOS Seatbelt 对隔离 canary 的策略查询与 broker 对照。探针范围写入证据，不扩称所有进程和所有资源都已覆盖。保留沙箱、TLS及站点安全机制。
 - native composition 截图必须同时含 shell/guest 的固定颜色 landmark，防止“DOM 输入成功但 native guest 被遮住”的假通过。图片仍保留供人工判读；该像素检查不是完整视觉或辅助功能验收。
 - scripted consent 只用于独立测试 profile。Go Service/permit是真实逻辑，CEF admission 仍为 lab metadata fixture；CDP 是实验特权传输，非正式产品安全边界。
-- popup 与自动下载的现有缺口有稳定 ID。恢复 native download default 后的取消，不冒充批准保存/路径/活跃下载撤销已经实现；权限 query 不读取真实敏感数据。
+- 弹窗、下载与通知权限已改为正向闭环断言；缺实现、无 callback 或策略失效直接失败。权限 query 不读取敏感数据。
 - 正常结束及失败均尝试 gateway→CEF/host→backend→fixture 回收。必要的强制清理仅针对登记过的进程／私有 staging 范围，并使门禁失败；不删除用户数据或重新定位缓存。
 - `private-session.json`、`session.json`、token、profile 与 crash dump 留在私有 TEMP run root，**不上传**。CI 只上传工作流列出的公共报告、日志和 scoped native PNG。
 
