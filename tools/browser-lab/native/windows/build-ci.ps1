@@ -10,5 +10,7 @@ if(!(Test-Path $sdk)) {
  & tar.exe -xjf "$work/cef.tar.bz2" -C $work
  if($LASTEXITCODE -ne 0){throw 'CEF SDK extraction failed'}
 }
-try { & "$PSScriptRoot/build.ps1" -CefSdk $sdk } catch { Write-Host $_.ScriptStackTrace; throw }
+# Compare Wails' supported official native loader with the Go port after real
+# composition-controller callback stalls. Hosting, sandbox and assertions stay.
+try { & "$PSScriptRoot/build.ps1" -CefSdk $sdk -WebView2Loader native } catch { Write-Host $_.ScriptStackTrace; throw }
 if($LASTEXITCODE -ne 0){throw 'CEF candidate build failed'}

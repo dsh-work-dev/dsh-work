@@ -28,6 +28,14 @@ async function run(name,mode,body){
  try{
   manager=process.platform==='win32'?await(await import('./platforms/windows.mjs')).startWindows(options):await(await import('./platforms/posix-smoke.mjs')).startPosixSmoke(options);
   browser=await attach(19479);
+  const created=await waitFor(()=>{const all=browser.contexts().flatMap(c=>c.pages());return all.length===2?all:false},'two existing CEF pages');
+  const setup={initialUrls:created.map(p=>p.url()),rolesAssignedByProbe:mode==='shared'};
+  // A shared-process fault fixture defines its own two test documents. Load
+  // them serially in the existing targets, rather than assuming simultaneous
+  // initial CreateBrowser navigations have completed. This is setup, before
+  // identity/state observations, not a replacement page or crash recovery.
+  if(mode==='shared')for(let i=0;i<created.length;i++)await created[i].goto('http://127.0.0.1:19478/interactions?tab='+['A','B'][i],{waitUntil:'domcontentloaded'});
+  writeFileSync(join(evidenceRoot,'setup-targets.json'),JSON.stringify(setup,null,2));
   const pages=await waitFor(()=>{
    const all=browser.contexts().flatMap(c=>c.pages());
    if(all.length!==2)return false;
@@ -39,7 +47,7 @@ async function run(name,mode,body){
   const control=async(action,args={})=>process.platform==='win32'?manager.command(action,args):manager.call('/command?'+new URLSearchParams({action,...args}),{});
   const state=async()=>process.platform==='win32'?manager.call('control','/state'):manager.call('/state');
   const evidence=await body({A,B,browser,options,manager,state,control,markFault(){faultInjected=true;options.architectureFault=true;options.architectureFaultPid=manager.child?.pid}});
-  result={id:name,status:'pass',evidence};
+  result={id:name,status:'pass',setup,evidence};
  }catch(e){result.error=e.stack;console.error(name,e.message)}
  finally{
   // Close known CEF targets while still connected, including an orphaned broker

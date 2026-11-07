@@ -2,7 +2,8 @@
 param(
  [Parameter(Mandatory,ParameterSetName='Bundle')][string]$CefBundle,
  [Parameter(Mandatory,ParameterSetName='SDK')][string]$CefSdk,
- [ValidateSet('bottom','stock')][string]$Composition='bottom'
+ [ValidateSet('bottom','stock')][string]$Composition='bottom',
+ [ValidateSet('go','native')][string]$WebView2Loader='go'
 )
 $ErrorActionPreference='Stop'
 $suite=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
@@ -64,7 +65,8 @@ Push-Location "$work/host"
 try{
  go test -run '^TestGuestWindowProbeReusesCallback$' -count=1 .
  if($LASTEXITCODE -ne 0){throw 'Window probe regression failed'}
- go build -o "$bundle/host.exe" .
+ $tags=@();if($WebView2Loader -eq 'native'){$tags=@('-tags','native_webview2loader')}
+ go build @tags -o "$bundle/host.exe" .
  if($LASTEXITCODE -ne 0){throw 'Native host build failed'}
 }finally{Pop-Location}
 Push-Location "$suite/native/gateway"
@@ -81,5 +83,5 @@ $compile=$setup+'cl /nologo /std:c++20 /EHsc /W4 /O2 /DUNICODE /D_UNICODE "'+$PS
 & cmd.exe /d /s /c $compile
 if($LASTEXITCODE -ne 0){throw 'Scoped WGC capture helper build failed'}
 $gitRef=git -C $repo rev-parse HEAD
-@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;composition=$Composition;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
+@{schemaVersion=1;kind='browser-lab-windows-bundle';created=(Get-Date).ToUniversalTime().ToString('o');sourceCommit=$gitRef;composition=$Composition;webView2Loader=$WebView2Loader;wails='v3.0.0-beta.16';cefOverlay='156.0.15+gcf671c0+chromium-156.0.8078.80';go=(& go version);playwright='1.58.2';syntheticAdmission=$true}|ConvertTo-Json|Set-Content "$bundle/build.json"
 Write-Host "Built isolated test bundle: $bundle"
