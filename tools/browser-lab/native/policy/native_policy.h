@@ -183,6 +183,10 @@ public:
       return;
     }
     bytes_ += n;
+    // Expose actual received bytes to the lab's active-cancellation probe.
+    // This bounded demo streams tiny fixture chunks, not a production writer.
+    if (fflush(file_) != 0)
+      r->Cancel();
   }
   bool GetAuthCredentials(bool, const CefString &, int, const CefString &,
                           const CefString &,

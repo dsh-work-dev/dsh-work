@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {mkdirSync,existsSync,readFileSync,readdirSync,lstatSync} from 'node:fs';
+import {mkdirSync,existsSync,readFileSync,readdirSync,lstatSync,statSync} from 'node:fs';
 import {join,basename} from 'node:path';
 export function nativePolicy({tabs,hostState,identity,display,native,record,dataRoot}){
  const requests=new Map(),reserved=new Set(),directory=join(dataRoot,'approved-downloads');
@@ -27,14 +27,17 @@ export function nativePolicy({tabs,hostState,identity,display,native,record,data
   }
   if(path==='state'){
    for(const p of requests.values())if(p.status==='pending'&&!await valid(p)){p.choice='deny';p.status='expired'}
-   return {requests:[...requests.values()].map(publicRequest),files:readdirSync(directory).map(name=>({name,partial:name.endsWith('.partial')}))};
+   return {requests:[...requests.values()].map(publicRequest),files:readdirSync(directory).flatMap(name=>{
+    try{return [{name,size:statSync(join(directory,name)).size,partial:name.endsWith('.partial')}]}
+    catch(e){if(e.code==='ENOENT')return [];throw e} // broker can rename/cancel between readdir and stat
+   })};
   }
   const p=requests.get(body.id);if(!p)throw Error('Unknown native policy request');
   if(path==='answer'){
    if(p.choice||p.status!=='pending')throw Error('Native decision already consumed');
    if(!['allow','deny'].includes(body.choice)||!await valid(p)){p.choice='deny';p.status='expired';throw Error('Native decision expired')}
    if(body.filename!==undefined){
-    if(p.kind!=='download'||!/^[-a-zA-Z0-9_][-.a-zA-Z0-9_]{0,100}\.txt$/.test(body.filename)||body.filename.includes('..'))throw Error('Invalid download filename');
+    if(p.kind!=='download'||!/^[-a-zA-Z0-9_][-.a-zA-Z0-9_]{0,100}\.txt$/.test(body.filename)||body.filename.includes('..')||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\./i.test(body.filename))throw Error('Invalid download filename');
     p.filename=body.filename;
    }
    if(p.kind==='download'&&body.choice==='allow'){
