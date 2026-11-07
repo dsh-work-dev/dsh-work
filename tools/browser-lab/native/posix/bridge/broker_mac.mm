@@ -196,7 +196,8 @@ void Command(CefRefPtr<CefDictionaryValue> d) {
   if (op == "geometry") {
     auto &g = geometry[i];
     int w = d->GetInt("width"), height = d->GetInt("height");
-    double scale = d->GetDouble("scale");
+    double scale = d->GetType("scale") == VTYPE_INT ? d->GetInt("scale")
+                                                    : d->GetDouble("scale");
     if (w < 1 || height < 1 || scale < 1 || scale > 4 ||
         w * scale > lab_osr::kMaxWidth || height * scale > lab_osr::kMaxHeight)
       return;

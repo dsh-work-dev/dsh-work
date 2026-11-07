@@ -133,6 +133,9 @@ func (l *lab) quit() {
 			// On Cocoa, never re-enter CefShutdown from an active message pump.
 			if C.lab_closed() != 0 {
 				if runtime.GOOS == "darwin" {
+					// CEF already shut down in its broker. Release host-owned
+					// AppKit views/timer before Wails drains its autorelease pool.
+					C.lab_shutdown()
 					if e := nativeCommand("stop-host-loop", 0); e != nil {
 						log.Print(e)
 						return
@@ -395,11 +398,7 @@ func main() {
 		log.Fatal(e)
 	}
 	if runtime.GOOS == "darwin" && l.quitting.Load() {
-		// Wails' Cocoa run loop and its autorelease pool have now returned.
-		// NSApplication.terminate would exit before this CEF teardown could run.
-		log.Print("CEF shutdown beginning after Cocoa run-loop return")
-		C.lab_shutdown()
-		log.Print("CEF shutdown returned")
+		log.Print("CEF broker shutdown and host Cocoa run-loop return completed")
 		if e := os.WriteFile(filepath.Join(l.root, "evidence", "host-closed.json"), []byte("{\"createdClosed\":true,\"cefShutdownReturned\":true}"), 0600); e != nil {
 			log.Fatal(e)
 		}

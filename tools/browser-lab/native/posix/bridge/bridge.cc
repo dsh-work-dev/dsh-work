@@ -97,6 +97,7 @@ static std::array<BrowserLabFrameView *, 2> views{};
 - (instancetype)initWithIndex:(int)index {
   if ((self = [super initWithFrame:NSMakeRect(240, 20, 890, 680)])) {
     index_ = index;
+    self.wantsLayer = YES;
     marked_ = [@"" copy];
     selection_ = NSMakeRange(0, 0);
     caret_ = NSMakeRect(0, 0, 1, 18);
@@ -646,6 +647,7 @@ LAB_EXPORT int lab_closed() {
 }
 LAB_EXPORT void lab_shutdown() {
   [frame_timer invalidate];
+  frame_timer = nil;
   if (reader.joinable())
     reader.join();
   if (command_fd >= 0)
