@@ -150,11 +150,14 @@ Ubuntu24.04 runner 为本次 host 配置单程序 AppArmor userns 许可，让 W
 
 ## 架构评审补证
 
-构建同一原生 bundle 后运行 `node tools/browser-lab/architecture.mjs`。三平台 CI 在原全量回归后执行，报告独立放在 `results/architecture-*/report.json`，不计入既有 34 项的 qualification。
+构建原生bundle后运行 `node tools/browser-lab/architecture.mjs`。Windows使用`-CefSdk`构建的协议2 overlay；准备好的旧协议1 bundle仍能使用原regression入口，新架构入口会明确要求重建。三平台CI在构建成功后独立执行原回归和架构探针，两者各自保留失败，不因前一个失败而跳过后一个。
 
-该入口只使用隔离 fixture：
-- 两个独立、空 cache_path 的 CEF RequestContext，以每租约不同的标准 HTTP localhost origin 拦截资源请求。实际验证存储正例、跨产物读取／导航拒绝、Worker／Service Worker CSP 拒绝及撤销后的新读取拒绝。它尚不是正式 os.Root 资源服务，也未证明自定义 scheme、完整异步撤销屏障或持久数据迁移。
-- 通过 browser-side trace 与 SystemInfo 的实际 OS PID 构造共享 renderer 和跨站 OOPIF，再终止当前私有 CEF inventory 中的目标进程，核对受损集合及未提交输入。共享进程 fixture 显式启用 process-per-site，保留站点隔离和沙箱；这不是正式进程策略。
-- 正常关闭、强退 UI；Windows 另直接 DestroyWindow 原生父窗。记录销毁前 document nonce／内存状态／未提交输入、销毁后存续和重开后的新 document。强退不执行优雅 detach；故障注入后的清理与正常退出证据分开。
+架构报告位于`results/architecture-*/report.json`，kind为`architecture-research`，不计入原34项的qualification。Windows6组、Mac/Linux各5组：
 
-当前 lab 的 broker 由 UI 启动；两 UI 进程共享 daemon-owned broker、自动故障关联和正式授权屏障仍需后续隔离验证。此入口提供实际引擎与生命周期证据，不把这些尚未实现的能力记成通过。架构实验会主动关闭或终止本次专用进程；不要用于用户 profile 或生产工作台。
+- **产物网页隔离**：每租约不同标准HTTP localhost origin、独立内存RequestContext。各存储API有自身读写正例，再检查cookie、local/sessionStorage、IndexedDB、Cache Storage与BroadcastChannel隔离；验证跨root读取／导航拒绝、真实Worker／Service Worker CSP失败、实际收到字节后的资源撤销、正常重启的新租约与旧URL拒绝。资源是内存fixture，只交付本租约内容，其余HTTP(S)拒绝；正式Go os.Root资源IPC与跨进程撤销完成屏障仍须产品验证。
+- **实际故障范围**：browser-side trace关联frame／parent／OS PID，并核对SystemInfo当前renderer inventory。共享进程fixture显式启用process-per-site，OOPIF启用site-per-process，保留沙箱与站点隔离。共享场景在已有target内串行装载测试文档作为前置，不另建替代浏览器，也不据标签名授予产品身份。
+- **UI退出与重开**：正常退出、无优雅钩子的强退；Windows另直接DestroyWindow父窗。分别核对document nonce、内存状态、未提交输入和重开后的document。`liveRetained=false`是实际负面存续结果，probe pass不表示保证页面保活。旧UI的故障退出与重开的host正常关闭分开核对。
+
+Windows协议2从宿主独立native slot和CEF创建角色建立初始绑定，不依赖网页标题；旧协议保留原使用条件。Linux通过GTK和slot两个X11连接注册XFixes SaveSetRoot／Unmap，避免UI死亡先毁掉CEF句柄、跳过其关闭握手；本地构建还需要X11-xcb／XFixes开发库，具体依赖见workflow。原Go WebView2 loader保持默认；native SDK loader对比未解决controller callback问题，实验依赖已撤回。
+
+架构探针不启动Go授权gateway；授权由原34项另行验证。当前demo的broker由UI启动，daemon-owned多UI管理与自动故障控制屏障不在该引擎报告的通过范围。实验仅关闭或终止本次专用进程，不用于用户profile或生产工作台。
