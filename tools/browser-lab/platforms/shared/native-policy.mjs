@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdirSync,existsSync,readFileSync,readdirSync,lstatSync} from 'node:fs';
 import {join,basename} from 'node:path';
 export function nativePolicy({tabs,hostState,identity,display,native,record,dataRoot}){
- const requests=new Map(),directory=join(dataRoot,'approved-downloads');
+ const requests=new Map(),reserved=new Set(),directory=join(dataRoot,'approved-downloads');
  mkdirSync(directory,{recursive:true});
  if(lstatSync(directory).isSymbolicLink())throw Error('Download directory must not be a symlink');
  async function binding(tab){const h=await hostState();if(!h.interactable||h.selected!==tab||!h.guestRunning)throw Error('NATIVE_POLICY_NOT_INTERACTABLE');return {document:await identity(tabs.get(tab)),generation:h.viewGeneration,selection:h.selectionEpoch,presentation:h.presentationEpoch}}
@@ -37,7 +37,10 @@ export function nativePolicy({tabs,hostState,identity,display,native,record,data
     if(p.kind!=='download'||!/^[-a-zA-Z0-9_][-.a-zA-Z0-9_]{0,100}\.txt$/.test(body.filename)||body.filename.includes('..'))throw Error('Invalid download filename');
     p.filename=body.filename;
    }
-   if(p.kind==='download'&&existsSync(join(directory,p.filename)))throw Error('Destination already exists');
+   if(p.kind==='download'&&body.choice==='allow'){
+    if(reserved.has(p.filename)||existsSync(join(directory,p.filename)))throw Error('Destination already exists');
+    reserved.add(p.filename);
+   }
    p.choice=body.choice;p.status=p.choice==='allow'?'authorized':'denied';return publicRequest(p);
   }
   if(path==='revoke'){

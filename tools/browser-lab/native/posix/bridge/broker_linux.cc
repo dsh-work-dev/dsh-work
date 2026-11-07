@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
   CefString(&settings.root_cache_path) = c->GetSwitchValue("cache-path");
   CefString(&settings.cache_path) = c->GetSwitchValue("cache-path");
   CefString(&settings.log_file) = c->GetSwitchValue("log-file");
+  browser_lab::Rpc::Initialize();
   if (!CefInitialize(args, settings, new App(), nullptr))
     return 1;
   std::atomic<bool> running{true};

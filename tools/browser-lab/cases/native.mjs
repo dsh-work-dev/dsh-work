@@ -88,14 +88,17 @@ export const nativeCases={
  },
  async 'permissions.defaults'(c){const evidence=await c.adapter.call('backend','/permissions',{});assert(!Object.values(evidence.queried).includes('granted'));return {evidence}},
  async 'permissions.lifecycle'(c){
- const a=c.adapter,p=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,p,'allow');
+ const a=c.adapter,old=await policyRequest(c,'#request-notification','notifications');
+ await a.call('backend','/display',{tab:'A',url:fixture(a)});
+ const stale=await a.api('backend','/native-policy/answer',{id:old.id,choice:'allow'});assert(!stale.ok);
+ const p=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,p,'allow');
  const granted=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='granted'&&r.request?.settled?r:false},'native notification allow');
  await policyChoice(a,p,'revoke');
  const revoked=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.state==='denied'?r:false},'native notification revoke');
  await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});
  const deny=await policyRequest(c,'#request-notification','notifications');await policyChoice(a,deny,'deny');
  const denied=await waitFor(async()=>{const r=await a.call('backend','/permission-result');return r.request?.settled&&r.state!=='granted'?r:false},'native notification deny');
- return {evidence:{granted,revoked,denied,scope:'real Notification prompt and CEF content-setting revoke; no device access'}};
+ return {evidence:{stale,granted,revoked,denied,scope:'real Notification prompt and CEF content-setting revoke; no device access'}};
  },
  async 'download.authorization'(c){
  const a=c.adapter,p=await policyRequest(c,'#download-traversal','download');

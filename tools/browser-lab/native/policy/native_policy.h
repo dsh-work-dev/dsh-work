@@ -14,23 +14,33 @@
 namespace browser_lab {
 using Dictionary = CefRefPtr<CefDictionaryValue>;
 class Rpc final : public CefURLRequestClient {
+  inline static std::string token_;
   CefRefPtr<CefURLRequest> request_;
   std::string bytes_;
   std::function<void(Dictionary)> done_;
 
 public:
+  static void Initialize() {
+    const char *value = getenv("BROWSER_LAB_TOKEN");
+    token_ = value ? value : "";
+#if defined(OS_WIN)
+    _putenv_s("BROWSER_LAB_TOKEN", "");
+    SetEnvironmentVariableA("BROWSER_LAB_TOKEN", nullptr);
+#else
+    unsetenv("BROWSER_LAB_TOKEN");
+#endif
+  }
   explicit Rpc(std::function<void(Dictionary)> done) : done_(std::move(done)) {}
   static void Send(const std::string &path, Dictionary body,
                    std::function<void(Dictionary)> done) {
-    const char *token = getenv("BROWSER_LAB_TOKEN");
-    if (!token) {
+    if (token_.empty()) {
       done(nullptr);
       return;
     }
     auto req = CefRequest::Create();
     req->SetURL("http://127.0.0.1:19483/native-policy/" + path);
     req->SetMethod("POST");
-    req->SetHeaderByName("X-Browser-Lab-Token", token, true);
+    req->SetHeaderByName("X-Browser-Lab-Token", token_, true);
     req->SetHeaderByName("Content-Type", "application/json", true);
     auto value = CefValue::Create();
     value->SetDictionary(body);
@@ -47,6 +57,13 @@ public:
       client->done_(nullptr);
   }
   void OnRequestComplete(CefRefPtr<CefURLRequest> r) override {
+    if (r->GetRequestStatus() != UR_SUCCESS || !r->GetResponse() ||
+        r->GetResponse()->GetStatus() != 200)
+      fprintf(stderr,
+              "Browser Lab native policy RPC status=%d http=%d error=%d\n",
+              static_cast<int>(r->GetRequestStatus()),
+              r->GetResponse() ? r->GetResponse()->GetStatus() : 0,
+              static_cast<int>(r->GetRequestError()));
     Dictionary result;
     if (r->GetRequestStatus() == UR_SUCCESS && r->GetResponse() &&
         r->GetResponse()->GetStatus() == 200) {
@@ -84,6 +101,7 @@ class AuthorizedDownload final : public CefURLRequestClient {
   std::string path_, id_;
   size_t bytes_ = 0;
   bool done_ = false;
+  bool owns_partial_ = false;
 
 public:
   static void Start(CefRefPtr<CefBrowser> browser, const std::string &url,
@@ -98,6 +116,7 @@ public:
       client->Finish("destination-refused");
       return;
     }
+    client->owns_partial_ = true;
     auto req = CefRequest::Create();
     req->SetURL(url);
     req->SetMethod("GET");
@@ -137,7 +156,7 @@ public:
     if (actual == "complete" &&
         rename((path_ + ".partial").c_str(), path_.c_str()) != 0)
       actual = "destination-refused";
-    if (actual != "complete")
+    if (actual != "complete" && owns_partial_)
       remove((path_ + ".partial").c_str());
     request_ = nullptr;
     auto result = CefDictionaryValue::Create();

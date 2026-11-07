@@ -9,6 +9,7 @@
 #include "include/cef_sandbox_win.h"
 #include "include/cef_version_info.h"
 #include "tests/cefsimple/simple_app.h"
+#include "tests/cefsimple/native_policy.h"
 
 namespace {
 
@@ -55,6 +56,7 @@ int RunMain(HINSTANCE hInstance,
   // Initialize the CEF browser process. May return false if initialization
   // fails or if early exit is desired (for example, due to process singleton
   // relaunch behavior).
+  browser_lab::Rpc::Initialize();
   r78::Trace("before CefInitialize");
   if (!CefInitialize(main_args, settings, app.get(), sandbox_info)) {
     return CefGetExitCode();

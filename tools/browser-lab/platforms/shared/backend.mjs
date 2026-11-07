@@ -13,7 +13,7 @@ const headers={'X-Browser-Lab-Token':token};
 let browser,connected=false,connectionEpoch=0,controlEpoch=0,controlReady=true,faultError=null,faults=Promise.resolve();
 const tabs=new Map(),refs=new Map(),released=new Set(),pending=new Map();
 const audit={dispatches:0,mutations:0,denied:0,releases:0,events:[]};
-const record=(event,data={})=>{audit.events.push({time:Date.now(),event,...data});writeFileSync(root+'evidence/backend-audit.json',JSON.stringify(audit,null,2))};
+const record=(event,data={})=>{audit.events.push({time:Date.now(),event,...data});writeFileSync(root+'evidence/backend-audit.json',JSON.stringify(audit,null,2));if(event.startsWith('native-policy')||event==='refused')console.error(JSON.stringify({event,...data}))};
 async function native(action,args={}){const r=await fetch(session.control+'/command?'+new URLSearchParams({action,...args}),{method:'POST',headers,signal:AbortSignal.timeout(40000)});const text=await r.text();if(!r.ok)throw Error('Native '+action+': '+text);return text}
 function invalidate(reason){
  controlReady=false;controlEpoch++;const ownEpoch=controlEpoch;record('fault-detected',{reason,controlEpoch});

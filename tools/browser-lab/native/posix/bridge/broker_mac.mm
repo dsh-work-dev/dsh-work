@@ -299,6 +299,7 @@ int main(int argc, char **argv) {
     CefString(&settings.browser_subprocess_path) =
         c->GetSwitchValue("helper-path");
     CefString(&settings.log_file) = c->GetSwitchValue("log-file");
+    browser_lab::Rpc::Initialize();
     if (!CefInitialize(args, settings, new App(), nullptr))
       return 4;
     std::atomic<bool> reading{true};

@@ -10,7 +10,7 @@ export const capabilities = new Set(['browser','gateway','nativeViews','nativeIn
 export function normalizeNativeState(s) {
  return {ready:s.ready,running:s.guestRunning,selected:s.selected,covered:s.covered,floating:s.floating,
   viewGeneration:s.viewGeneration,presentationEpoch:s.presentationEpoch,
-  host:{id:String(s.main.hwnd),dpi:s.main.dpi},floatingHost:{id:String(s.float.hwnd),dpi:s.float.dpi,visible:s.float.visible},
+  host:{id:String(s.main.hwnd),dpi:s.main.dpi,pid:s.hostPID},brokerPID:s.guestPID,floatingHost:{id:String(s.float.hwnd),dpi:s.float.dpi,visible:s.float.visible},
   views:s.tabs.map(t=>({name:t.name,id:String(t.hwnd),parentId:String(t.parentHWND),visible:t.visible,dpi:t.dpi,fault:t.fault})),
   monitors:s.monitors};
 }
