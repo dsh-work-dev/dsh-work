@@ -471,6 +471,14 @@ LAB_EXPORT int lab_init(const char *cache, const char *helper,
 }
 LAB_EXPORT int lab_create(void *native, const char *) {
   main_window = (NSWindow *)native;
+  // Keep WKWebView's remote layers and our CPU frame view in one layer-backed
+  // content tree; a layer-backed child alone does not back its siblings.
+  main_window.contentView.wantsLayer = YES;
+  for (NSView *child in main_window.contentView.subviews)
+    fprintf(stderr, "Browser Lab host child %s frame=%s hidden=%d layer=%d\n",
+            [NSStringFromClass(child.class) UTF8String],
+            [NSStringFromRect(child.frame) UTF8String], child.hidden,
+            child.wantsLayer);
   for (int i = 0; i < 2; i++) {
     views[i] = [[BrowserLabFrameView alloc] initWithIndex:i];
     [main_window.contentView addSubview:views[i]
@@ -487,6 +495,7 @@ LAB_EXPORT int lab_create(void *native, const char *) {
 }
 LAB_EXPORT int lab_float_parent(void *native) {
   float_window = (NSWindow *)native;
+  float_window.contentView.wantsLayer = YES;
   return float_window != nil;
 }
 LAB_EXPORT int lab_command(const char *command, int index) {
