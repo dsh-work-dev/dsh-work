@@ -484,13 +484,47 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	if !found {
 		t.Fatal("Hide destroyed or lost the page instead of retaining it")
 	}
+	hiddenBaseline := baseline
 	wait("same document alive after Hide", func() bool {
 		reportMu.Lock()
 		defer reportMu.Unlock()
+		hiddenBaseline = report
 		return report.Nonce == baseline.Nonce && report.Input == baseline.Input && report.Tick > baseline.Tick
 	})
+	save("document-hidden", hiddenBaseline)
 	if visible.State.Document != hidden.State.Document || hidden.State.Visible {
 		t.Fatal("hidden slot document changed", visible, hidden)
+	}
+	if e = os.WriteFile(filepath.Join(out, "resume.request"), nil, 0600); e != nil {
+		t.Fatal(e)
+	}
+	var restored linuxUISlot
+	readPhase("restored", &restored)
+	if restored.Slot != visible.Slot || restored.State.Document != visible.State.Document || restored.State.Target != visible.State.Target || restored.State.Lease != visible.State.Lease || restored.State.BrokerGeneration != visible.State.BrokerGeneration || !restored.State.Visible {
+		t.Fatal("sidebar reopening replaced the retained page", visible, restored)
+	}
+	resumedWindows := observe()
+	save("windows-restored", resumedWindows)
+	found = false
+	for _, w := range resumedWindows {
+		if w.ID == guest.ID && w.PID == guest.PID && w.Started == guest.Started && w.Parent == guest.Parent && w.Visible {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("original native guest did not become visible again", resumedWindows)
+	}
+	resumedBaseline := baseline
+	wait("same document alive after reopening sidebar", func() bool {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		resumedBaseline = report
+		return report.Nonce == baseline.Nonce && report.Input == baseline.Input && report.Tick > hiddenBaseline.Tick
+	})
+	save("document-restored", resumedBaseline)
+	output, e = exec.CommandContext(ctx, "import", "-window", strconv.FormatUint(uint64(guest.Parent), 10), filepath.Join(out, "real-linux-dsh-slot-restored.png")).CombinedOutput()
+	if e != nil {
+		t.Fatal("capture verified restored UI", e, string(output))
 	}
 	if e = os.WriteFile(filepath.Join(out, "quit.request"), nil, 0600); e != nil {
 		t.Fatal(e)

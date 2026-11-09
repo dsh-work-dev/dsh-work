@@ -119,13 +119,19 @@ try {
  await until('collapse existing sidebar control',()=>click('^(Collapse right sidebar|收起右侧边栏)$'));
  const hidden=await until('native Hide ACK',async()=>{const rows=await state();return rows.find(r=>r.slot===visible.slot&&r.state&&!r.state.visible&&r.state.document===visible.state.document)});
  save('hidden',hidden);
- await until('capture hidden barrier',()=>existsSync(join(out,'quit.request')),30000);
+ await until('capture hidden barrier',()=>existsSync(join(out,'resume.request')),30000);
+ await until('expand retained sidebar',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('button[data-sidebar-right-expand]')].filter(e=>!e.disabled&&e.getClientRects().length);if(rows.length!==1)return false;rows[0].click();return true})()`));
+ const restored=await until('same native slot visible again',async()=>{const rows=await state();return rows.find(r=>r.slot===visible.slot&&r.state?.state==='ready'&&r.state.visible&&r.state.document===visible.state.document&&r.state.lease===visible.state.lease&&r.state.target===visible.state.target)});
+ const chrome=await until('restored toolbar URL and title synchronized',()=>inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');const title=${JSON.stringify(visible.state.title)};const tabs=[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].filter(e=>e.getClientRects().length).map(e=>e.textContent.trim());return e?.value===${JSON.stringify(fixture)}&&tabs.some(t=>t.includes(title))?{address:e.value,tabs}:undefined})()`));
+ save('restored-chrome',chrome);
+ save('restored',restored);
+ await until('capture restored barrier',()=>existsSync(join(out,'quit.request')),30000);
  save('quit-requested',{method:'HostService.Quit'});
  await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return await Call.ByID(${ids.quit})})()`).catch(e=>save('quit-response',{error:String(e)}));
  }
 } catch(error) {
  if(lastSlotStates)save('last-slot-states',lastSlotStates);
  if(inspector)save('inspector-protocol',{events:inspector.trace,targets:[...inspector.targets.values()],contextCount:inspector.contexts.size});
- if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh)save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));}
+ if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh){save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));save('failure-browser-chrome',await inspector.evaluate(dsh,`({addresses:[...document.querySelectorAll('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')].map(e=>({value:e.value,visible:!!e.getClientRects().length})),tabs:[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].map(e=>({text:e.textContent.trim(),visible:!!e.getClientRects().length}))})`).catch(()=>({})));}}
  save(mode==='--boot-diagnostic'?'boot-inspector-unavailable':'failure',{error:String(error)});process.exitCode=1;
 } finally {inspector?.close();}
