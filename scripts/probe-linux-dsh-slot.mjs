@@ -104,6 +104,12 @@ try {
    // Existing trusted shell navigation refreshes and opens an existing real
    // Session. It neither creates a Session nor appends a turn/tool event.
    if(typeof expected.key!=='string'||!expected.key.startsWith('session:session-'))throw Error('Exact original A session missing');
+   // Provider registration precedes DSH's asynchronous catalog hydration and
+   // saved Workspace/blank-Session restoration. The navigation handler refreshes
+   // the catalog but cannot open a Session that has not entered it yet. Wait
+   // for the exact original row, not merely the provider or any New Session.
+   const catalogReady=await until('original A session row hydrated',async()=>{const value=await readSessionSelection();return value?.rows.some(row=>row.key===expected.key)?value:undefined});
+   save('session-catalog-ready',catalogReady);
    const opened=await inspector.evaluate(shell,`(()=>new Promise((resolve,reject)=>{const frame=document.querySelector('iframe'),origin=globalThis.__DSH_WORK_ORIGINS__?.origin(frame.src),id=crypto.randomUUID();if(!origin||origin==='null'||origin!==${JSON.stringify(workerOrigin.origin)})throw Error('Unsafe Worker origin');const timer=setTimeout(()=>{removeEventListener('message',receive);reject(Error('Existing session navigation acknowledgment deadline'))},5000);function receive(e){if(e.source!==frame.contentWindow||e.origin!==origin||e.data?.type!=='dsh-work/open-session-result'||e.data?.version!==1||e.data?.id!==id)return;clearTimeout(timer);removeEventListener('message',receive);resolve(e.data)}addEventListener('message',receive);frame.contentWindow.postMessage({version:1,type:'dsh-work/open-session',id,sessionId:${JSON.stringify(expected.key.slice(8))}},origin)}))()`);
    save('session-opened',opened);if(opened.error)throw Error('Original A session unavailable: '+opened.error);
   }
