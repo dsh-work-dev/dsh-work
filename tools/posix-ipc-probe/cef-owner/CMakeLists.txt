@@ -21,3 +21,11 @@ foreach(target cef_owner_broker cef_owner_helper cef_owner_inspect)
   target_link_libraries(${target} probe_official_wrapper ${CEF_STANDARD_LIBS})
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/out")
 endforeach()
+
+# CEF's executable macro supplies CXX flags; broker.mm is a distinct OBJCXX
+# language target and must request the same C++20 concepts explicitly.
+set_target_properties(cef_owner_broker PROPERTIES
+  OBJCXX_STANDARD 20
+  OBJCXX_STANDARD_REQUIRED YES
+  OBJCXX_EXTENSIONS NO
+)
