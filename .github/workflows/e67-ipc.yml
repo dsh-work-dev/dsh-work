@@ -1,0 +1,72 @@
+name: E67 platform IPC
+
+on:
+  push:
+    branches: ['codex/e67-embedded-browser']
+    paths:
+      - 'internal/localipc/**'
+      - 'internal/workeripc/**'
+      - 'internal/daemon/**'
+      - 'tools/posix-ipc-probe/**'
+      - '.github/workflows/e67-ipc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-peer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - name: Verify real Linux process admission
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-ipc
+          { uname -a; id; go version; test "$(uname -m)" = x86_64; } 2>&1 | tee results/e67-ipc/environment.log
+          CGO_ENABLED=0 go test -tags server -count=1 -v -timeout=60s ./internal/localipc ./internal/workeripc ./internal/daemon -run 'TestPeerProcessAndExit|TestSocketOwnershipAndCleanup|TestRejectUnsafePathsAndPreserveReplacement|TestParseProcessCreation|TestLinuxProcessInstanceAdmission|TestLinuxProcessClientAndPeerContext' 2>&1 | tee results/e67-ipc/linux-peer.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-peer
+          path: results/e67-ipc/*.log
+
+  mac-sender-probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify macOS 15 arm64 environment
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-ipc
+          { sw_vers; uname -a; test "$(uname -m)" = arm64; test "$(sw_vers -productVersion | cut -d. -f1)" = 15; } 2>&1 | tee results/e67-ipc/environment.log
+      - name: Compile standalone system API probe
+        shell: bash
+        run: |
+          set -o pipefail
+          clang -std=c11 -Wall -Wextra -Werror tools/posix-ipc-probe/mach_peer_darwin.c -o "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/compile.log
+      - name: Probe ordinary process sender identity
+        shell: bash
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/ordinary.log
+      - name: Probe ad-hoc hardened runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          codesign --force --sign - --options runtime "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/sign.log
+          codesign -dvv "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/sign-details.log
+          "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/hardened.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-sender-probe
+          path: results/e67-ipc/*.log
