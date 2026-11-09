@@ -124,3 +124,23 @@ test('shell preserves visible then hidden intent order across delayed Capability
  capability.resolve(true);await tick();await tick();
  assert.deepEqual(calls.map(call=>call[4]),[true,false],'the final native operation must remain Hide');
 });
+
+test('menu close ACK cannot resume the document after Settings has blocked it',async()=>{
+ const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
+ const resumed=deferred(),messages=[],calls=[];
+ const bindings={BeginDocument:async()=>true,Capability:async()=>true,State:async()=>({}),Overlay:blocked=>{calls.push(blocked);return blocked?Promise.resolve():resumed.promise}};
+ const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+ const frame={getAttribute:()=> 'http://dsh/',contentWindow:{postMessage:m=>messages.push(m)}};
+ const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('doc');bridge.activateDocument('doc');
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'state',action:'state',document:'doc',slot:'s'}});await tick();
+ await bridge.overlay(true);messages.length=0;
+ const menuClosed=bridge.overlay(false);await tick();
+ const settingsOpened=bridge.overlay(true);
+ assert.equal(messages.at(-1).blocked,true,'Settings blocks the document before waiting for native Hide');
+ resumed.resolve();await Promise.all([menuClosed,settingsOpened]);
+ assert.deepEqual(calls,[true,false,true],'native operations retain intent order');
+ assert.equal(messages.some(m=>m.type==='dsh-work/browser-blocked'&&!m.blocked),false,'an older resume ACK must not undo the latest block');
+ await bridge.overlay(false);
+ assert.equal(messages.at(-1).blocked,false,'closing Settings resumes the retained document');
+});
