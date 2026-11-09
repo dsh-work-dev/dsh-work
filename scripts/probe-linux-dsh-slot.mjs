@@ -3,7 +3,8 @@
 import {readFileSync,writeFileSync,existsSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const [base,fixture,directory]=process.argv.slice(2);
+const [base,fixture,directory,mode]=process.argv.slice(2);
+if(mode&&mode!=='--boot-diagnostic')throw Error('Unknown fixed probe mode');
 if(process.platform!=='linux'||!/^http:\/\/127\.0\.0\.1:\d+$/.test(base??'')||!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(fixture??'')||!directory)throw Error('Expected isolated Linux inspector, local fixture and output directory');
 const out=resolve(directory);mkdirSync(out,{recursive:true});
 const repo=fileURLToPath(new URL('../',import.meta.url));
@@ -13,9 +14,10 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(label,fn,ms=30000){const deadline=Date.now()+ms;let last;while(Date.now()<deadline){try{const v=await fn();if(v)return v}catch(e){last=e}await delay(100)}throw Error(label+': '+(last?.message??'bounded deadline'));}
 function save(name,value){writeFileSync(join(out,name+'.json'),JSON.stringify(value,null,2).replace(/([?&](?:token|auth)=)[^&#"\s]+/gi,'$1[REDACTED]')+'\n',{mode:0o600});}
 class Inspector {
- constructor(url){this.pending=new Map();this.targets=new Map();this.contexts=new Map();this.trace=[];this.seq=0;this.ws=new WebSocket(url);this.ws.onmessage=e=>this.receive(JSON.parse(e.data));this.ws.onclose=()=>{for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('WebKit inspector disconnected'))}this.pending.clear()};}
+ constructor(url){this.pending=new Map();this.targets=new Map();this.contexts=new Map();this.trace=[];this.messages=[];this.seq=0;this.ws=new WebSocket(url);this.ws.onmessage=e=>this.receive(JSON.parse(e.data));this.ws.onclose=()=>{for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('WebKit inspector disconnected'))}this.pending.clear()};}
  receive(m,target=''){
   this.trace.push({method:m.method??'reply',target,error:m.error?.message});if(this.trace.length>150)this.trace.shift();
+  if(m.method==='Console.messageAdded'){const c=m.params.message;this.messages.push({source:c.source,level:c.level,text:String(c.text).slice(0,1000)});if(this.messages.length>50)this.messages.shift();}
   if(m.method==='Target.dispatchMessageFromTarget'){this.receive(JSON.parse(m.params.message),m.params.targetId);return}
   if(m.method==='Target.targetCreated'){const t=m.params.targetInfo;if(!t.isProvisional&&['page','frame'].includes(t.type)){this.targets.set(t.targetId,t);void this.send('Runtime.enable',{},t.targetId).catch(()=>{});}return}
   if(m.method==='Target.targetDestroyed'){this.targets.delete(m.params.targetId);for(const [key,c] of this.contexts)if(c.target===m.params.targetId)this.contexts.delete(key);return}
@@ -39,6 +41,23 @@ class Inspector {
 }
 let inspector;
 try {
+ if(mode==='--boot-diagnostic'){
+  // One channel attempt at the checkpoint. If WebKit cannot list/connect its
+  // own target, record that fact instead of looping on an unavailable channel.
+  const html=await(await fetch(base,{signal:AbortSignal.timeout(3000)})).text();
+  const path=html.match(/\/socket\/\d+\/\d+\/WebPage/)?.[0];
+  save('boot-inspector-list',{hasWebPage:!!path,preview:html.slice(0,2000)});
+  if(path){
+   inspector=new Inspector(base.replace('http:','ws:')+path);await inspector.open();
+   await until('boot execution context',async()=>inspector.contexts.size>0,3000);
+   for(const target of inspector.targets.keys())await inspector.send('Console.enable',{},target).catch(()=>{});
+   const pages=[];
+   for(const where of inspector.contexts.values()){
+    try{pages.push(await inspector.evaluate(where,`(()=>{const safe=u=>{try{const p=new URL(u,location.href);return p.protocol+'//'+p.host+p.pathname}catch{return String(u).slice(0,100)}};return{url:safe(location.href),origin:location.origin,top:parent===window,ready:document.readyState,title:document.title,body:document.body?.innerText.slice(0,2000),frames:[...document.querySelectorAll('iframe')].map(f=>({src:safe(f.src),origin:new URL(f.src).origin,documentPresent:!!f.contentDocument})),generation:globalThis.__WORK_GENERATION__,provider:globalThis.__DSH_WORK_BROWSER_PROVIDER__?.protocolVersion,embeddedVersion:globalThis.__DSH_WORK_EMBEDDED_VERSION__,boot:document.querySelector('[data-dsh-boot]')?.textContent.slice(0,1000),resources:performance.getEntriesByType('resource').slice(-30).map(r=>({url:safe(r.name),duration:r.duration,bytes:r.transferSize}))}})()`))}catch(error){pages.push({contextError:String(error)})}
+   }
+   save('boot-webview',{pages,console:inspector.messages,protocol:inspector.trace});
+  }
+ }else{
  const path=await until('Wails inspectable page',async()=>{const html=await(await fetch(base,{signal:AbortSignal.timeout(2000)})).text();return html.match(/\/socket\/\d+\/\d+\/WebPage/)?.[0]});
  inspector=new Inspector(base.replace('http:','ws:')+path);await inspector.open();
  const shell=await until('shell execution context',()=>inspector.find('shell'));
@@ -64,8 +83,9 @@ try {
  await until('capture hidden barrier',()=>existsSync(join(out,'quit.request')),30000);
  save('quit-requested',{method:'HostService.Quit'});
  await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return await Call.ByID(${ids.quit})})()`).catch(e=>save('quit-response',{error:String(e)}));
+ }
 } catch(error) {
  if(inspector)save('inspector-protocol',{events:inspector.trace,targets:[...inspector.targets.values()],contextCount:inspector.contexts.size});
  if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh)save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));}
- save('failure',{error:String(error)});process.exitCode=1;
+ save(mode==='--boot-diagnostic'?'boot-inspector-unavailable':'failure',{error:String(error)});process.exitCode=1;
 } finally {inspector?.close();}

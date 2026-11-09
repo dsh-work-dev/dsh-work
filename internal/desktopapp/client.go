@@ -154,6 +154,18 @@ func runDesktopClient(identity string, resources Resources) error {
 			},
 		}
 	}}
+	if embeddedDevelopmentRoot() != "" && os.Getenv("DSH_WORK_EMBEDDED_TRACE_SURFACE") == "1" {
+		var shellRequests, workerRequests atomic.Int32
+		workerSurface.Trace = func(method, scheme, host, path string) {
+			counter := &shellRequests
+			if strings.EqualFold(host, shellWorkerHost) {
+				counter = &workerRequests
+			}
+			if counter.Add(1) <= 32 {
+				logging.Module(logging.ModIPC).Info("development WebView surface request", "method", method, "scheme", scheme, "host", host, "path", path)
+			}
+		}
+	}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}

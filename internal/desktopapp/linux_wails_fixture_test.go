@@ -234,20 +234,75 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		uiEnv[k] = v
 	}
 	uiEnv["WEBKIT_INSPECTOR_HTTP_SERVER"] = "127.0.0.1:" + strconv.Itoa(port)
+	uiEnv["DSH_WORK_EMBEDDED_TRACE_SURFACE"] = "1"
 	ui := start("ui", nil, uiEnv)
 	uiIdentity := ui.Diagnostics()
+	node, e := exec.LookPath("node")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var diagnosticStarted bool
+	var diagnosticJoined chan struct{}
+	var diagnosticErr error
+	defer func() {
+		if diagnosticJoined != nil {
+			<-diagnosticJoined
+			if diagnosticErr != nil {
+				t.Log("bounded read-only boot diagnostic", diagnosticErr)
+			}
+		}
+	}()
+	startBootDiagnostic := func() {
+		diagnosticStarted = true
+		diagnosticJoined = make(chan struct{})
+		go func() {
+			defer close(diagnosticJoined)
+			diagnosticCtx, stop := context.WithTimeout(ctx, 20*time.Second)
+			defer stop()
+			// Capture only an XRes/instance-verified window of this own UI. This
+			// still works if WebKit's inspector cannot connect its child process.
+			output, e := exec.CommandContext(diagnosticCtx, observer, strconv.FormatUint(uint64(uiIdentity.PID), 10), strconv.FormatUint(uiIdentity.ProcessStarted, 10), native).Output()
+			var rows []x11FixtureWindow
+			if e == nil {
+				e = json.Unmarshal(output, &rows)
+				_ = os.WriteFile(filepath.Join(out, "boot-windows.json"), output, 0600)
+			}
+			var window x11FixtureWindow
+			for _, w := range rows {
+				if w.PID == uiIdentity.PID && w.Started == uiIdentity.ProcessStarted && w.Visible && w.Width*w.Height > window.Width*window.Height {
+					window = w
+				}
+			}
+			if e == nil && window.ID != 0 {
+				capture, captureErr := exec.CommandContext(diagnosticCtx, "import", "-window", strconv.FormatUint(uint64(window.ID), 10), filepath.Join(out, "boot-ui.png")).CombinedOutput()
+				if captureErr != nil {
+					_ = os.WriteFile(filepath.Join(out, "boot-capture.log"), []byte(redact.Secrets(fmt.Sprint(captureErr, " ", string(capture)))), 0600)
+				}
+			}
+			command := exec.CommandContext(diagnosticCtx, node, filepath.Join(repo, "scripts", "probe-linux-dsh-slot.mjs"), "http://127.0.0.1:"+strconv.Itoa(port), fixture.URL+"/", out, "--boot-diagnostic")
+			command.Dir = repo
+			output, diagnosticErr = command.CombinedOutput()
+			_ = os.WriteFile(filepath.Join(out, "boot-inspector.log"), []byte(redact.Secrets(string(output))), 0600)
+		}()
+	}
 	wait("real daemon Ready after UI mount", func() bool {
 		select {
 		case <-ui.Exited():
 			t.Fatal("owned UI exited before mount confirmation", ui.ExitResult())
 		default:
 		}
-		return probeDaemon() && snapshot.Status.State == lifecycle.StateReady
+		available := probeDaemon()
+		if available && snapshot.Status.Phase == lifecycle.PhaseCheckpoint && !diagnosticStarted {
+			startBootDiagnostic()
+		}
+		return available && snapshot.Status.State == lifecycle.StateReady
 	})
 	save("daemon-ready", map[string]any{"pid": identity.PID, "created": identity.ProcessStarted, "generation": snapshot.Status.GenerationID, "state": snapshot.Status.State})
-	node, e := exec.LookPath("node")
-	if e != nil {
-		t.Fatal(e)
+	// A WebPage has one inspector frontend owner. The read-only checkpoint
+	// diagnostic keeps its original bounded lifetime and must fully disconnect
+	// before the functional driver can attach, even if Ready arrived first.
+	if diagnosticJoined != nil {
+		<-diagnosticJoined
 	}
 	driver := exec.CommandContext(ctx, node, filepath.Join(repo, "scripts", "probe-linux-dsh-slot.mjs"), "http://127.0.0.1:"+strconv.Itoa(port), fixture.URL+"/", out)
 	driver.Dir = repo
