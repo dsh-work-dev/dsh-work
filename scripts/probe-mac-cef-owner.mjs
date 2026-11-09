@@ -1,6 +1,6 @@
 // Actual fixed CEF bundle diagnostic, not a general Supervisor Adapter.
 import {execFileSync, spawn, spawnSync} from 'node:child_process';
-import {appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync} from 'node:fs';
+import {appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, statSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -18,13 +18,16 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
 } else {
   const options = new Map();
   for (let i = 2; i < process.argv.length; i += 2) {
-    if (!['--manifest', '--output-dir'].includes(process.argv[i]) || !process.argv[i + 1]) throw Error('Expected --manifest FILE --output-dir DIR');
-    options.set(process.argv[i], resolve(process.argv[i + 1]));
+    if (!['--manifest', '--output-dir', '--case'].includes(process.argv[i]) || !process.argv[i + 1]) throw Error('Expected --manifest FILE --output-dir DIR [--case MODE]');
+    options.set(process.argv[i], process.argv[i] === '--case' ? process.argv[i + 1] : resolve(process.argv[i + 1]));
   }
   if (!options.has('--manifest') || !options.has('--output-dir')) throw Error('Expected --manifest FILE --output-dir DIR');
   const manifest = JSON.parse(readFileSync(options.get('--manifest'), 'utf8'));
   if (manifest.kind !== 'cef-specific-owner-diagnostic' || manifest.version !== '156.0.15+gcf671c0+chromium-156.0.8078.80' || manifest.sandbox !== true || manifest.crashConfigs.length) throw Error('Unexpected diagnostic bundle identity');
   const output = options.get('--output-dir'); mkdirSync(output, {recursive: true});
+  const modes = ['normal-close', 'broker-crash', 'owner-death', 'owner-death-unarmed', 'owner-death-first-launch', 'profile-reopen'];
+  const selectedCase = options.get('--case');
+  if (selectedCase && (!modes.includes(selectedCase) || selectedCase === 'profile-reopen')) throw Error('Unknown or dependent standalone case');
   const domain = `gui/${process.getuid()}`;
   execFileSync('launchctl', ['print', domain], {stdio: 'ignore'});
   const pause = ms => new Promise(done => setTimeout(done, ms));
@@ -46,12 +49,35 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
   function events(dir) {
     const file = join(dir, 'stdout.log'); if (!existsSync(file)) return [];
     if (statSync(file).size > 8 * 1024 * 1024) throw Error('Diagnostic stdout exceeded bound');
-    return readFileSync(file, 'utf8').split('\n').filter(line => line.startsWith('{')).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const records = readFileSync(file, 'utf8').split('\n').filter(line => line.startsWith('{')).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const directory = join(dir, 'entries');
+    const files = existsSync(directory) ? readdirSync(directory).filter(name => name.endsWith('.json')) : [];
+    if (files.length > 4096) throw Error('Independent entry record count exceeded bound');
+    let entryBytes = 0;
+    for (const name of files) {
+      const path = join(directory, name);
+      const size = statSync(path).size; entryBytes += size;
+      if (size > 65536 || entryBytes > 8 * 1024 * 1024) throw Error('Independent entry records exceeded byte bound');
+      records.push({...JSON.parse(readFileSync(path, 'utf8')), independentEntryFile: name});
+    }
+    const seen = new Set();
+    return records.filter(event => {
+      if (!['broker-entry', 'helper-entry'].includes(event.event)) return true;
+      const key = `${event.event}:${event.identity.pid}:${event.identity.started}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).sort((a, b) => a.source_timestamp_ms - b.source_timestamp_ms);
   }
   const group = pgid => JSON.parse(execFileSync(manifest.inspector, ['--group', String(pgid)], {encoding: 'utf8'}));
   const inspect = identity => JSON.parse(execFileSync(manifest.inspector, ['--identity', String(identity.pid), String(identity.started)], {encoding: 'utf8'}));
   const entries = dir => events(dir).filter(event => ['broker-entry', 'helper-entry'].includes(event.event));
   const instanceStates = dir => entries(dir).map(entry => ({original: entry.identity, ...inspect(entry.identity)}));
+  function assertEntryRecorder(dir) {
+    const failures = events(dir).filter(event => event.event === 'entry-record-failed');
+    if (!failures.length) return;
+    writeFileSync(join(dir, 'entry-record-failure.json'), JSON.stringify({observedAt: new Date().toISOString(), failures}, null, 2));
+    throw Error('Independent entry recorder failed; see entry-record-failure.json');
+  }
   function censusMembers(census) {
     if (census.error || census.truncated || !Array.isArray(census.members) || census.members.some(member => !['live', 'zombie', 'gone'].includes(member.state))) throw Error('Kernel group census is unavailable/unknown');
     // Preserve the raw snapshot. ESRCH after the PID enumeration confirms that
@@ -59,6 +85,7 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
     return census.members.filter(member => member.state !== 'gone');
   }
   function measureBarrier(dir, rootIdentity, helpersOnly) {
+    assertEntryRecorder(dir);
     const instances = instanceStates(dir);
     if (instances.some(instance => instance.state === 'unknown')) {
       writeFileSync(join(dir, 'measurement-error.json'), JSON.stringify({error: 'process identity observation unavailable', instances}, null, 2));
@@ -88,8 +115,9 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
   }
   let reopen;
   try {
-    for (const mode of ['normal-close', 'broker-crash', 'owner-death', 'owner-death-unarmed', 'owner-death-first-launch', 'profile-reopen']) {
+    for (const mode of selectedCase ? [selectedCase] : modes) {
       const dir = mkdtempSync(join(output, `${mode}-`)), lease = join(dir, 'lease');
+      const entryDirectory = join(dir, 'entries'); mkdirSync(entryDirectory, {mode: 0o700});
       const unarmed = mode === 'owner-death-unarmed', firstLaunch = mode === 'owner-death-first-launch', startupCut = unarmed || firstLaunch;
       const profile = mode === 'profile-reopen' ? reopen?.profile : join(dir, 'profile');
       if (!profile) throw Error('Reopen requires the completed first-launch generation');
@@ -105,7 +133,7 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
       const label = `dev.dsh.cefowner.${process.pid}.${randomBytes(6).toString('hex')}`, service = `${domain}/${label}`;
       const argv = [manifest.executable, `--probe-directory=${dir}`, `--probe-url=${pageURL}`, `--probe-profile=${profile}`, ...(firstLaunch ? ['--probe-cut=first-launch'] : [])];
       const plist = join(dir, 'probe.plist');
-      writeFileSync(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${argv.map(value => `<string>${xml(value)}</string>`).join('')}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>${xml(join(dir, 'stdout.log'))}</string><key>StandardErrorPath</key><string>${xml(join(dir, 'stderr.log'))}</string></dict></plist>`);
+      writeFileSync(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${argv.map(value => `<string>${xml(value)}</string>`).join('')}</array><key>EnvironmentVariables</key><dict><key>DSH_CEF_OWNER_PROBE_ENTRIES</key><string>${xml(entryDirectory)}</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>${xml(join(dir, 'stdout.log'))}</string><key>StandardErrorPath</key><string>${xml(join(dir, 'stderr.log'))}</string></dict></plist>`);
       const owner = spawn(process.execPath, [script, '--lease-holder', lease, ...(unarmed ? ['--hold-arm'] : [])], {stdio: 'ignore'});
       const ownerExit = new Promise((done, reject) => { owner.once('error', reject); owner.once('exit', (code, signal) => done({code, signal})); });
       let loaded = true, killedOwner = false;
@@ -113,6 +141,7 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
         const boot = run(['bootstrap', domain, plist], join(dir, 'bootstrap.json'));
         if (boot.status !== 0) throw Error(`LaunchAgent bootstrap failed: ${boot.stderr}`);
         await waitFor(() => {
+          assertEntryRecorder(dir);
           const log = events(dir);
           if (log.some(event => ['helper-sandbox-failed', 'helper-framework-failed', 'lease-open-failed', 'create-failed', 'self-audit-failed', 'load-error'].includes(event.event))) throw Error('Actual component startup failed; see stdout.log');
           if (startupCut) return log.some(event => event.event === (unarmed ? 'lease-connected-unarmed' : 'first-launch-held')) && existsSync(`${lease}-writer.json`);
@@ -123,16 +152,23 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
         if (!startupCut && (initialized.crash_reporting !== false || initialized.version !== manifest.version)) throw Error('Runtime crash reporting/version differs from fixed candidate');
         const rootEntry = initialEvents.find(event => event.event === 'broker-entry');
         if (!rootEntry?.identity.started || rootEntry.identity.pgid !== rootEntry.identity.pid) throw Error('Job broker must be its actual process-group leader');
+        const before = group(rootEntry.identity.pgid);
+        const seenEntries = entries(dir), seen = new Set(seenEntries.map(event => `${event.identity.pid}:${event.identity.started}`));
+        const missing = Array.isArray(before.members) ? before.members.filter(member => !seen.has(`${member.pid}:${member.started}`)) : [];
+        writeFileSync(join(dir, 'kernel-before.json'), JSON.stringify({observedAt: new Date().toISOString(), group: before, seenEntries, missing}, null, 2));
+        for (const member of missing) {
+          const current = inspect(member);
+          writeFileSync(join(dir, `missing-${member.pid}-${member.started}.json`), JSON.stringify({original: member, current}, null, 2));
+          run(['procinfo', String(member.pid)], join(dir, `missing-procinfo-${member.pid}-${member.started}.json`));
+        }
+        if (before.error || before.truncated || before.members.some(member => !member.started)) throw Error('Kernel group inventory unavailable/incomplete');
+        if (missing.length) throw Error('Kernel group contains an instance without a helper-entry diagnostic; see kernel-before.json');
         const helpers = initialEvents.filter(event => event.event === 'helper-entry');
         if (startupCut && (helpers.length || initialEvents.some(event => ['initialized', 'created', 'loaded'].includes(event.event)))) throw Error('Startup cut occurred after component admission');
         if (unarmed && initialEvents.some(event => event.event === 'lease-armed')) throw Error('Unarmed cut already armed');
         if (firstLaunch && !initialEvents.some(event => event.event === 'lease-armed')) throw Error('First launch lacks initial lease admission');
         if (!startupCut && (!helpers.some(event => event.type === 'renderer') || !helpers.some(event => event.type === 'gpu-process') || !helpers.some(event => event.type === 'utility' && event.utility.includes('NetworkService')))) throw Error('Workload did not exercise renderer/GPU/network helper inventory');
         if (helpers.some(event => !event.identity.started || event.identity.pgid !== rootEntry.identity.pgid)) throw Error('A real helper is outside the proposed owned PGID');
-        const before = group(rootEntry.identity.pgid);
-        if (before.error || before.truncated || before.members.some(member => !member.started)) throw Error('Kernel group inventory unavailable/incomplete');
-        const seen = new Set(entries(dir).map(event => `${event.identity.pid}:${event.identity.started}`));
-        if (before.members.some(member => !seen.has(`${member.pid}:${member.started}`))) throw Error('Kernel group contains an instance without a helper-entry diagnostic');
         writeFileSync(join(dir, 'inventory-before.json'), JSON.stringify({helpers, before, launchIntents: initialEvents.filter(event => event.event === 'launch-intent')}, null, 2));
         phase('inventory-complete', {root: rootEntry.identity, group: before});
         run(['print', service], join(dir, 'job-before.json'));
@@ -186,6 +222,7 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
         writeFileSync(join(dir, 'final-barrier.json'), JSON.stringify(finalBarrier, null, 2));
         phase('all-instances-group-empty-before-cleanup', {barrier: finalBarrier});
         const finalEvents = events(dir); shutdown = finalEvents.find(event => event.event === 'shutdown-return');
+        assertEntryRecorder(dir);
         if (mode !== 'broker-crash') {
           if (startupCut) {
             if (finalEvents.some(event => ['created', 'loaded', 'lease-arm-timeout', 'lease-invalid-arm', 'lease-read-failed', 'lease-poll-failed', 'launch-hold-timeout', 'reap-error', 'root-release-timeout'].includes(event.event))) throw Error('Startup cut created pages or encountered a transport/gate failure');
@@ -244,6 +281,7 @@ if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)
         phase('cleanup-observed', {signals: cleanup.length, observationErrors, settlementError, group: finalGroup, instances});
         if (observationErrors.length || settlementError || instances.some(instance => !['gone', 'reused'].includes(instance.state))) throw Error('Probe cleanup could not verify every original instance exited; see cleanup.json');
         if (finalGroup && (finalGroup.error || finalGroup.truncated || finalGroup.members.length)) throw Error('Probe cleanup has an unresolved group member');
+        assertEntryRecorder(dir); // Check late teardown records after cleanup, never instead of cleanup.
       }
     }
   } finally {

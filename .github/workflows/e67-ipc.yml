@@ -116,10 +116,13 @@ jobs:
         run: |
           set -o pipefail
           node scripts/build-mac-cef-owner-probe.mjs --lab-work "$GITHUB_WORKSPACE/tools/browser-lab/.work/posix" --output-dir "$RUNNER_TEMP/e67-cef-owner-build" 2>&1 | tee results/e67-mac-cef/probe-build.log
-      - name: Measure fixed-workload helper and owner lifetimes
+      - name: Observe startup inventory and normal cleanup helpers
         run: |
           set -o pipefail
-          node scripts/probe-mac-cef-owner.mjs --manifest "$RUNNER_TEMP/e67-cef-owner-build/cef-owner-bundle.json" --output-dir "$RUNNER_TEMP/e67-cef-owner-results" 2>&1 | tee results/e67-mac-cef/probe.log
+          status=0
+          node scripts/probe-mac-cef-owner.mjs --manifest "$RUNNER_TEMP/e67-cef-owner-build/cef-owner-bundle.json" --output-dir "$RUNNER_TEMP/e67-cef-owner-results/first-launch" --case owner-death-first-launch 2>&1 | tee results/e67-mac-cef/probe-first-launch.log || status=1
+          node scripts/probe-mac-cef-owner.mjs --manifest "$RUNNER_TEMP/e67-cef-owner-build/cef-owner-bundle.json" --output-dir "$RUNNER_TEMP/e67-cef-owner-results/normal-close" --case normal-close 2>&1 | tee results/e67-mac-cef/probe-normal-close.log || status=1
+          exit "$status"
       - uses: actions/upload-artifact@v6
         if: always()
         with:

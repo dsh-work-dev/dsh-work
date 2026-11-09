@@ -139,7 +139,7 @@ class App final : public CefApp,public CefBrowserProcessHandler {
   void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command) override {
     owner_probe::Emit("{\"event\":\"launch-intent\",\"type\":"+owner_probe::Quote(command->GetSwitchValue("type").ToString())+",\"utility\":"+owner_probe::Quote(command->GetSwitchValue("utility-sub-type").ToString())+"}");
     if(cut=="first-launch") {
-      if(!launch_held.exchange(true)) owner_probe::Emit("{\"event\":\"first-launch-held\"}");
+      if(!launch_held.exchange(true)) owner_probe::Emit("{\"event\":\"first-launch-held\",\"group\":"+owner_probe::Census(getpgrp())+"}");
       const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
       while(access((directory+"/launch-release").c_str(),F_OK)!=0) {
         if(std::chrono::steady_clock::now()>=deadline) { owner_probe::Emit("{\"event\":\"launch-hold-timeout\"}"); lease_lost=true; break; }

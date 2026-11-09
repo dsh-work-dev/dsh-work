@@ -4,9 +4,12 @@
 #include <mach/mach.h>
 #include <sys/proc_info.h>
 #include <sys/proc.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
 #include <cerrno>
+#include <cstdlib>
 #include <chrono>
 #include <string>
 #include <vector>
@@ -25,6 +28,30 @@ inline std::string Quote(const std::string& value) {
 inline void Emit(const std::string& json) {
   const std::string stamped=json.substr(0,json.size()-1)+",\"source_timestamp_ms\":"+std::to_string(Now())+"}";
   flockfile(stdout); std::fwrite(stamped.data(),1,stamped.size(),stdout); std::fputc('\n',stdout); std::fflush(stdout); funlockfile(stdout);
+}
+inline void RecordEntry(const std::string& json,uint64_t start) {
+  const char* dir=std::getenv("DSH_CEF_OWNER_PROBE_ENTRIES");
+  if(!dir) return;
+  struct stat info={};
+  if(lstat(dir,&info)!=0 || !S_ISDIR(info.st_mode) || info.st_uid!=geteuid() || (info.st_mode&0777)!=0700) {
+    Emit("{\"event\":\"entry-record-failed\",\"stage\":\"directory\"}"); return;
+  }
+  const std::string file=std::string(dir)+"/entry-"+std::to_string(getpid())+"-"+std::to_string(start)+"-"+std::to_string(Now());
+  const std::string temporary=file+".tmp",final=file+".json";
+  int fd=open(temporary.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC|O_NOFOLLOW,0600);
+  if(fd<0) { Emit("{\"event\":\"entry-record-failed\",\"stage\":\"open\"}"); return; }
+  const std::string stamped=json.substr(0,json.size()-1)+",\"source_timestamp_ms\":"+std::to_string(Now())+"}\n";
+  size_t offset=0;
+  while(offset<stamped.size()) {
+    auto count=write(fd,stamped.data()+offset,stamped.size()-offset);
+    if(count<0 && errno==EINTR) continue;
+    if(count<=0) break;
+    offset+=static_cast<size_t>(count);
+  }
+  const bool closed=close(fd)==0;
+  if(offset!=stamped.size() || !closed || rename(temporary.c_str(),final.c_str())!=0) {
+    unlink(temporary.c_str()); Emit("{\"event\":\"entry-record-failed\",\"stage\":\"publish\"}");
+  }
 }
 inline uint64_t Started(pid_t pid,int* status=nullptr,pid_t* parent=nullptr,pid_t* group=nullptr,int* error=nullptr) {
   struct proc_bsdinfo info={};
@@ -73,7 +100,9 @@ inline void Self(const std::string& event,int argc,char** argv) {
   std::string audit="[";
   for(size_t i=0;i<8;i++) { if(i) audit+=','; audit+=std::to_string(token.val[i]); }
   audit+=']';
-  Emit("{\"event\":"+Quote(event)+",\"identity\":"+Identity(getpid())+",\"audit\":"+audit+",\"type\":"+Quote(Argument(argc,argv,"type"))+",\"utility\":"+Quote(Argument(argc,argv,"utility-sub-type"))+"}");
+  const std::string json="{\"event\":"+Quote(event)+",\"identity\":"+Identity(getpid())+",\"audit\":"+audit+",\"type\":"+Quote(Argument(argc,argv,"type"))+",\"utility\":"+Quote(Argument(argc,argv,"utility-sub-type"))+"}";
+  Emit(json);
+  RecordEntry(json,Started(getpid()));
 }
 }
 #endif
