@@ -78,13 +78,13 @@ inline std::string Identity(pid_t pid) {
   char path[PROC_PIDPATHINFO_MAXSIZE]={}; proc_pidpath(pid,path,sizeof(path));
   return "{\"pid\":"+std::to_string(pid)+",\"started\":"+std::to_string(start)+",\"state\":"+Quote(state)+",\"error\":"+std::to_string(error)+",\"ppid\":"+std::to_string(parent)+",\"pgid\":"+std::to_string(group)+",\"sid\":"+std::to_string(getsid(pid))+",\"status\":"+std::to_string(status)+",\"path\":"+Quote(path)+"}";
 }
-inline std::string Census(pid_t group) {
+inline std::string Census(pid_t group,bool children=false) {
   std::vector<pid_t> pids(4096);
   errno=0;
   // Unlike proc_listpids (bytes), this convenience API returns a PID count.
-  int count=proc_listpgrppids(group,pids.data(),static_cast<int>(pids.size()*sizeof(pid_t)));
-  if(count<0 || (count==0 && errno && errno!=ESRCH)) return "{\"error\":\"proc_listpgrppids failed\"}";
-  std::string out="{\"pgid\":"+std::to_string(group)+",\"truncated\":"+(count==static_cast<int>(pids.size())?"true":"false")+",\"members\":[";
+  int count=children?proc_listchildpids(group,pids.data(),static_cast<int>(pids.size()*sizeof(pid_t))):proc_listpgrppids(group,pids.data(),static_cast<int>(pids.size()*sizeof(pid_t)));
+  if(count<0 || (count==0 && errno && errno!=ESRCH)) return std::string("{\"error\":\"")+(children?"proc_listchildpids":"proc_listpgrppids")+" failed\",\"errno\":"+std::to_string(errno)+"}";
+  std::string out=std::string("{\"")+(children?"parent":"pgid")+"\":"+std::to_string(group)+",\"truncated\":"+(count==static_cast<int>(pids.size())?"true":"false")+",\"members\":[";
   bool first=true;
   for(int i=0;i<count;i++) if(pids[i]>0) { if(!first) out+=','; first=false; out+=Identity(pids[i]); }
   return out+"]}";

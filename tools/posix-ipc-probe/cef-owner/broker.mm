@@ -202,7 +202,7 @@ int main(int argc,char** argv) {
     owner_probe::Emit("{\"event\":\"shutdown-enter\"}"); CefShutdown();
     close(lease); // Main owns the reader; callbacks/monitor only borrow it.
     const auto shutdown_at=owner_probe::Now();
-    owner_probe::Emit("{\"event\":\"shutdown-return\",\"returned_at_ms\":"+std::to_string(shutdown_at)+",\"group\":"+owner_probe::Census(getpgrp())+"}");
+    owner_probe::Emit("{\"event\":\"shutdown-return\",\"returned_at_ms\":"+std::to_string(shutdown_at)+",\"group\":"+owner_probe::Census(getpgrp())+",\"children\":"+owner_probe::Census(getpid(),true)+"}");
     // Keep the actual LaunchAgent root alive after CEF shutdown. Otherwise its
     // exit would trigger launchd's group fallback before the observer can prove
     // natural child quiescence. Only the observer may release this diagnostic
