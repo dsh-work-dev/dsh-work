@@ -26,6 +26,7 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/localipc"
 	linuxplatform "github.com/local/dsh-work/internal/platform/linux"
+	"github.com/local/dsh-work/internal/redact"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
 	"golang.org/x/sys/unix"
@@ -124,6 +125,14 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	defer func() {
 		for i := len(workers) - 1; i >= 0; i-- {
 			w := workers[i]
+			d := w.Diagnostics()
+			d.StdoutTail = redact.Secrets(d.StdoutTail)
+			d.StderrTail = redact.Secrets(d.StderrTail)
+			if data, e := json.MarshalIndent(d, "", "  "); e != nil {
+				t.Errorf("save owned diagnostics: %v", e)
+			} else if e = os.WriteFile(filepath.Join(out, "owned-process-"+strconv.Itoa(i)+".json"), append(data, '\n'), 0600); e != nil {
+				t.Errorf("save owned diagnostics: %v", e)
+			}
 			c, stop := context.WithTimeout(context.Background(), 8*time.Second)
 			if w.Diagnostics().ActiveProcesses != 0 {
 				t.Log("failure-only cleanup of retained self-owned unit", w.Diagnostics().PID)
@@ -184,7 +193,8 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		}
 	}
 	var snapshot daemon.Snapshot
-	wait("real daemon Ready", func() bool {
+	lastReadiness := ""
+	probeDaemon := func() bool {
 		select {
 		case <-background.Exited():
 			t.Fatal("real daemon exited before readiness", background.ExitResult())
@@ -192,9 +202,27 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		}
 		c, stop := context.WithTimeout(ctx, time.Second)
 		defer stop()
-		return client.JSON(c, "/snapshot", nil, &snapshot) == nil && snapshot.Status.State == lifecycle.StateReady
-	})
-	save("daemon-ready", map[string]any{"pid": identity.PID, "created": identity.ProcessStarted, "generation": snapshot.Status.GenerationID, "state": snapshot.Status.State})
+		if e := client.JSON(c, "/snapshot", nil, &snapshot); e != nil {
+			return false
+		}
+		code, summary := "", ""
+		if snapshot.Status.Error != nil {
+			code = string(snapshot.Status.Error.Code)
+			summary = redact.Secrets(snapshot.Status.Error.Summary)
+		}
+		key := fmt.Sprint(snapshot.Status.State, "/", snapshot.Status.Phase, "/", code)
+		if key != lastReadiness {
+			lastReadiness = key
+			save("readiness-last", map[string]any{"state": snapshot.Status.State, "phase": snapshot.Status.Phase, "generation": snapshot.Status.GenerationID, "code": code, "summary": summary})
+		}
+		if snapshot.Status.State == lifecycle.StateFailed {
+			t.Fatal("real daemon boot failed", code, summary)
+		}
+		return snapshot.Protocol == daemon.Protocol && snapshot.PID == int(identity.PID)
+	}
+	// Ready requires the actual UI's plugin/mount confirmation. Start that
+	// owned UI as soon as authenticated IPC exists, not after full Ready.
+	wait("authenticated daemon IPC", probeDaemon)
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)
@@ -208,6 +236,15 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	uiEnv["WEBKIT_INSPECTOR_HTTP_SERVER"] = "127.0.0.1:" + strconv.Itoa(port)
 	ui := start("ui", nil, uiEnv)
 	uiIdentity := ui.Diagnostics()
+	wait("real daemon Ready after UI mount", func() bool {
+		select {
+		case <-ui.Exited():
+			t.Fatal("owned UI exited before mount confirmation", ui.ExitResult())
+		default:
+		}
+		return probeDaemon() && snapshot.Status.State == lifecycle.StateReady
+	})
+	save("daemon-ready", map[string]any{"pid": identity.PID, "created": identity.ProcessStarted, "generation": snapshot.Status.GenerationID, "state": snapshot.Status.State})
 	node, e := exec.LookPath("node")
 	if e != nil {
 		t.Fatal(e)
