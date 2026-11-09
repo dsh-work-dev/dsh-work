@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -57,8 +58,7 @@ const spawned=cp.spawnSync('/usr/bin/true');if(spawned.error?.code!=='EPERM')thr
 let ptyDenied=false;try{const pty=ptyBackend.spawn('/bin/sh',[],options);pty.kill()}catch{ptyDenied=true}if(!ptyDenied)throw Error('native PTY not denied');
 const text=await(await fetch(process.argv[4])).text();if(text!=='network-ok')throw Error('network unavailable');
 fs.writeFileSync(process.argv[5],'file-ok');if(fs.readFileSync(process.argv[5],'utf8')!=='file-ok')throw Error('files unavailable');
-let execDenied=false;try{process.execve('/usr/bin/true',['true'],{})}catch(e){execDenied=e.code==='EPERM'}if(!execDenied)throw Error('native exec not denied');
-console.log(JSON.stringify({kernelForkDenied:true,nativeSpawnDenied:true,nativePTYDenied:true,execDenied:true,network:true,files:true}));`
+console.log(JSON.stringify({kernelForkDenied:true,nativeSpawnDenied:true,nativePTYDenied:true,network:true,files:true}));`
 	if err = os.WriteFile(script, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +69,34 @@ console.log(JSON.stringify({kernelForkDenied:true,nativeSpawnDenied:true,nativeP
 		t.Fatalf("kernel checkpoint: %v: %s", err, output)
 	}
 	var kernel map[string]bool
-	if json.Unmarshal(output, &kernel) != nil || len(kernel) != 6 {
+	if json.Unmarshal(output, &kernel) != nil || len(kernel) != 5 {
 		t.Fatalf("invalid kernel result: %s", output)
 	}
+	// Node's native execve failure is fatal after native RunAtExit cleanup; it
+	// cannot be caught as a JavaScript exception. Keep that real failure in a
+	// separate, reaped probe rather than aborting the shared owner checkpoint.
+	execScript := filepath.Join(t.TempDir(), "exec-denial.mjs")
+	execSource := `import fs from 'node:fs';import {createRequire} from 'node:module';
+if(createRequire(import.meta.url)(process.argv[2]).apply()!==true)throw Error('sandbox missing');
+fs.writeSync(2,'MAC_PREVIEW_EXEC_ARMED\n');
+process.execve('/usr/bin/true',['true'],{});
+throw Error('execve unexpectedly returned');`
+	if err = os.WriteFile(execScript, []byte(execSource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	execProbe := exec.CommandContext(ctx, node, execScript, filepath.Join(filepath.Dir(host), "dsh-preview-sandbox.node"))
+	execProbe.Env = os.Environ()
+	execOutput, execErr := execProbe.CombinedOutput()
+	var exitError *exec.ExitError
+	if !errors.As(execErr, &exitError) {
+		t.Fatalf("native exec denial did not produce the expected fatal boundary: %v: %s", execErr, execOutput)
+	}
+	status, ok := exitError.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() || status.Signal() != syscall.SIGABRT || !strings.Contains(string(execOutput), "MAC_PREVIEW_EXEC_ARMED\n") || !strings.Contains(string(execOutput), "process.execve failed") || !strings.Contains(string(execOutput), "EPERM") {
+		t.Fatalf("native exec failure was not the isolated EPERM abort: %v: %s", execErr, execOutput)
+	}
+	kernel["execDenied"] = true
+	t.Log("isolated native execve: sandbox EPERM, Node SIGABRT observed and reaped")
 	env := map[string]string{}
 	for _, item := range os.Environ() {
 		if k, v, ok := strings.Cut(item, "="); ok {
