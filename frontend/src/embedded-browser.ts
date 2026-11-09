@@ -52,6 +52,7 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
       if(typeof m.accept!=="boolean"||typeof m.text!=="string")throw Error("Invalid webpage answer");
       return EmbeddedBrowserService.AnswerDialog(token,slot,d,m.accept,m.text);
      }
+     case "download-cancel":if(typeof m.download!=="string"||m.download.length!==26)throw Error("Invalid download");return EmbeddedBrowserService.CancelDownload(token,slot,m.download);
      case "detach":return EmbeddedBrowserService.Detach(token,slot);
      case "action":if(!["back","forward","reload"].includes(String(m.command)))throw Error("Invalid browser action");return EmbeddedBrowserService.Action(token,slot,String(m.command));
      default:throw Error("Unsupported browser request");

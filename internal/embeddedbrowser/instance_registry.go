@@ -806,3 +806,12 @@ func (r *InstancePresenterRegistry) PresentDialog(ctx context.Context, p Present
 	defer i.serial.Unlock()
 	return i.views.PresentDialog(ctx, p, surface, slot, dialog, ready)
 }
+
+func (r *InstancePresenterRegistry) CancelDownload(ctx context.Context, p PresenterPeer, surface, slot, id string) error {
+	i, e := r.lockSurface(p, surface)
+	if e != nil {
+		return e
+	}
+	defer i.serial.Unlock()
+	return i.views.CancelDownload(ctx, p, surface, slot, id)
+}

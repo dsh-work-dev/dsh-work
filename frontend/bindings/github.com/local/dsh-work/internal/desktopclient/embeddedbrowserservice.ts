@@ -28,6 +28,10 @@ export function BeginDocument(document: string): $CancellablePromise<boolean> {
     return $Call.ByID(199062276, document);
 }
 
+export function CancelDownload(document: string, slot: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(2330640698, document, slot, id);
+}
+
 export function Capability(): $CancellablePromise<boolean> {
     return $Call.ByID(3254308590);
 }

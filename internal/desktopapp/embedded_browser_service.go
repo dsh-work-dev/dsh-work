@@ -171,3 +171,11 @@ func (s *embeddedBrowserService) PresentDialog(ctx context.Context, slot string,
 	}
 	return s.Registry.PresentDialog(ctx, peer, surface, slot, dialog, ready)
 }
+
+func (s *embeddedBrowserService) CancelDownload(ctx context.Context, slot, id string) error {
+	peer, surface, e := s.peer(ctx)
+	if e != nil {
+		return e
+	}
+	return s.Registry.CancelDownload(ctx, peer, surface, slot, id)
+}

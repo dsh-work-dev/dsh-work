@@ -312,3 +312,15 @@ func (s *EmbeddedBrowserService) AnswerDialog(ctx context.Context, document, slo
 	}
 	return call(ctx, s.Client, "EmbeddedBrowserService", "AnswerDialog", []any{slot, dialog, accept, text}, nil)
 }
+
+func (s *EmbeddedBrowserService) CancelDownload(ctx context.Context, document, slot, id string) error {
+	gate, e := s.lockDocument(ctx, document)
+	if e != nil {
+		return e
+	}
+	defer gate.Unlock()
+	if !s.Enabled || len(id) != 26 {
+		return errors.New("DOWNLOAD_ARGUMENT_REJECTED")
+	}
+	return call(ctx, s.Client, "EmbeddedBrowserService", "CancelDownload", []any{slot, id}, nil)
+}

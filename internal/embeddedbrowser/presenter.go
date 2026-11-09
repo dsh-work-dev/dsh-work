@@ -30,19 +30,20 @@ type WebDialog struct {
 	Truncated     bool   `json:"truncated"`
 }
 type ViewState struct {
-	Dialog           *WebDialog `json:"dialog,omitempty"`
-	DialogVisible    bool       `json:"dialogVisible,omitempty"`
-	Instance         string     `json:"instance,omitempty"`
-	BrokerGeneration string     `json:"brokerGeneration,omitempty"`
-	Title            string     `json:"title"`
-	CanGoBack        bool       `json:"canGoBack"`
-	CanGoForward     bool       `json:"canGoForward"`
-	Lease            string     `json:"lease"`
-	State            string     `json:"state"`
-	URL              string     `json:"url"`
-	Visible          bool       `json:"visible"`
-	Target           string     `json:"target"`
-	Document         string     `json:"document"`
+	Downloads        []DownloadView `json:"downloads,omitempty"`
+	Dialog           *WebDialog     `json:"dialog,omitempty"`
+	DialogVisible    bool           `json:"dialogVisible,omitempty"`
+	Instance         string         `json:"instance,omitempty"`
+	BrokerGeneration string         `json:"brokerGeneration,omitempty"`
+	Title            string         `json:"title"`
+	CanGoBack        bool           `json:"canGoBack"`
+	CanGoForward     bool           `json:"canGoForward"`
+	Lease            string         `json:"lease"`
+	State            string         `json:"state"`
+	URL              string         `json:"url"`
+	Visible          bool           `json:"visible"`
+	Target           string         `json:"target"`
+	Document         string         `json:"document"`
 	// Read-only CEF identity evidence; never accepts authority from a caller.
 	Frame   string      `json:"frame,omitempty"`
 	Epoch   string      `json:"epoch"`
@@ -450,6 +451,12 @@ type navigationState struct {
 }
 
 func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) error {
+	p.view.Downloads = nil
+	for _, d := range p.target.broker.DownloadState() {
+		if d.owner == p.target.owner || d.owner == "" {
+			p.view.Downloads = append(p.view.Downloads, d)
+		}
+	}
 	raw, err := p.target.broker.controlCall(ctx, "target.navigation", p.target.owner, nil)
 	if err != nil {
 		return err
@@ -535,4 +542,25 @@ func (r *PresenterRegistry) PresentDialog(ctx context.Context, peer PresenterPee
 	}
 	_, err := p.target.broker.controlCall(ctx, method, p.target.owner, map[string]any{"dialog": dialog})
 	return err
+}
+
+// Cancellation is admitted by the existing Host surface and exact target owner.
+func (r *PresenterRegistry) CancelDownload(ctx context.Context, peer PresenterPeer, surface, slot, id string) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	if p.peer != peer || p.target == nil {
+		p.serial.Unlock()
+		return ErrClosed
+	}
+	b, owner := p.target.broker, p.target.owner
+	p.serial.Unlock()
+	for _, d := range b.DownloadState() {
+		if d.ID == id && d.owner == owner {
+			return b.CancelDownload(ctx, id, false)
+		}
+	}
+	return ErrClosed
 }

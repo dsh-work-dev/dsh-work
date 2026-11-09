@@ -25,6 +25,13 @@
  addEventListener('DOMContentLoaded',scanModals,{once:true});
  // A webpage dialog belongs to its viewport, never the application's top layer.
  const dialogStyle=document.createElement('style');dialogStyle.textContent=`
+ .dsh-downloads{position:absolute;inset:auto 0 0;z-index:1;box-sizing:border-box;max-height:128px;overflow:auto;border-top:1px solid var(--group-border,#c6ced8);background:var(--canvas,#fff);color:var(--text,#18212f);font:12px/1.4 system-ui,sans-serif}
+ .dsh-download-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 12px;padding:8px 12px}
+ .dsh-download-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .dsh-download-status{color:var(--muted,#667085);overflow-wrap:anywhere}
+ .dsh-download-row progress{width:100%;height:4px;grid-column:1/-1;accent-color:var(--accent,#2563eb)}
+ .dsh-download-row button{grid-column:2;grid-row:1/3;align-self:center;font:inherit;padding:5px 9px;border:1px solid var(--group-border,#bac4d0);border-radius:6px;background:var(--canvas,#fff);color:inherit;cursor:pointer}
+ .dsh-download-row button:focus-visible{outline:2px solid var(--accent,#2563eb);outline-offset:2px}
  .dsh-web-dialog-layer{position:absolute;inset:0;z-index:2;display:grid;place-items:center;padding:16px;box-sizing:border-box;overflow:hidden;background:color-mix(in srgb,var(--canvas,#f5f7fb) 78%,transparent)}
  .dsh-web-dialog{box-sizing:border-box;width:min(400px,100%);max-height:100%;overflow:auto;padding:20px;border:1px solid var(--dialog-border,var(--group-border,#c6ced8));border-radius:12px;background:var(--dialog-bg,var(--canvas,#fff));color:var(--text,#18212f);box-shadow:var(--dialog-shadow,0 12px 36px #0002);font:14px/1.5 system-ui,sans-serif}
  .dsh-web-dialog h2{font-size:16px;line-height:1.4;margin:0 0 4px;font-weight:650}
@@ -45,6 +52,39 @@
   const slot=`${session}/${options.key}`;let container,observer,intersection,intersecting=false,disposed=false,mounted=false,registered=false,issued=false,mountGeneration=0,state={target:undefined,address:'empty',loading:false,canGoBack:false,canGoForward:false,error:undefined,sandboxEnabled:undefined};
   let view,queued=Promise.resolve(),pendingURL,revision=0,lastGeometry='',persistedKey='',layoutQueued=false,pollQueued=false;const listeners=new Set();
   let dialogCard,dialogSync=false,dialogRound=0;
+  let downloadTray,downloadHeight=0;const downloadRows=new Map(),hiddenDownloads=new Set();
+  const clearDownloads=()=>{downloadTray?.remove();downloadTray=undefined;downloadRows.clear();downloadHeight=0};
+  const downloadError=code=>({
+   DOWNLOAD_NETWORK_FAILED:'连接中断，请重新下载。',DOWNLOAD_HTTP_FAILED:'网站未能提供文件，请稍后重试。',DOWNLOAD_REQUEST_FAILED:'无法连接下载，请重试。',
+   DOWNLOAD_BUDGET_EXCEEDED:'文件超过当前下载上限，请选择较小文件。',DOWNLOAD_DISK_SPACE_REQUIRED:'磁盘空间不足，请释放空间后重试。',
+   DOWNLOAD_WRITE_FAILED:'无法写入文件，请检查磁盘后重试。',DOWNLOAD_DESTINATION_CHANGED:'目标文件已改变，请重新选择保存位置。',DOWNLOAD_DESTINATION_BUSY:'目标已被占用，请重新选择保存位置。',
+   DOWNLOAD_OWNED_FILE_CHANGED:'临时文件已改变，请重新下载。',DOWNLOAD_REDIRECT_NOT_APPROVED:'下载转向其他地址，请打开该地址后重新下载。',
+   DOWNLOAD_FINALIZATION_FAILED:'无法完成文件检查，请检查文件来源后重试。',DOWNLOAD_RISK_CHECK_FAILED:'文件检查未通过，未保存文件。',DOWNLOAD_RISK_DECLINED:'已取消保存此文件。',
+   DOWNLOAD_PUBLISH_FAILED:'无法保存文件，请检查目标位置后重试。',DOWNLOAD_BROKER_INTERRUPTED:'下载已中断，请重新下载。',DOWNLOAD_RECOVERY_REQUIRED:'保存未完成，请检查保留的原文件。',DOWNLOAD_CLEANUP_REQUIRED:'临时文件清理待完成。'
+  }[code]||'下载未完成，请重试。');
+  const renderDownloads=()=>{
+   const items=(view?.downloads||[]).filter(d=>!hiddenDownloads.has(d.id));if(!mounted||!container||!items.length){if(downloadTray){clearDownloads();page.schedule()}return}
+   if(!downloadTray){downloadTray=document.createElement('section');downloadTray.className='dsh-downloads';downloadTray.setAttribute('aria-label','下载');if(getComputedStyle(container).position==='static')container.style.position='relative';container.append(downloadTray)}
+   const ids=new Set(items.map(d=>d.id));for(const [id,row]of downloadRows)if(!ids.has(id)){row.element.remove();downloadRows.delete(id)}
+   const sizes=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':n>=1024?(n/1024).toFixed(0)+' KB':n+' B';
+   const labels={approved:'准备下载',starting:'正在连接',transferring:'正在下载',finalizing:'正在保存',stopping:'正在取消',complete:'下载完成',canceled:'已取消',revoked:'已撤销',failed:'下载失败',interrupted:'下载已中断'};
+   for(const d of items){let row=downloadRows.get(d.id);if(!row){
+    const element=document.createElement('div'),name=document.createElement('div'),status=document.createElement('div'),progress=document.createElement('progress'),cancel=document.createElement('button');
+    element.className='dsh-download-row';name.className='dsh-download-name';status.className='dsh-download-status';cancel.type='button';cancel.textContent='取消';cancel.onclick=()=>{if(!downloadRows.get(d.id)?.active){hiddenDownloads.add(d.id);renderDownloads();return}cancel.disabled=true;void enqueue(async()=>{
+     let localError='';try{await request('download-cancel',{slot,download:d.id})}catch{localError='取消未完成，请重试。'}
+     try{accept(await request('state',{slot}))}catch{localError='无法读取下载状态，请稍后重试。'}
+     const current=downloadRows.get(d.id);if(current){current.localError=localError;renderDownloads()}
+    }).finally(()=>{cancel.disabled=false})};
+    element.append(name,status,progress,cancel);downloadTray.append(element);row={element,name,status,progress,cancel};downloadRows.set(d.id,row);
+   }
+   const text=labels[d.state]||'等待下载',reason=d.error&&['failed','interrupted'].includes(d.state)?downloadError(d.error):text,detail=(row.localError||reason)+(d.recoveryPath?' · 原文件保留于 '+d.recoveryPath:d.cleanupRequired?' · 临时文件清理待完成':'')+(d.received?' · '+sizes(d.received)+(d.total>0?' / '+sizes(d.total):''):'');
+   if(row.name.textContent!==d.filename)row.name.textContent=d.filename;row.name.title=d.filename;
+   if(row.status.textContent!==detail)row.status.textContent=detail;
+   const active=['approved','starting','transferring','finalizing','stopping'].includes(d.state);row.active=active;if(!active)row.localError='';row.cancel.hidden=false;row.cancel.textContent=active?'取消':'隐藏';row.cancel.setAttribute('aria-label',active?'取消下载':'隐藏此下载');row.cancel.disabled=d.state==='stopping';row.progress.hidden=!active;row.progress.setAttribute('aria-label',d.filename+' '+text);
+   if(d.total>0){row.progress.max=d.total;row.progress.value=d.received}else row.progress.removeAttribute('value');
+   }
+   const height=downloadTray.offsetHeight;if(height!==downloadHeight){downloadHeight=height;page.schedule()}
+  };
   const clearDialog=()=>{dialogRound++;dialogCard?.layer.remove();dialogCard=undefined};
   const renderDialog=(dialog,ready)=>{
    if(dialogCard?.dialog.epoch===dialog.epoch){dialogCard.dialog=dialog;dialogCard.ready=ready;for(const b of dialogCard.buttons)b.disabled=!ready||dialogCard.busy;return}
@@ -101,10 +141,10 @@
    // checkpoint before notifying so its standard title/address/action render
    // even when the provider initially has the same empty frame snapshot.
    let saved=false;if(page&&['ready','NeedsReload'].includes(value.state)&&persistedKey!==page.url+'|'+page.title){persistedKey=page.url+'|'+page.title;options.persist({entries:[page],index:0,request:undefined,navigation:{status:'known',revision:++revision},failure:undefined});saved=true}
-   syncDialog();
+   renderDownloads();syncDialog();
    publish({target:needsReload?undefined:page,address:!needsReload&&page?'observed':'empty',loading:value.state==='loading',canGoBack:value.state!=='controlPaused'&&!!value.canGoBack,canGoForward:value.state!=='controlPaused'&&!!value.canGoForward,error:value.state==='controlPaused'?{code:-32099,description:'Browser control is paused.'}:value.state==='presentationFailed'?{code:undefined,description:'Reload to continue.'}:undefined,sandboxEnabled:undefined},needsReload&&saved);return value};
   const fail=error=>{if(String(error).includes('CEF_BROKER_CONTROL_PAUSED')){if(view)accept({...view,state:'controlPaused'});return}console.error('Browser presentation failed',String(error));publish({...state,loading:false,error:{code:undefined,description:'The page is unavailable. Reload to continue.'}})};
-  const geometry=()=>{const rect=container?.getBoundingClientRect();if(!rect)return{rect:{x:0,y:0,width:0,height:0},visible:false};const dock=container.closest?.('[data-dockkit-host="dock"]'),panel=dock?.closest('[data-sidebar-right-panel]'),collapsed=panel&&!panel.hasAttribute('data-sidebar-right-open');const left=Math.min(innerWidth,Math.max(0,rect.left)),top=Math.min(innerHeight,Math.max(0,rect.top)),right=Math.min(innerWidth,rect.right),bottom=Math.min(innerHeight,rect.bottom);return{rect:{x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)},visible:mounted&&!collapsed&&intersecting&&!blocked&&container.isConnected&&container.getClientRects().length>0&&getComputedStyle(container).visibility!=='hidden'&&right>left&&bottom>top}};
+  const geometry=()=>{const rect=container?.getBoundingClientRect();if(!rect)return{rect:{x:0,y:0,width:0,height:0},visible:false};const dock=container.closest?.('[data-dockkit-host="dock"]'),panel=dock?.closest('[data-sidebar-right-panel]'),collapsed=panel&&!panel.hasAttribute('data-sidebar-right-open');const left=Math.min(innerWidth,Math.max(0,rect.left)),top=Math.min(innerHeight,Math.max(0,rect.top)),right=Math.min(innerWidth,rect.right),bottom=Math.min(innerHeight,rect.bottom-downloadHeight);return{rect:{x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)},visible:mounted&&!collapsed&&intersecting&&!blocked&&container.isConnected&&container.getClientRects().length>0&&getComputedStyle(container).visibility!=='hidden'&&right>left&&bottom>top}};
   const enqueue=task=>{const result=queued.then(task);queued=result.catch(error=>{if(!disposed)fail(error)});return result};
   const update=(address='',explicit=false)=>{const generation=mountGeneration;return enqueue(async()=>{if(disposed)return;const g=geometry();lastGeometry=JSON.stringify(g);issued=true;let value=await request('update',{slot,address,...g});if(value.state==='NeedsReload'&&explicit&&generation===mountGeneration&&mounted){value=await request('recover',{slot,address});value=await request('update',{slot,address:'',...geometry()})}if(generation!==mountGeneration){await request('update',{slot,address:'',rect:g.rect,visible:false});return value}return accept(value)})};
   const page={key:options.key,visible:()=>mounted&&geometry().visible,select:()=>{if(!view?.lease||view.state!=='ready'||!geometry().visible)throw Error('Reload the visible page first');return request('select-control',{session,slot,lease:view.lease})},schedule(){if(disposed||!mounted)return;syncDialog();
@@ -113,13 +153,13 @@
    if(layoutQueued)return;const key=JSON.stringify(geometry());if(key===lastGeometry)return;lastGeometry=key;layoutQueued=true;void update().then(()=>{layoutQueued=false;page.schedule()},()=>{layoutQueued=false})
   }};pages.add(page);
   const polling=setInterval(()=>{if(disposed||!registered||pollQueued)return;pollQueued=true;void enqueue(async()=>accept(await request('state',{slot}))).then(()=>{pollQueued=false},()=>{pollQueued=false})},250);
-  const frame={getSnapshot:()=>state,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener)},loadUrl(value){if(view?.state==='controlPaused')return;pendingURL=value.url;publish({...state,target:value,address:'requested',loading:true,error:undefined});if(mounted){const url=pendingURL;pendingURL=undefined;void update(url,true)}},goBack(){if(view?.state==='controlPaused')return;void enqueue(async()=>{await request('action',{slot,command:'back'});accept(await request('state',{slot}))})},goForward(){if(view?.state==='controlPaused')return;void enqueue(async()=>{await request('action',{slot,command:'forward'});accept(await request('state',{slot}))})},reload(){if(view?.state==='controlPaused')return;if(view?.state==='presentationFailed'){void update()}else if(view?.state==='NeedsReload'){void enqueue(async()=>{accept(await request('recover',{slot,address:''}));accept(await request('update',{slot,address:'',...geometry()}))})}else if(registered){void enqueue(async()=>{await request('action',{slot,command:'reload'});accept(await request('state',{slot}))})}else if(state.target){void update(state.target.url,true)}},async dispose(){if(disposed)return;clearDialog();disposed=true;mounted=false;mountGeneration++;pages.delete(page);clearInterval(polling);observer?.disconnect();intersection?.disconnect();await queued.catch(()=>{});if(issued)await request('detach',{slot});listeners.clear()}};
+  const frame={getSnapshot:()=>state,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener)},loadUrl(value){if(view?.state==='controlPaused')return;pendingURL=value.url;publish({...state,target:value,address:'requested',loading:true,error:undefined});if(mounted){const url=pendingURL;pendingURL=undefined;void update(url,true)}},goBack(){if(view?.state==='controlPaused')return;void enqueue(async()=>{await request('action',{slot,command:'back'});accept(await request('state',{slot}))})},goForward(){if(view?.state==='controlPaused')return;void enqueue(async()=>{await request('action',{slot,command:'forward'});accept(await request('state',{slot}))})},reload(){if(view?.state==='controlPaused')return;if(view?.state==='presentationFailed'){void update()}else if(view?.state==='NeedsReload'){void enqueue(async()=>{accept(await request('recover',{slot,address:''}));accept(await request('update',{slot,address:'',...geometry()}))})}else if(registered){void enqueue(async()=>{await request('action',{slot,command:'reload'});accept(await request('state',{slot}))})}else if(state.target){void update(state.target.url,true)}},async dispose(){if(disposed)return;clearDownloads();clearDialog();disposed=true;mounted=false;mountGeneration++;pages.delete(page);clearInterval(polling);observer?.disconnect();intersection?.disconnect();await queued.catch(()=>{});if(issued)await request('detach',{slot});listeners.clear()}};
   const presentation={mount(id){container=document.getElementById(id);if(!container)throw Error('Browser viewport unavailable');mounted=true;const generation=++mountGeneration;intersecting=false;lastGeometry='';observer?.disconnect();intersection?.disconnect();observer=new ResizeObserver(()=>page.schedule());observer.observe(container);
    // Ancestor overflow/transforms can hide a retained pane without resizing
    // its viewport. A native child must not outlive that DOM clip. Keep it
    // hidden until the browser confirms the whole slot is visible again.
    intersection=new IntersectionObserver(entries=>{if(generation!==mountGeneration||!mounted)return;for(const entry of entries)if(entry.target===container){intersecting=entry.isIntersecting&&entry.intersectionRatio>=0.9999;page.schedule()}},{threshold:[0,0.9999]});intersection.observe(container);
-   const scroll=()=>page.schedule();addEventListener('scroll',scroll,true);addEventListener('resize',scroll);if(pendingURL){const url=pendingURL;pendingURL=undefined;void update(url,true)}else{page.schedule()}return()=>{clearDialog();mounted=false;intersecting=false;mountGeneration++;lastGeometry='';observer?.disconnect();intersection?.disconnect();removeEventListener('scroll',scroll,true);removeEventListener('resize',scroll);void update()}}};
+   const scroll=()=>page.schedule();addEventListener('scroll',scroll,true);addEventListener('resize',scroll);if(pendingURL){const url=pendingURL;pendingURL=undefined;void update(url,true)}else{page.schedule()}return()=>{clearDownloads();clearDialog();mounted=false;intersecting=false;mountGeneration++;lastGeometry='';observer?.disconnect();intersection?.disconnect();removeEventListener('scroll',scroll,true);removeEventListener('resize',scroll);void update()}}};
   return{frame,presentation};
  }};
 })();

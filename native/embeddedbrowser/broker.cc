@@ -12,6 +12,8 @@
 #include <vector>
 #include <algorithm>
 #include <charconv>
+#include <chrono>
+#include <cctype>
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_command_line.h"
@@ -28,12 +30,14 @@
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_download_handler.h"
 #include "include/cef_dialog_handler.h"
+#include "include/cef_urlrequest.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
 #ifdef _WIN32
+#include <bcrypt.h>
 #include "platform_win.h"
 #include "file_picker_win.h"
 #elif defined(__APPLE__)
@@ -56,9 +60,14 @@ void Write(Dict value) {
   auto v = CefValue::Create(); v->SetDictionary(value);
   auto json = CefWriteJSON(v, JSON_WRITER_DEFAULT).ToString();
   if (json.empty() || json.size() > kLimit) return;
+#ifdef _WIN32
+  auto key=value->GetString("kind")=="download.progress" ? value->GetString("id").ToString() : std::string{};
+  QueueFrame(std::move(json),std::move(key));
+#else
   uint32_t n = static_cast<uint32_t>(json.size());
   std::lock_guard<std::mutex> lock(output_mutex);
   Transfer(true, &n, 4); Transfer(true, json.data(), n);
+#endif
 }
 void Send(const std::string& route, Dict payload) {
   auto m = CefDictionaryValue::Create();
@@ -93,6 +102,16 @@ struct Tab {
 };
 std::map<int, Tab> tabs;
 int next_tab = 0;
+#ifdef _WIN32
+#include "download_win.h"
+#endif
+bool DownloadWorkDrained(){
+#ifdef _WIN32
+return download_transfers.empty();
+#else
+return true;
+#endif
+}
 class Client final : public CefClient, public CefLifeSpanHandler,
                      public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler,public CefDialogHandler
 #ifdef __APPLE__
@@ -118,7 +137,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   }
   void CancelFilePicker(){
 #ifdef _WIN32
-    if(file_picker_)file_picker_->canceled=true;
+    CancelDownloadPending();if(file_picker_)file_picker_->canceled=true;
 #endif
   }
   void FlushRevocation(){
@@ -174,6 +193,9 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (children) for (size_t i=0;i<children->GetSize();++i) RememberFrames(children->GetDictionary(i));
   }
 public:
+  #ifdef _WIN32
+  #include "download_gate_win.inc"
+  #endif
   Client(std::string route, int id,std::shared_ptr<ArtifactState> artifact={},bool managed=false) : route_(route),owner_route_(std::move(route)),artifact_(std::move(artifact)), create_id_(id), tab_(++next_tab) {managed_=managed;guard_required_=managed;view_visible_=!managed;}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
@@ -212,7 +234,7 @@ public:
         self->FlushRevocation();
         if(self->browser_closed_&&self->engine_frames_.empty()){
           closing_clients.erase(self->owner_route_);
-          if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
+          if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty()&&DownloadWorkDrained())CefQuitMessageLoop();
         }
       });
     return true;
@@ -519,7 +541,7 @@ bool RequiresGuard()const{return guard_required_;}
       FinishArtifact(artifact_);
     }
     FlushRevocation();
-    if(browser_closed_&&engine_frames_.empty()&&!FilePickerActive()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();}
+    if(browser_closed_&&engine_frames_.empty()&&!FilePickerActive()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty()&&DownloadWorkDrained())CefQuitMessageLoop();}
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("frame-destroyed-return");
 #endif
@@ -534,6 +556,9 @@ bool RequiresGuard()const{return guard_required_;}
     auto enable_value=CefValue::Create();enable_value->SetDictionary(enable);
     auto enable_json=CefWriteJSON(enable_value,JSON_WRITER_DEFAULT).ToString();
     b->GetHost()->SendDevToolsMessage(enable_json.data(),enable_json.size());
+#endif
+#ifdef _WIN32
+    if(!artifact_){auto params=CefDictionaryValue::Create();auto patterns=CefListValue::Create();auto pattern=CefDictionaryValue::Create();pattern->SetString("urlPattern","*");pattern->SetString("requestStage","Response");patterns->SetDictionary(0,pattern);params->SetList("patterns",patterns);DownloadCommand("Fetch.enable",params);DownloadCommand("Page.getFrameTree",CefDictionaryValue::Create());params=CefDictionaryValue::Create();params->SetString("behavior","deny");DownloadCommand("Browser.setDownloadBehavior",params);}
 #endif
     if(artifact_){artifact_->browser=b->GetIdentifier();ArtifactEvent(artifact_,"artifact.bound",b->GetIdentifier());artifact_->admitted=true;CefPostTask(TID_IO,base::BindOnce(AdmitArtifactResources,artifact_));}
     auto tab = CefDictionaryValue::Create(); tab->SetInt("id", tab_);
@@ -661,6 +686,10 @@ bool RequiresGuard()const{return guard_required_;}
     auto m = value ? value->GetDictionary() : nullptr;
     if (!m) return true;
     if (m->HasKey("id")) {
+
+#ifdef _WIN32
+      if(DownloadResult(m->GetInt("id"),m))return true;
+#endif
       auto p = pending_.find(m->GetInt("id")); if (p == pending_.end()) return true;
       auto id = p->second; pending_.erase(p);
       auto method = pending_methods_.extract(m->GetInt("id"));
@@ -674,6 +703,7 @@ bool RequiresGuard()const{return guard_required_;}
       const auto method = m->GetString("method").ToString();
       auto params = m->GetDictionary("params");
 #ifdef _WIN32
+      if(DownloadIntercept(method,params))return true;
       if(params&&method=="Page.javascriptDialogOpening"){
         bool truncated=false;
         auto message=DialogText(params->GetString("message"),kDialogMessageUnits,truncated);
@@ -736,7 +766,7 @@ void FinishArtifact(const std::shared_ptr<ArtifactState>& state) {
   event->SetInt("revokedFrames",state->revocation_frames);
   event->SetInt("readMarshaled",state->read_marshaled.load());
   event->SetBool("partitionRetired",cleared);if(!cleared)event->SetString("error","CEF_ARTIFACT_FACTORY_CLEAR_FAILED");Write(event);artifacts.erase(state->lease);
-  if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
+  if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty()&&DownloadWorkDrained())CefQuitMessageLoop();
 }
 void RevokeArtifact(std::shared_ptr<ArtifactState> state) {
   if(state->draining)return;
@@ -755,6 +785,9 @@ void Shutdown() {
   dsh_platform::Lifecycle("shutdown-enter");
 #endif
   if (stopping.exchange(true)) return;
+#ifdef _WIN32
+  for(const auto& [_,transfer]:download_transfers)transfer->Cancel();
+#endif
   std::vector<std::shared_ptr<ArtifactState>> states;
   for(const auto& [_,state]:artifacts)states.push_back(state);
   for(auto& state:states)RevokeArtifact(state);
@@ -763,7 +796,7 @@ void Shutdown() {
   std::vector<CefRefPtr<CefBrowser>> browsers;
   for (const auto& [_, tab] : tabs) if(!tab.artifact)browsers.push_back(tab.browser);
   for (auto& browser : browsers) browser->GetHost()->CloseBrowser(true);
-  if(tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
+  if(tabs.empty()&&artifacts.empty()&&closing_clients.empty()&&DownloadWorkDrained())CefQuitMessageLoop();
 }
 // This candidate admits only the real locked-MCP inventory exercised by the
 // transport gate. New protocol methods require scope review and live evidence.
@@ -824,6 +857,20 @@ void Command(Dict m) {
   if (m->GetString("generation").ToString() != generation) return;
   auto route = m->GetString("route").ToString();
   auto kind = m->GetString("kind").ToString();
+#ifdef _WIN32
+  if(kind=="download.cancel"){
+    auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));
+    auto args=m->GetDictionary("arguments");auto id=args?args->GetString("id").ToString():std::string{};
+    auto transfer=download_transfers.find(id);bool drained=transfer==download_transfers.end()||transfer->second->Drained();
+    if(transfer!=download_transfers.end())transfer->second->Cancel();
+    else if(!id.empty()&&!download_writers.contains(id)){
+      HANDLE writer=INVALID_HANDLE_VALUE;try{if(args)writer=reinterpret_cast<HANDLE>(std::stoull(args->GetString("writer").ToString()));}catch(...){}
+      if(writer&&writer!=INVALID_HANDLE_VALUE)CloseHandle(writer);
+      download_writers[id]={writer,true}; // Reject a start which arrives after cancellation.
+    }
+    auto result=CefDictionaryValue::Create();result->SetBool("drained",drained);response->SetDictionary("result",result);Write(response);return;
+  }
+#endif
   if(kind=="control.pause"){
     PauseAllControl();auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));response->SetDictionary("result",CefDictionaryValue::Create());Write(response);return;
   }
@@ -831,9 +878,25 @@ void Command(Dict m) {
     auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));
     Client* client=nullptr;for(const auto& [_,tab]:tabs){auto candidate=static_cast<Client*>(tab.browser->GetHost()->GetClient().get());if(candidate->OwnsRoute(route)){client=candidate;break;}}
     if(!client&&closing_clients.contains(route))client=closing_clients.at(route).get();
-    if(!client){if(kind=="target.revoke"||kind=="target.end")response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_TARGET_NOT_READY");}
-    else if(control_blocked&&kind!="target.state"&&kind!="target.navigation"&&kind!="target.hide"&&kind!="target.end"&&kind!="target.revoke"&&kind!="target.close")response->SetString("error","CEF_BROKER_CONTROL_PAUSED");
+    if(!client){
 #ifdef _WIN32
+      if(kind=="target.download.start"){auto a=m->GetDictionary("arguments");if(a)try{auto id=a->GetString("id").ToString();auto h=reinterpret_cast<HANDLE>(std::stoull(a->GetString("writer").ToString()));if(!download_writers.contains(id)){if(h&&h!=INVALID_HANDLE_VALUE)CloseHandle(h);download_writers[id]={h,true};}}catch(...){} }
+#endif
+      if(kind=="target.revoke"||kind=="target.end")response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_TARGET_NOT_READY");}
+    else if(control_blocked&&kind!="target.state"&&kind!="target.navigation"&&kind!="target.hide"&&kind!="target.end"&&kind!="target.revoke"&&kind!="target.close"){
+#ifdef _WIN32
+      if(kind=="target.download.start")DownloadDiscardWriter(m->GetDictionary("arguments"));
+#endif
+      response->SetString("error","CEF_BROKER_CONTROL_PAUSED");
+    }
+#ifdef _WIN32
+    else if(kind=="target.download.pending"){
+      auto state=client->DownloadPendingState(m->GetDictionary("arguments"));if(state)response->SetDictionary("result",state);else response->SetString("error","DOWNLOAD_APPROVAL_EXPIRED");
+    }
+    else if(kind=="target.download.start"){
+      auto error=client->DownloadStart(m->GetDictionary("arguments"));if(error.empty())response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error",error);
+    }
+    else if(kind=="target.download.dismiss"){client->DownloadDismiss(m->GetDictionary("arguments"));response->SetDictionary("result",CefDictionaryValue::Create());}
     else if(kind=="target.dialog.answer"||kind=="target.dialog.suspend"||kind=="target.dialog.ready"){
       auto args=m->GetDictionary("arguments");bool ok=false;
       if(args){auto expected=args->GetDictionary("dialog");
@@ -960,12 +1023,20 @@ int RunBroker(CefMainArgs args,void* sandbox){
   if(path.empty()||token.empty()||generation.empty()||profile.empty())return 72;
   if(!OpenTransport(path)||!Authenticate(token))return 73;
   Erase(token);
+#ifdef _WIN32
+  StartTransportWriter();
+#endif
   CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
 #ifdef __APPLE__
   settings.windowless_rendering_enabled=true;
   settings.log_severity=LOGSEVERITY_DISABLE;
 #endif
-  CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox))return CefGetExitCode();
+  CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox)){
+#ifdef _WIN32
+    CloseTransport();
+#endif
+    return CefGetExitCode();
+  }
   CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();
 #ifdef __APPLE__
   // CEF is still initialized, but the pump and transport reader are joined.

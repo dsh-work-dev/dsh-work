@@ -42,6 +42,7 @@ type Config struct {
 	// ObserveProtocol receives method names only, never page values or CDP data.
 	ObserveProtocol func(direction, method string)
 	ObserveCommand  func(ProtocolObservation)
+	DownloadConsent DownloadConsent
 }
 
 type Broker struct {
@@ -73,6 +74,7 @@ type Broker struct {
 	framePauseOnce        sync.Once
 	framePauseDone        chan struct{}
 	controlPauseConfirmed bool
+	downloads             brokerDownloads
 	rendererJoinReason    string
 }
 
@@ -155,6 +157,10 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	}
 	b.renderers = newRendererTracker(b, c.Executable)
 	b.rendererNeedsClose = b.renderers != nil
+	b.downloads, err = newBrokerDownloads(b, c)
+	if err != nil {
+		return nil, errors.Join(err, b.Close())
+	}
 	go b.receive()
 	go func() {
 		select {
@@ -229,7 +235,7 @@ func (b *Broker) write(m map[string]any) error {
 	defer b.writeMu.Unlock()
 	select {
 	case <-b.done:
-		if m["kind"] != "control.pause" && m["kind"] != "release" && m["kind"] != "close" && m["kind"] != "shutdown" && m["kind"] != "artifact.revoke" && m["kind"] != "resource.result" && m["kind"] != "target.revoke" && m["kind"] != "target.end" && m["kind"] != "target.close" && m["kind"] != "target.hide" && m["kind"] != "target.state" && m["kind"] != "target.navigation" {
+		if m["kind"] != "download.cancel" && m["kind"] != "control.pause" && m["kind"] != "release" && m["kind"] != "close" && m["kind"] != "shutdown" && m["kind"] != "artifact.revoke" && m["kind"] != "resource.result" && m["kind"] != "target.revoke" && m["kind"] != "target.end" && m["kind"] != "target.close" && m["kind"] != "target.hide" && m["kind"] != "target.state" && m["kind"] != "target.navigation" {
 			return b.failure()
 		}
 	default:
@@ -250,7 +256,7 @@ func (b *Broker) receive() {
 		var m struct {
 			Kind, Generation, Route, Scope, Method, Owner string
 			Protocol                                      int
-			ID                                            int
+			ID                                            json.RawMessage
 			Payload                                       json.RawMessage
 		}
 		if err := json.Unmarshal(raw, &m); err != nil {
@@ -260,6 +266,17 @@ func (b *Broker) receive() {
 		if m.Generation != b.generation {
 			b.abort(errors.New("CEF_GENERATION_REJECTED"))
 			return
+		}
+		if strings.HasPrefix(m.Kind, "download.") {
+			if b.downloads == nil {
+				b.abort(errors.New("DOWNLOAD_UNAVAILABLE"))
+				return
+			}
+			if err := b.downloads.message(raw); err != nil {
+				b.abort(err)
+				return
+			}
+			continue
 		}
 		if m.Kind == "frame.lifecycle" {
 			b.mu.Lock()
@@ -293,7 +310,12 @@ func (b *Broker) receive() {
 			continue
 		}
 		if m.Kind == "dispatch.observed" {
-			b.commands.accepted(m.Route, m.ID, m.Method)
+			var commandID int
+			if err := json.Unmarshal(m.ID, &commandID); err != nil {
+				b.abort(err)
+				return
+			}
+			b.commands.accepted(m.Route, commandID, m.Method)
 			if b.observe != nil {
 				b.observe("dispatch", m.Method)
 			}
@@ -459,6 +481,9 @@ func (b *Broker) Close() error {
 		b.closeErr = errors.Join(b.closeErr, b.joinWorker())
 	}
 
+	if !b.workerNeedsClose && !b.treeNeedsJoin && !b.rendererNeedsClose && b.downloads != nil {
+		b.closeErr = errors.Join(b.closeErr, b.downloads.afterJoin())
+	}
 	return b.closeErr
 }
 func (b *Broker) close() error {
@@ -579,7 +604,7 @@ func (r *route) Close() error {
 func (b *Broker) CleanupPending() bool {
 	b.closeMu.Lock()
 	defer b.closeMu.Unlock()
-	return !b.closeAttempted || b.workerNeedsClose || b.treeNeedsJoin || b.rendererNeedsClose
+	return !b.closeAttempted || b.workerNeedsClose || b.treeNeedsJoin || b.rendererNeedsClose || (b.downloads != nil && b.downloads.pending())
 }
 
 // joinWorker retains the real job/process handles until an explicit successful
