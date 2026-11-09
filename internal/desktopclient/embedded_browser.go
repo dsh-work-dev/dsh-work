@@ -54,7 +54,11 @@ func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, add
 	}
 	visible = visible && !gate.blocked
 	var state embeddedbrowser.ViewState
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{uint64(uintptr(window.NativeWindow())), admission.Lease, slot, address, bounds, window.GetZoom(), visible}, &state)
+	parent, zoom, err := presenterNativeWindow(window)
+	if err != nil {
+		return state, err
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, admission.Lease, slot, address, bounds, zoom, visible}, &state)
 	return state, err
 }
 func (s *EmbeddedBrowserService) State(ctx context.Context, document, slot string) (embeddedbrowser.ViewState, error) {
@@ -106,7 +110,11 @@ func (s *EmbeddedBrowserService) Recover(ctx context.Context, document, slot, ad
 	if !s.Enabled {
 		return state, errors.New("CEF_PRESENTER_UNAVAILABLE")
 	}
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "Recover", []any{uint64(uintptr(window.NativeWindow())), admission.Lease, slot, address}, &state)
+	parent, _, err := presenterNativeWindow(window)
+	if err != nil {
+		return state, err
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Recover", []any{parent, admission.Lease, slot, address}, &state)
 	return state, err
 }
 
@@ -178,7 +186,11 @@ func (s *EmbeddedBrowserService) RegisterWindow(ctx context.Context) (embeddedbr
 		return embeddedbrowser.WindowAdmission{}, err
 	}
 	var admission embeddedbrowser.WindowAdmission
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "RegisterWindow", []any{uint64(uintptr(window.NativeWindow())), s.InstanceKey}, &admission)
+	parent, _, err := presenterNativeWindow(window)
+	if err != nil {
+		return admission, err
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "RegisterWindow", []any{parent, s.InstanceKey}, &admission)
 	return admission, err
 }
 
@@ -203,7 +215,11 @@ func (s *EmbeddedBrowserService) BeginDocument(ctx context.Context, document str
 	if err != nil {
 		return true, err
 	}
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "RetireDocument", []any{uint64(uintptr(window.NativeWindow())), admission.Lease}, nil)
+	parent, _, err := presenterNativeWindow(window)
+	if err != nil {
+		return true, err
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "RetireDocument", []any{parent, admission.Lease}, nil)
 	if err == nil {
 		gate.document = document
 	}
@@ -245,6 +261,10 @@ func (s *EmbeddedBrowserService) SelectControl(ctx context.Context, document, ge
 		return automation.OwnedSelectionState{}, err
 	}
 	var result automation.OwnedSelectionState
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "SelectControl", []any{uint64(uintptr(window.NativeWindow())), admission.Lease, document, generation, session, slot, viewLease}, &result)
+	parent, _, err := presenterNativeWindow(window)
+	if err != nil {
+		return result, err
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "SelectControl", []any{parent, admission.Lease, document, generation, session, slot, viewLease}, &result)
 	return result, err
 }

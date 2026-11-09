@@ -1,8 +1,5 @@
 // Owned CEF browser process. No TCP/debug listener; control is a per-launch,
 // mutually authenticated current-user pipe. CEF remains the DevTools engine.
-#include <windows.h>
-#include <bcrypt.h>
-#include "presentation_window.h"
 #include <array>
 #include <atomic>
 #include <map>
@@ -20,7 +17,9 @@
 #include "include/cef_command_line.h"
 #include "include/cef_devtools_message_observer.h"
 #include "include/cef_parser.h"
+#ifdef _WIN32
 #include "include/cef_sandbox_win.h"
+#endif
 #include "include/cef_version_info.h"
 #include "include/cef_scheme.h"
 #include "include/cef_resource_handler.h"
@@ -33,70 +32,26 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
+#ifdef _WIN32
+#include "platform_win.h"
+#else
+#include "platform_linux.h"
+#endif
+using namespace dsh_platform;
+
 namespace {
 using Dict = CefRefPtr<CefDictionaryValue>;
-HANDLE pipe_handle = INVALID_HANDLE_VALUE;
 std::mutex output_mutex;
-constexpr DWORD kLimit = 8 << 20;
+constexpr uint32_t kLimit = 8 << 20;
 std::string generation;
 std::atomic_bool stopping{false};
 std::thread reader;
 bool control_blocked = false;
-bool Transfer(bool write, void* bytes, DWORD size) {
-  auto* p = static_cast<char*>(bytes);
-  while (size) {
-    DWORD n = 0;
-    OVERLAPPED operation = {};
-    operation.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!operation.hEvent) return false;
-    bool ok = write ? !!WriteFile(pipe_handle, p, size, &n, &operation)
-                    : !!ReadFile(pipe_handle, p, size, &n, &operation);
-    if (!ok && GetLastError() == ERROR_IO_PENDING)
-      ok = !!GetOverlappedResult(pipe_handle, &operation, &n, TRUE);
-    CloseHandle(operation.hEvent);
-    if (!ok || !n) return false;
-    p += n; size -= n;
-  }
-  return true;
-}
-std::string TakeEnvironment(const wchar_t* name) {
-  const DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
-  if (!size) return {};
-  std::wstring value(size, L'\0');
-  GetEnvironmentVariableW(name, value.data(), size);
-  SetEnvironmentVariableW(name, nullptr);
-  value.resize(size - 1);
-  return CefString(value).ToString();
-}
-bool Authenticate(const std::string& token) {
-  std::array<unsigned char, 32> nonce, actual, expected;
-  if (!Transfer(false, nonce.data(), 32)) return false;
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr,
-                                 BCRYPT_ALG_HANDLE_HMAC_FLAG) < 0) return false;
-  auto mac = [&](const char* role, size_t size, std::array<unsigned char,32>& out) {
-    BCRYPT_HASH_HANDLE hash = nullptr;
-    bool ok = BCryptCreateHash(alg, &hash, nullptr, 0,
-        reinterpret_cast<PUCHAR>(const_cast<char*>(token.data())),
-        static_cast<ULONG>(token.size()), 0) >= 0;
-    if (ok) ok = BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(role)), static_cast<ULONG>(size), 0) >= 0;
-    if (ok) ok = BCryptHashData(hash, nonce.data(), 32, 0) >= 0;
-    if (ok) ok = BCryptFinishHash(hash, out.data(), 32, 0) >= 0;
-    if (hash) BCryptDestroyHash(hash);
-    return ok;
-  };
-  bool ok = mac("worker", 6, expected) && Transfer(true, expected.data(), 32)
-      && Transfer(false, actual.data(), 32) && mac("host", 4, expected);
-  unsigned char difference = 0;
-  for (size_t i = 0; i < 32; ++i) difference |= actual[i] ^ expected[i];
-  BCryptCloseAlgorithmProvider(alg, 0);
-  return ok && !difference;
-}
 void Write(Dict value) {
   auto v = CefValue::Create(); v->SetDictionary(value);
   auto json = CefWriteJSON(v, JSON_WRITER_DEFAULT).ToString();
   if (json.empty() || json.size() > kLimit) return;
-  DWORD n = static_cast<DWORD>(json.size());
+  uint32_t n = static_cast<uint32_t>(json.size());
   std::lock_guard<std::mutex> lock(output_mutex);
   Transfer(true, &n, 4); Transfer(true, json.data(), n);
 }
@@ -208,7 +163,7 @@ public:
   void OnLoadEnd(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,int)override{if(frame->IsMain()){loaded_=true;}}
   void OnTitleChange(CefRefPtr<CefBrowser>,const CefString& title)override{page_title_=title;}
   void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else scope_epoch_++;}
-  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();return IsWindow(hwnd)&&IsWindowVisible(hwnd)&&!IsIconic(GetAncestor(hwnd,GA_ROOT));}
+  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();return dsh_platform::Visible(hwnd);}
   Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());return value;}
   bool NavigationAction(const std::string& action){if(control_blocked||closing_||!tabs.contains(tab_))return false;auto browser=tabs.at(tab_).browser;RevokeGuard();if(action=="reload")browser->Reload();else if(action=="back"&&browser->CanGoBack())browser->GoBack();else if(action=="forward"&&browser->CanGoForward())browser->GoForward();else return false;return true;}
   bool FrameScopeReady(){
@@ -253,27 +208,14 @@ public:
  if(closing_)return "CEF_TARGET_CLOSING";
     managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;
     if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
-    auto browser=tabs.at(tab_).browser;auto hwnd=browser->GetHost()->GetWindowHandle();dsh_presenter::WindowOps ops;
-    auto fail=[&](const std::string& code){auto hidden=dsh_presenter::hide(ops,hwnd);return code+(hidden.empty()?"":" / "+hidden);};
-    if(!args)return fail("CEF_PRESENT_ARGUMENTS_REJECTED");
-    HWND parent=nullptr;uint64_t started=0;
-    try{parent=reinterpret_cast<HWND>(std::stoull(args->GetString("parent").ToString()));started=std::stoull(args->GetString("started").ToString());}catch(...){return fail("CEF_PRESENT_ARGUMENTS_REJECTED");}
-    DWORD pid=static_cast<DWORD>(args->GetInt("pid"));auto process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
-    if(!process)return fail("CEF_PRESENT_PROCESS_INSTANCE_REJECTED");
-    FILETIME created,exited,kernel,user;bool same=GetProcessTimes(process,&created,&exited,&kernel,&user)&&((static_cast<uint64_t>(created.dwHighDateTime)<<32)|created.dwLowDateTime)==started;
-    if(!same){CloseHandle(process);return fail("CEF_PRESENT_PROCESS_INSTANCE_REJECTED");}
-    auto bounds=args->GetDictionary("bounds");RECT client{};
-    if(!bounds||args->GetString("view").empty()||args->GetString("epoch").empty()||!GetClientRect(parent,&client)){CloseHandle(process);return fail("CEF_PRESENT_ARGUMENTS_REJECTED");}
-    int x=bounds->GetInt("X"),y=bounds->GetInt("Y"),width=bounds->GetInt("Width"),height=bounds->GetInt("Height");
-    if(x<0||y<0||width<0||height<0||x>client.right||y>client.bottom||width>client.right-x||height>client.bottom-y){CloseHandle(process);return fail("CEF_PRESENT_BOUNDS_REJECTED");}
-    bool visible=args->GetBool("visible")&&width>0&&height>0;
-    auto error=dsh_presenter::attach(ops,hwnd,parent,pid,x,y,width,height,visible);CloseHandle(process);
-    if(!error.empty())return error;
+    auto browser=tabs.at(tab_).browser;auto hwnd=browser->GetHost()->GetWindowHandle();
+    auto error=dsh_platform::Present(hwnd,args);if(!error.empty())return error;
+    auto bounds=args->GetDictionary("bounds");bool visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
     // No identity changes until every operation and final OS readback passed.
     view_lease_=args->GetString("view");presentation_epoch_=args->GetString("epoch");view_visible_=visible;
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
-  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";dsh_presenter::WindowOps ops;return dsh_presenter::hide(ops,tabs.at(tab_).browser->GetHost()->GetWindowHandle());}
+  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());}
   bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
   bool GuardValid(){
  if(control_blocked||closing_)return false;
@@ -333,19 +275,22 @@ bool RequiresGuard()const{return guard_required_;}
   bool DoClose(CefRefPtr<CefBrowser> browser) override {
     closing_=true;RevokeGuard();view_visible_=false;
     if(!managed_)return false;
+#ifndef _WIN32
+    // Locked CEF's Linux CloseHostWindow addresses its own CefWindowX11, not
+    // the external parent. Keep that maintained lifecycle instead of copying
+    // the Windows ancestor-close workaround.
+    return false;
+#else
     // CEF's default Alloy CloseHostWindow posts WM_CLOSE to GA_ROOT, which
     // is the external UI after presentation. Tear down only our own guest
     // asynchronously; final ACK still requires OnBeforeClose + all frames.
     const auto guest=browser->GetHost()->GetWindowHandle();
-    CefPostTask(TID_UI,base::BindOnce([](CefRefPtr<CefBrowser> current,HWND expected){
+    CefPostTask(TID_UI,base::BindOnce([](CefRefPtr<CefBrowser> current,CefWindowHandle expected){
       if(!current->IsValid()||current->GetHost()->GetWindowHandle()!=expected)return;
-      DWORD pid=0;
-      if(!IsWindow(expected)||!GetWindowThreadProcessId(expected,&pid)||pid!=GetCurrentProcessId())return;
-      // Failure leaves the close waiter/Go owner retained for the existing
-      // bounded failure path and an explicit retry; it never reports success.
-      DestroyWindow(expected);
+      dsh_platform::DestroyOwnedGuest(expected);
     },browser,guest));
     return true;
+#endif
   }
   void OnBeforeClose(CefRefPtr<CefBrowser>) override {
     browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
@@ -443,9 +388,7 @@ bool RequiresGuard()const{return guard_required_;}
 };
 bool Create(const std::string& route, int id, const std::string& url,std::shared_ptr<ArtifactState> artifact={},bool managed=false) {
   CefWindowInfo window;
-  window.SetAsPopup(nullptr, "DSH Browser");
-  window.style &= ~WS_VISIBLE; window.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-  window.ex_style |= WS_EX_NOACTIVATE;
+  if(!dsh_platform::ConfigureWindow(window)){Result(route,id,nullptr,"CEF_NATIVE_WINDOW_UNAVAILABLE");return false;}
   CefBrowserSettings settings;
   if (!CefBrowserHost::CreateBrowserSync(window, new Client(route, id,artifact,managed), url, settings, nullptr,artifact?artifact->context:nullptr)) {
     Result(route, id, nullptr, "CEF_CREATE_FAILED");
@@ -635,7 +578,7 @@ public:
     ready->SetString("generation", generation); ready->SetInt("protocol",1); Write(ready);
     reader = std::thread([] {
       while (true) {
-        DWORD size = 0;
+        uint32_t size = 0;
         if (!Transfer(false, &size, 4) || !size || size > kLimit) break;
         std::string json(size, '\0'); if (!Transfer(false, json.data(), size)) break;
         auto value = CefParseJSON(json, JSON_PARSER_RFC);
@@ -649,29 +592,21 @@ public:
 };
 } // namespace
 
-CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE instance, LPWSTR, int, void* sandbox,
-                                   cef_version_info_t*) {
-  CefMainArgs args(instance);
-  int code = CefExecuteProcess(args, nullptr, sandbox);
-  if (code >= 0) return code;
-  if (!sandbox) return 71;
-  auto path = TakeEnvironment(L"DSH_WORK_BRIDGE_PIPE");
-  auto token = TakeEnvironment(L"DSH_WORK_BRIDGE_TOKEN");
-  generation = TakeEnvironment(L"DSH_WORK_CEF_GENERATION");
-  auto profile = TakeEnvironment(L"DSH_WORK_CEF_PROFILE");
-  if (path.empty() || token.empty() || generation.empty() || profile.empty()) return 72;
-  std::wstring wide = CefString(path).ToWString();
-  pipe_handle = CreateFileW(wide.c_str(), GENERIC_READ|GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-  if (pipe_handle == INVALID_HANDLE_VALUE || !Authenticate(token)) return 73;
-  SecureZeroMemory(token.data(), token.size()); token.clear();
-  CefSettings settings; CefString(&settings.root_cache_path) = profile;
-  CefString(&settings.cache_path) = profile;
-  settings.remote_debugging_port = 0;
-  CefRefPtr<App> app = new App;
-  if (!CefInitialize(args, settings, app, sandbox)) return CefGetExitCode();
-  CefRunMessageLoop();
-  CancelIoEx(pipe_handle, nullptr);
-  if (reader.joinable()) reader.join();
-  CefShutdown(); CloseHandle(pipe_handle);
-  return 0;
+int RunBroker(CefMainArgs args,void* sandbox){
+  int code=CefExecuteProcess(args,nullptr,sandbox);if(code>=0)return code;
+#ifdef _WIN32
+  if(!sandbox)return 71;
+#endif
+  auto path=TakeEnvironment("DSH_WORK_BRIDGE_PIPE");auto token=TakeEnvironment("DSH_WORK_BRIDGE_TOKEN");
+  generation=TakeEnvironment("DSH_WORK_CEF_GENERATION");auto profile=TakeEnvironment("DSH_WORK_CEF_PROFILE");
+  if(path.empty()||token.empty()||generation.empty()||profile.empty())return 72;
+  if(!OpenTransport(path)||!Authenticate(token))return 73;Erase(token);
+  CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
+  CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox))return CefGetExitCode();
+  CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();CefShutdown();CloseTransport();return 0;
 }
+#ifdef _WIN32
+CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE instance,LPWSTR,int,void* sandbox,cef_version_info_t*){return RunBroker(CefMainArgs(instance),sandbox);}
+#else
+int main(int argc,char** argv){return RunBroker(CefMainArgs(argc,argv),nullptr);}
+#endif

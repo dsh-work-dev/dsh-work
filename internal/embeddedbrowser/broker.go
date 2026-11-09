@@ -121,6 +121,10 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	}
 	env["DSH_WORK_CEF_GENERATION"] = b.generation
 	env["DSH_WORK_CEF_PROFILE"] = c.Profile
+	if err = nativeEnvironment(env); err != nil {
+		ipc.Close()
+		return nil, err
+	}
 	b.worker, err = c.Supervisor.Start(ctx, supervisor.LaunchPlan{GenerationID: "cef-" + b.generation, Executable: c.Executable, WorkingDirectory: filepath.Dir(c.Executable), Env: env, ExpectedOrigin: workeripc.Origin}, nil)
 	if err != nil {
 		ipc.Close()

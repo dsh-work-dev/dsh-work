@@ -8,6 +8,10 @@ on:
       - 'internal/workeripc/**'
       - 'internal/daemon/**'
       - 'internal/platform/linux/**'
+      - 'internal/embeddedbrowser/**'
+      - 'internal/desktopclient/presenter_native_linux*'
+      - 'native/embeddedbrowser/**'
+      - 'scripts/build-embedded-cef-linux.sh'
       - 'go.mod'
       - 'go.sum'
       - 'tools/posix-ipc-probe/**'
@@ -22,6 +26,71 @@ permissions:
   contents: read
 
 jobs:
+  linux-managed-cef:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install native build and X11 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-res0-dev libxcb-xfixes0-dev libxres-dev libssl-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
+      - name: Prepare pinned CEF SDK and locked MCP publication
+        run: |
+          mkdir -p "$RUNNER_TEMP/e67-cef-sdk" "$RUNNER_TEMP/e67-browser-dependencies" results/e67-linux-native
+          name='cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_linux64'
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/e67-cef-sdk/sdk.tar.bz2" 'https://cef-builds.spotifycdn.com/cef_binary_156.0.15%2Bgcf671c0%2Bchromium-156.0.8078.80_linux64.tar.bz2'
+          tar -xjf "$RUNNER_TEMP/e67-cef-sdk/sdk.tar.bz2" -C "$RUNNER_TEMP/e67-cef-sdk"
+          echo "CEF_ROOT=$RUNNER_TEMP/e67-cef-sdk/$name" >> "$GITHUB_ENV"
+          cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
+          npm ci --ignore-scripts --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Build formal private CEF broker
+        run: |
+          set -o pipefail
+          bash scripts/build-embedded-cef-linux.sh "$CEF_ROOT" "$RUNNER_TEMP/e67-formal-cef" 2>&1 | tee results/e67-linux-native/build.log
+      - name: Prepare sandbox for this isolated CI component
+        run: |
+          sudo chown root:root "$RUNNER_TEMP/e67-formal-cef/Release/chrome-sandbox"
+          sudo chmod 4755 "$RUNNER_TEMP/e67-formal-cef/Release/chrome-sandbox"
+          cat > "$RUNNER_TEMP/e67-formal-cef.apparmor" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile e67-formal-cef-ci "$RUNNER_TEMP/e67-formal-cef/Release/dsh_cef_broker" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$RUNNER_TEMP/e67-formal-cef.apparmor"
+      - name: Exercise formal registry Service MCP and native lifetime
+        env:
+          GDK_BACKEND: x11
+          CGO_ENABLED: '1'
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-native
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & go test -tags "server,e67presenter,e67nativefixture" -count=1 -v -timeout=90s ./internal/embeddedbrowser -run "^TestLiveLinuxManagedPrivateCEFService$"' 2>&1 | tee results/e67-linux-native/managed-cef.log
+      - name: Remove isolated namespace grant
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/e67-formal-cef.apparmor"; then sudo apparmor_parser -R "$RUNNER_TEMP/e67-formal-cef.apparmor"; fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-managed-cef
+          path: |
+            results/e67-linux-native/*.log
+            results/e67-linux-native/*.json
+            results/e67-linux-native/*.png
+
   mac-launchd-tree:
     runs-on: macos-15
     timeout-minutes: 10

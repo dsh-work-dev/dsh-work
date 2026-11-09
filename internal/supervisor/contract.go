@@ -61,9 +61,10 @@ type ExitResult struct {
 
 type Diagnostics struct {
 	PID uint32
-	// ProcessStarted is the immutable Windows process creation FILETIME captured
-	// from the supervisor-owned handle before the child is resumed. Zero means
-	// unavailable; legacy Workers do not require instance admission.
+	// ProcessStarted is the platform's immutable process creation identity:
+	// Windows FILETIME, Linux boot-relative start ticks, or macOS start time in
+	// microseconds. Compare it only with the same platform's authenticated peer
+	// identity. Zero means unavailable; legacy Workers do not require admission.
 	ProcessStarted      uint64
 	ProcessStartedError string
 	ActiveProcesses     uint32
