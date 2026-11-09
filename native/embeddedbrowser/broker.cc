@@ -14,6 +14,8 @@
 #include <charconv>
 #include <chrono>
 #include <cctype>
+#include <cmath>
+#include "action_indicator_asset.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_command_line.h"
@@ -103,6 +105,7 @@ struct Tab {
 };
 std::map<int, Tab> tabs;
 int next_tab = 0;
+std::map<std::string,int> feedback_selected;
 #ifdef _WIN32
 #include "download_win.h"
 #endif
@@ -143,7 +146,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   }
   void FlushRevocation(){
  if(FilePickerActive())return;
- if(!pending_.empty()||(browser_closed_&&!engine_frames_.empty()))return;
+ if(feedback_waiter_||feedback_press_pending_||!feedback_inputs_.empty()||!pending_.empty()||(browser_closed_&&!engine_frames_.empty()))return;
  auto callbacks=std::move(revoke_waiters_);revoke_waiters_.clear();for(auto& cb:callbacks)cb();
  if(browser_closed_&&engine_frames_.empty()){
   if(!close_notified_){close_notified_=true;auto event=CefDictionaryValue::Create();event->SetString("kind","target.closed");event->SetString("generation",generation);event->SetString("owner",owner_route_);Write(event);}
@@ -179,6 +182,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     CancelPopups(true);
     CancelDialog(true);
 #endif
+    FeedbackCancel(true);
     document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
 
   }
@@ -195,6 +199,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     if (children) for (size_t i=0;i<children->GetSize();++i) RememberFrames(children->GetDictionary(i));
   }
 public:
+  #include "action_indicator.inc"
   #ifdef _WIN32
   #include "download_origin_win.inc"
   #include "download_gate_win.inc"
@@ -274,7 +279,7 @@ public:
     event->SetString("generation",generation);event->SetString("owner",owner_route_);
     event->SetString("method",error);Write(event);
     for(const auto& [_,id]:pending_)Result(route_,id,nullptr,error);
-    pending_.clear();pending_methods_.clear();FlushRevocation();
+    pending_.clear();pending_methods_.clear();feedback_commits_.clear();FlushRevocation();
   }
   bool OnJSDialog(CefRefPtr<CefBrowser>,const CefString& origin,JSDialogType type,const CefString& message,const CefString& prompt,CefRefPtr<CefJSDialogCallback> callback,bool& suppress)override{
 #ifdef _WIN32
@@ -437,8 +442,13 @@ PopupFrameChanged(frame);
     navigation_origin_=call->GetString("navigationOrigin");guard_scope_=actual->GetString("scopeEpoch");guard_view_=view_lease_;guard_presentation_=presentation_epoch_;navigating_=false;guard_active_=true;
     return true;
   }
-  bool EndGuard(const std::string& token){if(guard_active_&&token!=guard_token_)return false;RevokeGuard();return true;}
-  void RevokeGuard(){guard_active_=false;navigating_=false;policy_denied_.clear();}
+  bool EndGuard(const std::string& token){if(guard_active_&&token!=guard_token_)return false;
+    // Retire input authority without cutting short the purely visual tail of
+    // a completed hover. An unfinished click still loses its final dispatch.
+    guard_active_=false;navigating_=false;policy_denied_.clear();
+    ++feedback_attempt_;FeedbackRejectInputs();auto waiter=std::move(feedback_waiter_);feedback_waiter_={};if(waiter)waiter(false);
+    return true;}
+  void RevokeGuard(){FeedbackCancel();guard_active_=false;navigating_=false;policy_denied_.clear();}
   void PauseControl(){
     CancelFilePicker();
 #ifdef _WIN32
@@ -449,7 +459,7 @@ PopupFrameChanged(frame);
     // Retire result ownership immediately. A renderer promise need not finish
     // before control cleanup; late replies to these serials are discarded.
     for(const auto& [_,id]:pending_)Result(route_,id,nullptr,"CEF_BROKER_CONTROL_PAUSED");
-    pending_.clear();pending_methods_.clear();FlushRevocation();
+    pending_.clear();pending_methods_.clear();feedback_commits_.clear();FlushRevocation();
   }
   void RevokeWhenDrained(std::function<void()> done){
     CancelFilePicker();
@@ -460,7 +470,7 @@ PopupFrameChanged(frame);
 #endif
     FlushRevocation();
   }
-  bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();
+  bool HasPending()const{return feedback_waiter_||feedback_press_pending_||!feedback_inputs_.empty()||!pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();
 #ifdef _WIN32
 CancelPopups(false);DownloadOriginRetire();
 #endif
@@ -641,7 +651,8 @@ bool RequiresGuard()const{return guard_required_;}
     dsh_platform::Lifecycle("before-close");
     dsh_platform::RetireBrowser(browser->GetIdentifier());
 #endif
-    CancelFilePicker();browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
+    CancelFilePicker();feedback_commands_.clear();browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();feedback_commits_.clear();
+    for(auto it=feedback_selected.begin();it!=feedback_selected.end();)if(it->second==tab_)it=feedback_selected.erase(it);else ++it;
     tabs.erase(tab_);
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("before-close-tab-erased");
@@ -689,7 +700,7 @@ bool RequiresGuard()const{return guard_required_;}
     auto frame=browser->GetMainFrame();if(frame)m->SetString("reportedMainFrame",frame->GetIdentifier());
     Write(m);
   }
-  void Dispatch(int id, const std::string& method, Dict params, const std::string& session) {
+  void Dispatch(int id, const std::string& method, Dict params, const std::string& session,bool feedback_ready=false) {
  if(control_blocked){Result(route_,id,nullptr,"CEF_BROKER_CONTROL_PAUSED");return;}
  if(closing_){Result(route_,id,nullptr,"CEF_TARGET_CLOSING");return;}
     if(!policy_denied_.empty()){Result(route_,id,nullptr,policy_denied_);return;}
@@ -723,7 +734,19 @@ bool RequiresGuard()const{return guard_required_;}
     if (params && params->HasKey("frameId") && !frames_.contains(params->GetString("frameId").ToString())) {
       Result(route_, id, nullptr, "CEF_CROSS_FRAME_REJECTED"); return;
     }
+    // Playwright can pipeline mouse down/up. Hold the complete input tail
+    // behind preparation and the actual press response, preserving engine order.
+    if(!feedback_ready&&(feedback_waiter_||feedback_press_pending_)&&method.rfind("Input.",0)==0){
+      if(feedback_inputs_.size()>=16){Result(route_,id,nullptr,"CEF_CLICK_INPUT_QUEUE_FULL");FeedbackCancel();return;}
+      feedback_inputs_.push_back({id,method,params?params->Copy(false):nullptr,session,guard_token_,document_epoch_,feedback_epoch_});return;
+    }
+    if(method=="Page.bringToFront"){auto previous=feedback_selected.find(route_);if(previous!=feedback_selected.end()&&previous->second!=tab_&&tabs.contains(previous->second))static_cast<Client*>(tabs.at(previous->second).browser->GetHost()->GetClient().get())->FeedbackCancel();feedback_selected[route_]=tab_;}
+    if(method=="Input.dispatchMouseEvent"&&params&&params->GetString("type")=="mousePressed"&&feedback_click_&&!feedback_ready){FeedbackBeforeClick(id,params,session);return;}
+    FeedbackInput(method,params);
     auto m = CefDictionaryValue::Create(); int serial = ++next_command_;
+    // SetDictionary may transfer an unowned params object (the prepared copy).
+    // Capture geometry while that handle still owns its value.
+    if(feedback_ready&&params)feedback_commits_[serial]={std::to_string(FeedbackNumber(params,"x"))+","+std::to_string(FeedbackNumber(params,"y")),guard_token_,document_epoch_,feedback_epoch_};
     m->SetInt("id", serial); m->SetString("method", method);
     if (params) m->SetDictionary("params", params);
     if (!session.empty()) m->SetString("sessionId", session);
@@ -732,7 +755,7 @@ bool RequiresGuard()const{return guard_required_;}
     pending_[serial] = id;
     pending_methods_[serial] = method;
     if (!tabs.at(tab_).browser->GetHost()->SendDevToolsMessage(json.data(), json.size())) {
-      pending_.erase(serial); pending_methods_.erase(serial); Result(route_, id, nullptr, "CEF_DEVTOOLS_DISPATCH_REJECTED");
+      pending_.erase(serial); pending_methods_.erase(serial);feedback_commits_.erase(serial);if(feedback_ready)FeedbackRejectInputs();Result(route_, id, nullptr, "CEF_DEVTOOLS_DISPATCH_REJECTED");
     }else{
       auto observed=CefDictionaryValue::Create();observed->SetString("kind","dispatch.observed");observed->SetString("generation",generation);observed->SetString("route",route_);observed->SetString("method",method);observed->SetInt("id",id);Write(observed);
     }
@@ -746,8 +769,14 @@ bool RequiresGuard()const{return guard_required_;}
 #ifdef _WIN32
       if(DownloadResult(m->GetInt("id"),m))return true;
 #endif
+      if(FeedbackResult(m))return true;
       auto p = pending_.find(m->GetInt("id")); if (p == pending_.end()) return true;
       auto id = p->second; pending_.erase(p);
+      auto commit=feedback_commits_.extract(m->GetInt("id"));
+      if(!commit.empty()){
+        if(!m->HasKey("error")&&GuardValid()&&commit.mapped().token==guard_token_&&commit.mapped().document==document_epoch_&&commit.mapped().epoch==feedback_epoch_){FeedbackEvaluate("globalThis.__dshIndicator?.commitClick("+commit.mapped().coordinates+")");FeedbackFlushInputs();}
+        else FeedbackRejectInputs();
+      }
       auto method = pending_methods_.extract(m->GetInt("id"));
       if (!method.empty() && method.mapped() == "Page.getFrameTree" && m->GetDictionary("result"))
         RememberFrames(m->GetDictionary("result")->GetDictionary("frameTree"));
@@ -758,6 +787,8 @@ bool RequiresGuard()const{return guard_required_;}
     } else {
       const auto method = m->GetString("method").ToString();
       auto params = m->GetDictionary("params");
+      FeedbackRememberPrivateRoot(method,params,m->GetString("sessionId").ToString());
+      if(FeedbackEvent(method,params,m->GetString("sessionId").ToString()))return true;
 #ifdef _WIN32
       if(DownloadIntercept(method,params,m->GetString("sessionId").ToString()))return true;
       if(params&&method=="Page.javascriptDialogOpening"){
@@ -768,6 +799,7 @@ bool RequiresGuard()const{return guard_required_;}
         params->SetString("defaultPrompt",DialogText(params->GetString("defaultPrompt"),kDialogDefaultUnits,default_truncated));
       }
 #endif
+      if(FeedbackPrivateEvent(method,params,m->GetString("sessionId").ToString()))return true;
       if (params && method == "Target.attachedToTarget") child_sessions_.insert(params->GetString("sessionId").ToString());
       if (params && method == "Target.detachedFromTarget") child_sessions_.erase(params->GetString("sessionId").ToString());
       if (params && method == "Page.frameNavigated" && params->GetDictionary("frame")) frames_.insert(params->GetDictionary("frame")->GetString("id").ToString());
@@ -988,7 +1020,8 @@ void Command(Dict m) {
   // Lifecycle disposal remains available while control is conservatively
   // paused. Releasing an Agent route never destroys broker-owned documents.
   if (kind == "release") {
-    for (auto& [_, t] : tabs) if (t.route == route) {auto client=static_cast<Client*>(t.browser->GetHost()->GetClient().get());client->RevokeGuard();t.route.clear();
+    feedback_selected.erase(route);
+    for (auto& [_, t] : tabs) if (t.route == route) {auto client=static_cast<Client*>(t.browser->GetHost()->GetClient().get());client->RevokeGuard();client->FeedbackCancel(true);t.route.clear();
 #ifndef _WIN32
     if(!client->HasPending())t.observer = nullptr;
 #endif
@@ -1016,7 +1049,18 @@ void Command(Dict m) {
   if (kind == "open") {auto url=m->GetString("url").ToString();Create(route,0,url.empty()?"about:blank":url,nullptr,m->GetBool("managed"));return; }
   auto p = m->GetDictionary("payload"); if (!p) return;
   auto id = p->GetInt("id"); auto method = p->GetString("method").ToString();
-  if (method == "dsh.indicator") { Result(route,id,nullptr,"CEF_FEEDBACK_NOT_IMPLEMENTED"); return; }
+  if (method == "dsh.indicator") {
+#ifndef _WIN32
+    // Feedback qualification currently covers the Windows presenter only.
+    Result(route,id,nullptr,"CEF_FEEDBACK_PLATFORM_UNAVAILABLE");return;
+#else
+    auto state=p->GetDictionary("params");
+    int selected=0,count=0;for(const auto& [tab_id,tab]:tabs)if(tab.route==route){selected=tab_id;++count;}
+    auto current=feedback_selected.find(route);if(current!=feedback_selected.end()&&tabs.contains(current->second)&&tabs.at(current->second).route==route)selected=current->second;else if(count!=1)selected=0;
+    if(selected){auto client=static_cast<Client*>(tabs.at(selected).browser->GetHost()->GetClient().get());client->FeedbackState(state,[route,id](bool ok){Result(route,id,ok?Empty():nullptr,ok?"":"CEF_FEEDBACK_UNAVAILABLE");});return;}
+    Result(route,id,nullptr,"CEF_CROSS_TARGET_REJECTED");return;
+#endif
+  }
   auto args = p->GetList("params");
   if (method == "tab.create") {
     for(const auto& [_,tab]:tabs)if(tab.route==route&&static_cast<Client*>(tab.browser->GetHost()->GetClient().get())->RequiresGuard()){Result(route,id,nullptr,"CEF_HOST_TAB_ADMISSION_REQUIRED");return;}

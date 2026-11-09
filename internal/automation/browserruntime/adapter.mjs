@@ -78,11 +78,11 @@ async function receive(m){
   require=createRequire(path.join(m.dependencies,'package.json'));
   for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
   const {WebSocketServer}=require('ws');
-  const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop('wire-timeout')}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
+  const command=(method,params,optional=false,optionalTimeout=250)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop('wire-timeout')}},optional?optionalTimeout:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
   const protocol=m.routeProtocol??'extension-v2';
   if(!['extension-v2','owned-cef-v1'].includes(protocol))throw Error('BROWSER_ROUTE_PROTOCOL_REJECTED');
   model=protocol==='owned-cef-v1'?new OwnedCEFProtocolV1(command):new ExtensionProtocolV2(command);
-  indicator=value=>{void command('dsh.indicator',value,true).catch(()=>{});};
+  indicator=value=>protocol==='owned-cef-v1'?command('dsh.indicator',value,true,900).catch(()=>{}):void command('dsh.indicator',value,true).catch(()=>{});
   const dispatch=async(method,params,sessionId)=>{
    if(method==='Browser.getVersion')return{protocolVersion:'1.3',product:'Chrome/DSH-Work',userAgent:'DSH-Work/0.2.0'};
    if(method==='Browser.setDownloadBehavior')return{};
@@ -132,10 +132,11 @@ async function receive(m){
    // Only Go-admitted calls reach here. Inspections and pending approvals do
    // not animate; the extension receives geometry, never target text/values.
    // Reuse the gateway's mandatory, immediately preceding inspection. Optional
-   // display never adds an MCP query or waits ahead of the admitted action.
+   // display never adds an MCP query. CEF setup is bounded; actual click
+   // arrival/order is enforced by its native input gate.
    const target=m.arguments.target??m.arguments.fields?.[0]?.target??m.arguments.startTarget;
    const rect=['browser_type','browser_fill_form','browser_select_option'].includes(m.tool)?geometry.get(target):undefined;geometry.clear();
-   indicator({running:true,rect,action:m.tool});
+   await indicator({running:true,rect,action:m.tool});
    let rawResult;
    try{rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
    finally{indicator({running:false})}
