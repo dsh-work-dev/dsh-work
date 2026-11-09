@@ -2,8 +2,10 @@ package automation
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/local/dsh-work/internal/settings"
 	"testing"
+	"time"
 )
 
 func TestOwnedOriginAndLifetimeBinding(t *testing.T) {
@@ -73,5 +75,49 @@ func TestOwnedPolicyChangeInvalidatesOnlyOwnedExecutors(t *testing.T) {
 	defer s.mu.Unlock()
 	if s.entries[key(r)] != nil || s.entries[key(externalRequest)] != external || c.owned == nil || c.browser || len(c.sites) != 0 {
 		t.Fatal("policy change did not preserve provider pin and revoke only owned grants")
+	}
+}
+
+func TestOwnedUploadRequiresFileResourceBeforeInspection(t *testing.T) {
+	s, resource, r := gatewayForTest(t)
+	s.mu.Lock()
+	s.gate.sessions[r.Session].owned = &ownedBrowserAdmission{id: "owned:test"}
+	s.mu.Unlock()
+	for _, tool := range []string{"browser_file_upload", "browser_drop"} {
+		r.Tool = tool
+		r.Arguments = map[string]any{"paths": []any{`C:\not-a-user-selected-file.txt`}}
+		if _, err := s.AuthorizeBrowser(context.Background(), r); err == nil || err.Error() != "BROWSER_FILE_RESOURCE_REQUIRED" {
+			t.Fatalf("%s: %v", tool, err)
+		}
+	}
+	if resource.calls.Load() != 0 {
+		t.Fatalf("file-resource denial reached backend: %v", resource.calls)
+	}
+}
+
+func TestOwnedDataDropKeepsAuthorizationPath(t *testing.T) {
+	for _, paths := range []any{nil, []any{}, []string{}} {
+		s, _, r := gatewayForTest(t)
+		target := targetForSelection()
+		s.mu.Lock()
+		c := s.gate.sessions[r.Session]
+		c.owned = &ownedBrowserAdmission{id: "owned:data-drop", scope: OwnedBrowserScope{Generation: r.Generation, Session: r.Session, Lifetime: r.Lifetime}, target: target, initial: target.identity}
+		c.browser = true
+		c.binding = "owned:data-drop"
+		c.sites["http://localhost:8123"] = true
+		s.browserSchemas = append(s.browserSchemas, json.RawMessage(`{"name":"browser_drop"}`))
+		s.mu.Unlock()
+		s.ConfigureBrowserBackend(func(context.Context, Request) (Resource, error) { return &selectionInspection{target.identity}, nil }, s.browserSchemas)
+		r.Tool = "browser_drop"
+		r.Arguments = map[string]any{"target": "#drop", "data": map[string]any{"text/plain": "owned inline data"}}
+		if paths != nil {
+			r.Arguments["paths"] = paths
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		decision, err := s.AuthorizeBrowser(ctx, r)
+		cancel()
+		if err != nil || decision.Permit == "" {
+			t.Fatalf("inline drop with paths=%#v: %+v %v", paths, decision, err)
+		}
 	}
 }

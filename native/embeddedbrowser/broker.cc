@@ -27,6 +27,7 @@
 #include "include/cef_frame_handler.h"
 #include "include/cef_jsdialog_handler.h"
 #include "include/cef_download_handler.h"
+#include "include/cef_dialog_handler.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_closure_task.h"
@@ -34,6 +35,7 @@
 
 #ifdef _WIN32
 #include "platform_win.h"
+#include "file_picker_win.h"
 #elif defined(__APPLE__)
 #include "mac/platform_mac.h"
 #include "mac/presenter_mac.h"
@@ -92,7 +94,7 @@ struct Tab {
 std::map<int, Tab> tabs;
 int next_tab = 0;
 class Client final : public CefClient, public CefLifeSpanHandler,
-                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler
+                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler,public CefDialogHandler
 #ifdef __APPLE__
                      , public CefRenderHandler
 #endif
@@ -107,7 +109,20 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::vector<std::function<void()>> revoke_waiters_,close_waiters_;
   bool close_notified_=false,view_visible_=true,managed_=false;
   std::string view_lease_,presentation_epoch_,guard_view_,guard_presentation_,page_title_;
+  bool FilePickerActive()const{
+#ifdef _WIN32
+    return !!file_picker_;
+#else
+    return false;
+#endif
+  }
+  void CancelFilePicker(){
+#ifdef _WIN32
+    if(file_picker_)file_picker_->canceled=true;
+#endif
+  }
   void FlushRevocation(){
+ if(FilePickerActive())return;
  if(!pending_.empty()||(browser_closed_&&!engine_frames_.empty()))return;
  auto callbacks=std::move(revoke_waiters_);revoke_waiters_.clear();for(auto& cb:callbacks)cb();
  if(browser_closed_&&engine_frames_.empty()){
@@ -118,6 +133,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
 #ifdef _WIN32
   // Dialog authority is independent of Host approvals and is bound to the
   // pending engine dialog observed when this call's guard is installed.
+  std::shared_ptr<dsh_file_picker::Request> file_picker_;
   bool dialog_pending_=false;
   CefRefPtr<CefJSDialogCallback> dialog_callback_;
   std::string dialog_origin_,dialog_kind_,dialog_message_,dialog_default_;
@@ -138,6 +154,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::string document_url_,guard_document_,guard_url_,guard_token_,navigation_origin_,guard_scope_;
   static std::string Origin(const std::string& url){CefURLParts parts;if(!CefParseURL(url,parts))return {};auto origin=CefString(&parts.origin).ToString();if(!origin.empty()&&origin.back()=='/')origin.pop_back();return origin;}
   void DocumentChanged(const std::string& url){
+    CancelFilePicker();
 #ifdef _WIN32
     CancelDialog(true);
 #endif
@@ -164,6 +181,45 @@ public:
   CefRefPtr<CefDisplayHandler> GetDisplayHandler()override{return this;}
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler()override{return this;}
   CefRefPtr<CefDownloadHandler> GetDownloadHandler()override{return this;}
+  CefRefPtr<CefDialogHandler> GetDialogHandler()override{return this;}
+  bool OnFileDialog(CefRefPtr<CefBrowser> browser,FileDialogMode mode,
+      const CefString&,const CefString&,const std::vector<CefString>&,
+      const std::vector<CefString>& extensions,const std::vector<CefString>&,
+      CefRefPtr<CefFileDialogCallback> callback)override{
+#ifdef _WIN32
+    if(guard_active_){callback->Cancel();RejectUnsupportedPolicy("CEF_FILE_RESOURCE_REQUIRED");return true;}
+    const auto origin=Origin(browser->GetMainFrame()->GetURL());
+    if(closing_||control_blocked||!revoke_waiters_.empty()||FilePickerActive()||!ViewVisible()||
+       (origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0)||mode==FILE_DIALOG_SAVE){callback->Cancel();return true;}
+    auto guest=browser->GetHost()->GetWindowHandle();
+    auto owner=GetAncestor(guest,GA_ROOT);
+    if(!owner||owner==guest||!last_present_args_){callback->Cancel();return true;}
+    dsh_file_picker::Owner peer{owner,GetParent(guest),guest,static_cast<DWORD>(last_present_args_->GetInt("pid")),0};
+    try{
+      peer.started=std::stoull(last_present_args_->GetString("started").ToString());
+      if(reinterpret_cast<HWND>(std::stoull(last_present_args_->GetString("parent").ToString()))!=peer.parent){callback->Cancel();return true;}
+    }catch(...){callback->Cancel();return true;}
+    const auto document=document_epoch_,scope=scope_epoch_;const auto view=view_lease_,presentation=presentation_epoch_;
+    std::vector<std::wstring> filters;for(const auto& extension:extensions)filters.push_back(extension.ToWString());
+    auto self=CefRefPtr<Client>(this);
+    file_picker_=dsh_file_picker::Open(peer,mode==FILE_DIALOG_OPEN_MULTIPLE,mode==FILE_DIALOG_OPEN_FOLDER,
+      CefString("为 "+origin+" 选择文件").ToWString(),std::move(filters),
+      [self,callback,document,scope,view,presentation](std::vector<CefString> files){
+        bool valid=self->file_picker_&&!self->file_picker_->canceled.load()&&
+          self->document_epoch_==document&&self->scope_epoch_==scope&&self->view_lease_==view&&self->presentation_epoch_==presentation&&self->ViewVisible();
+        self->file_picker_.reset();
+        if(valid&&!files.empty())callback->Continue(files);else callback->Cancel();
+        self->FlushRevocation();
+        if(self->browser_closed_&&self->engine_frames_.empty()){
+          closing_clients.erase(self->owner_route_);
+          if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
+        }
+      });
+    return true;
+#else
+    return false;
+#endif
+  }
 #ifdef __APPLE__
   CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
   void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override {
@@ -287,6 +343,9 @@ public:
   }
   Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());
 #ifdef _WIN32
+    if(file_picker_){auto picker=CefDictionaryValue::Create();picker->SetInt("phase",file_picker_->phase.load());picker->SetBool("canceled",file_picker_->canceled.load());picker->SetBool("cancelPosted",file_picker_->cancel_posted.load());picker->SetInt("cancelResult",file_picker_->cancel_result.load());picker->SetInt("windowResult",file_picker_->window_result.load());picker->SetInt("showResult",file_picker_->show_result.load());auto hwnd=file_picker_->picker_window.load();picker->SetBool("windowPresent",IsWindow(hwnd));picker->SetBool("windowVisible",IsWindowVisible(hwnd));value->SetDictionary("filePicker",picker);}
+#endif
+#ifdef _WIN32
     if(auto dialog=PendingDialog())value->SetDictionary("dialog",dialog);
     if(DialogVisible())value->SetBool("dialogVisible",true);
     if(!dialog_restore_error_.empty())value->SetString("presentationFailure",dialog_restore_error_);
@@ -337,6 +396,7 @@ public:
   bool EndGuard(const std::string& token){if(guard_active_&&token!=guard_token_)return false;RevokeGuard();return true;}
   void RevokeGuard(){guard_active_=false;navigating_=false;policy_denied_.clear();}
   void PauseControl(){
+    CancelFilePicker();
 #ifdef _WIN32
     CancelDialog(true);
 #endif
@@ -347,14 +407,16 @@ public:
     pending_.clear();pending_methods_.clear();FlushRevocation();
   }
   void RevokeWhenDrained(std::function<void()> done){
+    CancelFilePicker();
     RevokeGuard();revoke_waiters_.push_back(std::move(done));
 #ifdef _WIN32
     CancelDialog(true);
 #endif
     FlushRevocation();
   }
-  bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
+  bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
   std::string Present(Dict args){
+    CancelFilePicker();
 #ifdef _WIN32
     bool requested_visible=args&&args->GetBool("visible");
     if(!requested_visible)CancelDialog(false);
@@ -386,6 +448,7 @@ public:
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
   std::string Hide(Dict args){
+    CancelFilePicker();
 #ifdef _WIN32
     CancelDialog(false);
 #endif
@@ -396,7 +459,7 @@ public:
     return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());
 #endif
   }
-  bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
+  bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;CancelFilePicker();RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
   bool GuardValid(){
  if(control_blocked||closing_)return false;
     if(!guard_required_)return true;
@@ -456,7 +519,7 @@ bool RequiresGuard()const{return guard_required_;}
       FinishArtifact(artifact_);
     }
     FlushRevocation();
-    if(browser_closed_&&engine_frames_.empty()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();}
+    if(browser_closed_&&engine_frames_.empty()&&!FilePickerActive()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();}
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("frame-destroyed-return");
 #endif
@@ -481,7 +544,7 @@ bool RequiresGuard()const{return guard_required_;}
     else Event(route_, "route.ready", CefListValue::Create());
   }
   bool DoClose(CefRefPtr<CefBrowser> browser) override {
-    closing_=true;RevokeGuard();view_visible_=false;
+    CancelFilePicker();closing_=true;RevokeGuard();view_visible_=false;
     if(!managed_)return false;
 #ifndef _WIN32
     // Locked CEF's Linux CloseHostWindow addresses its own CefWindowX11, not
@@ -505,7 +568,7 @@ bool RequiresGuard()const{return guard_required_;}
     dsh_platform::Lifecycle("before-close");
     dsh_platform::RetireBrowser(browser->GetIdentifier());
 #endif
-    browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
+    CancelFilePicker();browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
     tabs.erase(tab_);
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("before-close-tab-erased");
@@ -525,6 +588,9 @@ bool RequiresGuard()const{return guard_required_;}
   bool OnBeforeBrowse(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,CefRefPtr<CefRequest> request,bool,bool)override {
     if(artifact_&&(artifact_->revoked||!ArtifactURL(artifact_,request->GetURL())))return true;
     if(frame->IsMain()&&guard_required_&&guard_active_){auto origin=Origin(request->GetURL());if(origin.empty()||(!navigation_origin_.empty()&&origin!=navigation_origin_))return true;}
+    // CEF's chooser callback has no initiating frame identity. Any admitted
+    // frame navigation retires it conservatively; rejected requests do not.
+    CancelFilePicker();
     return false;
   }
   void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
@@ -552,6 +618,9 @@ bool RequiresGuard()const{return guard_required_;}
 #endif
     if(!GuardValid()&&!NavigationWaitMethod(method)){Result(route_,id,nullptr,"CEF_DOCUMENT_AUTHORIZATION_CHANGED");return;}
 #ifdef _WIN32
+    // Locked MCP persistently requests interception on attachment. The owned
+    // Windows profile reserves chooser ownership for explicit user selection.
+    if(method=="Page.setInterceptFileChooserDialog"){Result(route_,id,Empty());return;}
     if(method=="Page.handleJavaScriptDialog"&&(!dialog_pending_||guard_required_&&guard_dialog_epoch_!=dialog_epoch_)){
       Result(route_,id,nullptr,"CEF_DIALOG_AUTHORIZATION_CHANGED");return;
     }

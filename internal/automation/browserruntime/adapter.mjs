@@ -117,7 +117,7 @@ async function receive(m){
    const args=m.arguments;if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(schema.inputSchema.properties??{},k)))throw Error('BROWSER_INVALID_ARGUMENT');
    const validated=validator.getValidator(schema.inputSchema)(args);if(!validated.valid)throw Error('BROWSER_INVALID_ARGUMENT: '+validated.errorMessage);
    if(Buffer.byteLength(JSON.stringify(args))>256*1024)throw Error('BROWSER_INPUT_TOO_LARGE: reduce complete UTF-8 JSON arguments to 262144 bytes');
-   if(m.tool==='browser_file_upload'||m.tool==='browser_drop') {let total=0;for(const file of args.paths??[]){if(!path.isAbsolute(file))throw Error('BROWSER_UPLOAD_ABSOLUTE_PATH_REQUIRED');const stat=fs.statSync(file);if(!stat.isFile())throw Error('BROWSER_UPLOAD_NOT_FILE');total+=stat.size;}if(total>256*1024)throw Error('BROWSER_UPLOAD_TOO_LARGE: total file size must not exceed 262144 bytes');}
+   if(m.tool==='browser_file_upload'||m.tool==='browser_drop') {if(model instanceof OwnedCEFProtocolV1&&(m.tool==='browser_file_upload'||args.paths?.length>0))throw Error('BROWSER_FILE_RESOURCE_REQUIRED');let total=0;for(const file of args.paths??[]){if(!path.isAbsolute(file))throw Error('BROWSER_UPLOAD_ABSOLUTE_PATH_REQUIRED');const stat=fs.statSync(file);if(!stat.isFile())throw Error('BROWSER_UPLOAD_NOT_FILE');total+=stat.size;}if(total>256*1024)throw Error('BROWSER_UPLOAD_TOO_LARGE: total file size must not exceed 262144 bytes');}
    m.arguments=refs.argumentsForMCP(args);
   }catch(e){send({kind:'result',id:m.id,error:e.message});return}
   try{
