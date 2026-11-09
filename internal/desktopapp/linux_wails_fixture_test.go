@@ -159,6 +159,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	env["DSH_WORK_EMBEDDED_ROOT"] = root
 	env["DSH_WORK_EMBEDDED_UI_INSTANCE"] = "1"
 	env["DSH_WORK_CEF_EXECUTABLE"] = native
+	if agentTest {
+		env["DSH_WORK_LINUX_AGENT_DIAGNOSTICS"] = "1"
+	}
 	owner := linuxplatform.NewSystemdAdapter()
 	var workers []supervisor.Worker
 	nativeFD := -1

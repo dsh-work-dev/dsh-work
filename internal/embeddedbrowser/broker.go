@@ -41,6 +41,7 @@ type Config struct {
 	Supervisor          supervisor.Adapter
 	// ObserveProtocol receives method names only, never page values or CDP data.
 	ObserveProtocol func(direction, method string)
+	ObserveCommand  func(ProtocolObservation)
 }
 
 type Broker struct {
@@ -61,6 +62,7 @@ type Broker struct {
 	closeErr              error
 	err                   error
 	observe               func(string, string)
+	commands              *commandObserver
 	artifacts             map[string]*Artifact
 	controls              map[string]chan controlResult
 	targets               map[string][]*OwnedTarget
@@ -113,7 +115,7 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &Broker{ipc: ipc, generation: rand.Text(), routes: map[string]*route{}, ready: make(chan error, 1), done: make(chan struct{}), closed: make(chan struct{}), observe: c.ObserveProtocol, artifacts: map[string]*Artifact{}}
+	b := &Broker{ipc: ipc, generation: rand.Text(), routes: map[string]*route{}, ready: make(chan error, 1), done: make(chan struct{}), closed: make(chan struct{}), observe: c.ObserveProtocol, commands: newCommandObserver(c.ObserveCommand), artifacts: map[string]*Artifact{}}
 	env := map[string]string{}
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
@@ -248,6 +250,7 @@ func (b *Broker) receive() {
 		var m struct {
 			Kind, Generation, Route, Scope, Method, Owner string
 			Protocol                                      int
+			ID                                            int
 			Payload                                       json.RawMessage
 		}
 		if err := json.Unmarshal(raw, &m); err != nil {
@@ -290,6 +293,7 @@ func (b *Broker) receive() {
 			continue
 		}
 		if m.Kind == "dispatch.observed" {
+			b.commands.accepted(m.Route, m.ID, m.Method)
 			if b.observe != nil {
 				b.observe("dispatch", m.Method)
 			}
@@ -407,6 +411,7 @@ func (b *Broker) receive() {
 				b.observe("result", "rejected")
 			}
 		}
+		b.commands.response(m.Route, m.Payload)
 		if r == nil {
 			continue
 		}
@@ -552,13 +557,14 @@ func (r *route) Send(ctx context.Context, p json.RawMessage) error {
 		}
 		r.broker.observe("command", method)
 	}
+	r.broker.commands.command(r.id, p)
 	return r.broker.write(map[string]any{"kind": "wire", "route": r.id, "payload": p})
 }
 func (r *route) Messages() <-chan json.RawMessage { return r.messages }
 func (r *route) Done() <-chan struct{}            { return r.done }
 func (r *route) Err() error                       { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
 func (r *route) finish(err error) {
-	r.once.Do(func() { r.mu.Lock(); r.err = err; close(r.done); r.mu.Unlock() })
+	r.once.Do(func() { r.broker.commands.retire(r.id); r.mu.Lock(); r.err = err; close(r.done); r.mu.Unlock() })
 }
 func (r *route) Close() error {
 	r.finish(automation.ErrRevoked)

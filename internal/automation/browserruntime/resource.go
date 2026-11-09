@@ -29,12 +29,13 @@ type Runtime struct {
 	Environment        map[string]string
 }
 type Config struct {
-	Service    *automation.Service
-	Supervisor supervisor.Adapter
-	Resolve    func(context.Context) (Runtime, error)
-	Root       string
-	OutputRoot string
-	Observe    func(automation.Request, Observation)
+	Service      *automation.Service
+	Supervisor   supervisor.Adapter
+	Resolve      func(context.Context) (Runtime, error)
+	Root         string
+	OutputRoot   string
+	Observe      func(automation.Request, Observation)
+	ObserveStage func(string)
 	// Routes is an in-process provider dependency. Nil preserves the external
 	// browser selection contract; no route identity comes from tool arguments.
 	Routes RouteProvider
@@ -210,7 +211,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		for k, v := range r.ipc.ChildEnvironment() {
 			env[k] = v
 		}
-		r.worker, err = c.Supervisor.Start(ctx, supervisor.LaunchPlan{GenerationID: "browser-" + filepath.Base(r.dir), Executable: runtime.Node, Args: []string{filepath.Join(r.dir, "adapter.mjs")}, Env: env, WorkingDirectory: r.dir, ExpectedOrigin: workeripc.Origin}, nil)
+		r.worker, err = c.Supervisor.Start(ctx, supervisor.LaunchPlan{GenerationID: "browser-" + filepath.Base(r.dir), Executable: runtime.Node, Args: []string{filepath.Join(r.dir, "adapter.mjs")}, Env: env, WorkingDirectory: r.dir, ExpectedOrigin: workeripc.Origin}, adapterDiagnosticOutput(runtime.Environment["DSH_WORK_BROWSER_DIAGNOSTICS"] == "1", c.ObserveStage))
 		if err != nil {
 			return nil, err
 		}

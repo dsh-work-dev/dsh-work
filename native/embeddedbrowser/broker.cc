@@ -392,7 +392,7 @@ bool RequiresGuard()const{return guard_required_;}
     if (!tabs.at(tab_).browser->GetHost()->SendDevToolsMessage(json.data(), json.size())) {
       pending_.erase(serial); pending_methods_.erase(serial); Result(route_, id, nullptr, "CEF_DEVTOOLS_DISPATCH_REJECTED");
     }else{
-      auto observed=CefDictionaryValue::Create();observed->SetString("kind","dispatch.observed");observed->SetString("generation",generation);observed->SetString("route",route_);observed->SetString("method",method);Write(observed);
+      auto observed=CefDictionaryValue::Create();observed->SetString("kind","dispatch.observed");observed->SetString("generation",generation);observed->SetString("route",route_);observed->SetString("method",method);observed->SetInt("id",id);Write(observed);
     }
   }
   bool OnDevToolsMessage(CefRefPtr<CefBrowser>, const void* data, size_t size) override {
