@@ -16,29 +16,31 @@ import (
 const maxFrame = 1 << 20
 
 type message struct {
-	Kind           string   `json:"kind"`
-	Generation     string   `json:"generation,omitempty"`
-	Secret         string   `json:"secret,omitempty"`
-	Type           string   `json:"type,omitempty"`
-	Broker         Process  `json:"broker,omitempty"`
-	Group          Census   `json:"group,omitempty"`
-	Children       Census   `json:"children,omitempty"`
-	State          *journal `json:"state,omitempty"`
-	Error          string   `json:"error,omitempty"`
-	Version        string   `json:"version,omitempty"`
-	CrashReporting *bool    `json:"crashReporting,omitempty"`
+	Output         *supervisor.OutputEvent `json:"output,omitempty"`
+	Kind           string                  `json:"kind"`
+	Generation     string                  `json:"generation,omitempty"`
+	Secret         string                  `json:"secret,omitempty"`
+	Type           string                  `json:"type,omitempty"`
+	Broker         Process                 `json:"broker,omitempty"`
+	Group          Census                  `json:"group,omitempty"`
+	Children       Census                  `json:"children,omitempty"`
+	State          *journal                `json:"state,omitempty"`
+	Error          string                  `json:"error,omitempty"`
+	Version        string                  `json:"version,omitempty"`
+	CrashReporting *bool                   `json:"crashReporting,omitempty"`
 }
 
 type launchConfig struct {
-	MCP       *mcpConfig            `json:"mcp,omitempty"`
-	Directory string                `json:"directory"`
-	Profile   string                `json:"profile"`
-	Socket    string                `json:"socket"`
-	Secret    string                `json:"secret"`
-	Host      Process               `json:"host"`
-	Helpers   []string              `json:"helpers"`
-	Plan      supervisor.LaunchPlan `json:"plan"`
-	Job       string                `json:"job"`
+	Restricted *restrictedConfig     `json:"restricted,omitempty"`
+	MCP        *mcpConfig            `json:"mcp,omitempty"`
+	Directory  string                `json:"directory"`
+	Profile    string                `json:"profile"`
+	Socket     string                `json:"socket"`
+	Secret     string                `json:"secret"`
+	Host       Process               `json:"host"`
+	Helpers    []string              `json:"helpers"`
+	Plan       supervisor.LaunchPlan `json:"plan"`
+	Job        string                `json:"job"`
 }
 
 func readFrame(c net.Conn, value any) error {

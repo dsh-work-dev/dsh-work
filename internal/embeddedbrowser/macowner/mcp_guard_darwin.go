@@ -78,14 +78,16 @@ func (g *guard) registerMCP(c net.Conn, hello message, target localipc.ProcessTa
 	if hello.Kind != "mcp" {
 		return
 	}
+	g.registerNode(c, hello, target, g.cfg.MCP.Node, g.cfg.MCP.NodeDevice, g.cfg.MCP.NodeInode, false, mcpVersion)
+}
+func (g *guard) registerNode(c net.Conn, hello message, target localipc.ProcessTarget, node string, device, inode uint64, rootOnly bool, version string) {
 	select {
 	case <-g.brokerReady:
 	case <-time.After(3 * time.Second):
 		return
 	}
 	p, err := process(target.PID)
-	cfg := g.cfg.MCP
-	if err != nil || p.Started != target.Started || p.State != "live" || !pinnedJobFile(p.Path, cfg.Node, cfg.NodeDevice, cfg.NodeInode) {
+	if err != nil || p.Started != target.Started || p.State != "live" || !pinnedJobFile(p.Path, node, device, inode) {
 		return
 	}
 	g.mu.Lock()
@@ -98,11 +100,14 @@ func (g *guard) registerMCP(c net.Conn, hello message, target localipc.ProcessTa
 	isRoot := p.PID == root.PID && p.Started == root.Started && p.PPID == g.state.Owner.PID
 	if isRoot {
 		role = "mcp-adapter"
-	} else if p.PPID == root.PID {
+	} else if !rootOnly && p.PPID == root.PID {
 		parent, ok := g.state.Owned[processKey(root)]
 		if ok && parent.Target != nil {
 			role = "mcp-stdio-child"
 		}
+	}
+	if rootOnly && isRoot {
+		role = "restricted-dsh"
 	}
 	if role == "" {
 		g.mu.Unlock()
@@ -115,8 +120,11 @@ func (g *guard) registerMCP(c net.Conn, hello message, target localipc.ProcessTa
 	g.state.Owned[processKey(p)] = owned{Process: p, Target: &target, Role: role}
 	if isRoot {
 		g.state.RuntimeReady = true
-		g.state.RuntimeVersion = mcpVersion
+		g.state.RuntimeVersion = version
 		g.state.Phase = "mcp-running"
+		if rootOnly {
+			g.state.Phase = "restricted-running"
+		}
 	}
 	err = g.persist()
 	if err != nil {

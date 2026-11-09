@@ -460,7 +460,7 @@ func (a *Adapter) locateExecutable() (string, error) {
 		filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh.exe"),
 		filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh"),
 	}
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 		// Prefer the package's native executable launcher over the Windows
 		// repository shim when the locked development runtime is installed.
 		candidates = append([]string{filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh")}, candidates...)

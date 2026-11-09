@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package dshadapter
 
@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Linux's supervised bootstrap receives an exact Env, rather than the service
+// Native supervised bootstraps receive an exact Env, rather than the service
 // manager's environment. Construct the application's inherited environment at
 // the DSH launch-plan boundary before applying its explicit child overrides.
 func launchEnvironment() map[string]string {

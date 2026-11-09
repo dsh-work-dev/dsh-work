@@ -84,7 +84,7 @@ func (g *guard) requestStop() {
 	g.mu.Lock()
 	g.stopping = true
 	g.mu.Unlock()
-	if g.cfg.MCP != nil {
+	if g.cfg.MCP != nil || g.cfg.Restricted != nil {
 		g.stopMCP(false)
 	} else {
 		_ = g.nativeCommand("stop")
@@ -92,7 +92,7 @@ func (g *guard) requestStop() {
 	g.wakeup()
 }
 func (g *guard) force() {
-	if g.cfg.MCP != nil {
+	if g.cfg.MCP != nil || g.cfg.Restricted != nil {
 		g.stopMCP(true)
 		return
 	}
@@ -162,6 +162,10 @@ func (g *guard) serve(c net.Conn) {
 			}
 		}
 	}
+	if g.cfg.Restricted != nil {
+		g.registerRestrictedDSH(c, hello, target)
+		return
+	}
 	if g.cfg.MCP != nil {
 		g.registerMCP(c, hello, target)
 		return
@@ -221,6 +225,9 @@ func (g *guard) serve(c net.Conn) {
 }
 
 func (g *guard) startBroker() error {
+	if g.cfg.Restricted != nil {
+		return g.startRestrictedDSH()
+	}
 	if g.cfg.MCP != nil {
 		return g.startMCPBroker()
 	}
@@ -350,6 +357,9 @@ func (g *guard) commitSnapshotLocked() error {
 }
 
 func (g *guard) admitLocked(c Census, children bool) error {
+	if g.cfg.Restricted != nil {
+		return g.admitRestrictedGroupLocked(c)
+	}
 	if g.cfg.MCP != nil {
 		return g.admitMCPGroupLocked(c)
 	}
@@ -484,6 +494,9 @@ func RunGuard(configPath string) error {
 		return err
 	}
 	leaseName := ".dsh-cef-profile.lock"
+	if cfg.Restricted != nil {
+		leaseName = ".dsh-restricted-component.lock"
+	}
 	if cfg.MCP != nil {
 		leaseName = ".dsh-mcp-component.lock"
 	}
@@ -505,6 +518,9 @@ func RunGuard(configPath string) error {
 		return errors.Join(ErrCleanupPending, err)
 	}
 	g := &guard{cfg: cfg, key: key, state: journal{Generation: cfg.Plan.GenerationID, Job: cfg.Job, Owner: self, Phase: "starting", Owned: map[string]owned{}}, brokerReady: make(chan struct{}), start: make(chan struct{}), wake: make(chan struct{}, 1)}
+	if cfg.Restricted != nil {
+		g.state.Component = "restricted-dsh"
+	}
 	if cfg.MCP != nil {
 		g.state.Component = "owned-cef-mcp"
 	}
@@ -559,12 +575,15 @@ func RunGuard(configPath string) error {
 			return ctx.Err()
 		}
 		g.mu.Lock()
-		if cfg.MCP != nil && !g.mcpStopAt.IsZero() && time.Since(g.mcpStopAt) > 3*time.Second {
+		if (cfg.MCP != nil || cfg.Restricted != nil) && !g.mcpStopAt.IsZero() && time.Since(g.mcpStopAt) > 3*time.Second {
 			// The LaunchAgent still holds the original PGID here. Returning
 			// lets launchd finish its owned inherited group, including a child
 			// stopped before its mandatory registration. Recovery still needs
 			// actual instance/group empty; this is not a completion record.
 			g.state.Phase = "mcp-retiring"
+			if cfg.Restricted != nil {
+				g.state.Phase = "restricted-retiring"
+			}
 			err := g.persist()
 			g.mu.Unlock()
 			return errors.Join(ErrCleanupPending, err)
@@ -585,7 +604,7 @@ func RunGuard(configPath string) error {
 			continue
 		}
 		pendingNotified = false
-		if (g.engine || cfg.MCP != nil) && !g.quiescent && !g.exited {
+		if (g.engine || cfg.MCP != nil || cfg.Restricted != nil) && !g.quiescent && !g.exited {
 			before := len(g.state.Owned)
 			c, e := group(g.state.Owner.PGID)
 			if e == nil {

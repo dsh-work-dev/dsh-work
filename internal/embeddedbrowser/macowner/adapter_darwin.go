@@ -96,6 +96,7 @@ type Adapter struct {
 	profile, directory string
 	worker             *Worker
 	mcp                *mcpConfig
+	restricted         *restrictedConfig
 }
 
 // New is per-profile and CEF-specific. It deliberately does not become the
@@ -153,7 +154,7 @@ func recoverState(ctx context.Context, dir string, key []byte, original journal)
 		}
 		// Only the pinned CDP-attached Node/stdio component keeps all spawn paths
 		// in the LaunchAgent's inherited PGID. CEF retains its quiescent barrier.
-		mcpRecoverable := s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
+		mcpRecoverable := nodeComponentRecoverable(s)
 		if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
 			return ErrCleanupPending
 		}
@@ -169,7 +170,7 @@ func recoverState(ctx context.Context, dir string, key []byte, original journal)
 			if e != nil {
 				return e
 			}
-			mcpRecoverable = s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
+			mcpRecoverable = nodeComponentRecoverable(s)
 			if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
 				return ErrCleanupPending
 			}
@@ -243,19 +244,22 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err := plan.Validate(); err != nil {
 		return nil, err
 	}
-	if a.mcp == nil {
+	if a.mcp == nil && a.restricted == nil {
 		profile, profileErr := filepath.EvalSymlinks(plan.Env["DSH_WORK_CEF_PROFILE"])
 		if profileErr != nil || plan.Executable != a.publication.Executable || len(plan.Args) != 0 || plan.WorkingDirectory != filepath.Dir(a.publication.Executable) || profile != a.profile {
 			return nil, errors.New("MAC_CEF_LAUNCH_PLAN_REJECTED")
 		}
-	} else if !sameJobFile(plan.Executable, a.mcp.Node) || len(plan.Args) != 1 || !sameJobFile(plan.Args[0], a.mcp.Adapter) {
+	} else if a.mcp != nil && (!sameJobFile(plan.Executable, a.mcp.Node) || len(plan.Args) != 1 || !sameJobFile(plan.Args[0], a.mcp.Adapter)) {
 		return nil, errors.New("MAC_MCP_LAUNCH_PLAN_REJECTED")
+	}
+	if a.restricted != nil && (!pinnedJobFile(plan.Executable, a.restricted.Node, a.restricted.NodeDevice, a.restricted.NodeInode) || len(plan.Args) == 0 || !sameJobFile(plan.Args[0], a.restricted.Entry)) {
+		return nil, errors.New("MAC_PREVIEW_LAUNCH_PLAN_REJECTED")
 	}
 	if plan.ExpectedOrigin != workeripc.Origin || !regexp.MustCompile(`^cef-[A-Za-z0-9]+$`).MatchString(plan.GenerationID) {
 		return nil, errors.New("MAC_CEF_LAUNCH_PLAN_REJECTED")
 	}
 	plan.Env = maps.Clone(plan.Env)
-	if a.mcp == nil {
+	if a.mcp == nil && a.restricted == nil {
 		plan.Env["DSH_WORK_CEF_PROFILE"] = a.profile
 	}
 	if a.worker != nil {
@@ -280,6 +284,9 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	}
 	job := "dev.dsh.cef." + strings.ToLower(rand.Text())
 	w := &Worker{directory: a.directory, key: key, job: job, run: run, exited: make(chan struct{}), empty: make(chan struct{}), events: make(chan supervisor.OutputEvent, 16), raw: raw, readDone: make(chan struct{}), state: journal{Generation: plan.GenerationID}}
+	if a.restricted != nil {
+		w.state.Component = "restricted-dsh"
+	}
 	w.attempt = &launchAttempt{Generation: plan.GenerationID, Job: job, Run: run, Program: a.publication.Owner}
 	a.worker = w
 	defer func() {
@@ -312,7 +319,7 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err != nil {
 		return nil, err
 	}
-	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Plan: plan, Job: job, MCP: a.mcp}
+	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Plan: plan, Job: job, MCP: a.mcp, Restricted: a.restricted}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -400,6 +407,9 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 			conn.Close()
 			return nil, errors.Join(ErrCleanupPending, err)
 		}
+		if a.restricted != nil && w.acceptRestrictedOutput(m) {
+			continue
+		}
 		if m.State == nil || m.State.Generation != plan.GenerationID || m.State.Owner.PID != w.owner.PID || m.State.Owner.Started != w.owner.Started {
 			conn.Close()
 			return nil, ErrCleanupPending
@@ -408,6 +418,9 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 		expectedVersion := Version
 		if a.mcp != nil {
 			expectedVersion = mcpVersion
+		}
+		if a.restricted != nil {
+			expectedVersion = restrictedVersion
 		}
 		if m.Kind == "runtime" && m.State.RuntimeReady && m.State.RuntimeVersion == expectedVersion {
 			durable, e := loadGeneration(w.directory, w.key, plan.GenerationID)
@@ -441,6 +454,7 @@ type Worker struct {
 	readStarted         bool
 	raw                 supervisor.RawOutputHandler
 	err                 error
+	stdout, stderr      string
 	retired, jobRetired bool
 	runRetired          bool
 	socketInfo          os.FileInfo
@@ -460,6 +474,9 @@ func (w *Worker) receive() {
 			w.mu.Unlock()
 			w.observeFailure()
 			return
+		}
+		if w.acceptRestrictedOutput(m) {
+			continue
 		}
 		w.mu.Lock()
 		valid := m.State != nil && m.State.Generation == w.state.Generation && m.State.Owner.PID == w.owner.PID && m.State.Owner.Started == w.owner.Started
@@ -578,7 +595,7 @@ func (w *Worker) WaitEmpty(ctx context.Context) error {
 func (w *Worker) Diagnostics() supervisor.Diagnostics {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	d := supervisor.Diagnostics{PID: w.state.Broker.PID, ProcessStarted: w.state.Broker.Started, Exit: w.state.Exit}
+	d := supervisor.Diagnostics{PID: w.state.Broker.PID, ProcessStarted: w.state.Broker.Started, Exit: w.state.Exit, StdoutTail: w.stdout, StderrTail: w.stderr}
 	for _, r := range w.state.Owned {
 		p, e := instance(r.Process)
 		if e != nil || p.State != "gone" && p.State != "reused" {
@@ -650,7 +667,7 @@ func (w *Worker) removeRun() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock", "mcp-bootstrap.json", "mcp-bootstrap.mjs"} {
+	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock", "mcp-bootstrap.json", "mcp-bootstrap.mjs", "restricted-bootstrap.json", "restricted-bootstrap.mjs"} {
 		if err := os.Remove(filepath.Join(w.run, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -660,4 +677,8 @@ func (w *Worker) removeRun() error {
 	}
 	w.runRetired = true
 	return nil
+}
+
+func nodeComponentRecoverable(s journal) bool {
+	return (s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")) || (s.Component == "restricted-dsh" && (s.Phase == "restricted-running" || s.Phase == "restricted-retiring"))
 }
