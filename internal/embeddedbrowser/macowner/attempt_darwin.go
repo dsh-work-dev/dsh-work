@@ -19,16 +19,21 @@ import (
 // Contains no launch environment, HMAC secret or Mach token. An uncertain
 // launchctl result remains owned even if the creating Adapter is replaced.
 type launchAttempt struct {
-	Generation   string  `json:"generation"`
-	Job          string  `json:"job"`
-	Run          string  `json:"run"`
-	Program      string  `json:"program"`
-	Submitted    bool    `json:"submitted"`
-	Hello        bool    `json:"hello"`
-	JobRetired   bool    `json:"jobRetired"`
-	Owner        Process `json:"owner"`
-	SocketDevice uint64  `json:"socketDevice"`
-	SocketInode  uint64  `json:"socketInode"`
+	FileIdentityVersion int     `json:"fileIdentityVersion,omitempty"`
+	Generation          string  `json:"generation"`
+	Job                 string  `json:"job"`
+	Run                 string  `json:"run"`
+	Program             string  `json:"program"`
+	Submitted           bool    `json:"submitted"`
+	Hello               bool    `json:"hello"`
+	JobRetired          bool    `json:"jobRetired"`
+	Owner               Process `json:"owner"`
+	SocketDevice        uint64  `json:"socketDevice"`
+	SocketInode         uint64  `json:"socketInode"`
+	PlistDevice         uint64  `json:"plistDevice"`
+	PlistInode          uint64  `json:"plistInode"`
+	ProgramDevice       uint64  `json:"programDevice"`
+	ProgramInode        uint64  `json:"programInode"`
 }
 
 func attemptName(generation string) (string, error) {
@@ -37,12 +42,13 @@ func attemptName(generation string) (string, error) {
 	}
 	return "attempt-" + generation + ".json", nil
 }
-func (w *Worker) saveAttempt() error {
-	name, err := attemptName(w.attempt.Generation)
+func (w *Worker) saveAttempt() error { return w.saveAttemptValue(w.attempt) }
+func (w *Worker) saveAttemptValue(attempt *launchAttempt) error {
+	name, err := attemptName(attempt.Generation)
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(w.attempt)
+	body, err := json.Marshal(attempt)
 	if err != nil {
 		return err
 	}
@@ -75,19 +81,132 @@ func jobField(status []byte, key string) string {
 	}
 	return ""
 }
+
+// This is an allowlist projection, never launchctl's full output (which can
+// contain the launch environment). A failed lookup does not establish absence.
+type jobMeasurement struct {
+	QuerySucceeded     bool   `json:"querySucceeded"`
+	Status             string `json:"status"`
+	Path               string `json:"path,omitempty"`
+	Program            string `json:"program,omitempty"`
+	PID                uint32 `json:"pid,omitempty"`
+	State              string `json:"state,omitempty"`
+	PlistFileMatched   bool   `json:"plistFileMatched"`
+	ProgramFileMatched bool   `json:"programFileMatched"`
+}
+
+func sameJobFile(actual, expected string) bool {
+	if !filepath.IsAbs(actual) || !filepath.IsAbs(expected) {
+		return false
+	}
+	a, err := os.Stat(actual)
+	if err != nil || !a.Mode().IsRegular() {
+		return false
+	}
+	e, err := os.Stat(expected)
+	return err == nil && e.Mode().IsRegular() && os.SameFile(a, e)
+}
+func fileIdentity(path string) (uint64, uint64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || !info.Mode().IsRegular() || stat.Ino == 0 {
+		return 0, 0, ErrCleanupPending
+	}
+	return uint64(stat.Dev), stat.Ino, nil
+}
+func pinnedJobFile(actual, expected string, device, inode uint64) bool {
+	if inode == 0 || !sameJobFile(actual, expected) {
+		return false
+	}
+	dev, ino, err := fileIdentity(actual)
+	return err == nil && dev == device && ino == inode
+}
+func (w *Worker) sealAttemptFiles() error {
+	var err error
+	w.attempt.PlistDevice, w.attempt.PlistInode, err = fileIdentity(filepath.Join(w.run, "owner.plist"))
+	if err != nil {
+		return err
+	}
+	w.attempt.ProgramDevice, w.attempt.ProgramInode, err = fileIdentity(w.attempt.Program)
+	if err == nil {
+		w.attempt.FileIdentityVersion = 1
+	}
+	return err
+}
 func (w *Worker) verifiedJob(ctx context.Context) ([]byte, error) {
 	status, err := launchctl(ctx, "print", service(w.job))
+	measure := jobMeasurement{Status: "lookup-failed-absence-unconfirmed"}
+	defer func() { w.mu.Lock(); w.jobMeasurement = measure; w.mu.Unlock() }()
 	if err != nil {
 		return nil, errors.Join(ErrCleanupPending, err)
 	}
-	program := w.program
-	if w.attempt != nil {
-		program = w.attempt.Program
+	measure, err = w.verifyJobMetadata(status)
+	return status, err
+}
+func (w *Worker) verifyJobMetadata(status []byte) (jobMeasurement, error) {
+	measure := jobMeasurement{QuerySucceeded: true, Status: "present-unmatched", Path: jobField(status, "path"), Program: jobField(status, "program"), State: jobField(status, "state")}
+	pid, _ := strconv.ParseUint(jobField(status, "pid"), 10, 32)
+	measure.PID = uint32(pid)
+	reject := func() (jobMeasurement, error) {
+		return measure, errors.Join(ErrCleanupPending, errors.New("MAC_CEF_JOB_OWNERSHIP_UNKNOWN"))
 	}
-	if jobField(status, "path") != filepath.Join(w.run, "owner.plist") || jobField(status, "program") != program {
-		return nil, errors.Join(ErrCleanupPending, errors.New("MAC_CEF_JOB_OWNERSHIP_UNKNOWN"))
+	if w.attempt == nil {
+		return reject()
 	}
-	return status, nil
+	a := w.attempt
+	if a.FileIdentityVersion == 0 {
+		// Authenticated old v1 attempts predate file pins. Preserve their original
+		// trusted path/program contract; a canonical alias must name the same file.
+		// Commit an explicit identity upgrade before granting any retirement action.
+		measure.PlistFileMatched = sameJobFile(measure.Path, filepath.Join(w.run, "owner.plist"))
+		measure.ProgramFileMatched = sameJobFile(measure.Program, a.Program)
+		if !measure.PlistFileMatched || !measure.ProgramFileMatched {
+			return reject()
+		}
+		candidate := *a
+		if a.PlistInode != 0 || a.ProgramInode != 0 || a.PlistDevice != 0 || a.ProgramDevice != 0 {
+			// A pre-version checkpoint that already wrote pins keeps those pins; do
+			// not silently resnapshot a replacement under the legacy branch.
+			if !pinnedJobFile(measure.Path, filepath.Join(w.run, "owner.plist"), a.PlistDevice, a.PlistInode) || !pinnedJobFile(measure.Program, a.Program, a.ProgramDevice, a.ProgramInode) {
+				return reject()
+			}
+		} else {
+			var err error
+			candidate.PlistDevice, candidate.PlistInode, err = fileIdentity(filepath.Join(w.run, "owner.plist"))
+			if err != nil {
+				return measure, errors.Join(ErrCleanupPending, err)
+			}
+			candidate.ProgramDevice, candidate.ProgramInode, err = fileIdentity(a.Program)
+			if err != nil {
+				return measure, errors.Join(ErrCleanupPending, err)
+			}
+		}
+		candidate.FileIdentityVersion = 1
+		if err := w.saveAttemptValue(&candidate); err != nil {
+			return measure, errors.Join(ErrCleanupPending, err)
+		}
+		w.attempt = &candidate
+		a = w.attempt
+	}
+	if a.FileIdentityVersion != 1 {
+		return reject()
+	}
+	measure.PlistFileMatched = pinnedJobFile(measure.Path, filepath.Join(w.run, "owner.plist"), a.PlistDevice, a.PlistInode)
+	measure.ProgramFileMatched = pinnedJobFile(measure.Program, a.Program, a.ProgramDevice, a.ProgramInode)
+	if !measure.PlistFileMatched || !measure.ProgramFileMatched {
+		return reject()
+	}
+	measure.Status = "present-owned"
+	return measure, nil
+}
+func ownedRunParent(run string) bool {
+	parent := filepath.Dir(run)
+	root := filepath.Clean(localipc.SocketTempRoot())
+	canonical, err := filepath.EvalSymlinks(root)
+	return parent == root || (err == nil && parent == canonical)
 }
 func (a *Adapter) recoverAttempts(ctx context.Context, key []byte) error {
 	entries, err := os.ReadDir(a.directory)
@@ -108,10 +227,10 @@ func (a *Adapter) recoverAttempts(ctx context.Context, key []byte) error {
 			return errors.Join(ErrCleanupPending, err)
 		}
 		expected, err := attemptName(attempt.Generation)
-		if err != nil || name != expected || attempt.Program != a.publication.Owner || !strings.HasPrefix(attempt.Job, "dev.dsh.cef.") || filepath.Dir(attempt.Run) != filepath.Clean(localipc.SocketTempRoot()) || !strings.HasPrefix(filepath.Base(attempt.Run), "dsh-cef-") {
+		if err != nil || name != expected || attempt.Program != a.publication.Owner || !strings.HasPrefix(attempt.Job, "dev.dsh.cef.") || !ownedRunParent(attempt.Run) || !strings.HasPrefix(filepath.Base(attempt.Run), "dsh-cef-") {
 			return ErrCleanupPending
 		}
-		w := &Worker{directory: a.directory, key: key, job: attempt.Job, run: attempt.Run, program: attempt.Program, attempt: &attempt, state: journal{Generation: attempt.Generation}}
+		w := &Worker{directory: a.directory, key: key, job: attempt.Job, run: attempt.Run, attempt: &attempt, state: journal{Generation: attempt.Generation}}
 		a.worker = w
 		if err = w.closeAttempt(ctx); err != nil {
 			return err

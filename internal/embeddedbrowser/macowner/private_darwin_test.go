@@ -303,6 +303,10 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 		QueryError string    `json:"queryError,omitempty"`
 	}
 	var proof struct {
+		Job                        jobMeasurement     `json:"job"`
+		JobBootoutConfirmed        bool               `json:"jobBootoutConfirmed"`
+		RunFilesRetired            bool               `json:"runFilesRetired"`
+		AttemptRecordRetired       bool               `json:"attemptRecordRetired"`
 		SystemCrash                *safeCrash         `json:"systemCrash"`
 		ExitSignal                 int                `json:"brokerExitSignal"`
 		ExitCoreDump               bool               `json:"brokerCoreDump"`
@@ -328,7 +332,13 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 	proof.Groups = []groupMeasurement{}
 	w.mu.Lock()
 	id := w.state.Generation
+	proof.Job = w.jobMeasurement
 	w.mu.Unlock()
+	// Called after Close has returned: job/run retirement is distinct from
+	// the signed process-empty proof.
+	proof.JobBootoutConfirmed = w.jobRetired
+	proof.RunFilesRetired = w.runRetired
+	proof.AttemptRecordRetired = w.attempt == nil
 	proof.Generation = id
 	state, err := loadGeneration(w.directory, w.key, id)
 	if err != nil {

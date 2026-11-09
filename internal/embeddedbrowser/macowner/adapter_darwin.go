@@ -222,7 +222,7 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 		return nil, err
 	}
 	job := "dev.dsh.cef." + strings.ToLower(rand.Text())
-	w := &Worker{directory: a.directory, key: key, job: job, run: run, program: a.publication.Owner, exited: make(chan struct{}), empty: make(chan struct{}), events: make(chan supervisor.OutputEvent, 16), raw: raw, readDone: make(chan struct{}), state: journal{Generation: plan.GenerationID}}
+	w := &Worker{directory: a.directory, key: key, job: job, run: run, exited: make(chan struct{}), empty: make(chan struct{}), events: make(chan supervisor.OutputEvent, 16), raw: raw, readDone: make(chan struct{}), state: journal{Generation: plan.GenerationID}}
 	w.attempt = &launchAttempt{Generation: plan.GenerationID, Job: job, Run: run, Program: a.publication.Owner}
 	a.worker = w
 	defer func() {
@@ -241,6 +241,16 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 			retErr = errors.Join(ErrCleanupPending, retErr)
 		}
 	}()
+	// launchd resolves the submitted plist's filesystem path. Keep our actual
+	// run path canonical too; /tmp is a symlink on macOS. Ownership was already
+	// installed above so failed resolution still has an exact cleanup owner.
+	canonicalRun, e := filepath.EvalSymlinks(run)
+	if e != nil {
+		return nil, e
+	}
+	run = canonicalRun
+	w.run = run
+	w.attempt.Run = run
 	host, err := process(uint32(os.Getpid()))
 	if err != nil {
 		return nil, err
@@ -254,13 +264,16 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err = writePrivate(configPath, data); err != nil {
 		return nil, err
 	}
-	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>` + escaped(job) + `</string><key>ProgramArguments</key><array><string>` + escaped(a.publication.Owner) + `</string><string>--guard</string><string>` + escaped(configPath) + `</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>`
+	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>` + escaped(job) + `</string><key>Program</key><string>` + escaped(a.publication.Owner) + `</string><key>ProgramArguments</key><array><string>` + escaped(a.publication.Owner) + `</string><string>--guard</string><string>` + escaped(configPath) + `</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>`
 	plistPath := filepath.Join(run, "owner.plist")
 	if err = writePrivate(plistPath, []byte(plist)); err != nil {
 		return nil, err
 	}
 	// Commit ownership before invoking a command whose cancelled/error return
 	// does not establish whether launchd accepted the job.
+	if err = w.sealAttemptFiles(); err != nil {
+		return nil, err
+	}
 	w.attempt.Submitted = true
 	if err = w.saveAttempt(); err != nil {
 		w.attempt.Submitted = false
@@ -357,7 +370,6 @@ type Worker struct {
 	mu, write, close    sync.Mutex
 	conn                net.Conn
 	directory, job, run string
-	program             string
 	key                 []byte
 	owner               Process
 	state               journal
@@ -369,9 +381,11 @@ type Worker struct {
 	raw                 supervisor.RawOutputHandler
 	err                 error
 	retired, jobRetired bool
+	runRetired          bool
 	socketInfo          os.FileInfo
 	attempt             *launchAttempt
 	handedOff           bool
+	jobMeasurement      jobMeasurement
 }
 
 func (w *Worker) receive() {
@@ -583,5 +597,6 @@ func (w *Worker) removeRun() error {
 	if err := os.Remove(w.run); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	w.runRetired = true
 	return nil
 }
