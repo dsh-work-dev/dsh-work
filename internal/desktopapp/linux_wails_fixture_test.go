@@ -87,6 +87,10 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentTest := os.Getenv("DSH_WORK_LINUX_AGENT_TEST") == "1"
+	dualTest := os.Getenv("DSH_WORK_LINUX_DUAL_TEST") == "1"
+	if agentTest && dualTest {
+		t.Fatal("Agent and dual lifecycle fixtures must run independently")
+	}
 	if agentTest {
 		for _, name := range []string{"agent-permission-browser.captured", "agent-permission-site.captured", "agent-completed.json"} {
 			if _, err = os.Stat(filepath.Join(out, name)); !os.IsNotExist(err) {
@@ -104,19 +108,36 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		}
 	}
 	var reportMu sync.Mutex
-	var report struct {
-		Nonce, Input string
-		Tick         int
-	}
+	var report linuxFixtureReport
+	reports := map[string]linuxFixtureReport{}
+	pageLoads := 0
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/report" {
 			reportMu.Lock()
-			_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&report)
+			var next linuxFixtureReport
+			if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&next) == nil && next.Nonce != "" {
+				reports[next.Nonce] = next
+				if report.Nonce == "" || next.Nonce == report.Nonce {
+					report = next
+				}
+			}
 			reportMu.Unlock()
 			w.WriteHeader(204)
 			return
 		}
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
+		if dualTest {
+			reportMu.Lock()
+			pageLoads++
+			sequence := pageLoads
+			reportMu.Unlock()
+			fmt.Fprintf(w, `<!doctype html><title>Linux DSH slot fixture</title><style>body{background:#ddf4e4;color:#143324;font:22px system-ui;padding:24px}input{font:inherit}</style><h1>Real DSH Linux CEF slot</h1><input aria-label="Unsubmitted fixture input" value=""><script>const nonce=crypto.randomUUID(),storageBefore=localStorage.getItem("e67-marker")||"",cookieBefore=document.cookie,marker=storageBefore||crypto.randomUUID();localStorage.setItem("e67-marker",marker);document.cookie="e67="+marker+"; Path=/; SameSite=Strict; Max-Age=3600";const input=document.querySelector("input");input.value=%d===1?"linux-dsh-original":"linux-dsh-dirty-"+nonce;let tick=0;setInterval(()=>fetch("/report",{method:"POST",body:JSON.stringify({nonce,input:input.value,dirty:input.value!==input.defaultValue,tick:++tick,marker,storageBefore,cookieBefore})}),250)</script>`, sequence)
+			return
+		}
 		fmt.Fprint(w, `<!doctype html><title>Linux DSH slot fixture</title><style>body{background:#ddf4e4;color:#143324;font:22px system-ui;padding:24px}input{font:inherit}</style><h1>Real DSH Linux CEF slot</h1><input aria-label="Unsubmitted fixture input" value="linux-dsh-original"><script>const nonce=crypto.randomUUID();let tick=0;setInterval(()=>fetch('/report',{method:'POST',body:JSON.stringify({nonce,input:document.querySelector('input').value,tick:++tick})}),250)</script>`)
 	}))
 	defer fixture.Close()
@@ -604,11 +625,29 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			t.Fatal("read-only Agent tool changed or lost the document", agentReport)
 		}
 	}
+	var extraUI supervisor.Worker
+	var extraNativeJoin func()
+	if dualTest {
+		readReport := func(nonce string) (linuxFixtureReport, map[string]linuxFixtureReport) {
+			reportMu.Lock()
+			defer reportMu.Unlock()
+			copy := map[string]linuxFixtureReport{}
+			for k, v := range reports {
+				copy[k] = v
+			}
+			return reports[nonce], copy
+		}
+		extraUI, extraNativeJoin = exerciseLinuxDualNormal(t, ctx, repo, root, out, node, native, observer, fixture.URL+"/", env, client, snapshot.Status.GenerationID, ui, restored, guest, resumedBaseline, readReport, start)
+	}
 	if e = os.WriteFile(filepath.Join(out, "quit.request"), nil, 0600); e != nil {
 		t.Fatal(e)
 	}
 	readPhase("quit-requested", &map[string]any{})
-	for _, w := range []supervisor.Worker{ui, background} {
+	normalWorkers := []supervisor.Worker{ui, background}
+	if extraUI != nil {
+		normalWorkers = append(normalWorkers, extraUI)
+	}
+	for _, w := range normalWorkers {
 		select {
 		case <-w.Exited():
 		case <-ctx.Done():
@@ -623,6 +662,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		if e = w.Close(); e != nil {
 			t.Fatal(e)
 		}
+	}
+	if extraNativeJoin != nil {
+		extraNativeJoin()
 	}
 	poll := []unix.PollFd{{Fd: int32(nativeFD), Events: unix.POLLIN}}
 	if n, e := unix.Poll(poll, 0); e != nil || n != 1 {

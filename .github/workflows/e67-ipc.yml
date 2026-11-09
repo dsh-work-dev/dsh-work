@@ -289,6 +289,31 @@ jobs:
           xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
           go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
           SH
+      - name: Exercise independent Linux UI lifetimes and persistent profiles
+        env:
+          GDK_BACKEND: x11
+          DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_AGENT_TEST: '0'
+          DSH_WORK_LINUX_DUAL_TEST: '1'
+          DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-dual
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-linux-dual
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash <<'SH' 2>&1 | tee results/e67-linux-dual/integration.log
+          set -euo pipefail
+          openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & wm=$!
+          trap 'kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'; then break; fi
+            sleep 0.1
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
+          go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
+          SH
       - name: Capture scoped sandbox denial evidence
         if: failure()
         run: |
@@ -313,6 +338,9 @@ jobs:
             results/e67-linux-wails/*.log
             results/e67-linux-wails/*.json
             results/e67-linux-wails/*.png
+            results/e67-linux-dual/**/*.log
+            results/e67-linux-dual/**/*.json
+            results/e67-linux-dual/**/*.png
 
   mac-launchd-tree:
     needs: changes
