@@ -92,6 +92,17 @@ func fixtureProcess() error {
 	})
 	_ = server.Serve(listener)
 	server.Close()
+	if !isDaemon && role == "1" && os.Getenv("E67_RUNNER_FIXTURE_HOLD_EXIT") == "1" {
+		if err := os.WriteFile(filepath.Join(root, "fixture-ui-exit-held"), nil, 0600); err != nil {
+			return err
+		}
+		for {
+			if _, err := os.Stat(filepath.Join(root, "release-fixture-ui-exit")); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	if detached.Load() {
 		for {
 			if _, e := os.Stat(filepath.Join(root, "release-detached")); e == nil {
@@ -145,20 +156,81 @@ func fixtureNative(t *testing.T) *Native {
 		return probe(ctx, n.uiIdentity(instance), "/status", &state) == nil && state.Marker == "ordinary-terminal-value"
 	}
 	t.Cleanup(func() {
-		for _, i := range []int{1, 2} {
-			if p := n.get(i); p != nil && live(p.worker) {
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				_ = probe(ctx, n.uiIdentity(i), "/release", nil)
-				cancel()
-			}
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := n.stopAll(ctx); err != nil {
+		if err := cleanupFixture(ctx, n); err != nil {
 			t.Error("fixture cleanup", err)
 		}
 	})
 	return n
+}
+
+func cleanupFixture(ctx context.Context, n *Native) error {
+	for _, i := range []int{1, 2} {
+		p := n.get(i)
+		if p == nil {
+			continue
+		}
+		if live(p.worker) {
+			bounded, cancel := context.WithTimeout(ctx, time.Second)
+			releaseErr := ownedProbe(bounded, n.uiIdentity(i), "/release", p, nil)
+			cancel()
+			// The fixture closes its listener before main returns. A missing pipe
+			// is not process exit: join the held owner before asking stopAll to
+			// authenticate the remaining endpoints. No force-stop is needed.
+			select {
+			case <-p.worker.Exited():
+			case <-ctx.Done():
+				return fmt.Errorf("fixture UI %d release=%v; exit not joined: %w", i, releaseErr, ctx.Err())
+			}
+		}
+		if err := n.reap(ctx, i); err != nil {
+			return err
+		}
+	}
+	return n.stopAll(ctx)
+}
+
+func TestFixtureCleanupJoinsReleasedUIBeforeGlobalStop(t *testing.T) {
+	n := fixtureNative(t)
+	n.env["E67_RUNNER_FIXTURE_HOLD_EXIT"] = "1"
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	release := filepath.Join(n.config.Workspace, "release-fixture-ui-exit")
+	defer os.WriteFile(release, nil, 0600)
+	if err := n.startUI(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	p := n.get(1)
+	if err := ownedProbe(ctx, n.uiIdentity(1), "/release", p, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.wait(ctx, func() bool {
+		_, err := os.Stat(filepath.Join(n.config.Workspace, "fixture-ui-exit-held"))
+		return err == nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !live(p.worker) || !live(n.get(0).worker) {
+		t.Fatal("fixture did not isolate closed UI endpoint from process exit")
+	}
+	// Hold the real process after closing its pipe, then let it exit naturally.
+	// No shutdown request can use that endpoint during this interval.
+	joined := make(chan error, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		joined <- os.WriteFile(release, nil, 0600)
+	}()
+	err := cleanupFixture(ctx, n)
+	if releaseErr := <-joined; releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if err != nil {
+		t.Fatal("cleanup raced a naturally exiting owned UI", err)
+	}
+	if !n.CleanupComplete() {
+		t.Fatal("cleanup returned before joining the actual owned trees")
+	}
 }
 func TestOwnedLifecycleEnvironmentForeignRefusalAndFailedStop(t *testing.T) {
 	n := fixtureNative(t)
