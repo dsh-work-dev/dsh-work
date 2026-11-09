@@ -133,22 +133,46 @@ func launchctl(ctx context.Context, args ...string) ([]byte, error) {
 
 var jobPID = regexp.MustCompile(`(?m)^\s*pid = ([0-9]+)\s*$`)
 
-func recoverState(ctx context.Context, dir string, key []byte, s journal) error {
-	// Only the pinned CDP-attached Node/stdio component keeps all spawn paths
-	// in the LaunchAgent's inherited PGID. CEF still needs quiescence because
-	// its real post-root cleanup helper can create a separate process group.
-	mcpRecoverable := s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
-	if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
-		return ErrCleanupPending
+func freshRecoveryState(dir string, key []byte, original journal) (journal, error) {
+	latest, err := loadGeneration(dir, key, original.Generation)
+	if err != nil {
+		return journal{}, errors.Join(ErrCleanupPending, err)
 	}
+	if latest.Job != original.Job || latest.Component != original.Component || latest.Owner.PID != original.Owner.PID || latest.Owner.Started != original.Owner.Started || (original.Broker.PID != 0 && (latest.Broker.PID != original.Broker.PID || latest.Broker.Started != original.Broker.Started)) {
+		return journal{}, ErrCleanupPending
+	}
+	return latest, nil
+}
+func recoverState(ctx context.Context, dir string, key []byte, original journal) error {
 	for {
+		// A guard can publish the real exit/expanded inventory while recovery waits
+		// for its death. Never replace that terminal record with our older snapshot.
+		s, err := freshRecoveryState(dir, key, original)
+		if err != nil {
+			return err
+		}
+		// Only the pinned CDP-attached Node/stdio component keeps all spawn paths
+		// in the LaunchAgent's inherited PGID. CEF retains its quiescent barrier.
+		mcpRecoverable := s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
+		if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
+			return ErrCleanupPending
+		}
 		owner, e := instance(s.Owner)
 		if e != nil {
 			return errors.Join(ErrCleanupPending, e)
 		}
 		if owner.State == "gone" || owner.State == "reused" {
-			// An authenticated terminal record is a past completion proof, not a
-			// demand that numeric PGIDs stay unused by future generations forever.
+			// Death is the changed premise: the final write may have happened
+			// after the read above. This post-death record cannot be overtaken
+			// by another write from that original guard instance.
+			s, e = freshRecoveryState(dir, key, original)
+			if e != nil {
+				return e
+			}
+			mcpRecoverable = s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
+			if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
+				return ErrCleanupPending
+			}
 			if s.Phase == "empty" {
 				return nil
 			}
@@ -158,6 +182,12 @@ func recoverState(ctx context.Context, dir string, key []byte, s journal) error 
 			}
 			if ready {
 				s.Phase = "empty"
+				// Full tree-empty is not a wait-status observation. If the
+				// guard died before its waiter persisted a result, report the
+				// known started broker's exit as unknown, never default zero.
+				if s.Broker.PID != 0 && !s.Exit.Started {
+					s.Exit = supervisor.ExitResult{Started: true, Code: -1, Err: "MAC_CEF_BROKER_EXIT_UNOBSERVED"}
+				}
 				return save(dir, key, s)
 			}
 		}

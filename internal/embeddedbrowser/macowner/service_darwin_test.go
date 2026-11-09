@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,9 +69,26 @@ func TestLiveMacEngineServiceMCP(t *testing.T) {
 	if err = os.MkdirAll(evidence, 0700); err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.MkdirTemp("/tmp", "dsh-mac-service-")
-	if err != nil {
+	root := os.Getenv("DSH_WORK_MAC_DEATH_ROOT")
+	deathChild := root != "" && os.Getenv("DSH_WORK_MAC_DEATH_CONTROL") != ""
+	if !deathChild {
+		root, err = os.MkdirTemp("/tmp", "dsh-mac-service-")
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if err = privateDir(root); err != nil {
 		t.Fatal(err)
+	}
+	evidenceFile := func(name string) string {
+		if deathChild {
+			name = "death-active-" + name
+		}
+		return filepath.Join(evidence, name)
+	}
+	var deathControl net.Conn
+	if deathChild {
+		deathControl = connectServiceDeathController(t, ctx)
+		defer deathControl.Close()
 	}
 	complete := false
 	t.Cleanup(func() {
@@ -107,7 +125,7 @@ func TestLiveMacEngineServiceMCP(t *testing.T) {
 	defer broker.Close()
 	t.Cleanup(func() {
 		if native.worker != nil {
-			_ = writeTerminalEvidence(t, filepath.Join(evidence, "service-cef-terminal.json"), native.worker)
+			_ = writeTerminalEvidence(t, evidenceFile("service-cef-terminal.json"), native.worker)
 		}
 	})
 	target, err := broker.OpenOwnedWebTarget(ctx, page.URL)
@@ -145,7 +163,7 @@ func TestLiveMacEngineServiceMCP(t *testing.T) {
 			if err := w.Close(); err != nil {
 				t.Error("MCP owner retirement", err)
 			}
-			_ = writeTerminalEvidence(t, filepath.Join(evidence, "service-mcp-"+string(rune('1'+i))+"-terminal.json"), w)
+			_ = writeTerminalEvidence(t, evidenceFile("service-mcp-"+string(rune('1'+i))+"-terminal.json"), w)
 		}
 	}()
 	manager, err := settings.New(settings.Config{Path: filepath.Join(root, "settings.json")})
@@ -253,7 +271,7 @@ consentLoop:
 		if e != nil || image.Bounds().Dx() < 100 || image.Bounds().Dy() < 100 {
 			t.Fatal("MCP actual screenshot", e)
 		}
-		if err = os.WriteFile(filepath.Join(evidence, "formal-mac-engine-service.png"), data, 0600); err != nil {
+		if err = os.WriteFile(evidenceFile("formal-mac-engine-service.png"), data, 0600); err != nil {
 			t.Fatal(err)
 		}
 	case <-ctx.Done():
@@ -264,8 +282,12 @@ consentLoop:
 		t.Fatal("Service moved document scope", err)
 	}
 	proof, _ := json.MarshalIndent(map[string]any{"qualification": "formal-engine-service-mcp-without-managed-ui", "documentNonce": nonce, "dirty": "mac-private-dirty", "before": before, "after": after, "consentKinds": consentKinds, "mcpVersion": "0.0.83", "sdkVersion": "1.32.2", "wsVersion": "8.22.1"}, "", "  ")
-	if err = os.WriteFile(filepath.Join(evidence, "formal-mac-engine-service.json"), proof, 0600); err != nil {
+	if err = os.WriteFile(evidenceFile("formal-mac-engine-service.json"), proof, 0600); err != nil {
 		t.Fatal(err)
+	}
+	if deathChild {
+		holdServiceHostForDeath(t, ctx, deathControl, native, observed, after, nonce)
+		t.Fatal("death-cut child unexpectedly resumed")
 	}
 	if err = service.StopBrowserUse(request.Session, request.Lifetime); err != nil {
 		t.Fatal("formal Service stop", err)

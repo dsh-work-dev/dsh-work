@@ -131,6 +131,8 @@ func (g *guard) registerMCP(c net.Conn, hello message, target localipc.ProcessTa
 	}
 	if isRoot {
 		g.notify("runtime")
+	} else {
+		g.notify("member")
 	}
 	g.wakeup()
 }

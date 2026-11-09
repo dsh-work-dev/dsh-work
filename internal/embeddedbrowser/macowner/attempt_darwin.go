@@ -209,9 +209,13 @@ func ownedRunParent(run string) bool {
 	return parent == root || (err == nil && parent == canonical)
 }
 func (a *Adapter) recoverAttempts(ctx context.Context, key []byte) error {
+	_, err := a.recoverOwnedAttempts(ctx, key)
+	return err
+}
+func (a *Adapter) recoverOwnedAttempts(ctx context.Context, key []byte) (retired []*Worker, failure error) {
 	entries, err := os.ReadDir(a.directory)
 	if err != nil {
-		return err
+		return retired, err
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -220,24 +224,25 @@ func (a *Adapter) recoverAttempts(ctx context.Context, key []byte) error {
 		}
 		body, err := readSigned(a.directory, name, "cef-attempt-v1", key)
 		if err != nil {
-			return errors.Join(ErrCleanupPending, err)
+			return retired, errors.Join(ErrCleanupPending, err)
 		}
 		var attempt launchAttempt
 		if err = json.Unmarshal(body, &attempt); err != nil {
-			return errors.Join(ErrCleanupPending, err)
+			return retired, errors.Join(ErrCleanupPending, err)
 		}
 		expected, err := attemptName(attempt.Generation)
 		if err != nil || name != expected || attempt.Program != a.publication.Owner || !strings.HasPrefix(attempt.Job, "dev.dsh.cef.") || !ownedRunParent(attempt.Run) || !strings.HasPrefix(filepath.Base(attempt.Run), "dsh-cef-") {
-			return ErrCleanupPending
+			return retired, ErrCleanupPending
 		}
 		w := &Worker{directory: a.directory, key: key, job: attempt.Job, run: attempt.Run, attempt: &attempt, state: journal{Generation: attempt.Generation}}
 		a.worker = w
 		if err = w.closeAttempt(ctx); err != nil {
-			return err
+			return retired, err
 		}
+		retired = append(retired, w)
 		a.worker = nil
 	}
-	return nil
+	return retired, nil
 }
 func (w *Worker) closeAttempt(ctx context.Context) error {
 	if w.conn != nil {
@@ -256,7 +261,7 @@ func (w *Worker) closeAttempt(ctx context.Context) error {
 				if err != nil || state.Job != w.job {
 					return errors.Join(ErrCleanupPending, err)
 				}
-				if err = recoverState(ctx, w.directory, w.key, state); err != nil {
+				if err = w.recover(ctx); err != nil {
 					return err
 				}
 				w.owner = state.Owner

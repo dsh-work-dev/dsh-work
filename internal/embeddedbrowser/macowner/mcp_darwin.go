@@ -148,3 +148,46 @@ func (w *mcpWorker) PrivateConnectionProcess() (uint32, uint64) {
 	}
 	return w.state.Broker.PID, w.state.Broker.Started
 }
+
+// RecoverResource resumes this fixed component's persisted owner after its
+// Service host exits. Only the trusted runtime-generated resource root is
+// accepted; missing/unauthenticated state is not treated as a completed tree.
+func (a *MCPAdapter) RecoverResource(ctx context.Context, resource string) error {
+	_, err := a.recoverResource(ctx, resource)
+	return err
+}
+func (a *MCPAdapter) recoverResource(ctx context.Context, resource string) ([]*Worker, error) {
+	dir, err := filepath.EvalSymlinks(resource)
+	if err != nil {
+		return nil, errors.Join(ErrCleanupPending, err)
+	}
+	rel, err := filepath.Rel(a.root, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || !strings.HasPrefix(filepath.Base(dir), "session-") {
+		return nil, errors.New("MAC_MCP_RESOURCE_ROOT_REJECTED")
+	}
+	ownerDir := filepath.Join(dir, ".dsh-mcp-owner")
+	info, e := os.Lstat(ownerDir)
+	if e != nil || !info.IsDir() {
+		return nil, errors.Join(ErrCleanupPending, e)
+	}
+	if err = privateDir(ownerDir); err != nil {
+		return nil, err
+	}
+	key, err := readPrivate(filepath.Join(ownerDir, "journal.key"))
+	if err != nil || len(key) != 32 {
+		return nil, errors.Join(ErrCleanupPending, err)
+	}
+	if state, e := load(ownerDir, key); e == nil {
+		if state.Component != "owned-cef-mcp" {
+			return nil, ErrCleanupPending
+		}
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return nil, e
+	}
+	inner := &Adapter{publication: a.publication, profile: dir, directory: ownerDir}
+	retired, err := inner.recoverOwnedAttempts(ctx, key)
+	if err != nil {
+		return retired, err
+	}
+	return retired, recoverGeneration(ctx, ownerDir, key)
+}

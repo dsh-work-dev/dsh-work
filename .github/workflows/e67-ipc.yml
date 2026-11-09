@@ -121,7 +121,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p results/e67-mac-private
-          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner|TestNativeLifecycleEvidenceFiltersStderr|TestJobOwnershipUsesFileIdentity|TestLegacyAttemptUpgradesBeforeRetirement)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
+          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner|TestNativeLifecycleEvidenceFiltersStderr|TestJobOwnershipUsesFileIdentity|TestLegacyAttemptUpgradesBeforeRetirement|TestRecoveryRefreshPreservesGuardTerminalFacts)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
       - name: Prepare the approved unmodified CEF SDK
         run: |
           mkdir -p "$RUNNER_TEMP/cef-sdk" results/e67-mac-private
@@ -156,6 +156,14 @@ jobs:
         run: |
           set -o pipefail
           go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacEngineServiceMCP$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-mcp.log
+      - name: Exercise abrupt Service-host death and same-profile recovery
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacServiceHostDeathAndProfileReopen$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-host-death.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:
