@@ -36,7 +36,9 @@ func TestLiveMacRestrictedDSH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := NewRestrictedDSHAdapter(p, node, cli, t.TempDir())
+	// testing.T.TempDir's numbered leaf is Mkdir(0777), subject to umask.
+	// Let the production constructor create its own exact-0700 owner child.
+	owner, err := NewRestrictedDSHAdapter(p, node, cli, filepath.Join(t.TempDir(), "owner"))
 	if err != nil {
 		t.Fatal(err)
 	}
