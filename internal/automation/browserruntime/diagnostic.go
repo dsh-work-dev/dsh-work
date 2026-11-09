@@ -6,6 +6,16 @@ import (
 	"sync"
 )
 
+// Host failures carry only the first fixed transport source, never an error's
+// text or the command/response that was in flight.
+func runtimeFailureStage(stage string) bool {
+	switch stage {
+	case "failure-worker-exited", "failure-adapter-read", "failure-adapter-fatal", "failure-route-send", "failure-adapter-write", "failure-route-done":
+		return true
+	}
+	return false
+}
+
 // Fixed adapter stages are the only stderr metadata accepted by this seam.
 // Raw output is inspected synchronously and never retained or forwarded.
 func adapterDiagnosticOutput(enabled bool, observe func(string)) supervisor.RawOutputHandler {

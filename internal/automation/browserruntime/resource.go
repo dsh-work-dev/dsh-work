@@ -106,6 +106,7 @@ type resource struct {
 	failed           error
 	owner            automation.Request
 	observe          func(automation.Request, Observation)
+	observeFailure   func(string)
 	ownedTarget      automation.OwnedBrowserTarget
 	ownedIdentity    automation.OwnedBrowserIdentity
 }
@@ -168,6 +169,9 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		runtime, err := c.Resolve(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if runtime.Environment["DSH_WORK_BROWSER_DIAGNOSTICS"] == "1" {
+			r.observeFailure = c.ObserveStage
 		}
 		if !filepath.IsAbs(runtime.Node) || !filepath.IsAbs(runtime.Dependencies) {
 			return nil, errors.New("BROWSER_RUNTIME_PATH_INVALID")
@@ -271,7 +275,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 			case <-ctx.Done():
 				r.Close()
 			case <-r.worker.Exited():
-				r.fail(errors.New("BROWSER_MCP_EXITED"))
+				r.failAt("failure-worker-exited", errors.New("BROWSER_MCP_EXITED"))
 			case <-r.done:
 			}
 		}()
@@ -296,7 +300,7 @@ func (r *resource) receive() {
 	for {
 		var m envelope
 		if err := browsernative.ReadWireMessage(r.conn, &m); err != nil {
-			r.fail(err)
+			r.failAt("failure-adapter-read", err)
 			return
 		}
 		switch m.Kind {
@@ -314,7 +318,7 @@ func (r *resource) receive() {
 				return
 			}
 		case "fatal":
-			r.fail(errors.New(m.Error))
+			r.failAt("failure-adapter-fatal", errors.New(m.Error))
 			return
 		case "wire":
 			r.mu.Lock()
@@ -325,7 +329,7 @@ func (r *resource) receive() {
 				return
 			}
 			if err := route.Send(r.ctx, m.Payload); err != nil {
-				r.fail(err)
+				r.failAt("failure-route-send", err)
 				return
 			}
 		case "result":
@@ -349,11 +353,11 @@ func (r *resource) forward(route automation.BrowserRoute) {
 		select {
 		case m := <-route.Messages():
 			if err := r.write(map[string]any{"kind": "wire", "payload": m}); err != nil {
-				r.fail(err)
+				r.failAt("failure-adapter-write", err)
 				return
 			}
 		case <-route.Done():
-			r.fail(route.Err())
+			r.failAt("failure-route-done", route.Err())
 			return
 		case <-r.done:
 			return
@@ -461,11 +465,18 @@ func (r *resource) initializationFailure(cancellation error) error {
 	return cancellation
 }
 func (r *resource) fail(err error) {
+	r.failAt("", err)
+}
+func (r *resource) failAt(source string, err error) {
 	r.mu.Lock()
+	first := r.failed == nil
 	if r.failed == nil {
 		r.failed = err
 	}
 	r.mu.Unlock()
+	if first && r.observeFailure != nil && runtimeFailureStage(source) {
+		r.observeFailure(source)
+	}
 	r.cancel()
 	r.signaled.Do(func() { close(r.done) })
 	go r.Close()

@@ -175,7 +175,7 @@ func TestLiveMacEngineServiceMCP(t *testing.T) {
 	prompts := make(chan automation.BrowserConsent, 8)
 	service.EnableBrowserGateway(automation.BrowserGatewayConfig{Notify: func(p automation.BrowserConsent) { prompts <- p }})
 	images := make(chan []byte, 2)
-	service.ConfigureBrowserBackend(browserruntime.NewFactory(browserruntime.Config{Service: service, Supervisor: observed, Root: runtimeRoot, OutputRoot: filepath.Join(root, "output"), Resolve: func(context.Context) (browserruntime.Runtime, error) {
+	service.ConfigureBrowserBackend(browserruntime.NewFactory(browserruntime.Config{Service: service, Supervisor: observed, Root: runtimeRoot, OutputRoot: filepath.Join(root, "output"), ObserveStage: func(stage string) { t.Log("browser-runtime", stage) }, Resolve: func(context.Context) (browserruntime.Runtime, error) {
 		return browserruntime.Runtime{Node: node, Dependencies: deps, Environment: map[string]string{"DSH_WORK_BROWSER_DIAGNOSTICS": "1"}}, nil
 	}, Observe: func(_ automation.Request, o browserruntime.Observation) {
 		if o.Tool != "browser_take_screenshot" {
