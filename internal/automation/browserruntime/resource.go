@@ -193,6 +193,9 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		if err != nil {
 			return nil, err
 		}
+		if err = r.ipc.PrepareNativeClient(r.dir); err != nil {
+			return nil, err
+		}
 		env := map[string]string{}
 		for _, kv := range os.Environ() {
 			k, v, ok := strings.Cut(kv, "=")

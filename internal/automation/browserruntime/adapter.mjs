@@ -1,6 +1,5 @@
 // One Go-owned process per top-level session. JS adapts the pinned SDK and V2
 // CDP model; Go owns identity, admission, creation, cancellation and disposal.
-import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -11,10 +10,14 @@ import {ExtensionProtocolV2} from './cdp-adapter.mjs';
 import {OwnedCEFProtocolV1} from './owned-cef.mjs';
 import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
-const socket=net.connect(process.env.DSH_WORK_BRIDGE_PIPE);
+import {openPrivateSocket} from './native-socket.mjs';
+let stopping=false;
+const connection=JSON.parse(fs.readFileSync(new URL('./native-connection.json',import.meta.url),'utf8'));
+const socket=await openPrivateSocket(connection,()=>stopping);
+if(!socket)throw Error('BROWSER_PRIVATE_CONNECTION_CANCELLED');
 const token=process.env.DSH_WORK_BRIDGE_TOKEN;
 delete process.env.DSH_WORK_BRIDGE_PIPE;delete process.env.DSH_WORK_BRIDGE_TOKEN;
-let buffer=Buffer.alloc(0),nonce,authenticated=false,stopping=false;
+let buffer=Buffer.alloc(0),nonce,authenticated=false;
 let client,transport,server,wss,cdp,model,validator,schemas,require,indicator;
 let refs;
 const geometry=new Map();

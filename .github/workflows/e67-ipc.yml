@@ -11,6 +11,8 @@ on:
       - 'bootstrap_linux.go'
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
+      - 'scripts/build-embedded-cef-mac.mjs'
+      - 'cmd/dsh-cef-owner-mac/**'
       - 'scripts/probe-linux-dsh-slot.mjs'
       - 'scripts/linux-browser-agent-fixture.mjs'
       - 'tools/dsh/package*.json'
@@ -41,6 +43,7 @@ jobs:
       mac_probe: ${{ steps.paths.outputs.mac_probe }}
       mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
       mac_cef: ${{ steps.paths.outputs.mac_cef }}
+      mac_native: ${{ steps.paths.outputs.mac_native }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4.0.3
@@ -91,6 +94,63 @@ jobs:
               - 'tools/browser-lab/native/posix/**'
               - 'scripts/build-mac-cef-owner-probe.mjs'
               - 'scripts/probe-mac-cef-owner.mjs'
+            mac_native:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'native/embeddedbrowser/**'
+              - 'cmd/dsh-cef-owner-mac/**'
+              - 'scripts/build-embedded-cef-mac.mjs'
+
+  mac-private-cef:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_native == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify Mac owner measurement and failed-launch recovery
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-private
+          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
+      - name: Prepare the approved unmodified CEF SDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/cef-sdk" results/e67-mac-private
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" 'https://cef-builds.spotifycdn.com/cef_binary_156.0.15%2Bgcf671c0%2Bchromium-156.0.8078.80_macosarm64.tar.bz2'
+          tar -xjf "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" -C "$RUNNER_TEMP/cef-sdk"
+      - name: Build the formal Mac owner and private CEF bundle
+        run: |
+          set -o pipefail
+          node scripts/build-embedded-cef-mac.mjs --cef-root "$RUNNER_TEMP/cef-sdk/cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64" --output-dir "$RUNNER_TEMP/e67-formal-mac" 2>&1 | tee results/e67-mac-private/build.log
+      - name: Verify authenticated kernel process targets
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture ./internal/localipc -run '^TestDarwinAuthenticatedTarget$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/target.log
+      - name: Exercise the formal private broker and same-profile reopening
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^TestLiveMacPrivateCEF$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-private-cef
+          path: |
+            results/e67-mac-private/*.log
+            ${{ runner.temp }}/e67-formal-mac/publication.json
+            ${{ runner.temp }}/e67-mac-private-results/*.json
+            ${{ runner.temp }}/e67-mac-private-results/*.png
 
   mac-cef-owner:
     needs: changes

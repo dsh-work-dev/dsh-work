@@ -34,6 +34,8 @@
 
 #ifdef _WIN32
 #include "platform_win.h"
+#elif defined(__APPLE__)
+#include "mac/platform_mac.h"
 #else
 #include "platform_linux.h"
 #endif
@@ -87,7 +89,11 @@ struct Tab {
 std::map<int, Tab> tabs;
 int next_tab = 0;
 class Client final : public CefClient, public CefLifeSpanHandler,
-                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler {
+                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler
+#ifdef __APPLE__
+                     , public CefRenderHandler
+#endif
+{
   std::string route_,owner_route_;
   std::shared_ptr<ArtifactState> artifact_;
   int create_id_, tab_;
@@ -133,6 +139,17 @@ public:
   CefRefPtr<CefDisplayHandler> GetDisplayHandler()override{return this;}
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler()override{return this;}
   CefRefPtr<CefDownloadHandler> GetDownloadHandler()override{return this;}
+#ifdef __APPLE__
+  CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
+  void GetViewRect(CefRefPtr<CefBrowser>, CefRect& rect) override {
+    dsh_platform::ViewRect(rect);
+  }
+  void OnPaint(CefRefPtr<CefBrowser>, CefRenderHandler::PaintElementType,
+               const CefRenderHandler::RectList&, const void* buffer,
+               int width, int height) override {
+    dsh_platform::Paint(buffer, width, height);
+  }
+#endif
   void RejectUnsupportedPolicy(const std::string& error){
     // Authority belongs only to the installed call. A manual page event emits
     // diagnostics, but cannot poison a future unrelated permit.
@@ -576,6 +593,11 @@ public:
   void OnContextInitialized() override {
     auto ready = CefDictionaryValue::Create(); ready->SetString("kind", "ready");
     ready->SetString("generation", generation); ready->SetInt("protocol",1); Write(ready);
+#ifdef __APPLE__
+    dsh_platform::StartOwnerMonitor([] {
+      CefPostTask(TID_UI, base::BindOnce(Shutdown));
+    });
+#endif
     reader = std::thread([] {
       while (true) {
         uint32_t size = 0;
@@ -603,11 +625,29 @@ int RunBroker(CefMainArgs args,void* sandbox){
   if(!OpenTransport(path)||!Authenticate(token))return 73;
   Erase(token);
   CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
+#ifdef __APPLE__
+  settings.windowless_rendering_enabled=true;
+  settings.log_severity=LOGSEVERITY_DISABLE;
+#endif
   CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox))return CefGetExitCode();
-  CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();CefShutdown();CloseTransport();return 0;
+  CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();
+#ifdef __APPLE__
+  // CEF is still initialized, but the pump and transport reader are joined.
+  // The owner notification must never prevent the actual CEF shutdown.
+  dsh_platform::PrepareOwnedShutdown();
+#endif
+  CefShutdown();
+#ifdef __APPLE__
+  // No CEF calls after this point. The external owner retains the profile
+  // through post-root child cleanup; its bounded release is not root exit.
+  int owned_exit=dsh_platform::FinishOwnedShutdown();
+  CloseTransport();return owned_exit;
+#else
+  CloseTransport();return 0;
+#endif
 }
 #ifdef _WIN32
 CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE instance,LPWSTR,int,void* sandbox,cef_version_info_t*){return RunBroker(CefMainArgs(instance),sandbox);}
-#else
+#elif !defined(__APPLE__)
 int main(int argc,char** argv){return RunBroker(CefMainArgs(argc,argv),nullptr);}
 #endif
