@@ -23,4 +23,6 @@ func NewNodeInstaller(string) dshmanager.NodeInstaller           { return nil }
 func NewNodeResolver(string) dshmanager.NodeResolver {
 	return linuxplatform.NewSystemNodeResolver(linuxplatform.NewCommandExecutor(linuxplatform.NewSystemdAdapter()))
 }
-func NewAutomationPreparer(string) automation.Preparer { return nil }
+func NewAutomationPreparer(root string) automation.Preparer {
+	return linuxplatform.NewAutomationPreparer(root)
+}

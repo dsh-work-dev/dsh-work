@@ -12,6 +12,7 @@ import (
 
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/dshadapter"
+	"github.com/local/dsh-work/internal/platform/automationpackages"
 )
 
 // packageManagerAcquisitionAdapter owns package-manager command grammar and
@@ -73,30 +74,7 @@ func (a nodeArchiveAcquisitionAdapter) Attempt(ctx context.Context, request acqu
 }
 
 func classifyPackageManagerFailure(result dshadapter.CommandResult, err error) acquisition.Failure {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return acquisition.Failure{Kind: acquisition.FailureCanceled, Summary: "package acquisition was canceled", Cause: err}
-	}
-	text := strings.ToLower(result.Stdout + "\n" + result.Stderr + "\n" + errorString(err))
-	if containsAny(text, "eintegrity", "integrity", "checksum") {
-		return acquisition.Failure{Kind: acquisition.FailureIntegrity, Summary: "package integrity verification failed", Cause: err}
-	}
-	if containsAny(text, "e401", "401 unauthorized", "authentication required", "unable to authenticate", "self_signed", "certificate") {
-		return acquisition.Failure{Kind: acquisition.FailureAuthentication, Summary: "package source authentication failed", Cause: err}
-	}
-	if containsAny(text, "e403", "403 forbidden", "authorization") {
-		return acquisition.Failure{Kind: acquisition.FailureAuthorization, Summary: "package source authorization failed", Cause: err}
-	}
-	if containsAny(text, "e404", "404 not found", "no matching version", "notarget", " etarget") {
-		return acquisition.Failure{Kind: acquisition.FailureNotFound, Summary: "the requested package was not found", Cause: err}
-	}
-	if containsAny(text,
-		"enotfound", "eai_again", "econnrefused", "econnreset", "etimedout", "enetunreach", "ehostunreach",
-		"err_socket_timeout", "fetch failed", "no such host", "name or service not known",
-		"temporary failure in name resolution", "network is unreachable", "connection reset", "connection refused", "timeout",
-	) {
-		return acquisition.Failure{Kind: acquisition.FailureReachability, Summary: "package source could not be reached", Cause: err}
-	}
-	return acquisition.Failure{Kind: acquisition.FailureSemantic, Summary: "package manager rejected the acquisition", Cause: err}
+	return automationpackages.ClassifyPackageManagerFailure(result, err)
 }
 
 func classifyHTTPFailure(err error) acquisition.Failure {

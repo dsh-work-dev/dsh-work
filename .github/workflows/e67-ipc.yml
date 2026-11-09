@@ -158,6 +158,12 @@ jobs:
           echo "CEF_ROOT=$RUNNER_TEMP/e67-cef-sdk/$name" >> "$GITHUB_ENV"
           cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
           npm ci --ignore-scripts --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Exercise the product Browser package installer
+        env:
+          DSH_WORK_BROWSER_PREPARE_TEST: '1'
+        run: |
+          set -o pipefail
+          go test ./internal/platform/linux -run '^Test(LiveLinuxBrowserPreparation|AutomationPreparerKeepsComputerUnavailable)$' -count=1 -v -timeout=3m 2>&1 | tee results/e67-linux-native/browser-installer.log
       - name: Build formal private CEF broker
         run: |
           set -o pipefail
