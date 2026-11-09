@@ -39,12 +39,29 @@ const send=m=>{const b=Buffer.from(JSON.stringify(m));if(b.length>8*1024*1024)th
 async function stop(reason){if(stopping)return;stopping=true;diagnostic('stop-'+reason);for(const p of commands.values()){clearTimeout(p.timer);p.reject(Error('BROWSER_ROUTE_CLOSED'))}commands.clear();try{await client?.close()}catch{}try{await transport?.close()}catch{}cdp?.terminate();wss?.close();server?.close();socket.destroy();}
 socket.on('error',()=>void stop('private-error'));socket.on('close',()=>void stop('private-close'));
 socket.setTimeout(3000,()=>{diagnostic('stop-private-timeout');socket.destroy()});
+let frameScheduled=false;
+function dispatchFrame(){
+ frameScheduled=false;
+ if(stopping)return;
+ if(buffer.length<4){socket.resume();return}
+ const n=buffer.readUInt32LE();
+ if(!n||n>8*1024*1024){diagnostic('stop-frame-rejected');socket.destroy();return}
+ if(buffer.length<n+4){socket.resume();return}
+ const b=buffer.subarray(4,n+4);buffer=buffer.subarray(n+4);
+ let message;try{message=JSON.parse(b)}catch{diagnostic('stop-frame-rejected');socket.destroy();return}
+ void receive(message).catch(e=>{send({kind:'fatal',error:e.message});void stop('protocol-error')});
+ // A separate turn drains the complete async CDP response chain before the
+ // next native event. Never await init: it needs a later route-ready envelope.
+ frameScheduled=true;setImmediate(dispatchFrame);
+}
 socket.on('data',chunk=>{
  buffer=Buffer.concat([buffer,chunk]);
  if(!nonce&&buffer.length>=32){nonce=buffer.subarray(0,32);buffer=buffer.subarray(32);socket.write(mac('worker'))}
  if(nonce&&!authenticated&&buffer.length>=32){if(!timingSafeEqual(buffer.subarray(0,32),mac('host'))){diagnostic('stop-hmac-rejected');socket.destroy();return}buffer=buffer.subarray(32);authenticated=true;socket.setTimeout(0);diagnostic('hmac-authenticated')}
  if(!authenticated)return;
- while(buffer.length>=4){const n=buffer.readUInt32LE();if(!n||n>8*1024*1024){diagnostic('stop-frame-rejected');socket.destroy();return}if(buffer.length<n+4)return;const b=buffer.subarray(4,n+4);buffer=buffer.subarray(n+4);try{void receive(JSON.parse(b)).catch(e=>{send({kind:'fatal',error:e.message});void stop('protocol-error')})}catch{diagnostic('stop-frame-rejected');socket.destroy();return}}
+ // Pause reads while dispatching: retain only the current bounded wire frame
+ // plus the arriving stream chunk, rather than queueing one task per envelope.
+ socket.pause();if(!frameScheduled){frameScheduled=true;setImmediate(dispatchFrame)}
 });
 const allowed=new Set(['browser_close','browser_resize','browser_console_messages','browser_handle_dialog','browser_emulate_media','browser_file_upload','browser_drop','browser_find','browser_fill_form','browser_press_key','browser_type','browser_navigate','browser_navigate_back','browser_network_requests','browser_network_request','browser_take_screenshot','browser_snapshot','browser_click','browser_drag','browser_hover','browser_select_option','browser_tabs','browser_wait_for']);
 async function receive(m){
