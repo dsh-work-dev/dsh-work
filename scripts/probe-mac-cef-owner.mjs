@@ -8,10 +8,11 @@ import {randomBytes} from 'node:crypto';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64') throw Error('Requires native macOS arm64');
 const script = fileURLToPath(import.meta.url);
-if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
-  const fd = openSync(process.argv[3], 'w'); writeFileSync(fd, 'R');
+if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)) {
+  const fd = openSync(process.argv[3], 'w');
   const stat = fstatSync(fd);
   writeFileSync(`${process.argv[3]}-writer.json`, JSON.stringify({pid: process.pid, ppid: process.ppid, fd, device: stat.dev, inode: stat.ino, fifo: stat.isFIFO(), childrenSpawned: false}));
+  if (process.argv[4] !== '--hold-arm') writeFileSync(fd, 'R');
   const keepalive = setInterval(() => {}, 1000);
   setTimeout(() => { clearInterval(keepalive); closeSync(fd); }, 90000);
 } else {
@@ -85,9 +86,15 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
     do { if (test()) return; await pause(100); } while (Date.now() < end);
     throw Error(message);
   }
+  let reopen;
   try {
-    for (const mode of ['normal-close', 'broker-crash', 'owner-death']) {
+    for (const mode of ['normal-close', 'broker-crash', 'owner-death', 'owner-death-unarmed', 'owner-death-first-launch', 'profile-reopen']) {
       const dir = mkdtempSync(join(output, `${mode}-`)), lease = join(dir, 'lease');
+      const unarmed = mode === 'owner-death-unarmed', firstLaunch = mode === 'owner-death-first-launch', startupCut = unarmed || firstLaunch;
+      const profile = mode === 'profile-reopen' ? reopen?.profile : join(dir, 'profile');
+      if (!profile) throw Error('Reopen requires the completed first-launch generation');
+      if (mode === 'profile-reopen' && (!existsSync(profile) || !statSync(profile).isDirectory())) throw Error('The aborted initialized generation did not create its profile');
+      if (mode === 'profile-reopen' && !measureBarrier(reopen.dir, reopen.root, false).complete) throw Error('Previous profile generation is not empty before reopen');
       const phase = (stage, detail = {}) => appendFileSync(join(dir, 'phases.log'), `${JSON.stringify({stage, observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), ...detail})}\n`);
       const leaseHolders = stage => {
         // Evidence only: never authorize cleanup from a numeric PID in lsof.
@@ -96,10 +103,10 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
       };
       execFileSync('mkfifo', ['-m', '600', lease]);
       const label = `dev.dsh.cefowner.${process.pid}.${randomBytes(6).toString('hex')}`, service = `${domain}/${label}`;
-      const argv = [manifest.executable, `--probe-directory=${dir}`, `--probe-url=${pageURL}`];
+      const argv = [manifest.executable, `--probe-directory=${dir}`, `--probe-url=${pageURL}`, `--probe-profile=${profile}`, ...(firstLaunch ? ['--probe-cut=first-launch'] : [])];
       const plist = join(dir, 'probe.plist');
       writeFileSync(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${argv.map(value => `<string>${xml(value)}</string>`).join('')}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>${xml(join(dir, 'stdout.log'))}</string><key>StandardErrorPath</key><string>${xml(join(dir, 'stderr.log'))}</string></dict></plist>`);
-      const owner = spawn(process.execPath, [script, '--lease-holder', lease], {stdio: 'ignore'});
+      const owner = spawn(process.execPath, [script, '--lease-holder', lease, ...(unarmed ? ['--hold-arm'] : [])], {stdio: 'ignore'});
       const ownerExit = new Promise((done, reject) => { owner.once('error', reject); owner.once('exit', (code, signal) => done({code, signal})); });
       let loaded = true, killedOwner = false;
       try {
@@ -108,15 +115,19 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
         await waitFor(() => {
           const log = events(dir);
           if (log.some(event => ['helper-sandbox-failed', 'helper-framework-failed', 'lease-open-failed', 'create-failed', 'self-audit-failed', 'load-error'].includes(event.event))) throw Error('Actual component startup failed; see stdout.log');
+          if (startupCut) return log.some(event => event.event === (unarmed ? 'lease-connected-unarmed' : 'first-launch-held')) && existsSync(`${lease}-writer.json`);
           return log.some(event => event.event === 'initialized') && log.some(event => event.event === 'lease-armed') && new Set(log.filter(event => event.event === 'loaded' && event.status === 200).map(event => event.index)).size === 2;
         }, 30000, 'Actual sandbox CEF pages/lease did not become ready');
-        await pause(1000);
+        if (!startupCut) await pause(1000);
         const initialEvents = events(dir), initialized = initialEvents.find(event => event.event === 'initialized');
-        if (initialized.crash_reporting !== false || initialized.version !== manifest.version) throw Error('Runtime crash reporting/version differs from fixed candidate');
+        if (!startupCut && (initialized.crash_reporting !== false || initialized.version !== manifest.version)) throw Error('Runtime crash reporting/version differs from fixed candidate');
         const rootEntry = initialEvents.find(event => event.event === 'broker-entry');
         if (!rootEntry?.identity.started || rootEntry.identity.pgid !== rootEntry.identity.pid) throw Error('Job broker must be its actual process-group leader');
         const helpers = initialEvents.filter(event => event.event === 'helper-entry');
-        if (!helpers.some(event => event.type === 'renderer') || !helpers.some(event => event.type === 'gpu-process') || !helpers.some(event => event.type === 'utility' && event.utility.includes('NetworkService'))) throw Error('Workload did not exercise renderer/GPU/network helper inventory');
+        if (startupCut && (helpers.length || initialEvents.some(event => ['initialized', 'created', 'loaded'].includes(event.event)))) throw Error('Startup cut occurred after component admission');
+        if (unarmed && initialEvents.some(event => event.event === 'lease-armed')) throw Error('Unarmed cut already armed');
+        if (firstLaunch && !initialEvents.some(event => event.event === 'lease-armed')) throw Error('First launch lacks initial lease admission');
+        if (!startupCut && (!helpers.some(event => event.type === 'renderer') || !helpers.some(event => event.type === 'gpu-process') || !helpers.some(event => event.type === 'utility' && event.utility.includes('NetworkService')))) throw Error('Workload did not exercise renderer/GPU/network helper inventory');
         if (helpers.some(event => !event.identity.started || event.identity.pgid !== rootEntry.identity.pgid)) throw Error('A real helper is outside the proposed owned PGID');
         const before = group(rootEntry.identity.pgid);
         if (before.error || before.truncated || before.members.some(member => !member.started)) throw Error('Kernel group inventory unavailable/incomplete');
@@ -126,25 +137,37 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
         phase('inventory-complete', {root: rootEntry.identity, group: before});
         run(['print', service], join(dir, 'job-before.json'));
         for (const entry of entries(dir)) run(['procinfo', String(entry.identity.pid)], join(dir, `procinfo-${entry.identity.pid}.json`));
-        if (mode === 'normal-close') writeFileSync(join(dir, 'close'), 'normal close\n');
+        if (mode === 'normal-close' || mode === 'profile-reopen') writeFileSync(join(dir, 'close'), 'normal close\n');
         else if (mode === 'broker-crash') writeFileSync(join(dir, 'crash'), 'SIGKILL inside owned broker\n');
-        else { leaseHolders('before-kill'); killedOwner = true; if (!owner.kill('SIGKILL')) throw Error('Could not kill the actual independent lease owner'); }
+        else { if (!startupCut) leaseHolders('before-kill'); killedOwner = true; if (!owner.kill('SIGKILL')) throw Error('Could not kill the actual independent lease owner'); }
         phase('transition-requested', {mode});
         if (killedOwner) {
           const exited = await ownerExit; phase('lease-owner-exited', exited);
           if (exited.signal !== 'SIGKILL') throw Error('Lease owner did not really die by SIGKILL');
-          leaseHolders('after-kill');
+          if (!startupCut) leaseHolders('after-kill');
+          if (firstLaunch) {
+            if (events(dir).some(event => event.event === 'helper-entry')) throw Error('Helper entered before the held launch was released');
+            writeFileSync(join(dir, 'launch-release'), 'owner SIGKILL confirmed before first helper entry\n');
+            phase('first-launch-release-requested');
+          }
         }
         let helperBarrier, shutdown;
+        if (startupCut) {
+          await waitFor(() => events(dir).some(event => event.event === 'startup-aborted' && event.stage === (unarmed ? 'before-framework' : 'context-initialized')), 15000, 'Uncommitted startup did not abort');
+          if (!events(dir).some(event => event.event === 'startup-lease-eof')) throw Error('Startup abort lacked actual lease EOF');
+          phase('startup-abort-observed');
+        }
         if (mode !== 'broker-crash') {
-          await waitFor(() => {
-            const log = events(dir);
-            if (log.some(event => ['reap-error', 'root-release-timeout', 'lease-read-failed', 'lease-poll-failed'].includes(event.event))) throw Error('Broker lease/reap/hold failed');
-            shutdown = log.find(event => event.event === 'shutdown-return');
-            return Boolean(shutdown);
-          }, 15000, 'CefShutdown did not return');
-          phase('cef-shutdown-observed', {shutdown});
-          censusMembers(shutdown.group); // Unknown is still fatal; no instant-empty claim.
+          if (!unarmed) {
+            await waitFor(() => {
+              const log = events(dir);
+              if (log.some(event => ['reap-error', 'root-release-timeout', 'lease-read-failed', 'lease-poll-failed', 'launch-hold-timeout'].includes(event.event))) throw Error('Broker lease/reap/hold failed');
+              shutdown = log.find(event => event.event === 'shutdown-return');
+              return Boolean(shutdown);
+            }, 15000, 'CefShutdown did not return');
+            phase('cef-shutdown-observed', {shutdown});
+            censusMembers(shutdown.group); // Unknown is still fatal; no instant-empty claim.
+          }
           await waitFor(() => {
             helperBarrier = measureBarrier(dir, rootEntry.identity, true);
             return helperBarrier.complete;
@@ -164,17 +187,27 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
         phase('all-instances-group-empty-before-cleanup', {barrier: finalBarrier});
         const finalEvents = events(dir); shutdown = finalEvents.find(event => event.event === 'shutdown-return');
         if (mode !== 'broker-crash') {
-          if (new Set(finalEvents.filter(event => event.event === 'before-close').map(event => event.index)).size !== 2 || !shutdown) throw Error('Missing normal OnBeforeClose/CefShutdown barrier');
+          if (startupCut) {
+            if (finalEvents.some(event => ['created', 'loaded', 'lease-arm-timeout', 'lease-invalid-arm', 'lease-read-failed', 'lease-poll-failed', 'launch-hold-timeout', 'reap-error', 'root-release-timeout'].includes(event.event))) throw Error('Startup cut created pages or encountered a transport/gate failure');
+            if (unarmed && finalEvents.some(event => ['lease-armed', 'profile-configured', 'initialized', 'helper-entry', 'shutdown-enter'].includes(event.event))) throw Error('Unarmed startup entered CEF');
+            if (firstLaunch && (!shutdown || !finalEvents.some(event => event.event === 'helper-entry'))) throw Error('First-launch cut did not exercise real helper creation and CEF shutdown');
+          } else if (new Set(finalEvents.filter(event => event.event === 'before-close').map(event => event.index)).size !== 2 || !shutdown) throw Error('Missing normal OnBeforeClose/CefShutdown barrier');
           if (mode === 'owner-death' && !finalEvents.some(event => event.event === 'lease-eof')) throw Error('Owner-death case did not exercise actual FIFO EOF');
           if (!finalEvents.some(event => event.event === 'root-release')) throw Error('Held broker exited without the release barrier');
         } else if (shutdown) throw Error('SIGKILL case unexpectedly ran graceful shutdown');
+        const runtime = finalEvents.find(event => event.event === 'initialized');
+        if (!unarmed && (runtime?.crash_reporting !== false || runtime?.version !== manifest.version)) throw Error('Runtime crash reporting/version differs from fixed candidate');
+        if (!unarmed && finalEvents.find(event => event.event === 'profile-configured')?.path !== profile) throw Error('CEF did not configure the expected profile');
+        if (entries(dir).some(event => !event.identity.started || event.identity.pgid !== rootEntry.identity.pgid)) throw Error('A final registered component escaped the fixed owner group');
+        if (firstLaunch) reopen = {dir, profile, root: rootEntry.identity};
         run(['print', service], join(dir, 'job-after.json'));
-        const observation = {mode, dir, service, fixedVersion: initialized.version, crashReporting: initialized.crash_reporting, before, after, registeredInstances: entries(dir), shutdown, helperBarrier, finalBarrier, outcome: 'OBSERVED_FIXED_WORKLOAD_CONVERGED', limits: ['entry markers are not pre-exec ownership', 'audio/notification action/download and unexercised helper paths pending', 'group census does not prove a generic LaunchPlan tree owner', 'profile lock release/reopen and product daemon integration pending']};
+        const observation = {mode, dir, service, profile, previousProfileGeneration: mode === 'profile-reopen' ? reopen : undefined, fixedVersion: runtime?.version, crashReporting: runtime?.crash_reporting, before, after, registeredInstances: entries(dir), shutdown, helperBarrier, finalBarrier, outcome: startupCut ? 'OBSERVED_UNCOMMITTED_START_CONVERGED' : 'OBSERVED_FIXED_WORKLOAD_CONVERGED', limits: ['entry markers are not pre-exec ownership', 'audio/notification action/download and unexercised helper paths pending', 'group census does not prove a generic LaunchPlan tree owner', 'product daemon/profile-lock integration pending']};
         summary.push(observation); writeFileSync(join(dir, 'observation.json'), JSON.stringify(observation, null, 2));
         console.log(JSON.stringify({mode, outcome: observation.outcome, helpers: helpers.map(event => ({type: event.type, utility: event.utility, identity: event.identity}))}));
       } finally {
         phase('cleanup-start');
         writeFileSync(join(dir, 'close'), 'probe cleanup\n');
+        writeFileSync(join(dir, 'launch-release'), 'probe cleanup only\n');
         writeFileSync(join(dir, 'release'), 'probe cleanup only; not a measured barrier\n');
         if (!killedOwner) owner.kill('SIGTERM');
         await ownerExit;
