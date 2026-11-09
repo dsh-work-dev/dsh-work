@@ -91,8 +91,18 @@ try {
  // Never send a prompt or manufacture a session/turn event to get a sidebar.
  const click=pattern=>inspector.evaluate(dsh,`(()=>{const r=new RegExp(${JSON.stringify(pattern)},'i');const b=[...document.querySelectorAll('button,[role="button"]')].find(e=>!e.disabled&&e.getClientRects().length&&r.test(e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent.trim()));if(b){b.click();return true}return false})()`);
  const workspace=join(out,'workspace');mkdirSync(workspace,{recursive:true});
- const existingWorkspace=await inspector.evaluate(dsh,`[...document.querySelectorAll('[role="treeitem"][data-row-key^="workspace:"]')].some(e=>e.getClientRects().length)`);
- if(!existingWorkspace){
+ // A new WebView can mount the provider before the shared Host workspace
+ // projection hydrates. For peers the workspace is already known from B's
+ // actual picker readback; absence in one DOM tick never means a fresh Host.
+ if(mode?.startsWith('--dual-')){
+  const expected=JSON.parse(readFileSync(join(out,'session.json'),'utf8'));
+  const prepared=await until('shared own workspace row and real new-session action',()=>inspector.evaluate(dsh,`(()=>{const row=[...document.querySelectorAll('[role="treeitem"][data-row-key]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected.workspace)}&&e.getClientRects().length);if(!row)return;const buttons=[...row.querySelectorAll('button')].filter(e=>!e.disabled&&/^(New session in |在“.*”中新建会话$)/.test(e.getAttribute('aria-label')||''));if(buttons.length!==1)return;const result={workspace:row.getAttribute('data-row-key'),label:row.textContent.trim(),action:buttons[0].getAttribute('aria-label')};buttons[0].click();return result})()`));
+  save('workspace-reused',prepared);
+  // The locked UI's connectBlank reuses the first compatible blank in this
+  // Workspace. Require the expected real session rather than assuming reuse.
+  await until('original fixture session selected',()=>inspector.evaluate(dsh,`(()=>{const e=[...document.querySelectorAll('[role="treeitem"][data-row-key][aria-selected="true"]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected.key)}&&e.getClientRects().length);return !!e})()`));
+ }else{
+
  await until('Choose workspace action',()=>click('^(Choose workspace|选择工作区)$'));
  await until('directory browse path editor',()=>click('^(Edit path|编辑路径)$'));
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Edit path"],input[aria-label="编辑路径"]');if(!e)throw Error('Directory path input missing');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(workspace)});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
@@ -109,16 +119,10 @@ try {
  const workspaceRow=await until('actual workspace row',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('[role="treeitem"][data-row-key^="workspace:"]')].filter(e=>e.getClientRects().length);return rows.length===1&&rows[0].textContent.includes('workspace')?{row:rows[0].getAttribute('data-row-key'),label:rows[0].textContent.trim()}:undefined})()`));
  save('workspace-selected',{landedPath:landing.path,...workspaceRow,method:'existing directory picker UI'});
  }
- if(existingWorkspace&&mode?.startsWith('--dual-')){
-  const expected=JSON.parse(readFileSync(join(out,'session.json'),'utf8')).key;
-  await until('original fixture session row',()=>inspector.evaluate(dsh,`(()=>{const e=[...document.querySelectorAll('[role="treeitem"][data-row-key]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected)}&&e.getClientRects().length);if(e){e.click();return true}const w=[...document.querySelectorAll('[role="treeitem"][data-row-key^="workspace:"][aria-expanded="false"]')];if(w.length===1)w[0].click();return false})()`));
- }
- if(!await inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')?.getClientRects().length`)){
- await until('real session right-sidebar mount',()=>inspector.evaluate(dsh,`(()=>{const e=document.querySelector('button[data-sidebar-right-expand]');if(!e||e.disabled||!e.getClientRects().length)return false;e.click();return true})()`));
- // Guide cards include a description in textContent. Use the real card's
- // exact registered kind, not a substring label match or an internal action.
- if(!await inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')?.getClientRects().length`))await until('Browser UI action',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('button[data-sidebar-right-guide-entry="browser"]')].filter(e=>!e.disabled&&e.getClientRects().length);if(rows.length!==1)return false;rows[0].click();return true})()`));
- }
+ const sidebar=await until('real session Browser sidebar surface',()=>inspector.evaluate(dsh,`(()=>{const address=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');if(address?.getClientRects().length)return 'page';const guide=[...document.querySelectorAll('button[data-sidebar-right-guide-entry="browser"]')].filter(e=>!e.disabled&&e.getClientRects().length);if(guide.length===1)return 'guide';const expand=document.querySelector('button[data-sidebar-right-expand]');if(expand&&!expand.disabled&&expand.getClientRects().length)expand.click();return false})()`));
+ // Guide cards include a description. Only click the exact original Browser
+ // card; an already restored Browser surface needs no new tab/action.
+ if(sidebar==='guide')await until('Browser UI action',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('button[data-sidebar-right-guide-entry="browser"]')].filter(e=>!e.disabled&&e.getClientRects().length);if(rows.length!==1)return false;rows[0].click();return true})()`));
  await until('real address toolbar',()=>inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')`));
  const state=async()=>lastSlotStates=await inspector.evaluate(shell,`(async()=>{const frame=document.querySelector('iframe');const doc=decodeURIComponent(new URL(frame.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const rows=[];for(const slot of __e67Slots){try{rows.push({slot,state:await Call.ByID(${ids.state},doc,slot)})}catch(error){rows.push({slot,error:String(error)})}}return rows})()`);
  if(mode==='--dual-reopen'){

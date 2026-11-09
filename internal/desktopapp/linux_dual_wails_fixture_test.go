@@ -172,6 +172,17 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 		save(out, "dual-b-"+label, current)
 		return current
 	}
+	var selectedWorkspace struct{ Row string }
+	selectedData, selectedErr := os.ReadFile(filepath.Join(out, "workspace-selected.json"))
+	if selectedErr != nil || json.Unmarshal(selectedData, &selectedWorkspace) != nil || !strings.HasPrefix(selectedWorkspace.Row, "workspace:") {
+		t.Fatal("B actual workspace readback unavailable", selectedErr)
+	}
+	var capturePeers []func()
+	defer func() {
+		for _, capture := range capturePeers {
+			capture()
+		}
+	}()
 	type peer struct {
 		ui     supervisor.Worker
 		dir    string
@@ -197,8 +208,35 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 		}
 		env["DSH_WORK_EMBEDDED_UI_INSTANCE"] = "2"
 		env["WEBKIT_INSPECTOR_HTTP_SERVER"] = "127.0.0.1:" + strconv.Itoa(port)
-		save(dir, "session", map[string]string{"key": "session:" + strings.TrimSuffix(bSlot.Slot, "/"+filepath.Base(bSlot.Slot))})
+		save(dir, "session", map[string]string{"key": "session:" + strings.TrimSuffix(bSlot.Slot, "/"+filepath.Base(bSlot.Slot)), "workspace": selectedWorkspace.Row})
 		w := start(label, nil, env)
+		deferFailureCapture := func() {
+			if !t.Failed() {
+				return
+			}
+			captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			identity := w.Diagnostics()
+			data, err := exec.CommandContext(captureCtx, observer, strconv.FormatUint(uint64(identity.PID), 10), strconv.FormatUint(identity.ProcessStarted, 10), native).Output()
+			var rows []x11FixtureWindow
+			if err == nil {
+				err = json.Unmarshal(data, &rows)
+			}
+			var parent x11FixtureWindow
+			for _, row := range rows {
+				if row.PID == identity.PID && row.Started == identity.ProcessStarted && row.Visible && row.Width*row.Height > parent.Width*parent.Height {
+					parent = row
+				}
+			}
+			if err == nil && parent.ID != 0 {
+				data, err = exec.CommandContext(captureCtx, "import", "-window", strconv.FormatUint(uint64(parent.ID), 10), filepath.Join(dir, "failure-ui.png")).CombinedOutput()
+			} else if err == nil {
+				err = fmt.Errorf("held UI has no mapped parent")
+			}
+			save(dir, "failure-capture", map[string]any{"pid": identity.PID, "started": identity.ProcessStarted, "parent": parent, "error": fmt.Sprint(err)})
+		}
+		// This helper defer runs before the outer fixture drains owned processes.
+		capturePeers = append(capturePeers, deferFailureCapture)
 		p := &peer{ui: w, dir: dir, joined: make(chan struct{})}
 		p.log, err = os.Create(filepath.Join(dir, "driver.log"))
 		if err != nil {
