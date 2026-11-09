@@ -58,6 +58,13 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	if app == "" || native == "" || observer == "" {
 		t.Skip("requires explicit real Wails/native/window-observer components")
 	}
+	// The fixed driver exercises DSH's real in-page directory picker. Do not
+	// accidentally open a native chooser that this inspector cannot observe.
+	for _, chooser := range []string{"zenity", "kdialog"} {
+		if path, err := exec.LookPath(chooser); err == nil {
+			t.Fatalf("DOM-only workspace fixture requires the auto browse backend; native chooser present: %s", path)
+		}
+	}
 	if os.Getenv("DSH_WORK_ISOLATED_XVFB") != "1" {
 		t.Fatal("this test requires its own isolated Xvfb, never a user's display")
 	}
@@ -282,6 +289,7 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			command.Dir = repo
 			output, diagnosticErr = command.CombinedOutput()
 			_ = os.WriteFile(filepath.Join(out, "boot-inspector.log"), []byte(redact.Secrets(string(output))), 0600)
+			save("boot-diagnostic-result", map[string]any{"error": fmt.Sprint(diagnosticErr), "contextError": fmt.Sprint(diagnosticCtx.Err())})
 		}()
 	}
 	wait("real daemon Ready after UI mount", func() bool {
@@ -326,6 +334,32 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			t.Logf("failure-only inspector driver cleanup kill=%v wait=%v", killErr, driverErr)
 		}
 		_ = os.WriteFile(filepath.Join(out, "driver.log"), driverOutput.Bytes(), 0600)
+	}()
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		// One failure capture of the still-held UI only, before owned cleanup.
+		// XRes PID + creation verification is the same as the normal capture.
+		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		output, err := exec.CommandContext(captureCtx, observer, strconv.FormatUint(uint64(uiIdentity.PID), 10), strconv.FormatUint(uiIdentity.ProcessStarted, 10), native).Output()
+		var rows []x11FixtureWindow
+		if err == nil {
+			err = json.Unmarshal(output, &rows)
+		}
+		var window x11FixtureWindow
+		for _, w := range rows {
+			if w.PID == uiIdentity.PID && w.Started == uiIdentity.ProcessStarted && w.Visible && w.Width*w.Height > window.Width*window.Height {
+				window = w
+			}
+		}
+		if err == nil && window.ID != 0 {
+			output, err = exec.CommandContext(captureCtx, "import", "-window", strconv.FormatUint(uint64(window.ID), 10), filepath.Join(out, "failure-ui.png")).CombinedOutput()
+		}
+		if err != nil {
+			_ = os.WriteFile(filepath.Join(out, "failure-capture.log"), []byte(redact.Secrets(fmt.Sprint(err, " ", string(output)))), 0600)
+		}
 	}()
 	readPhase := func(name string, dst any) {
 		wait(name, func() bool {

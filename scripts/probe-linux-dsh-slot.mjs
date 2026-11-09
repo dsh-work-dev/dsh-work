@@ -84,9 +84,28 @@ try {
  const initial=await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return{capability:await Call.ByID(${ids.cap})}})()`);
  if(!initial.capability)throw Error('formal embedded provider capability unavailable');
  save('provider-ready',initial);
- // Use existing UI controls, not a synthetic BrowserPage or session event.
- const click=pattern=>inspector.evaluate(dsh,`(()=>{const r=new RegExp(${JSON.stringify(pattern)},'i');const b=[...document.querySelectorAll('button,[role="button"]')].find(e=>e.getClientRects().length&&r.test(e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent.trim()));if(b){b.click();return true}return false})()`);
- await click('^(New Session|New session|新会话|新建会话)$');
+ // The fresh profile has no workspace. DSH's New Session action then only
+ // clears the current view; it cannot mount a session-scoped right sidebar.
+ // Adopt only our own scratch directory through the existing browse picker.
+ // Never send a prompt or manufacture a session/turn event to get a sidebar.
+ const click=pattern=>inspector.evaluate(dsh,`(()=>{const r=new RegExp(${JSON.stringify(pattern)},'i');const b=[...document.querySelectorAll('button,[role="button"]')].find(e=>!e.disabled&&e.getClientRects().length&&r.test(e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent.trim()));if(b){b.click();return true}return false})()`);
+ const workspace=join(out,'workspace');mkdirSync(workspace,{recursive:true});
+ await until('Choose workspace action',()=>click('^(Choose workspace|选择工作区)$'));
+ await until('directory browse path editor',()=>click('^(Edit path|编辑路径)$'));
+ await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Edit path"],input[aria-label="编辑路径"]');if(!e)throw Error('Directory path input missing');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(workspace)});e.dispatchEvent(new Event('input',{bubbles:true}));return true})()`);
+ await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Edit path"],input[aria-label="编辑路径"]');e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return true})()`);
+ await until('directory navigation settled',()=>inspector.evaluate(dsh,`(()=>{const e=[...document.querySelectorAll('[role="dialog"] button')].find(e=>/^(Open|打开)$/.test(e.textContent.trim()));return !!e&&!e.disabled&&!e.closest('[role="dialog"]').querySelector('[role="alert"]')})()`));
+ // Reopen the editor without changing it: its initial value is taken from
+ // selected.path ?? parent.path, the same target as Open, not our typed draft.
+ await until('read back landed directory',()=>click('^(Edit path|编辑路径)$'));
+ const landing=await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Edit path"],input[aria-label="编辑路径"]');return{path:e?.value,error:e?.closest('[role="dialog"]')?.querySelector('[role="alert"]')?.textContent||''}})()`);
+ save('workspace-directory-landed',landing);
+ if(landing.path?.replace(/\/$/,'')!==workspace||landing.error)throw Error('Directory picker did not land on the own workspace');
+ await inspector.evaluate(dsh,`(()=>{document.querySelector('input[aria-label="Edit path"],input[aria-label="编辑路径"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true})()`);
+ await until('Open own workspace directory',()=>click('^(Open|打开)$'));
+ const workspaceRow=await until('actual workspace row',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('[role="treeitem"][data-row-key^="workspace:"]')].filter(e=>e.getClientRects().length);return rows.length===1&&rows[0].textContent.includes('workspace')?{row:rows[0].getAttribute('data-row-key'),label:rows[0].textContent.trim()}:undefined})()`));
+ save('workspace-selected',{landedPath:landing.path,...workspaceRow,method:'existing directory picker UI'});
+ await until('real session right-sidebar mount',()=>inspector.evaluate(dsh,`(()=>{const e=document.querySelector('button[data-sidebar-right-expand]');if(!e||e.disabled||!e.getClientRects().length)return false;e.click();return true})()`));
  await until('Browser UI action',()=>click('^(Browser|浏览器)$'));
  await until('real address toolbar',()=>inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')`));
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(fixture)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
