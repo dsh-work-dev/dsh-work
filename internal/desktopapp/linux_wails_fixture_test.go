@@ -547,6 +547,23 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			if request.ID == "" || request.Kind != kind || request.Phase != "waiting" || request.Browser != "embedded" || request.AllowAlways || request.Session != strings.TrimSuffix(visible.Slot, "/"+filepath.Base(visible.Slot)) || kind == "site" && request.Site != fixture.URL {
 				t.Fatal("unexpected actual Agent permission", request)
 			}
+			wait("current native permission content rendered", func() bool {
+				if failure, err := os.ReadFile(filepath.Join(out, "failure.json")); err == nil {
+					t.Fatalf("first Agent driver failure before native render: %s", failure)
+				}
+				data, err := os.ReadFile(filepath.Join(root, "logs", "daemon.log"))
+				if err != nil {
+					return false
+				}
+				for _, line := range bytes.Split(data, []byte{'\n'}) {
+					var event struct{ Msg, Request, Window string }
+					if json.Unmarshal(line, &event) == nil && event.Msg == "native permission content ready" && event.Request == request.ID && event.Window == "browser-permission" {
+						save("agent-permission-"+kind+"-rendered", event)
+						return true
+					}
+				}
+				return false
+			})
 			var popup x11FixtureWindow
 			wait("actual native "+kind+" permission window", func() bool {
 				output, err := exec.CommandContext(ctx, observer, strconv.FormatUint(uint64(identity.PID), 10), strconv.FormatUint(identity.ProcessStarted, 10), native).Output()

@@ -11,6 +11,12 @@ import (
 
 type AutomationService struct { Client *daemon.Client; Local *app.AutomationService }
 
+func (s *AutomationService) ReportBrowserPermissionRendered(ctx context.Context, id string) error {
+	if s.Local != nil { return s.Local.ReportBrowserPermissionRendered(ctx, id) }
+	err := call(ctx, s.Client, "AutomationService", "ReportBrowserPermissionRendered", []any{id}, nil)
+	return err
+}
+
 func (s *AutomationService) GetBrowserPermission(ctx context.Context) (app.BrowserPermissionPanel, error) {
 	if s.Local != nil { return s.Local.GetBrowserPermission(ctx) }
 	var value app.BrowserPermissionPanel

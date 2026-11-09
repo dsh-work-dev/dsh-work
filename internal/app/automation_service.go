@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/settings"
+	"time"
 )
 
 type AutomationService struct {
@@ -15,6 +17,7 @@ type AutomationService struct {
 	openBrowserExtension    func() error
 	chooseBrowserDirectory  func(string) (string, error)
 	openBrowserConversation func(context.Context, string) error
+	permissionRendered      func(string)
 }
 
 type BrowserPermissionPanel struct {
@@ -22,6 +25,25 @@ type BrowserPermissionPanel struct {
 	Request         *automation.BrowserConsent  `json:"request"`
 	Locale          settings.Locale             `json:"locale"`
 	Appearance      settings.Appearance         `json:"appearance"`
+}
+
+// ReportBrowserPermissionRendered acknowledges presentation only. The native
+// permission surface cannot grant authority through this readiness callback.
+func (s *AutomationService) ReportBrowserPermissionRendered(ctx context.Context, id string) error {
+	if !isTrustedWindow(ctx, "browser-permission") {
+		return trustedSurfaceRequired("Open the browser permission window.")
+	}
+	r, computer := automation.FirstAutomationPermission(s.service.Snapshot())
+	if computer != nil || r == nil || id == "" || r.ID != id || r.Phase != "waiting" || !time.Now().Before(r.Expires) {
+		return errors.New("BROWSER_CONSENT_INVALID")
+	}
+	if s.permissionRendered != nil {
+		s.permissionRendered(id)
+	}
+	return nil
+}
+func SetBrowserPermissionRendered(s *AutomationService, rendered func(string)) {
+	s.permissionRendered = rendered
 }
 
 // The standalone native window has only permission read/answer authority.

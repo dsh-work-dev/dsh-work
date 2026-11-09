@@ -687,7 +687,9 @@ func runDaemon(identity string, resources Resources) {
 		},
 	})
 	computerUI.Store(newComputerControlWindow(desktop, resources.Assets, applicationShuttingDown.Load))
-	permissionUI.Store(&browserPermissionWindow{app: desktop, service: automationState, quitting: applicationShuttingDown.Load})
+	permissionPresenter := &browserPermissionWindow{app: desktop, service: automationState, quitting: applicationShuttingDown.Load}
+	permissionUI.Store(permissionPresenter)
+	dshworkapp.SetBrowserPermissionRendered(automationService, permissionPresenter.rendered)
 	updateChannel := dshworksettings.DefaultUpdateChannel
 	if settingsManager != nil {
 		if values, err := settingsManager.Snapshot(context.Background()); err == nil {
