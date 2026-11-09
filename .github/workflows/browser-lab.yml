@@ -7,6 +7,10 @@ on:
     paths: ['tools/browser-lab/**', 'internal/automation/**', '.github/workflows/browser-lab.yml']
   workflow_dispatch:
     inputs:
+      mac_profile_diagnostic:
+        description: Run only Mac profile persistence with its recovery prerequisites
+        type: boolean
+        default: false
       native:
         description: Run native Windows tests on the prepared interactive runner
         type: boolean
@@ -25,6 +29,7 @@ permissions:
 
 jobs:
   contracts:
+    if: ${{ !inputs.mac_profile_diagnostic }}
     name: Browser Lab contracts (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -113,6 +118,7 @@ jobs:
             tools/browser-lab/results/*/evidence/sandbox-processes.json
 
   native-windows-hosted:
+    if: ${{ !inputs.mac_profile_diagnostic }}
     name: Browser Lab native full (windows-2025)
     runs-on: windows-2025
     timeout-minutes: 40
@@ -171,7 +177,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: ${{ fromJSON(inputs.mac_profile_diagnostic && '["macos-15"]' || '["ubuntu-24.04","macos-15"]') }}
     defaults:
       run:
         working-directory: tools/browser-lab
@@ -221,9 +227,16 @@ jobs:
         run: dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > /tmp/browser-lab-arch-openbox.log 2>&1 & node architecture.mjs'
       - name: Run actual macOS Cocoa native loop
         if: runner.os == 'macOS'
-        run: node cli.mjs run --profile regression --consent scripted --network
+        env:
+          PROFILE_DIAGNOSTIC: ${{ inputs.mac_profile_diagnostic }}
+        run: |
+          if [[ "$PROFILE_DIAGNOSTIC" == 'true' ]]; then
+            node cli.mjs run --profile regression --consent scripted --case recovery.renderer,recovery.broker,profile.same-origin,profile.persistence
+          else
+            node cli.mjs run --profile regression --consent scripted --network
+          fi
       - name: Probe macOS architectural review boundaries
-        if: always() && runner.os == 'macOS' && steps.native_build.outcome == 'success'
+        if: always() && runner.os == 'macOS' && steps.native_build.outcome == 'success' && !inputs.mac_profile_diagnostic
         run: node architecture.mjs
       - uses: actions/upload-artifact@v6
         if: always()

@@ -14,7 +14,7 @@ const headers={'X-Browser-Lab-Token':token};
 let browser,connected=false,connectionEpoch=0,controlEpoch=0,controlReady=true,faultError=null,faults=Promise.resolve();
 const tabs=new Map(),refs=new Map(),released=new Set(),pending=new Map();
 const audit={dispatches:0,mutations:0,denied:0,releases:0,events:[]};
-const record=(event,data={})=>{audit.events.push({time:Date.now(),event,...data});writeFileSync(root+'evidence/backend-audit.json',JSON.stringify(audit,null,2));if(event.startsWith('native-policy')||event==='refused')console.error(JSON.stringify({event,...data}))};
+const record=(event,data={})=>{const value={time:Date.now(),event,...data};audit.events.push(value);writeFileSync(root+'evidence/backend-audit.json',JSON.stringify(audit,null,2));if(event.startsWith('native-policy')||event.startsWith('target-')||event.startsWith('profile-')||event==='refused')console.error(JSON.stringify(value))};
 async function native(action,args={}){const r=await fetch(session.control+'/command?'+new URLSearchParams({action,...args}),{method:'POST',headers,signal:AbortSignal.timeout(40000)});const text=await r.text();if(!r.ok)throw Error('Native '+action+': '+text);return text}
 function invalidate(reason){
  controlReady=false;controlEpoch++;const ownEpoch=controlEpoch;record('fault-detected',{reason,controlEpoch});
@@ -115,7 +115,22 @@ async function execute(body,res){const {tool,arguments:args={},resourceId}=body;
 async function cover(){const h=await hostState();if(h.covered)throw Error('ALREADY_COVERED');const tab=tabs.get(h.selected);await tab.page.screenshot({path:root+'evidence/placeholder.png'});const r=await fetch(session.control+'/command?action=cover',{method:'POST',headers});if(!r.ok)throw Error('Cover failed: '+await r.text());record('covered',{tab:h.selected});return hostState()}
 async function display(body){if(!['A','B'].includes(body.tab))throw Error('Unknown display tab');const u=new URL(body.url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw Error('DISPLAY_URL_SCHEME_BLOCKED');const tab=tabs.get(body.tab);let security=null;const response=await tab.page.goto(u.href,{waitUntil:'domcontentloaded',timeout:30000});if(response)security=await response.securityDetails();const state=await identity(tab);record('display',{tab:body.tab,url:tab.page.url(),status:response?.status(),security});return {displayed:true,...state,status:response?.status(),security}}
 async function refresh(){const old=browser;browser=null;connected=false;await old.close();await connectTargets()}
-const batchProbe=batchOperations({getBrowser:()=>browser,tabs,hostState,root,session,refresh});
+const batchProbe=batchOperations({getBrowser:()=>browser,tabs,hostState,root,session,refresh,record});
+async function closeProfile(){
+ const stage=async(name,operation)=>{record('profile-close-stage',{stage:name,state:'begin'});const value=await operation();record('profile-close-stage',{stage:name,state:'complete'});return value};
+ if(process.platform!=='win32'){
+  await stage('invalidate',()=>invalidate('normal-profile-restart'));
+  const previous=browser;browser=null;connected=false;
+  await stage('detach-playwright',()=>previous.close());
+  await stage('native-close-broker',()=>native('close-broker'));
+ }else{
+  for(const tab of [...tabs.values()])await stage('close-page-'+tab.name,()=>tab.page.close());
+  await stage('disconnect',()=>waitUntil(()=>!connected,'profile graceful disconnect'));
+  await stage('invalidation-join',()=>faults);
+ }
+ await stage('broker-exit',()=>waitUntil(async()=>!(await hostState()).guestRunning,'profile broker exit'));
+ return stage('fault-state',()=>faultState());
+}
 const policy=nativePolicy({tabs,hostState,identity,display,native,record,dataRoot:process.env.BROWSER_LAB_DATA_ROOT});
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Content-Type','application/json');const supplied=Buffer.from(req.headers['x-browser-lab-token']||'');const expected=Buffer.from(token);
@@ -130,7 +145,7 @@ const server=http.createServer(async(req,res)=>{
  else if(req.url.startsWith('/native-policy/'))value=await policy(req.url.slice('/native-policy/'.length),body);
  else if(req.url==='/health')value={ready:connected&&controlReady&&!faultError,targets:tabs.size};
  else if(req.url==='/profile-detach'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();value={detached:true}}
- else if(req.url==='/profile-close'){if(process.platform!=='win32'){await invalidate('normal-profile-restart');const previous=browser;browser=null;connected=false;await previous.close();await native('close-broker')}else{for(const tab of [...tabs.values()])await tab.page.close();await waitUntil(()=>!connected,'profile graceful disconnect');await faults}await waitUntil(async()=>!(await hostState()).guestRunning,'profile broker exit');value=await faultState()}
+ else if(req.url==='/profile-close')value=await closeProfile();
  else if(req.url==='/page-text')value=await tabs.get('A').page.evaluate(()=>({text:document.body?.innerText,url:location.href,title:document.title}));
  else if(req.url==='/presentation-barrier'){
   const h=await hostState(),tab=tabs.get(h.selected);

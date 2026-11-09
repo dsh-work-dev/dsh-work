@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {basename} from 'node:path';
+import {basename,join} from 'node:path';
+import {appendFileSync} from 'node:fs';
 import {sleep,waitFor} from '../lib/context.mjs';
 import {createInvalidTLSFixture} from '../fixtures/invalid-tls.mjs';
 const view=(s,name)=>s.views.find(v=>v.name===name);
@@ -9,6 +10,10 @@ const intact=(a,b)=>a.instance===b.instance&&a.value===b.value&&a.result===b.res
 const fixture=(a,name='A',host='127.0.0.1')=>`http://${host}:19478/interactions?tab=${name}`;
 async function input(c,text){return c.action('browser_type','#entry',{text})}
 async function picture(a,id,which){const path=await a.capture(id,which);return {artifact:basename(path),markers:a.visualMarkers(path)}}
+async function profileStep(c,stage,operation){
+ const record=(state,error)=>appendFileSync(join(c.options.evidenceRoot,'profile.persistence-phases.log'),JSON.stringify({time:Date.now(),stage,state,...(error?{errorType:error.name||'Error'}:{})})+'\n');
+ record('begin');try{const value=await operation();record('complete');return value}catch(error){record('failed',error);throw Error('profile.persistence '+stage+': '+String(error),{cause:error})}
+}
 async function policyState(a){return a.call('backend','/native-policy/state',{})}
 async function policyRequest(c,selector,kind){
  const a=c.adapter,before=new Set((await policyState(a)).requests.map(p=>p.id));
@@ -91,7 +96,17 @@ export const nativeCases={
  async 'isolation.guest'(c){const a=c.adapter,g=await a.call('backend','/guest-isolation');assert(g.parentSelf&&g.openerNull&&g.wails==='undefined'&&g.webview==='undefined'&&g.hostObjects==='undefined');const denied={};for(const [role,path,body] of [['control','/command?action=quit',{}],['gateway','/state',undefined],['backend','/health',undefined]]){const r=await a.api(role,path,body,{authenticate:false});assert([401,403].includes(r.status));denied[role]=r.status;}for(const role of ['gateway','backend']){const r=await a.api(role,role==='gateway'?'/state':'/health',undefined,{origin:a.session.endpoints.fixture});assert.equal(r.status,403)}const nativeDenied=[];for(const flags of [{authenticate:false},{origin:a.session.endpoints.fixture},{origin:'null'},{authenticate:false,origin:a.session.endpoints.backend}]){const r=await a.api('backend','/native-policy/answer',{id:'foreign-request',choice:'allow'},flags);assert.equal(r.status,403);nativeDenied.push({flags,status:r.status})}return {evidence:{guest:g,unauthenticated:denied,nativeDenied}}},
  async 'isolation.artifact-root'(c){const a=c.adapter,result=[];for(const path of ['/escape/outside.txt','/%2e%2e/private/outside.txt']){const r=await fetch(a.session.endpoints.artifact+path),body=await r.text();assert(r.status>=400&&!body.includes('BROWSER_LAB_PRIVATE_SENTINEL'));result.push({path,status:r.status})}const file=await a.api('backend','/display',{tab:'A',url:'file:///browser-lab-no-file'});assert(!file.ok);return {evidence:{result,file,scope:'root escape/junction and disallowed file scheme'}}},
  async 'profile.same-origin'(c){const a=c.adapter,key='browser_lab_'+randomUUID().replaceAll('-',''),guest='guest-'+randomUUID(),host='host-'+randomUUID(),original=a.float.url();try{const first=await a.call('backend','/storage-set',{key,value:guest}),peer=await a.call('backend','/storage-get',{key,tab:'B'});assert.equal(peer.localStorage,guest);await a.float.goto(fixture(a,'host'),{waitUntil:'domcontentloaded'});const before=await a.float.evaluate(key=>({storage:localStorage.getItem(key),cookie:document.cookie}),key);assert.equal(before.storage,null);assert(!before.cookie.includes(guest));await a.float.evaluate(({key,value})=>{localStorage.setItem(key,value);document.cookie=key+'='+value+'; Path=/; Max-Age=3600'},{key,value:host});const after=await a.call('backend','/storage-get',{key});assert.equal(after.localStorage,guest);assert(!after.cookie.includes(host));return {evidence:{first,peer,hostBefore:before,guestAfter:after}}}finally{await a.float.goto(original,{waitUntil:'domcontentloaded'})}},
- async 'profile.persistence'(c){const a=c.adapter,key='browser_lab_'+randomUUID().replaceAll('-',''),value='persist-'+randomUUID();await a.call('backend','/storage-set',{key,value});const before=await a.state();await a.call('backend','/profile-close',{});await a.recover('broker');const after=await a.state(),state=await a.call('backend','/storage-get',{key});assert.equal(state.localStorage,value);assert(state.cookie.includes(value));assert.equal(before.host.id,after.host.id);if(before.host.pid){assert.equal(before.host.pid,after.host.pid);assert.notEqual(before.brokerPID,after.brokerPID)}assert.notEqual(before.viewGeneration,after.viewGeneration);return {evidence:{state,before,after}}},
+ async 'profile.persistence'(c){
+  const a=c.adapter,key='browser_lab_'+randomUUID().replaceAll('-',''),value='persist-'+randomUUID(),step=(name,operation)=>profileStep(c,name,operation);
+  await step('storage-set',()=>a.call('backend','/storage-set',{key,value}));
+  const before=await step('state-before-close',()=>a.state());
+  await step('normal-profile-close',()=>a.call('backend','/profile-close',{}));
+  await step('explicit-broker-recovery',()=>a.recover('broker'));
+  const after=await step('state-after-recovery',()=>a.state()),state=await step('storage-get-after-recovery',()=>a.call('backend','/storage-get',{key}));
+  assert.equal(state.localStorage,value);assert(state.cookie.includes(value));assert.equal(before.host.id,after.host.id);
+  if(before.host.pid){assert.equal(before.host.pid,after.host.pid);assert.notEqual(before.brokerPID,after.brokerPID)}
+  assert.notEqual(before.viewGeneration,after.viewGeneration);return {evidence:{state,before,after}};
+ },
  'popup.window-open':c=>popup(c,'#open-window'),
  'popup.target-blank':c=>popup(c,'#open-tab'),
  async 'download.attached-default'(c){
