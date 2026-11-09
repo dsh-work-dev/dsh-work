@@ -69,14 +69,40 @@ type BrowserGatewayConfig struct {
 	Notify          func(BrowserConsent)
 }
 type browserConversation struct {
+	owned                            *ownedBrowserAdmission
 	serial                           chan struct{}
 	life, turn, title, binding, host string
 	browser                          bool
 	active                           bool
 	stopped                          bool
+	turnSeen                         bool
 	sites, denied                    map[string]bool
 	last                             time.Time
+	inspection                       *ownedInspection
 }
+
+// One read-only inspection belongs to the serialized conversation and the
+// policy revision that approved it. Revocation cancels queued and active work.
+type ownedInspection struct {
+	conversation *browserConversation
+	request      Request
+	revision     uint64
+	binding      string
+	principal    string
+	approved     bool
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+type ownedInspectionKey struct{}
+
+func (s *Service) validOwnedInspectionLocked(o *ownedInspection) bool {
+	return o != nil && o.ctx.Err() == nil && s.gate != nil && s.gate.policyRevision == o.revision && s.gate.sessions[o.request.Session] == o.conversation && o.conversation.inspection == o && o.conversation.browser && !o.conversation.stopped && s.validLocked(o.request) && s.browserBindingMatchesLocked(o.request, o.binding)
+}
+func (s *Service) validInspectionContextLocked(ctx context.Context) bool {
+	o, ok := ctx.Value(ownedInspectionKey{}).(*ownedInspection)
+	return !ok || s.validOwnedInspectionLocked(o) && o.approved && o.conversation.sites[o.principal]
+}
+
 type pendingBrowserConsent struct {
 	view    BrowserConsent
 	request Request
@@ -87,6 +113,7 @@ type pendingBrowserConsent struct {
 	decided bool
 }
 type browserPermit struct {
+	owned                    *OwnedBrowserCall
 	policyRevision           uint64
 	request                  Request
 	binding                  string
@@ -98,6 +125,7 @@ type browserGateway struct {
 	policyRevision uint64
 	policy         settings.BrowserPolicy
 	sessions       map[string]*browserConversation
+	ownedIntents   map[string]*ownedBrowserIntent
 	permits        map[string]browserPermit
 	pending        map[string]*pendingBrowserConsent
 	queue          []string
@@ -137,7 +165,16 @@ func (s *Service) browserGatewaySnapshotLocked() *BrowserGatewaySnapshot {
 	}
 	for id, c := range g.sessions {
 		if c.browser && c.active {
-			v.Sessions = append(v.Sessions, BrowserUse{id, c.life, c.title, c.host})
+			site := c.host
+			if c.owned != nil && strings.HasPrefix(site, "artifact:") {
+				site = "本地产物"
+			}
+			v.Sessions = append(v.Sessions, BrowserUse{id, c.life, c.title, site})
+		}
+	}
+	for i := range v.Activity {
+		if strings.HasPrefix(v.Activity[i].Site, "artifact:") {
+			v.Activity[i].Site = "本地产物"
 		}
 	}
 	for _, p := range g.permits {
@@ -192,10 +229,15 @@ func (s *Service) BrowserTurn(r Request) (map[string]string, error) {
 		}
 	}
 	if c == nil || c.life != life {
-		c = &browserConversation{serial: make(chan struct{}, 1), life: life, sites: map[string]bool{}, denied: map[string]bool{}}
+		var owned *ownedBrowserAdmission
+		if c != nil {
+			owned = c.owned
+		}
+		c = &browserConversation{owned: owned, serial: make(chan struct{}, 1), life: life, sites: map[string]bool{}, denied: map[string]bool{}}
 		s.gate.sessions[r.Session] = c
 	}
 	c.turn = r.Turn
+	c.turnSeen = true
 	c.denied = map[string]bool{}
 	s.cancelBrowserConsentsLocked(r.Session)
 	for id, p := range s.gate.permits {
@@ -206,6 +248,8 @@ func (s *Service) BrowserTurn(r Request) (map[string]string, error) {
 	s.publishLocked()
 	s.mu.Unlock()
 	s.release(old)
+	r.Lifetime = life
+	_ = s.admitOwnedIntent(s.root, r) // Failed selection never changes the trusted turn lifetime.
 	return map[string]string{"lifetime": life, "turn": r.Turn}, nil
 }
 
@@ -229,6 +273,9 @@ func (s *Service) revokeBrowserGrantsLocked(capability Capability, scope string)
 	}
 	for id, c := range s.gate.sessions {
 		if session == "" || session == id {
+			if c.inspection != nil {
+				c.inspection.cancel()
+			}
 			c.browser = false
 			c.active = false
 			c.sites = map[string]bool{}
@@ -303,15 +350,26 @@ func (s *Service) SetBrowserPolicy(ctx context.Context, expected uint64, p setti
 	}
 	s.gate.policy = settings.NormalizeBrowserPolicy(&p)
 	s.gate.policyRevision++
+	var ownedResources []*entry
+	for id, c := range s.gate.sessions {
+		if c.owned != nil {
+			ownedResources = append(ownedResources, s.revokeLocked(Browser, id+"/"+c.life)...)
+		}
+	}
 	s.gate.permits = map[string]browserPermit{}
 	s.cancelBrowserConsentsLocked("")
 	s.publishLocked()
 	s.mu.Unlock()
-	return s.Snapshot(), nil
+	s.release(ownedResources)
+	var cleanup error
+	for _, e := range ownedResources {
+		cleanup = errors.Join(cleanup, e.closeErr)
+	}
+	return s.Snapshot(), cleanup
 }
 func (s *Service) browserConsent(ctx context.Context, r Request, c *browserConversation, binding, kind, site string, connect func(context.Context) error, action ...BrowserConsent) error {
 	s.mu.Lock()
-	if !s.validLocked(r) || s.profiles.prefs.Selected != binding {
+	if !s.validLocked(r) || !s.browserBindingMatchesLocked(r, binding) {
 		s.mu.Unlock()
 		return ErrRevoked
 	}
@@ -336,9 +394,17 @@ func (s *Service) browserConsent(ctx context.Context, r Request, c *browserConve
 		p.view.Action = action[0].Action
 	}
 	p.view.AllowAlways = kind == "browser"
+	if s.ownedLocked(r) != nil {
+		p.view.AllowAlways = false
+		p.view.Browser = "embedded"
+		p.view.Profile = "内置浏览器"
+		if strings.HasPrefix(site, "artifact:") {
+			p.view.Site = "本地产物"
+		}
+	}
 	if kind == "site" {
 		_, err := settings.NormalizeBrowserHost(site)
-		p.view.AllowAlways = err == nil
+		p.view.AllowAlways = err == nil && s.ownedLocked(r) == nil
 	}
 	for _, b := range s.profiles.prefs.Bindings {
 		if b.ID == binding {
@@ -424,7 +490,7 @@ func (s *Service) AnswerBrowserConsent(ctx context.Context, id, choice string) (
 		return s.Snapshot(), ErrUnavailable
 	}
 	p := s.gate.pending[id]
-	if p == nil || len(s.gate.queue) == 0 || s.gate.queue[0] != id || p.ctx.Err() != nil || p.request.Generation != s.state.Generation || s.profiles.prefs.Selected != p.binding || !s.state.CanChange || !s.slots[Browser].state.Enabled || !s.state.DefaultBrowserEnabled {
+	if p == nil || len(s.gate.queue) == 0 || s.gate.queue[0] != id || p.ctx.Err() != nil || p.request.Generation != s.state.Generation || !s.browserBindingMatchesLocked(p.request, p.binding) || !s.state.CanChange || !s.slots[Browser].state.Enabled || !s.state.DefaultBrowserEnabled {
 		s.mu.Unlock()
 		return s.Snapshot(), ErrRevoked
 	}
@@ -520,6 +586,9 @@ func (s *Service) inspectBrowser(ctx context.Context, r Request) (BrowserEvidenc
 	return evidence, err
 }
 func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecision, error) {
+	if err := s.admitOwnedIntent(ctx, r); err != nil {
+		return BrowserDecision{}, err
+	}
 	s.mu.Lock()
 	if s.gate == nil {
 		s.mu.Unlock()
@@ -548,8 +617,9 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 		s.mu.Unlock()
 		return BrowserDecision{}, errors.New("BROWSER_TOOL_UNAVAILABLE")
 	}
-	binding := s.profiles.prefs.Selected
-	if want := s.gate.config.ExtensionSource; want != "" {
+	binding := s.browserBindingLocked(r)
+	owned := s.ownedLocked(r) != nil
+	if want := s.gate.config.ExtensionSource; !owned && want != "" {
 		if id, e := s.selectedConnectionLocked(); e == nil && s.profiles.connections[id].hello.Source != want {
 			s.mu.Unlock()
 			return BrowserDecision{}, errors.New("BROWSER_EXTENSION_RELOAD_REQUIRED: reload the supplied extension in the selected profile, then reconnect")
@@ -572,10 +642,17 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 		return BrowserDecision{}, ErrRevoked
 	}
 	p := settings.NormalizeBrowserPolicy(&s.gate.policy)
-	need := p.AskEachConversation && !c.browser
+	need := (p.AskEachConversation || owned) && !c.browser
+	authorizationRevision := s.gate.policyRevision
 	c.title = r.Title
 	s.mu.Unlock()
-	connect := func(run context.Context) error { return s.OpenBrowserProfile(run, binding) }
+	connect := func(run context.Context) error {
+		if owned {
+			_, _, err := s.ownedCall(run, r)
+			return err
+		}
+		return s.OpenBrowserProfile(run, binding)
+	}
 	if need {
 		err = s.browserConsent(ctx, r, c, binding, "browser", "", connect)
 	} else {
@@ -586,11 +663,11 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	}
 	s.mu.Lock()
 	r.Epoch = s.slots[Browser].state.Epoch
-	if !s.validLocked(r) || s.profiles.prefs.Selected != binding {
+	if !s.validLocked(r) || !s.browserBindingMatchesLocked(r, binding) || owned && (s.gate.policyRevision != authorizationRevision || s.gate.sessions[r.Session] != c) {
 		s.mu.Unlock()
 		return BrowserDecision{}, ErrRevoked
 	}
-	if want := s.gate.config.ExtensionSource; want != "" {
+	if want := s.gate.config.ExtensionSource; !owned && want != "" {
 		id, e := s.selectedConnectionLocked()
 		if e != nil || s.profiles.connections[id].hello.Source != want {
 			s.mu.Unlock()
@@ -602,11 +679,44 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	c.last = time.Now()
 	s.publishLocked()
 	s.mu.Unlock()
+	call, isOwned, err := s.ownedCall(ctx, r)
+	if err != nil {
+		return BrowserDecision{}, err
+	}
+	// The owned engine already supplies an exact principal. Obtain its site
+	// consent before creating MCP or reading the page for policy inspection.
+	// External browsers still establish their destination through inspection.
+	if isOwned && r.Tool != "browser_navigate" && !(r.Tool == "browser_tabs" && r.Arguments["action"] == "new") {
+		inspection, err := s.authorizeOwnedInspection(ctx, r, c, binding, call, authorizationRevision)
+		if err != nil {
+			return BrowserDecision{}, err
+		}
+		defer func() {
+			s.mu.Lock()
+			if c.inspection == inspection {
+				c.inspection = nil
+			}
+			inspection.cancel()
+			s.mu.Unlock()
+		}()
+		ctx = context.WithValue(inspection.ctx, ownedInspectionKey{}, inspection)
+		current, _, err := s.ownedCall(ctx, r)
+		if err != nil {
+			return BrowserDecision{}, err
+		}
+		if current.Identity != call.Identity {
+			return BrowserDecision{}, errors.New("BROWSER_PAGE_CHANGED: the selected page changed while waiting for site approval")
+		}
+		call = current
+	}
+	if isOwned {
+		ctx = WithOwnedBrowserCall(ctx, call)
+	}
 	evidence, err := s.inspectBrowser(ctx, r)
 	if err != nil {
 		// Snapshot/list can establish state even when the page is closing or a
 		// JavaScript dialog prevents a read-only observation. No write fallback.
-		if r.Tool == "browser_snapshot" || r.Tool == "browser_handle_dialog" || r.Tool == "browser_tabs" && r.Arguments["action"] == "list" {
+		if !owned && (r.Tool == "browser_snapshot" || r.Tool == "browser_handle_dialog" || r.Tool == "browser_tabs" && r.Arguments["action"] == "list") {
 			evidence = BrowserEvidence{URL: "about:blank"}
 		} else {
 			return BrowserDecision{}, fmt.Errorf("BROWSER_TARGET_UNVERIFIED: %w", err)
@@ -635,9 +745,31 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	if err != nil {
 		return BrowserDecision{}, err
 	}
+	coarseHost := host
+	if owned {
+		host, err = ownedPrincipal(call.Identity, address)
+		if err != nil {
+			return BrowserDecision{}, err
+		}
+		if call.Identity.ArtifactLease != "" {
+			coarseHost = ""
+		}
+		if r.Tool == "browser_navigate" {
+			call.NavigationOrigin, err = BrowserOrigin(address)
+			if err != nil {
+				return BrowserDecision{}, err
+			}
+		} else {
+			currentOrigin, _ := BrowserOrigin(call.Identity.URL)
+			observedOrigin, _ := BrowserOrigin(address)
+			if currentOrigin != observedOrigin {
+				return BrowserDecision{}, errors.New("BROWSER_FRAME_SCOPE_UNAVAILABLE")
+			}
+		}
+	}
 	s.mu.Lock()
 	p = settings.NormalizeBrowserPolicy(&s.gate.policy)
-	rule := p.SiteRule(host)
+	rule := p.SiteRule(coarseHost)
 	siteAllowed := c.sites[host]
 	s.mu.Unlock()
 	if host != "" && rule == "block" {
@@ -646,7 +778,7 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 		s.mu.Unlock()
 		return BrowserDecision{}, errors.New("BROWSER_SITE_BLOCKED: " + host + " is blocked in Settings. Don't use it.")
 	}
-	if host != "" && rule != "allow" && !siteAllowed && p.NewSites == "ask" {
+	if host != "" && !siteAllowed && (owned || rule != "allow" && p.NewSites == "ask") {
 		if err = s.browserConsent(ctx, r, c, binding, "site", host, nil); err != nil {
 			return BrowserDecision{}, err
 		}
@@ -686,7 +818,7 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.validLocked(r) || s.profiles.prefs.Selected != binding {
+	if !s.validLocked(r) || !s.browserBindingMatchesLocked(r, binding) {
 		return BrowserDecision{}, ErrRevoked
 	}
 	for id, permit := range s.gate.permits {
@@ -700,7 +832,16 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	id := rand.Text()
 	r.Permit = ""
 	s.gate.permits[id] = browserPermit{policyRevision: s.gate.policyRevision, request: r, binding: binding, evidence: evidence, category: category, host: host, decision: decision, expires: time.Now().Add(2 * time.Minute)}
+	if owned {
+		p := s.gate.permits[id]
+		call.Token = id
+		p.owned = &call
+		s.gate.permits[id] = p
+	}
 	if decision == "ask" {
+		if owned && strings.HasPrefix(host, "artifact:") {
+			host = "本地产物"
+		}
 		s.publishLocked()
 	}
 	name := ""
@@ -730,6 +871,68 @@ func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecis
 	}
 	return result, nil
 }
+
+func (s *Service) authorizeOwnedInspection(ctx context.Context, r Request, c *browserConversation, binding string, call OwnedBrowserCall, revision uint64) (_ *ownedInspection, err error) {
+	principal, err := ownedPrincipal(call.Identity, call.Identity.URL)
+	if err != nil {
+		return nil, err
+	}
+	coarseHost := ""
+	if call.Identity.ArtifactLease == "" {
+		coarseHost, err = browserHost(call.Identity.URL, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	s.mu.Lock()
+	run, cancel := context.WithCancel(ctx)
+	o := &ownedInspection{conversation: c, request: r, revision: revision, binding: binding, principal: principal, ctx: run, cancel: cancel}
+	c.inspection = o
+	if !s.validOwnedInspectionLocked(o) {
+		c.inspection = nil
+		cancel()
+		s.mu.Unlock()
+		return nil, ErrRevoked
+	}
+	defer func() {
+		if err != nil {
+			s.mu.Lock()
+			if c.inspection == o {
+				c.inspection = nil
+			}
+			cancel()
+			s.mu.Unlock()
+		}
+	}()
+	blocked := settings.NormalizeBrowserPolicy(&s.gate.policy).SiteRule(coarseHost) == "block"
+	allowed := c.sites[principal]
+	s.mu.Unlock()
+	if blocked {
+		return nil, errors.New("BROWSER_SITE_BLOCKED: " + principal + " is blocked in Settings. Don't use it.")
+	}
+	if !allowed {
+		if err = s.browserConsent(run, r, c, binding, "site", principal, nil); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		if !s.validOwnedInspectionLocked(o) {
+			s.mu.Unlock()
+			return nil, ErrRevoked
+		}
+		c.sites[principal] = true
+		o.approved = true
+		s.mu.Unlock()
+	} else {
+		s.mu.Lock()
+		if !s.validOwnedInspectionLocked(o) {
+			s.mu.Unlock()
+			return nil, ErrRevoked
+		}
+		o.approved = true
+		s.mu.Unlock()
+	}
+	return o, nil
+}
 func browserDisplayReason(category, name, host, tool string) map[string]string {
 	labels := map[string][3]string{"payment": {"付款", "Payment", "支払い"}, "send": {"发送", "Send", "送信"}, "publish": {"发布", "Publish", "公開"}, "delete": {"删除", "Delete", "削除"}, "install": {"安装", "Install", "インストール"}, "settings": {"更改设置", "Change settings", "設定の変更"}, "submit": {"提交", "Submit", "確定"}, "upload": {"上传文件", "Upload file", "ファイルをアップロード"}, "script": {"运行页面脚本", "Run page script", "ページスクリプトを実行"}, "unknown": {"无法识别的操作", "Unrecognised action", "認識できない操作"}}
 	label := labels[category]
@@ -751,7 +954,7 @@ func (s *Service) executeBrowserPermit(ctx context.Context, r Request) (any, err
 	copy.Permit = ""
 	a, _ := json.Marshal(copy)
 	b, _ := json.Marshal(permit.request)
-	if !ok || permit.policyRevision != s.gate.policyRevision || !time.Now().Before(permit.expires) || string(a) != string(b) || !s.validLocked(r) || s.profiles.prefs.Selected != permit.binding {
+	if !ok || permit.policyRevision != s.gate.policyRevision || !time.Now().Before(permit.expires) || string(a) != string(b) || !s.validLocked(r) || !s.browserBindingMatchesLocked(r, permit.binding) {
 		s.mu.Unlock()
 		return nil, errors.New("BROWSER_AUTHORIZATION_REQUIRED: access approval expired or does not match this call")
 	}
@@ -764,14 +967,17 @@ func (s *Service) executeBrowserPermit(ctx context.Context, r Request) (any, err
 		return nil, ctx.Err()
 	}
 	s.mu.Lock()
-	valid := time.Now().Before(permit.expires) && s.validLocked(r) && permit.policyRevision == s.gate.policyRevision && s.profiles.prefs.Selected == permit.binding
+	valid := time.Now().Before(permit.expires) && s.validLocked(r) && permit.policyRevision == s.gate.policyRevision && s.browserBindingMatchesLocked(r, permit.binding)
 	s.mu.Unlock()
 	if !valid {
 		return nil, ErrRevoked
 	}
+	if permit.owned != nil {
+		ctx = WithOwnedBrowserCall(ctx, *permit.owned)
+	}
 	current, err := s.inspectBrowser(ctx, r)
 	if err != nil {
-		if r.Tool == "browser_snapshot" || r.Tool == "browser_handle_dialog" || r.Tool == "browser_tabs" && r.Arguments["action"] == "list" {
+		if permit.owned == nil && (r.Tool == "browser_snapshot" || r.Tool == "browser_handle_dialog" || r.Tool == "browser_tabs" && r.Arguments["action"] == "list") {
 			current = permit.evidence
 		} else {
 			return nil, errors.New("BROWSER_PAGE_CHANGED: take a fresh snapshot and try again")
@@ -783,7 +989,7 @@ func (s *Service) executeBrowserPermit(ctx context.Context, r Request) (any, err
 		return nil, errors.New("BROWSER_PAGE_CHANGED: the page changed while waiting for approval; take a fresh snapshot and try again")
 	}
 	s.mu.Lock()
-	if !s.validLocked(r) {
+	if !s.validLocked(r) || permit.owned != nil && permit.policyRevision != s.gate.policyRevision {
 		s.mu.Unlock()
 		return nil, ErrRevoked
 	}
@@ -792,6 +998,9 @@ func (s *Service) executeBrowserPermit(ctx context.Context, r Request) (any, err
 	}
 	s.mu.Unlock()
 	value, err := s.executeOwned(ctx, r)
+	if permit.owned != nil {
+		return s.finishOwnedBrowserCall(ctx, r, permit, value, err)
+	}
 	actualHost := permit.host
 	if address := browserResultURL(value); address != "" {
 		if host, hostErr := browserHost(address, false); hostErr == nil {
@@ -849,12 +1058,17 @@ func (s *Service) StopBrowserUse(session, lifetime string) error {
 			return ErrRevoked
 		}
 	}
+	for id, intent := range s.gate.ownedIntents {
+		if session == "" || id == session {
+			intent.invalid = true
+		}
+	}
 	var old []*entry
 	for id, c := range s.gate.sessions {
 		if session != "" && id != session {
 			continue
 		}
-		if session == "" && !c.browser {
+		if session == "" && !c.browser && s.gate.ownedIntents[id] == nil {
 			continue
 		}
 		host := c.host
@@ -866,7 +1080,13 @@ func (s *Service) StopBrowserUse(session, lifetime string) error {
 	s.publishLocked()
 	s.mu.Unlock()
 	s.release(old)
-	return nil
+	var cleanup error
+	for _, entry := range old {
+		if bound, ok := entry.resource.(interface{ OwnedBrowserBinding() OwnedBrowserIdentity }); ok && bound.OwnedBrowserBinding().BrokerGeneration != "" {
+			cleanup = errors.Join(cleanup, entry.closeErr)
+		}
+	}
+	return cleanup
 }
 
 var browserPageURL = regexp.MustCompile(`(?m)^### Page\r?\n- Page URL: ([^\r\n]+)`)

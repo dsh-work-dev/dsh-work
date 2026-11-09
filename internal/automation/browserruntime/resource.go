@@ -21,7 +21,7 @@ import (
 	"github.com/local/dsh-work/internal/workeripc"
 )
 
-//go:embed adapter.mjs cdp-adapter.mjs refs.mjs inspect.mjs schemas.json
+//go:embed adapter.mjs cdp-adapter.mjs owned-cef.mjs refs.mjs inspect.mjs schemas.json
 var sources embed.FS
 
 type Runtime struct {
@@ -35,6 +35,18 @@ type Config struct {
 	Root       string
 	OutputRoot string
 	Observe    func(automation.Request, Observation)
+	// Routes is an in-process provider dependency. Nil preserves the external
+	// browser selection contract; no route identity comes from tool arguments.
+	Routes RouteProvider
+}
+
+type RouteProvider interface {
+	Select(context.Context, automation.Request) (RouteSelection, error)
+}
+
+type RouteSelection struct {
+	Protocol string
+	Open     func(context.Context, string) (automation.BrowserRoute, error)
 }
 type Observation struct {
 	Tool                       string
@@ -71,32 +83,36 @@ type envelope struct {
 	Fatal      bool            `json:"fatal,omitempty"`
 }
 type resource struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	route        automation.BrowserRoute
-	ipc          *workeripc.Transport
-	worker       supervisor.Worker
-	conn         net.Conn
-	dir          string
-	writeMu      sync.Mutex
-	mu           sync.Mutex
-	sequence     uint64
-	pending      map[uint64]chan envelope
-	ready        chan envelope
-	adapterReady chan struct{}
-	done         chan struct{}
-	closing      sync.Once
-	initMu       sync.Mutex
-	signaled     sync.Once
-	closeErr     error
-	failed       error
-	owner        automation.Request
-	observe      func(automation.Request, Observation)
+	ctx              context.Context
+	cancel           context.CancelFunc
+	route            automation.BrowserRoute
+	ipc              *workeripc.Transport
+	worker           supervisor.Worker
+	conn             net.Conn
+	dir              string
+	writeMu          sync.Mutex
+	mu               sync.Mutex
+	sequence         uint64
+	pending          map[uint64]chan envelope
+	ready            chan envelope
+	adapterReady     chan struct{}
+	done             chan struct{}
+	closing          sync.Once
+	initMu           sync.Mutex
+	signaled         sync.Once
+	closeErr         error
+	workerNeedsClose bool
+	failed           error
+	owner            automation.Request
+	observe          func(automation.Request, Observation)
+	ownedTarget      automation.OwnedBrowserTarget
+	ownedIdentity    automation.OwnedBrowserIdentity
 }
 
-func NewFactory(c Config) automation.Factory {
+func NewFactory(c Config) automation.Factory { return newFactory(c, true) }
+func newFactory(c Config, wrap bool) automation.Factory {
 	return func(parent context.Context, request automation.Request) (result automation.Resource, err error) {
-		if c.Service == nil || c.Supervisor == nil || c.Resolve == nil {
+		if (c.Service == nil && c.Routes == nil) || c.Supervisor == nil || c.Resolve == nil {
 			return nil, automation.ErrUnavailable
 		}
 		if request.WorkingDirectory != "" {
@@ -111,14 +127,42 @@ func NewFactory(c Config) automation.Factory {
 		r.observe = c.Observe
 		defer func() {
 			if err != nil {
-				r.Close()
+				closeErr := r.Close()
+				if r.ownedTarget != nil {
+					err = errors.Join(err, closeErr)
+				}
 			}
 		}()
 		r.initMu.Lock()
 		defer r.initMu.Unlock()
-		lease, err := c.Service.SelectedBrowserConnection()
+		selection := RouteSelection{Protocol: "extension-v2"}
+		var owned bool
+		if c.Service != nil {
+			r.ownedTarget, owned, err = c.Service.OwnedBrowserTarget(request)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if owned {
+			r.ownedIdentity, err = r.ownedTarget.OwnedIdentity(ctx)
+			if err != nil {
+				return nil, err
+			}
+			selection = RouteSelection{Protocol: "owned-cef-v1", Open: r.ownedTarget.OpenOwnedRoute}
+		} else if c.Routes != nil {
+			selection, err = c.Routes.Select(ctx, request)
+		} else {
+			var lease automation.BrowserLease
+			lease, err = c.Service.SelectedBrowserConnection()
+			selection.Open = func(ctx context.Context, title string) (automation.BrowserRoute, error) {
+				return c.Service.OpenBrowserRoute(ctx, lease, title)
+			}
+		}
 		if err != nil {
 			return nil, err
+		}
+		if selection.Open == nil || (selection.Protocol != "extension-v2" && selection.Protocol != "owned-cef-v1") {
+			return nil, errors.New("BROWSER_ROUTE_PROTOCOL_REJECTED")
 		}
 		runtime, err := c.Resolve(ctx)
 		if err != nil {
@@ -139,7 +183,7 @@ func NewFactory(c Config) automation.Factory {
 			outputRoot = filepath.Join(c.Root, "artifacts")
 		}
 		output := filepath.Join(outputRoot, filepath.Base(r.dir))
-		for _, name := range []string{"adapter.mjs", "cdp-adapter.mjs", "refs.mjs", "inspect.mjs"} {
+		for _, name := range []string{"adapter.mjs", "cdp-adapter.mjs", "owned-cef.mjs", "refs.mjs", "inspect.mjs"} {
 			data, _ := sources.ReadFile(name)
 			if err = os.WriteFile(filepath.Join(r.dir, name), data, 0600); err != nil {
 				return nil, err
@@ -178,7 +222,7 @@ func NewFactory(c Config) automation.Factory {
 			return nil, err
 		}
 		go r.receive()
-		if err = r.write(map[string]any{"kind": "init", "dependencies": runtime.Dependencies, "output": output, "workspace": request.WorkingDirectory, "refScope": rand.Text()}); err != nil {
+		if err = r.write(map[string]any{"kind": "init", "dependencies": runtime.Dependencies, "output": output, "workspace": request.WorkingDirectory, "refScope": rand.Text(), "routeProtocol": selection.Protocol}); err != nil {
 			return nil, err
 		}
 		select {
@@ -186,10 +230,10 @@ func NewFactory(c Config) automation.Factory {
 		case <-r.done:
 			return nil, r.failure()
 		case <-bounded.Done():
-			return nil, bounded.Err()
+			return nil, r.initializationFailure(bounded.Err())
 		}
 		var route automation.BrowserRoute
-		route, err = c.Service.OpenBrowserRoute(ctx, lease, request.Title)
+		route, err = selection.Open(ctx, request.Title)
 		if err != nil {
 			return nil, err
 		}
@@ -216,7 +260,7 @@ func NewFactory(c Config) automation.Factory {
 		case <-r.done:
 			return nil, r.failure()
 		case <-bounded.Done():
-			return nil, bounded.Err()
+			return nil, r.initializationFailure(bounded.Err())
 		}
 		go func() {
 			select {
@@ -227,6 +271,10 @@ func NewFactory(c Config) automation.Factory {
 			case <-r.done:
 			}
 		}()
+		if owned && wrap {
+			wctx, wcancel := context.WithCancel(parent)
+			return &ownedResource{ctx: wctx, cancel: wcancel, current: r, reopen: newFactory(c, false), target: r.ownedTarget, identity: r.ownedIdentity, executorIdentity: r.ownedIdentity}, nil
+		}
 		return r, nil
 	}
 }
@@ -308,9 +356,26 @@ func (r *resource) forward(route automation.BrowserRoute) {
 		}
 	}
 }
-func (r *resource) Execute(ctx context.Context, tool string, args map[string]any) (any, error) {
+func (r *resource) Execute(ctx context.Context, tool string, args map[string]any) (value any, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if r.ownedTarget != nil {
+		call, ok := automation.OwnedBrowserCallFromContext(ctx)
+		if !ok {
+			return nil, errors.New("BROWSER_AUTHORIZATION_REQUIRED")
+		}
+		end, guardErr := r.ownedTarget.BeginOwnedCall(ctx, call)
+		if guardErr != nil {
+			return nil, guardErr
+		}
+		defer func() {
+			if endErr := end(); endErr != nil {
+				r.fail(endErr)
+				value = nil
+				err = errors.Join(err, endErr)
+			}
+		}()
 	}
 	select {
 	case <-r.done:
@@ -331,6 +396,11 @@ func (r *resource) Execute(ctx context.Context, tool string, args map[string]any
 	r.pending[id] = ch
 	r.mu.Unlock()
 	defer func() { r.mu.Lock(); delete(r.pending, id); r.mu.Unlock() }()
+	if r.ownedTarget != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	if err := r.write(map[string]any{"kind": "call", "id": id, "tool": tool, "arguments": args}); err != nil {
 		r.fail(err)
 		return nil, err
@@ -378,6 +448,14 @@ func (r *resource) failure() error {
 	}
 	return errors.New("BROWSER_RESOURCE_CLOSED")
 }
+func (r *resource) initializationFailure(cancellation error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.failed != nil {
+		return errors.Join(r.failed, cancellation)
+	}
+	return cancellation
+}
 func (r *resource) fail(err error) {
 	r.mu.Lock()
 	if r.failed == nil {
@@ -398,10 +476,20 @@ func (r *resource) Close() error {
 	r.signaled.Do(func() { close(r.done) })
 	r.initMu.Lock()
 	defer r.initMu.Unlock()
+	first := false
 	r.closing.Do(func() {
+		first = true
+		if r.ownedTarget != nil {
+			ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+			r.closeErr = errors.Join(r.closeErr, r.ownedTarget.RevokeOwned(ctx))
+			stop()
+		}
 		// Detach the native route even if process teardown fails, and conversely.
 		if r.route != nil {
-			_ = r.route.Close()
+			routeErr := r.route.Close()
+			if r.ownedTarget != nil {
+				r.closeErr = errors.Join(r.closeErr, routeErr)
+			}
 		}
 		if r.conn != nil {
 			_ = r.conn.Close()
@@ -412,7 +500,9 @@ func (r *resource) Close() error {
 		if r.worker != nil {
 			ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 			defer stop()
-			r.closeErr = errors.Join(r.worker.ForceStop(ctx), r.worker.WaitEmpty(ctx), r.worker.Close())
+			forceErr, emptyErr, closeErr := r.worker.ForceStop(ctx), r.worker.WaitEmpty(ctx), r.worker.Close()
+			r.workerNeedsClose = closeErr != nil
+			r.closeErr = errors.Join(r.closeErr, forceErr, emptyErr, closeErr)
 		}
 		// Artifacts live outside this generated-code directory. Never remove a
 		// tree while an owned process may still be using it.
@@ -420,8 +510,21 @@ func (r *resource) Close() error {
 			r.closeErr = os.RemoveAll(r.dir)
 		}
 	})
+	if !first && r.workerNeedsClose {
+		if err := r.worker.Close(); err != nil {
+			r.closeErr = errors.Join(r.closeErr, err)
+		} else {
+			r.workerNeedsClose = false
+		}
+	}
 	return r.closeErr
 }
+func (r *resource) CleanupPending() bool {
+	r.initMu.Lock()
+	defer r.initMu.Unlock()
+	return r.workerNeedsClose
+}
+func (r *resource) OwnedBrowserBinding() automation.OwnedBrowserIdentity { return r.ownedIdentity }
 
 // AutomationTerminal distinguishes a closed process/route from a recoverable MCP
 // tool error. The Service can end that owned lifetime without stranding retries.

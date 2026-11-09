@@ -110,3 +110,6 @@ func (s *HostService) UpdateAction(ctx context.Context, action UpdateAction) (Up
 	}
 	return UpdateSnapshot{}, nil
 }
+
+// IsWorkspaceSurface shares the canonical authenticated workspace naming rule.
+func IsWorkspaceSurface(surface string) bool { return isWorkspaceSurface(surface) }

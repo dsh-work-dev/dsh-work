@@ -239,6 +239,11 @@ func (s *Service) SetEnabled(ctx context.Context, c Capability, enabled bool) (S
 	if !enabled {
 		if c == Browser {
 			s.cancelBrowserOpeningLocked()
+			if s.gate != nil {
+				for _, intent := range s.gate.ownedIntents {
+					intent.invalid = true
+				}
+			}
 		}
 		slot.state.Availability = "disabled"
 		slot.state.Step = ""
@@ -281,6 +286,11 @@ func (s *Service) SetDefaultBrowser(ctx context.Context, enabled bool) (Snapshot
 	s.state.DefaultBrowserEnabled = enabled
 	if !enabled {
 		s.cancelBrowserOpeningLocked()
+		if s.gate != nil {
+			for _, intent := range s.gate.ownedIntents {
+				intent.invalid = true
+			}
+		}
 	}
 	slot := s.slots[Browser]
 	slot.state.Epoch++
@@ -507,8 +517,19 @@ func (s *Service) Worker(generation string, ready, profile bool) {
 	if s.computer != nil && s.state.Generation != generation {
 		s.computer.sessions = map[string]*computerConversation{}
 	}
+	if s.gate != nil && (!ready || !profile) {
+		for _, intent := range s.gate.ownedIntents {
+			intent.invalid = true
+		}
+	}
 	if s.gate != nil && s.state.Generation != generation {
+		for _, conversation := range s.gate.sessions {
+			if conversation.inspection != nil {
+				conversation.inspection.cancel()
+			}
+		}
 		s.gate.sessions = map[string]*browserConversation{}
+		s.gate.ownedIntents = map[string]*ownedBrowserIntent{}
 	}
 	s.state.Generation = generation
 	s.state.CanChange = ready && profile
@@ -548,6 +569,11 @@ func (s *Service) Gateway(generation string, connected bool) {
 	s.state.GatewayConnected = connected
 	var old []*entry
 	if !connected {
+		if s.gate != nil {
+			for _, intent := range s.gate.ownedIntents {
+				intent.invalid = true
+			}
+		}
 		old = s.revokeLocked("", "")
 		for _, slot := range s.slots {
 			slot.state.Epoch++
@@ -616,7 +642,7 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	if !s.validLocked(r) {
+	if !s.validLocked(r) || !s.validInspectionContextLocked(ctx) {
 		s.mu.Unlock()
 		return nil, ErrRevoked
 	}
@@ -663,7 +689,16 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 			e.beforeDesktopRelease = func() error { gate.probes.Wait(); s.mu.Lock(); defer s.mu.Unlock(); return gate.desktopFailure }
 		}
 		go func() {
-			resource, err := f(create, r)
+			s.mu.Lock()
+			valid := !e.revoked && create.Err() == nil && s.validInspectionContextLocked(ctx)
+			s.mu.Unlock()
+			var resource Resource
+			var err error
+			if valid {
+				resource, err = f(create, r)
+			} else {
+				err = ErrRevoked
+			}
 			s.mu.Lock()
 			if r.Operation == "browser" && create.Err() != nil && err == nil {
 				err = create.Err()
@@ -709,7 +744,7 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	valid := s.validLocked(r) && !e.revoked
+	valid := s.validLocked(r) && !e.revoked && s.validInspectionContextLocked(ctx)
 	resource, err := e.resource, e.err
 	s.mu.Unlock()
 	if !valid {
@@ -722,10 +757,31 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 	if resource == nil {
 		return nil, ErrUnavailable
 	}
+	if r.Capability == Browser {
+		s.mu.Lock()
+		admission := s.ownedLocked(r)
+		s.mu.Unlock()
+		if admission != nil {
+			bound, ok := resource.(interface{ OwnedBrowserBinding() OwnedBrowserIdentity })
+			if !ok {
+				return nil, ErrUnavailable
+			}
+			identity := bound.OwnedBrowserBinding()
+			if identity.BrokerGeneration != admission.initial.BrokerGeneration || identity.Target != admission.initial.Target || identity.ArtifactLease != admission.initial.ArtifactLease {
+				return nil, ErrRevoked
+			}
+		}
+	}
 	callCtx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(e.ctx, cancel)
 	defer stop()
 	defer cancel()
+	s.mu.Lock()
+	valid = s.validLocked(r) && !e.revoked && s.validInspectionContextLocked(ctx)
+	s.mu.Unlock()
+	if !valid || callCtx.Err() != nil {
+		return nil, ErrRevoked
+	}
 	value, err := resource.Execute(callCtx, r.Tool, r.Arguments)
 	if err != nil {
 		if terminal, ok := resource.(interface{ AutomationTerminal() bool }); ok && terminal.AutomationTerminal() {
@@ -735,7 +791,7 @@ func (s *Service) executeOwned(ctx context.Context, r Request) (any, error) {
 		}
 	}
 	s.mu.Lock()
-	valid = s.validLocked(r) && !e.revoked
+	valid = s.validLocked(r) && !e.revoked && s.validInspectionContextLocked(ctx)
 	s.mu.Unlock()
 	if !valid {
 		return nil, ErrRevoked
@@ -757,6 +813,9 @@ func (s *Service) StopSession(generation, session, lifetime string) {
 		s.stopped[revocationKey(Request{Capability: c, Epoch: s.slots[c].state.Epoch, Session: session, Lifetime: lifetime})] = true
 	}
 	if s.gate != nil {
+		if intent := s.gate.ownedIntents[session]; intent != nil {
+			intent.invalid = true
+		}
 		if c := s.gate.sessions[session]; c != nil && c.life == lifetime {
 			c.stopped = true
 		}

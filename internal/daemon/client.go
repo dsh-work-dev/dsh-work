@@ -20,6 +20,24 @@ type Client struct{ HTTP *http.Client }
 func NewClient(identity string) *Client {
 	return &Client{HTTP: &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx, identity) }, MaxIdleConnsPerHost: 16, IdleConnTimeout: 30 * time.Second}}}
 }
+
+// NewProcessClient pins every actual pipe connection to an already-owned
+// process instance. Reconnects cannot redirect a later control request to a
+// replacement endpoint between a status check and an action.
+func NewProcessClient(identity string, expected ProcessPeer) *Client {
+	return &Client{HTTP: &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		connection, err := dial(ctx, identity)
+		if err != nil {
+			return nil, err
+		}
+		if err = verifyServerProcess(connection, expected); err != nil {
+			connection.Close()
+			return nil, err
+		}
+		return connection, nil
+	}, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}}
+}
+
 func (c *Client) Close() { c.HTTP.CloseIdleConnections() }
 
 func (c *Client) JSON(ctx context.Context, path string, input, output any) error {

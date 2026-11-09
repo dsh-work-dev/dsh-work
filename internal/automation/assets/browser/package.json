@@ -1,1 +1,1 @@
-{"name":"dsh-work-browser-dependencies","private":true,"version":"1.0.0","dependencies":{"@modelcontextprotocol/sdk":"1.32.2","@playwright/mcp":"0.0.83"}}
+{"name":"dsh-work-browser-dependencies","private":true,"version":"1.0.0","dependencies":{"@modelcontextprotocol/sdk":"1.32.2","@playwright/mcp":"0.0.83","ws":"8.22.1"}}

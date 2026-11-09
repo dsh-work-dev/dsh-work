@@ -21,10 +21,14 @@ export default class PipeWebServer extends WebServer {
     let stopped = false;
     const server = createServer(async (req, res) => {
       try {
-        const route = this.match(new URL(req.url, 'http://127.0.0.1:1').pathname);
-        const handler = route?.handler ?? this.fallback;
-        if (!handler) { res.writeHead(404).end(); return; }
-        await handler(req, res);
+        const target = new URL(req.url, 'http://127.0.0.1:1');
+        const responder = this.match(target.pathname) ?? this.fallback;
+        if (!responder) { res.writeHead(404).end(); return; }
+        // Published DSH supports both Node handlers and Fetch resources. Keep
+        // upstream's resource adapter: it owns GET/HEAD, abort and streaming.
+        if (typeof responder === 'function') await responder(req, res);
+        else if ('resource' in responder) await this.serveResource(req, res, target, responder.resource);
+        else await responder.handler(req, res);
       } catch {
         if (res.headersSent) res.destroy();
         else res.writeHead(500).end();

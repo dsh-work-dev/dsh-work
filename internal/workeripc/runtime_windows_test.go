@@ -83,9 +83,15 @@ func TestRealWorkerPipe(t *testing.T) {
 	defer func() {
 		c, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
-		worker.ForceStop(c)
-		worker.WaitEmpty(c)
-		worker.Close()
+		if err := worker.ForceStop(c); err != nil {
+			t.Errorf("fixture ForceStop: %v", err)
+		}
+		if err := worker.WaitEmpty(c); err != nil {
+			t.Errorf("fixture WaitEmpty: %v", err)
+		}
+		if err := worker.Close(); err != nil {
+			t.Errorf("fixture Close/join: %v", err)
+		}
 	}()
 	var auth string
 	select {

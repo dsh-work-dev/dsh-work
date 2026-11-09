@@ -426,7 +426,9 @@ export function mountHost() {
     const bucket = update.hasTotal && update.totalBytes ? Math.floor((update.receivedBytes ?? 0) / update.totalBytes * 10) : Math.floor((update.receivedBytes ?? 0) / (5 * 1024 * 1024));
     logs[kind].append(update.operationId, text, update.state === "failed", `${update.state}/${update.step}/${update.route}/${bucket}`);
   });
+  let lifecycleRevision=0;
   const offLifecycle = Events.On("lifecycle", event => {
+    lifecycleRevision++;
     status = event.data as LifecycleStatus;
     if (status.state === "Starting") lastPhase = status.phase;
     render();
@@ -453,7 +455,12 @@ export function mountHost() {
   async function initialize() {
     try {
       applyLocale(await HostService.GetLocale());
-      status = await HostService.GetStatus() as LifecycleStatus;
+      const revision=lifecycleRevision;
+      const initialStatus=await HostService.GetStatus() as LifecycleStatus;
+      if(revision===lifecycleRevision)status=initialStatus;
+      // Lifecycle feedback must not wait for the environment inventory, nor may
+      // a delayed initial read overwrite a newer event.
+      render();
       await refreshEnvironment();
       connectionFailed = false; lastError = ""; render();
       void ManagerService.RefreshDSHReleases().then(next => { snapshot = next; renderEnvironment(); }).catch(showError);

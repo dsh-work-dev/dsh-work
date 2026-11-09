@@ -130,7 +130,7 @@ tasks:
     deps:
       - worker:assets
     cmds:
-      - wails3 generate bindings -ts -i -clean=true
+      - wails3 generate bindings -ts -i -clean=true {{if .DSH_WORK_EMBEDDED_MODFILE}}-f "-modfile='{{.DSH_WORK_EMBEDDED_MODFILE}}' -tags=e67presenter"{{end}}
 
   build:
     summary: Build dsh-work for the current platform
@@ -138,7 +138,7 @@ tasks:
       - frontend:build
     cmds:
       - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
-      - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}" .
+      - go build -trimpath -buildvcs=false {{if .DSH_WORK_EMBEDDED_MODFILE}}-modfile="{{.DSH_WORK_EMBEDDED_MODFILE}}" -tags=e67presenter{{end}} -o "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}" .
 
   build:smoke:
     summary: Build the real Windows DSH smoke harness

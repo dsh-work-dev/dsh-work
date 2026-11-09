@@ -3,8 +3,10 @@ package desktopbridge
 import (
 	_ "embed"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -13,6 +15,9 @@ var clientScript string
 
 //go:embed boot.js
 var bootScript string
+
+//go:embed embedded_browser.js
+var embeddedBrowserScript string
 
 // Assets serves a dedicated Worker-only WebView. Do not attach management
 // bindings to this surface: DSH plugins share its origin.
@@ -39,6 +44,13 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "GET" && r.Method != "HEAD" {
 		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if r.URL.Path == "/__work/embedded-browser.js" && b.EmbeddedBrowserVersion == EmbeddedBrowserRuntime {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		if r.Method != "HEAD" {
+			io.WriteString(w, embeddedBrowserScript)
+		}
 		return
 	}
 	if r.URL.Path == "/__work/bridge.js" {
@@ -71,6 +83,9 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, name := range []string{"Accept", "Accept-Language", "Range", "If-Range", "If-None-Match", "If-Modified-Since"} {
+		if b.EmbeddedBrowserVersion == EmbeddedBrowserRuntime && strings.HasPrefix(name, "If-") {
+			continue
+		}
 		if value := r.Header.Get(name); value != "" {
 			req.Header.Set(name, value)
 		}
@@ -83,14 +98,41 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer response.Body.Close()
-	for key, values := range response.Header {
-		if strings.EqualFold(key, "Set-Cookie") || strings.EqualFold(key, "Content-Length") {
-			continue
-		}
-		for _, value := range values {
-			w.Header().Add(key, value)
+	if b.EmbeddedBrowserVersion == EmbeddedBrowserRuntime && response.StatusCode == http.StatusOK && r.Method != "HEAD" {
+		contentType := response.Header.Get("Content-Type")
+		if strings.Contains(contentType, "javascript") || r.URL.Path == "/" && strings.Contains(contentType, "text/html") {
+			data, err := io.ReadAll(io.LimitReader(response.Body, (64<<20)+1))
+			if err != nil || len(data) > 64<<20 {
+				http.Error(w, "CEF runtime projection unavailable", 503)
+				return
+			}
+			text := string(data)
+			if r.URL.Path == "/" {
+				if strings.Count(text, "<head>") != 1 {
+					http.Error(w, "CEF runtime bootstrap mismatch", 503)
+					return
+				}
+				nonce := ""
+				if match := regexp.MustCompile(`<script[^>]*\bnonce="([^"]+)"`).FindStringSubmatch(text); len(match) == 2 {
+					nonce = ` nonce="` + html.EscapeString(match[1]) + `"`
+				}
+				text = strings.Replace(text, "<head>", `<head><script`+nonce+` src="/__work/embedded-browser.js"></script>`, 1)
+			} else {
+				text, err = projectEmbeddedBrowser(text)
+				if err != nil {
+					http.Error(w, err.Error(), 503)
+					return
+				}
+			}
+			copyWorkerAssetHeaders(w.Header(), response.Header)
+			w.Header().Set("Content-Type", contentType)
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(response.StatusCode)
+			io.WriteString(w, text)
+			return
 		}
 	}
+	copyWorkerAssetHeaders(w.Header(), response.Header)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(response.StatusCode)
 	flush := http.NewResponseController(w).Flush
@@ -105,6 +147,16 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 		}
 		if readErr == io.EOF || readErr != nil {
 			return
+		}
+	}
+}
+func copyWorkerAssetHeaders(destination, source http.Header) {
+	for key, values := range source {
+		if strings.EqualFold(key, "Set-Cookie") || strings.EqualFold(key, "Content-Length") {
+			continue
+		}
+		for _, value := range values {
+			destination.Add(key, value)
 		}
 	}
 }

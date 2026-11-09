@@ -3,6 +3,7 @@
 
 import * as AutomationService from "./automationservice.js";
 import * as DiagnosticsService from "./diagnosticsservice.js";
+import * as EmbeddedBrowserService from "./embeddedbrowserservice.js";
 import * as HostService from "./hostservice.js";
 import * as LogService from "./logservice.js";
 import * as ManagerService from "./managerservice.js";
@@ -13,6 +14,7 @@ import * as StorageService from "./storageservice.js";
 export {
     AutomationService,
     DiagnosticsService,
+    EmbeddedBrowserService,
     HostService,
     LogService,
     ManagerService,

@@ -70,6 +70,9 @@ type Server struct {
 	activeMu      sync.Mutex
 	active        map[uint64]context.CancelFunc
 	activeNext    uint64
+	UIStreamScope func(context.Context, string) (UIStreamAdmission, error)
+	uiStreamsMu   sync.Mutex
+	uiStreams     map[string]*uiStreamOwner
 	streamStartMu sync.Mutex
 	streamWriteMu sync.Mutex
 	streamMu      sync.Mutex
@@ -240,6 +243,12 @@ func maintenanceCallAllowed(call Call) bool {
 			return true
 		}
 	}
+	// Final native-window disposal remains available during a daemon drain;
+	// it cannot admit a new view or Agent action.
+	if call.Service == "EmbeddedBrowserService" {
+		return call.Method == "Closed"
+	}
+
 	if call.Service == "WindowService" {
 		return call.Method == "SetFocus" || call.Method == "Closed"
 	}
@@ -668,7 +677,7 @@ func writeJSON(w http.ResponseWriter, value any) {
 
 // HTTPServer retains streaming responses while bounding idle request headers.
 func HTTPServer(handler http.Handler) *http.Server {
-	return &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 64 << 10}
+	return &http.Server{Handler: handler, ConnContext: nativePeerContext, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 64 << 10}
 }
 
 func (s *Server) UIFocused() bool {

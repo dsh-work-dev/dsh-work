@@ -3,6 +3,7 @@ package desktopapp
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,6 +24,7 @@ import (
 	"github.com/local/dsh-work/internal/automation/computeruia"
 	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/desktopbridge"
 	"github.com/local/dsh-work/internal/desktopclient"
 	"github.com/local/dsh-work/internal/desktopprobe"
 	"github.com/local/dsh-work/internal/diagnostics"
@@ -30,6 +32,7 @@ import (
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/embeddedbrowser"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -61,6 +64,12 @@ func runDaemon(identity string, resources Resources) {
 	defaultRoot := paths.Root
 	defaultUserData := paths.UserDataRoot
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
+		defaultRoot = filepath.Join(root, "app")
+		defaultUserData = filepath.Join(root, "data")
+		config.CacheDirectory = filepath.Join(root, "cache")
+		paths.ConfigFile = filepath.Join(root, "config.toml")
+	}
+	if root := embeddedDevelopmentRoot(); root != "" {
 		defaultRoot = filepath.Join(root, "app")
 		defaultUserData = filepath.Join(root, "data")
 		config.CacheDirectory = filepath.Join(root, "cache")
@@ -183,6 +192,9 @@ func runDaemon(identity string, resources Resources) {
 		}},
 	}
 	desktopprobe.Configure(&managerConfig, dsh, storage.Root)
+	if err := embeddedConfigureManager(&managerConfig, dsh); err != nil {
+		logging.Fatal(logging.Module(logging.ModRuntime), "embedded runtime unavailable", "error", err)
+	}
 	manager, managerErr := dshmanager.New(managerConfig)
 	if managerErr != nil {
 		logging.Module(logging.ModRuntime).Error("manager state unavailable", logging.ErrAttrs(managerErr, lifecycle.ErrorManagerStateInvalid)...)
@@ -524,12 +536,74 @@ func runDaemon(identity string, resources Resources) {
 	hub.SetTopic("automation", automationState.Snapshot())
 	tracker := presence.New()
 	interactions := dshinteraction.New()
+	embeddedService := &embeddedBrowserService{Automation: automationState, Compatible: func(context.Context) bool {
+		status := host.Status()
+		selection := status.LaunchSelection
+		return embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(config.DSHDataDirectory)
+	}}
+	if embeddedDevelopmentRoot() != "" {
+		acquire := func(directory string) (io.Closer, error) {
+			return dshworkapp.AcquireManagerProcessLock(filepath.Join(directory, "instance.json"))
+		}
+		store, err := embeddedbrowser.OpenInstanceStore(filepath.Join(storage.Root, "embedded-browser", "instances"), acquire)
+		if err != nil {
+			logging.Fatal(logging.Module(logging.ModRuntime), "embedded instance store unavailable", "error", err)
+		}
+		defer store.Close()
+		registry, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{
+			Store: store, AcquireProfile: acquire,
+			StartBroker: func(ctx context.Context, instance embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
+				return embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor})
+			},
+			OnFailure: func(instance string, err error) {
+				logging.Module(logging.ModRuntime).Warn("embedded instance cleanup failed", "instance", instance, "error", err)
+			},
+		})
+		if err != nil {
+			logging.Fatal(logging.Module(logging.ModRuntime), "embedded instance registry unavailable", "error", err)
+		}
+		embeddedService.Registry = registry
+		defer func() {
+			if err := registry.Close(); err != nil {
+				label := "embedded instance final cleanup incomplete"
+				if registry.CleanupComplete() {
+					label = "embedded cleanup completed-abnormally"
+				}
+				logging.Module(logging.ModRuntime).Error(label, "error", err)
+			}
+		}()
+	}
 	daemonHostService := &daemon.HostService{HostService: hostService}
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
 		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
-		"DSHPageService":    &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
-		"AutomationService": automationService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
+		"EmbeddedBrowserService": embeddedService,
+		"DSHPageService":         &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
+		"AutomationService":      automationService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
+	if registry := embeddedService.Registry; registry != nil {
+		clearWindow := func(surface string) { tracker.Clear(surface); interactions.ClearWindow(surface) }
+		registry.WindowRetired = func(_ embeddedbrowser.PresenterPeer, surface string) { clearWindow(surface) }
+		server.UIStreamScope = func(ctx context.Context, lease string) (daemon.UIStreamAdmission, error) {
+			native, ok := daemon.ProcessPeerFrom(ctx)
+			if !ok {
+				return daemon.UIStreamAdmission{}, errors.New("CEF_STREAM_NATIVE_PEER_REQUIRED")
+			}
+			peer := embeddedbrowser.PresenterPeer{PID: native.PID, Started: native.Started}
+			surface, done, err := registry.WindowStreamScope(peer, lease)
+			if err != nil {
+				return daemon.UIStreamAdmission{}, err
+			}
+			return daemon.UIStreamAdmission{Key: lease, Windows: []string{surface}, Done: done, Retire: func() {
+				if registry.WithWindowLease(peer, surface, lease, func() { clearWindow(surface) }) {
+					ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+					defer cancel()
+					if err := registry.Hide(ctx, peer, surface); err != nil {
+						logging.Module(logging.ModIPC).Warn("embedded stream hide failed", "error", err)
+					}
+				}
+			}}, nil
+		}
+	}
 	server.BrowserNative = &browsernative.Handler{Service: automationState, Context: nativeContext}
 	accountCallback, callbackErr := accountcallback.NewAccountCallbackServer(func(w http.ResponseWriter, r *http.Request, generation string) {
 		server.ServeAccountCallback(w, r, generation)
@@ -964,6 +1038,7 @@ func runDaemon(identity string, resources Resources) {
 			refreshLifecycleMenu()
 		}
 	}
+	embeddedService.Quit = quitDSHWork
 	quitConfirmation := &quitConfirmation{
 		inspect: petActivity.InspectQuit,
 		ask: func(inspection dshactivity.QuitInspection, complete func(bool)) {
@@ -1284,11 +1359,26 @@ func runDaemon(identity string, resources Resources) {
 			logging.Module(logging.ModNotify).Warn("notification delivery failed", logging.ErrAttrs(err, "")...)
 		}
 	})
+	closeEmbeddedInstances := func() error {
+		if embeddedService.Registry != nil {
+			return embeddedService.Registry.Close()
+		}
+		return nil
+	}
 	host.SetQuitHandler(func() {
 		windowLedger.BeginQuit()
 		quitFlow.Begin(
 			hideBackgroundSurfaces,
 			func() error {
+				// Keep every UI's stream and native message pump alive until all CEF
+				// documents and supervised process trees have joined. QuitFlow retains
+				// the normal retry/recovery route if this barrier fails.
+				if err := closeEmbeddedInstances(); err != nil {
+					if embeddedService.Registry == nil || !embeddedService.Registry.CleanupComplete() {
+						return err
+					}
+					logging.Module(logging.ModRuntime).Error("embedded cleanup completed-abnormally", "error", err)
+				}
 				petWindowCloseAllowed.Store(true)
 				if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
 					return err
@@ -1316,12 +1406,22 @@ func runDaemon(identity string, resources Resources) {
 	petInputContext, stopPetInput := context.WithCancel(context.Background())
 	desktop.OnShutdown(func() {
 		server.BeginDrain()
+		embeddedCloseErr := closeEmbeddedInstances()
+		if embeddedCloseErr != nil {
+			label := "embedded instance shutdown incomplete"
+			if embeddedService.Registry != nil && embeddedService.Registry.CleanupComplete() {
+				label = "embedded cleanup completed-abnormally"
+			}
+			logging.Module(logging.ModRuntime).Error(label, "error", embeddedCloseErr)
+		}
 		stopPetInput()
 		applicationShuttingDown.Store(true)
 		updates.Stop()
 		updates.closeStatePublisher()
 		acquisitionStreamPublisher.close()
-		hub.SendCommand("", "background-stopping", 10*time.Second, true)
+		if embeddedCloseErr == nil || (embeddedService.Registry != nil && embeddedService.Registry.CleanupComplete()) {
+			hub.SendCommand("", "background-stopping", 10*time.Second, true)
+		}
 		_ = launcher.Stop()
 		if stopPetMenuRefresh != nil {
 			stopPetMenuRefresh()

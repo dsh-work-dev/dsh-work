@@ -65,6 +65,7 @@ func (s Subscription) Close() {
 }
 
 type subscriber struct {
+	windows  map[string]bool
 	messages chan Message
 	done     chan struct{}
 }
@@ -131,7 +132,7 @@ func (h *Hub) SendCommand(window, name string, ttl time.Duration, data any) {
 	defer h.mu.Unlock()
 	now := h.now()
 	message := Message{Type: "command", Name: name, Window: window, ExpiresAt: now.Add(ttl).UnixMilli(), Data: append(json.RawMessage(nil), raw...)}
-	if len(h.subscribers) == 0 {
+	if !h.hasSubscriberLocked(window) {
 		if len(h.commands) == commandBuffer {
 			copy(h.commands, h.commands[1:])
 			h.commands = h.commands[:len(h.commands)-1]
@@ -162,7 +163,18 @@ func (h *Hub) SendTransient(window, name string, data any) {
 
 // Subscribe atomically snapshots topics, takes unexpired staged commands and
 // begins buffering later messages in a 256-entry queue.
-func (h *Hub) Subscribe() (Subscription, []Message) {
+func (h *Hub) Subscribe() (Subscription, []Message) { return h.subscribe(nil) }
+
+// SubscribeWindows scopes commands to admitted windows. Unmatched staged
+// commands remain queued for their owner; state topics remain shared.
+func (h *Hub) SubscribeWindows(windows []string) (Subscription, []Message) {
+	allowed := make(map[string]bool, len(windows))
+	for _, window := range windows {
+		allowed[window] = true
+	}
+	return h.subscribe(allowed)
+}
+func (h *Hub) subscribe(windows map[string]bool) (Subscription, []Message) {
 	if h == nil {
 		closed := make(chan struct{})
 		close(closed)
@@ -171,7 +183,7 @@ func (h *Hub) Subscribe() (Subscription, []Message) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.nextID++
-	current := &subscriber{messages: make(chan Message, subscriberBuffer), done: make(chan struct{})}
+	current := &subscriber{windows: windows, messages: make(chan Message, subscriberBuffer), done: make(chan struct{})}
 	h.subscribers[h.nextID] = current
 
 	initial := make([]Message, 0, len(h.topicOrder)+len(h.commands))
@@ -179,17 +191,26 @@ func (h *Hub) Subscribe() (Subscription, []Message) {
 		initial = append(initial, Message{Type: "state", Topic: topic, Value: append(json.RawMessage(nil), h.topics[topic]...)})
 	}
 	now := h.now().UnixMilli()
+	var retained []Message
 	for _, message := range h.commands {
-		if message.ExpiresAt > now {
+		if message.ExpiresAt <= now {
+			continue
+		}
+		if current.accepts(message.Window) {
 			initial = append(initial, cloneMessage(message))
+		} else {
+			retained = append(retained, message)
 		}
 	}
-	h.commands = nil
+	h.commands = retained
 	return Subscription{Messages: current.messages, Done: current.done, hub: h, id: h.nextID}, initial
 }
 
 func (h *Hub) broadcastLocked(message Message) {
 	for id, current := range h.subscribers {
+		if message.Type == "command" && !current.accepts(message.Window) {
+			continue
+		}
 		select {
 		case current.messages <- cloneMessage(message):
 		default:
@@ -214,4 +235,16 @@ func cloneMessage(message Message) Message {
 	message.Value = append(json.RawMessage(nil), message.Value...)
 	message.Data = append(json.RawMessage(nil), message.Data...)
 	return message
+}
+
+func (s *subscriber) accepts(window string) bool {
+	return window == "" || s.windows == nil || s.windows[window]
+}
+func (h *Hub) hasSubscriberLocked(window string) bool {
+	for _, subscriber := range h.subscribers {
+		if subscriber.accepts(window) {
+			return true
+		}
+	}
+	return false
 }

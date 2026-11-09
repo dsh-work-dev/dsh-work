@@ -60,11 +60,16 @@ type ExitResult struct {
 }
 
 type Diagnostics struct {
-	PID             uint32
-	ActiveProcesses uint32
-	StdoutTail      string
-	StderrTail      string
-	Exit            ExitResult
+	PID uint32
+	// ProcessStarted is the immutable Windows process creation FILETIME captured
+	// from the supervisor-owned handle before the child is resumed. Zero means
+	// unavailable; legacy Workers do not require instance admission.
+	ProcessStarted      uint64
+	ProcessStartedError string
+	ActiveProcesses     uint32
+	StdoutTail          string
+	StderrTail          string
+	Exit                ExitResult
 }
 
 // Worker owns one process boundary for one immutable generation.

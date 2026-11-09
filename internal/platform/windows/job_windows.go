@@ -192,6 +192,14 @@ func startJobCommand(ctx context.Context, executable string, args []string, env 
 		return nil, fmt.Errorf("start DSH process: %w", err)
 	}
 
+	var created, exited, kernel, user win.Filetime
+	// Instance evidence is required by the private broker, not by legacy Worker
+	// callers. Preserve the original launch contract if this optional query fails.
+	creationErr := win.GetProcessTimes(processInfo.Process, &created, &exited, &kernel, &user)
+	var started uint64
+	if creationErr == nil {
+		started = uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+	}
 	if resumed, err := win.ResumeThread(processInfo.Thread); err != nil || resumed == ^uint32(0) {
 		if err == nil {
 			err = fmt.Errorf("ResumeThread returned %d", resumed)
@@ -204,7 +212,10 @@ func startJobCommand(ctx context.Context, executable string, args []string, env 
 	}
 	closeHandle(processInfo.Thread)
 
-	worker := newJobWorker(job, processInfo.Process, processInfo.ProcessId, stdoutRead, stderrRead, rawHandler)
+	worker := newJobWorker(job, processInfo.Process, processInfo.ProcessId, started, stdoutRead, stderrRead, rawHandler)
+	if creationErr != nil {
+		worker.startedError = creationErr.Error()
+	}
 	closeJob = false
 	closeStdout = false
 	closeStderr = false
@@ -287,33 +298,36 @@ func environmentBlock(overrides map[string]string) ([]uint16, error) {
 }
 
 type jobWorker struct {
-	job         win.Handle
-	process     win.Handle
-	pid         uint32
-	stdout      *os.File
-	stderr      *os.File
-	events      chan supervisor.OutputEvent
-	stop        chan struct{}
-	stopOnce    sync.Once
-	closeMu     sync.Mutex
-	closed      bool
-	readers     sync.WaitGroup
-	readersDone chan struct{}
-	exited      chan struct{}
-	waitDone    chan struct{}
-	rawHandler  supervisor.RawOutputHandler
-	exitMu      sync.RWMutex
-	exit        supervisor.ExitResult
-	tailMu      sync.RWMutex
-	stdoutTail  string
-	stderrTail  string
+	job          win.Handle
+	process      win.Handle
+	pid          uint32
+	started      uint64
+	startedError string
+	stdout       *os.File
+	stderr       *os.File
+	events       chan supervisor.OutputEvent
+	stop         chan struct{}
+	stopOnce     sync.Once
+	closeMu      sync.Mutex
+	closed       bool
+	readers      sync.WaitGroup
+	readersDone  chan struct{}
+	exited       chan struct{}
+	waitDone     chan struct{}
+	rawHandler   supervisor.RawOutputHandler
+	exitMu       sync.RWMutex
+	exit         supervisor.ExitResult
+	tailMu       sync.RWMutex
+	stdoutTail   string
+	stderrTail   string
 }
 
-func newJobWorker(job, process win.Handle, pid uint32, stdoutHandle, stderrHandle win.Handle, rawHandler supervisor.RawOutputHandler) *jobWorker {
+func newJobWorker(job, process win.Handle, pid uint32, started uint64, stdoutHandle, stderrHandle win.Handle, rawHandler supervisor.RawOutputHandler) *jobWorker {
 	worker := &jobWorker{
 		job:         job,
 		process:     process,
 		pid:         pid,
+		started:     started,
 		stdout:      os.NewFile(uintptr(stdoutHandle), "dsh-stdout"),
 		stderr:      os.NewFile(uintptr(stderrHandle), "dsh-stderr"),
 		events:      make(chan supervisor.OutputEvent, 128),
@@ -365,16 +379,16 @@ func (w *jobWorker) RequestStop(ctx context.Context) error {
 }
 
 func (w *jobWorker) ForceStop(_ context.Context) error {
-	select {
-	case <-w.exited:
+	w.closeMu.Lock()
+	defer w.closeMu.Unlock()
+	if w.closed {
 		return nil
-	default:
 	}
+	// Root exit does not imply the supervised job's descendants have exited.
 	if err := win.TerminateJobObject(w.job, 1); err != nil {
-		select {
-		case <-w.exited:
+		active, queryErr := w.queryActiveProcesses()
+		if queryErr == nil && active == 0 {
 			return nil
-		default:
 		}
 		return err
 	}
@@ -447,11 +461,13 @@ func (w *jobWorker) Diagnostics() supervisor.Diagnostics {
 		exit.Err = "active process query failed: " + activeErr.Error()
 	}
 	return supervisor.Diagnostics{
-		PID:             w.pid,
-		ActiveProcesses: active,
-		StdoutTail:      stdoutTail,
-		StderrTail:      stderrTail,
-		Exit:            exit,
+		PID:                 w.pid,
+		ProcessStarted:      w.started,
+		ProcessStartedError: w.startedError,
+		ActiveProcesses:     active,
+		StdoutTail:          stdoutTail,
+		StderrTail:          stderrTail,
+		Exit:                exit,
 	}
 }
 

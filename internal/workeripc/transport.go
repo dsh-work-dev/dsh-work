@@ -64,6 +64,45 @@ func (t *Transport) Connect(ctx context.Context) (net.Conn, error) {
 	return t.dial(ctx, "pipe", "127.0.0.1:1")
 }
 
+// ConnectProcess additionally binds the authenticated pipe to the OS process
+// launched by the caller's supervisor. The per-launch secret proves the launch
+// instance; the kernel peer identity prevents a self-reported PID admission.
+func (t *Transport) ConnectProcess(ctx context.Context, pid uint32) (net.Conn, error) {
+	return t.connectProcess(ctx, pid, 0, false)
+}
+
+// ConnectProcessInstance binds a private broker to the exact process instance
+// captured by its supervisor. Existing PID-only callers retain their contract.
+func (t *Transport) ConnectProcessInstance(ctx context.Context, pid uint32, started uint64) (net.Conn, error) {
+	if started == 0 {
+		return nil, errors.New("WORKER_IPC_PROCESS_INSTANCE_REQUIRED")
+	}
+	return t.connectProcess(ctx, pid, started, true)
+}
+func (t *Transport) connectProcess(ctx context.Context, pid uint32, started uint64, instance bool) (net.Conn, error) {
+	c, err := t.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw := c
+	if tracked, ok := c.(*trackedConn); ok {
+		raw = tracked.Conn
+	}
+	actual, err := peerProcessID(raw)
+	if err != nil || pid == 0 || actual != pid {
+		c.Close()
+		return nil, errors.New("WORKER_IPC_PROCESS_REJECTED")
+	}
+	if instance {
+		actualStarted, e := peerProcessStarted(raw)
+		if e != nil || actualStarted != started {
+			c.Close()
+			return nil, errors.New("WORKER_IPC_PROCESS_INSTANCE_REJECTED")
+		}
+	}
+	return c, nil
+}
+
 func (t *Transport) dial(ctx context.Context, network, address string) (net.Conn, error) {
 	if address != "127.0.0.1:1" {
 		return nil, errors.New("Worker IPC cannot dial another authority")

@@ -25,10 +25,11 @@ export function mountBrowserPermission(){
   for(const b of [deny,allow,always])b.disabled=expired||busy;
   always.hidden=!r?.allowAlways||connecting;allow.hidden=connecting;
   if(!r){title.textContent=t('automation.permission.empty');body.textContent=destination.textContent=detail.textContent='';return}
-  title.textContent=t(connecting?'automation.access.connecting':r.kind==='action'?'automation.permission.action':r.kind==='site'?'automation.access.siteTitle':'automation.access.browserTitle');
-  body.textContent=r.kind==='action'?`${r.title} · ${t('automation.access.category.'+r.category)}`:t(r.kind==='site'?'automation.access.siteBody':'automation.access.browserBody',{title:r.title});
-  destination.textContent=r.kind==='browser'?`${r.browser==='edge'?'Edge':'Chrome'} · ${r.profile}`:r.site;
-  detail.textContent=r.kind==='action'?(r.action??''):t(r.kind==='site'?'automation.access.siteWarning':'automation.access.warning');
+  const embedded=r.browser==='embedded',conversation=embedded&&r.kind==='browser';
+  title.textContent=t(connecting?'automation.access.connecting':r.kind==='action'?'automation.permission.action':r.kind==='site'?'automation.access.siteTitle':conversation?'automation.access.embeddedTitle':'automation.access.browserTitle');
+  body.textContent=r.kind==='action'?`${r.title} · ${t('automation.access.category.'+r.category)}`:t(r.kind==='site'?'automation.access.siteBody':conversation?'automation.access.embeddedBody':'automation.access.browserBody',{title:r.title});
+  destination.textContent=r.kind==='browser'?(embedded?t('automation.access.embeddedBrowser'):`${r.browser==='edge'?'Edge':'Chrome'} · ${r.profile}`):r.site;
+  detail.textContent=r.kind==='action'?(r.action??''):t(r.kind==='site'?'automation.access.siteWarning':conversation?'automation.access.embeddedWarning':'automation.access.warning');
   if(changed){error.textContent='';deny.focus()}
  }catch{for(const b of [deny,allow,always])b.disabled=true;error.textContent=t('error.loadSettings')}finally{loading=false}}
  void refresh();const timer=setInterval(()=>void refresh(),400);window.addEventListener('pagehide',()=>clearInterval(timer));

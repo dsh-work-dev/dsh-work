@@ -62,6 +62,9 @@ func Run(resources Resources) {
 		logging.Fatal(logging.Module(logging.ModApp), "installer maintenance in progress")
 	}
 	identity := filepath.Dir(app.DefaultConfig(currentDiscoveryRoot()).SettingsPath)
+	if root := embeddedDevelopmentRoot(); root != "" {
+		identity = root
+	}
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		identity = root
 	}
@@ -80,6 +83,9 @@ func Run(resources Resources) {
 
 func browserDaemonIdentity() string {
 	identity := filepath.Dir(app.DefaultConfig(currentDiscoveryRoot()).SettingsPath)
+	if root := embeddedDevelopmentRoot(); root != "" {
+		identity = root
+	}
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		identity = root
 	}
@@ -127,6 +133,9 @@ func runBrowserHostCommand() error {
 }
 
 func logRoot() string {
+	if root := embeddedDevelopmentRoot(); root != "" {
+		return filepath.Join(root, "logs")
+	}
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		return filepath.Join(root, "logs")
 	}

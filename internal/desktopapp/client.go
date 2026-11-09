@@ -50,7 +50,13 @@ func webviewPermissions(surface string) map[application.PermissionType]applicati
 }
 
 func runDesktopClient(identity string, resources Resources) error {
-	section, requestedWindow := "", "workspace"
+	primarySurface := "workspace"
+	embeddedInstanceKey := "default"
+	if embeddedDevelopmentRoot() != "" && os.Getenv("DSH_WORK_EMBEDDED_UI_INSTANCE") == "2" {
+		primarySurface = "workspace-2"
+		embeddedInstanceKey = "candidate-2"
+	}
+	section, requestedWindow := "", primarySurface
 	if len(os.Args) > 2 && os.Args[1] == "--ui" {
 		section = os.Args[2]
 		if len(os.Args) > 4 && os.Args[3] == "--window" {
@@ -60,7 +66,11 @@ func runDesktopClient(identity string, resources Resources) error {
 	// This process holds the foreground right from the user's launch or link;
 	// pass it on so the running UI instance can bring its window forward.
 	platform.AllowForegroundActivation()
-	existing := daemon.NewClient(identity + "-ui")
+	uiIdentity := identity + "-ui"
+	if embeddedDevelopmentRoot() != "" && os.Getenv("DSH_WORK_EMBEDDED_UI_INSTANCE") == "2" {
+		uiIdentity += "-embedded-2"
+	}
+	existing := daemon.NewClient(uiIdentity)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	err := existing.JSON(ctx, "/open", uiOpenRequest{Section: section, Window: requestedWindow}, nil)
 	cancel()
@@ -68,7 +78,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	if err == nil {
 		return nil
 	}
-	listener, err := daemon.Listen(identity + "-ui")
+	listener, err := daemon.Listen(uiIdentity)
 	if err != nil {
 		return err
 	}
@@ -90,6 +100,9 @@ func runDesktopClient(identity string, resources Resources) error {
 	webviewRoot := paths.CacheRoot
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		webviewRoot = filepath.Join(root, "cache")
+	}
+	if root := embeddedDevelopmentRoot(); root != "" {
+		webviewRoot = filepath.Join(root, "cache", "ui-"+os.Getenv("DSH_WORK_EMBEDDED_UI_INSTANCE"))
 	}
 	webviewDataPath := filepath.Join(webviewRoot, "webview")
 	defer client.Close()
@@ -126,11 +139,15 @@ func runDesktopClient(identity string, resources Resources) error {
 		if snapshot.URL == "" {
 			return nil
 		}
-		return &desktopbridge.Bridge{Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) },
+		embeddedVersion := ""
+		if selection := snapshot.Status.LaunchSelection; embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(filepath.Join(embeddedDevelopmentRoot(), "data")) {
+			embeddedVersion = selection.RuntimeVersion
+		}
+		return &desktopbridge.Bridge{EmbeddedBrowserVersion: embeddedVersion, Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) },
 			ReportBoot: func(ctx context.Context, generation, detail string) error {
 				ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 				defer cancel()
-				return client.Call(ctx, "HostService", "ReportWebBoot", "workspace", []any{generation, detail}, nil)
+				return client.Call(ctx, "HostService", "ReportWebBoot", primarySurface, []any{generation, detail}, nil)
 			},
 			SaveSessionExport: func(ctx context.Context, filename string, write func(io.Writer) error) (bool, error) {
 				return nativeui.SaveSessionLogArchive(desktop, filename, write)
@@ -151,7 +168,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	}, func(window, command string) {
 		logging.Module(logging.ModIPC).Warn("pet command queue full; dropped oldest command", "window", window, "command", command)
 	})
-	shellService := &desktopclient.ShellService{Open: func(section string) { open(section, "workspace") }, ReportOpenedSession: func(ctx context.Context, surface, id, reportedError string) error {
+	shellService := &desktopclient.ShellService{Open: func(section string) { open(section, primarySurface) }, ReportOpenedSession: func(ctx context.Context, surface, id, reportedError string) error {
 		return client.Call(ctx, "DSHPageService", "ReportSessionOpened", surface, []any{id, reportedError}, nil)
 	}, ReportPendingInteraction: func(ctx context.Context, surface string, interaction dshinteraction.Report) error {
 		return client.Call(ctx, "DSHPageService", "ReportInteraction", surface, []any{interaction}, nil)
@@ -196,6 +213,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		defer mu.Unlock()
 		return current.Update
 	}}
+	embeddedClient := &desktopclient.EmbeddedBrowserService{Client: client, Enabled: embeddedDevelopmentRoot() != "", InstanceKey: embeddedInstanceKey, QuitUI: func() { desktop.Quit() }}
 	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
@@ -203,7 +221,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			application.NewService(hostService), application.NewService(&desktopclient.ManagerService{Client: client}),
 			application.NewService(&desktopclient.AutomationService{Client: client}), application.NewService(&desktopclient.SettingsService{Client: client}), application.NewService(&desktopclient.StorageService{Client: client}), application.NewService(&desktopclient.PetSettingsService{Client: client}),
 			application.NewService(&desktopclient.DiagnosticsService{Client: client}),
-			application.NewService(shellService),
+			application.NewService(shellService), application.NewService(embeddedClient),
 			application.NewService(&desktopclient.LogService{}),
 		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
 			mu.Lock()
@@ -213,7 +231,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	})
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
-	ledger := lifecycle.NewWindowLedger("workspace")
+	ledger := lifecycle.NewWindowLedger(primarySurface)
 	remember := func(window application.Window, options application.WebviewWindowOptions) {
 		store := remoteGeometry{client: client, values: state.Preferences}
 		flush := nativeui.RememberWindowGeometry(window, options, store)
@@ -322,7 +340,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		if workspace != nil {
 			return
 		}
-		workOptions := newOptions("workspace")
+		workOptions := newOptions(primarySurface)
 		workOptions.Frameless = true
 		workOptions.URL = workspaceURL(manager, section)
 		// Composition hosting moves hit-testing to the native window: edge
@@ -330,19 +348,20 @@ func runDesktopClient(identity string, resources Resources) error {
 		// longer depend on which document is under the pointer. Without it,
 		// Wails detects edges in the top document, which the DSH frame covers.
 		workOptions.Windows.WebView2CompositionHosting = true
+		embeddedComposition(&workOptions)
 		workOptions.Zoom = state.Preferences.WorkspaceZoom
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
-		registerWorkspaceWindow("workspace", workspaceWindow)
+		registerWorkspaceWindow(primarySurface, workspaceWindow)
 		remember(workspace, workOptions)
 		if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 			desktopprobe.InstallClient(desktop, workspace, report)
 		}
-		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow("workspace", workspaceWindow, event) })
+		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow(primarySurface, workspaceWindow, event) })
 	}
 	open = func(section, requestedWindow string) string {
 		if section == "__boot" {
-			return "workspace"
+			return primarySurface
 		}
 		if applicationShuttingDown.Load() || ledger.IsQuitting() {
 			return ""
@@ -358,9 +377,9 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		windowName := requestedWindow
 		if _, exists := windows[windowName]; !exists {
-			windowName = "workspace"
+			windowName = primarySurface
 		}
-		created := windowName == "workspace" && workspace == nil
+		created := windowName == primarySurface && workspace == nil
 		if created {
 			createWorkspace(section)
 		}
@@ -393,7 +412,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		protocolMu.Unlock()
 		if started {
-			open("", "workspace")
+			open("", primarySurface)
 		}
 	})
 	ipcServer := daemon.HTTPServer(uiHandler(open, func(section string) {
@@ -407,12 +426,42 @@ func runDesktopClient(identity string, resources Resources) error {
 		if window != nil {
 			window.Close()
 		}
-	}, desktop.Quit))
+	}, func() {
+		if embeddedDevelopmentRoot() != "" {
+			windowMu.Lock()
+			window := workspace
+			windowMu.Unlock()
+			if window != nil {
+				ctx := context.WithValue(context.Background(), application.WindowKey, window)
+				if err := embeddedClient.ExitUI(ctx); err != nil {
+					logging.Module(logging.ModIPC).Error("candidate UI normal stop failed", "error", err)
+				}
+				return
+			}
+		}
+		desktop.Quit()
+	}))
 	defer ipcServer.Close()
 	streamCtx, stopStream := context.WithCancel(context.Background())
 	defer stopStream()
 	desktop.OnShutdown(func() {
 		applicationShuttingDown.Store(true)
+		if embeddedDevelopmentRoot() != "" {
+			windowMu.Lock()
+			names := make([]string, 0, len(windows))
+			for name := range windows {
+				names = append(names, name)
+			}
+			windowMu.Unlock()
+			for _, name := range names {
+				ctx, stop := context.WithTimeout(context.Background(), 8*time.Second)
+				err := client.Call(ctx, "EmbeddedBrowserService", "Closed", name, nil, nil)
+				stop()
+				if err != nil {
+					logging.Module(logging.ModIPC).Warn("embedded presenter close failed", "error", err)
+				}
+			}
+		}
 		ledger.BeginQuit()
 		stopStream()
 		focusReports.close()
@@ -434,11 +483,23 @@ func runDesktopClient(identity string, resources Resources) error {
 		windowMu.Unlock()
 		open(section, requestedWindow)
 		if openRequestedByProtocol {
-			open("", "workspace")
+			open("", primarySurface)
 		}
 		go func() { _ = ipcServer.Serve(listener) }()
 		go func() {
-			body, err := client.Stream(streamCtx, "/stream")
+			streamPath := "/stream"
+			if embeddedClient.Enabled {
+				ctx, cancel := context.WithTimeout(context.WithValue(streamCtx, application.WindowKey, workspace), 8*time.Second)
+				admission, err := embeddedClient.RegisterWindow(ctx)
+				cancel()
+				if err != nil {
+					logging.Module(logging.ModIPC).Error("native window admission failed", "error", err)
+					desktop.Quit()
+					return
+				}
+				streamPath += "?windowLease=" + url.QueryEscape(admission.Lease)
+			}
+			body, err := client.Stream(streamCtx, streamPath)
 			if err == nil {
 				processor := &streamProcessor{
 					current:   &current,

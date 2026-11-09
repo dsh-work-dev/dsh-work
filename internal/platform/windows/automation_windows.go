@@ -280,7 +280,7 @@ func validateAutomationPackages(root string, c automation.Capability) error {
 			return errors.New("AUV executable missing")
 		}
 	}
-	expected := map[string]string{"@modelcontextprotocol/sdk": automation.SDKVersion, "@playwright/mcp": automation.MCPVersion}
+	expected := map[string]string{"@modelcontextprotocol/sdk": automation.SDKVersion, "@playwright/mcp": automation.MCPVersion, "ws": automation.BrowserWebSocketVersion}
 	if c == automation.AUV {
 		expected = map[string]string{"@auv-js/sdk": automation.AUVVersion, "@auv-js/cli-win32-x64-msvc": automation.AUVVersion}
 	}
