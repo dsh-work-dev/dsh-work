@@ -50,7 +50,7 @@ func (g *guard) startMCPBroker() error {
 	cmd := exec.Command(g.cfg.Plan.Executable, g.cfg.Plan.Args...)
 	cmd.Dir = g.cfg.Plan.WorkingDirectory
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &nativeEventWriter{guard: g}
 	for key, value := range g.cfg.Plan.Env {
 		if key != "NODE_OPTIONS" && key != "DSH_WORK_MCP_OWNER_BOOTSTRAP" {
 			cmd.Env = append(cmd.Env, key+"="+value)

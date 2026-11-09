@@ -25,3 +25,16 @@ func TestNativeLifecycleEvidenceFiltersStderr(t *testing.T) {
 		t.Fatal("unbounded native diagnostic events")
 	}
 }
+
+func TestMCPLifecycleEvidenceFiltersStderr(t *testing.T) {
+	g := &guard{}
+	w := &nativeEventWriter{guard: g}
+	for _, part := range []string{"DSH_MCP_EV", "ENT inspect-start\n", "DSH_MCP_EVENT inspect-error private-body\n", "DSH_MCP_EVENT stop-private-close\n", strings.Repeat("x", 128) + "DSH_MCP_EVENT tools-ready\n"} {
+		if n, err := w.Write([]byte(part)); err != nil || n != len(part) {
+			t.Fatal("stderr drain", n, err)
+		}
+	}
+	if len(g.state.NativeEvents) != 2 || g.state.NativeEvents[0].Name != "mcp-inspect-start" || g.state.NativeEvents[1].Name != "mcp-stop-private-close" {
+		t.Fatal("non-fixed stderr escaped", g.state.NativeEvents)
+	}
+}

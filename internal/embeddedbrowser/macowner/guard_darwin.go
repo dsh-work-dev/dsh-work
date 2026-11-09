@@ -62,6 +62,7 @@ func (g *guard) notify(kind string) {
 	err = writeFrame(c, value)
 	g.daemonWrite.Unlock()
 	if err != nil {
+		g.recordMCPOwnerEvent("owner-notify-failed")
 		c.Close()
 		g.requestStop()
 	}
@@ -144,13 +145,16 @@ func (g *guard) serve(c net.Conn) {
 		for {
 			var command message
 			if readFrame(c, &command) != nil {
+				g.recordMCPOwnerEvent("owner-daemon-read-closed")
 				g.requestStop()
 				return
 			}
 			switch command.Kind {
 			case "stop":
+				g.recordMCPOwnerEvent("owner-stop-command")
 				g.requestStop()
 			case "force":
+				g.recordMCPOwnerEvent("owner-force-command")
 				g.force()
 			default:
 				g.requestStop()
@@ -676,9 +680,67 @@ func (w *nativeEventWriter) Write(data []byte) (int, error) {
 	}
 	return len(data), nil
 }
+func (g *guard) recordMCPOwnerEvent(name string) {
+	if g.cfg.MCP != nil && g.cfg.Plan.Env["DSH_WORK_BROWSER_DIAGNOSTICS"] == "1" {
+		(&nativeEventWriter{guard: g}).record("DSH_MCP_EVENT " + name)
+	}
+}
+
 func (w *nativeEventWriter) record(line string) {
 	name := ""
 	switch line {
+	case "DSH_MCP_EVENT owner-notify-failed":
+		name = "mcp-owner-notify-failed"
+	case "DSH_MCP_EVENT owner-daemon-read-closed":
+		name = "mcp-owner-daemon-read-closed"
+	case "DSH_MCP_EVENT owner-stop-command":
+		name = "mcp-owner-stop-command"
+	case "DSH_MCP_EVENT owner-force-command":
+		name = "mcp-owner-force-command"
+	case "DSH_MCP_EVENT entry":
+		name = "mcp-entry"
+	case "DSH_MCP_EVENT private-connected":
+		name = "mcp-private-connected"
+	case "DSH_MCP_EVENT hmac-authenticated":
+		name = "mcp-hmac-authenticated"
+	case "DSH_MCP_EVENT init":
+		name = "mcp-init"
+	case "DSH_MCP_EVENT adapter-ready":
+		name = "mcp-adapter-ready"
+	case "DSH_MCP_EVENT route-ready":
+		name = "mcp-route-ready"
+	case "DSH_MCP_EVENT sdk-connect-start":
+		name = "mcp-sdk-connect-start"
+	case "DSH_MCP_EVENT sdk-connected":
+		name = "mcp-sdk-connected"
+	case "DSH_MCP_EVENT tools-ready":
+		name = "mcp-tools-ready"
+	case "DSH_MCP_EVENT inspect-start":
+		name = "mcp-inspect-start"
+	case "DSH_MCP_EVENT inspect-complete":
+		name = "mcp-inspect-complete"
+	case "DSH_MCP_EVENT inspect-error":
+		name = "mcp-inspect-error"
+	case "DSH_MCP_EVENT stop-private-error":
+		name = "mcp-stop-private-error"
+	case "DSH_MCP_EVENT stop-private-close":
+		name = "mcp-stop-private-close"
+	case "DSH_MCP_EVENT stop-private-timeout":
+		name = "mcp-stop-private-timeout"
+	case "DSH_MCP_EVENT stop-hmac-rejected":
+		name = "mcp-stop-hmac-rejected"
+	case "DSH_MCP_EVENT stop-frame-rejected":
+		name = "mcp-stop-frame-rejected"
+	case "DSH_MCP_EVENT stop-protocol-error":
+		name = "mcp-stop-protocol-error"
+	case "DSH_MCP_EVENT stop-cdp-error":
+		name = "mcp-stop-cdp-error"
+	case "DSH_MCP_EVENT stop-cdp-close":
+		name = "mcp-stop-cdp-close"
+	case "DSH_MCP_EVENT stop-wire-timeout":
+		name = "mcp-stop-wire-timeout"
+	case "DSH_MCP_EVENT stop-call-fatal":
+		name = "mcp-stop-call-fatal"
 	case "DSH_CEF_EVENT shutdown-enter":
 		name = "shutdown-enter"
 	case "DSH_CEF_EVENT before-close":

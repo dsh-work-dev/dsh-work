@@ -11,10 +11,22 @@ import {OwnedCEFProtocolV1} from './owned-cef.mjs';
 import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
 import {openPrivateSocket} from './native-socket.mjs';
+// Trusted launch-only diagnostics: fixed, once-per-process metadata only.
+const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
+const diagnosticSeen=new Set();
+let diagnosticStop;
+const diagnostic=stage=>{
+ if(process.env.DSH_WORK_BROWSER_DIAGNOSTICS!=='1'||!diagnosticStages.has(stage)||diagnosticSeen.has(stage))return;
+ if(stage.startsWith('stop-')){if(diagnosticStop)return;diagnosticStop=stage}
+ diagnosticSeen.add(stage);
+ try{fs.writeSync(2,'DSH_MCP_EVENT '+stage+'\n')}catch{}
+};
+diagnostic('entry');
 let stopping=false;
 const connection=JSON.parse(fs.readFileSync(new URL('./native-connection.json',import.meta.url),'utf8'));
 const socket=await openPrivateSocket(connection,()=>stopping);
 if(!socket)throw Error('BROWSER_PRIVATE_CONNECTION_CANCELLED');
+diagnostic('private-connected');
 const token=process.env.DSH_WORK_BRIDGE_TOKEN;
 delete process.env.DSH_WORK_BRIDGE_PIPE;delete process.env.DSH_WORK_BRIDGE_TOKEN;
 let buffer=Buffer.alloc(0),nonce,authenticated=false;
@@ -24,25 +36,26 @@ const geometry=new Map();
 let commandId=0;const commands=new Map();
 const mac=role=>createHmac('sha256',token).update(role).update(nonce).digest();
 const send=m=>{const b=Buffer.from(JSON.stringify(m));if(b.length>8*1024*1024)throw Error('BROWSER_ADAPTER_MESSAGE_TOO_LARGE');const h=Buffer.alloc(4);h.writeUInt32LE(b.length);socket.write(Buffer.concat([h,b]));};
-async function stop(){if(stopping)return;stopping=true;for(const p of commands.values()){clearTimeout(p.timer);p.reject(Error('BROWSER_ROUTE_CLOSED'))}commands.clear();try{await client?.close()}catch{}try{await transport?.close()}catch{}cdp?.terminate();wss?.close();server?.close();socket.destroy();}
-socket.on('error',()=>void stop());socket.on('close',()=>void stop());
-socket.setTimeout(3000,()=>socket.destroy());
+async function stop(reason){if(stopping)return;stopping=true;diagnostic('stop-'+reason);for(const p of commands.values()){clearTimeout(p.timer);p.reject(Error('BROWSER_ROUTE_CLOSED'))}commands.clear();try{await client?.close()}catch{}try{await transport?.close()}catch{}cdp?.terminate();wss?.close();server?.close();socket.destroy();}
+socket.on('error',()=>void stop('private-error'));socket.on('close',()=>void stop('private-close'));
+socket.setTimeout(3000,()=>{diagnostic('stop-private-timeout');socket.destroy()});
 socket.on('data',chunk=>{
  buffer=Buffer.concat([buffer,chunk]);
  if(!nonce&&buffer.length>=32){nonce=buffer.subarray(0,32);buffer=buffer.subarray(32);socket.write(mac('worker'))}
- if(nonce&&!authenticated&&buffer.length>=32){if(!timingSafeEqual(buffer.subarray(0,32),mac('host'))){socket.destroy();return}buffer=buffer.subarray(32);authenticated=true;socket.setTimeout(0)}
+ if(nonce&&!authenticated&&buffer.length>=32){if(!timingSafeEqual(buffer.subarray(0,32),mac('host'))){diagnostic('stop-hmac-rejected');socket.destroy();return}buffer=buffer.subarray(32);authenticated=true;socket.setTimeout(0);diagnostic('hmac-authenticated')}
  if(!authenticated)return;
- while(buffer.length>=4){const n=buffer.readUInt32LE();if(!n||n>8*1024*1024){socket.destroy();return}if(buffer.length<n+4)return;const b=buffer.subarray(4,n+4);buffer=buffer.subarray(n+4);try{void receive(JSON.parse(b)).catch(e=>{send({kind:'fatal',error:e.message});void stop()})}catch{socket.destroy();return}}
+ while(buffer.length>=4){const n=buffer.readUInt32LE();if(!n||n>8*1024*1024){diagnostic('stop-frame-rejected');socket.destroy();return}if(buffer.length<n+4)return;const b=buffer.subarray(4,n+4);buffer=buffer.subarray(n+4);try{void receive(JSON.parse(b)).catch(e=>{send({kind:'fatal',error:e.message});void stop('protocol-error')})}catch{diagnostic('stop-frame-rejected');socket.destroy();return}}
 });
 const allowed=new Set(['browser_close','browser_resize','browser_console_messages','browser_handle_dialog','browser_emulate_media','browser_file_upload','browser_drop','browser_find','browser_fill_form','browser_press_key','browser_type','browser_navigate','browser_navigate_back','browser_network_requests','browser_network_request','browser_take_screenshot','browser_snapshot','browser_click','browser_drag','browser_hover','browser_select_option','browser_tabs','browser_wait_for']);
 async function receive(m){
  if(m.kind==='init'){
+  diagnostic('init');
   if(model)throw Error('BROWSER_ADAPTER_ALREADY_INITIALIZED');
   refs=createRefScope(m.refScope);
   require=createRequire(path.join(m.dependencies,'package.json'));
   for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
   const {WebSocketServer}=require('ws');
-  const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop()}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
+  const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop('wire-timeout')}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
   const protocol=m.routeProtocol??'extension-v2';
   if(!['extension-v2','owned-cef-v1'].includes(protocol))throw Error('BROWSER_ROUTE_PROTOCOL_REJECTED');
   model=protocol==='owned-cef-v1'?new OwnedCEFProtocolV1(command):new ExtensionProtocolV2(command);
@@ -57,25 +70,25 @@ async function receive(m){
   const endpointPath='/cdp/'+randomBytes(24).toString('hex');
   server=http.createServer((_req,res)=>res.writeHead(404).end());wss=new WebSocketServer({noServer:true,maxPayload:8*1024*1024});
   server.on('upgrade',(req,s,head)=>{if(req.url!==endpointPath||req.headers.origin||cdp||stopping){s.destroy();return}wss.handleUpgrade(req,s,head,ws=>wss.emit('connection',ws))});
-  wss.on('connection',ws=>{cdp=ws;model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop());ws.on('close',()=>void stop());ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
+  wss.on('connection',ws=>{cdp=ws;model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop('cdp-error'));ws.on('close',()=>void stop('cdp-close'));ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
   // Go may now flush the extension's initialization messages into this model.
-  send({kind:'adapter-ready'});
-  await model.ready();
+  send({kind:'adapter-ready'});diagnostic('adapter-ready');
+  await model.ready();diagnostic('route-ready');
   const {Client}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/index.js')));
   const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/stdio.js')));
   const {AjvJsonSchemaValidator}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/validation/ajv-provider.js')));
   validator=new AjvJsonSchemaValidator();
   transport=new StdioClientTransport({cwd:m.workspace || process.cwd(),command:process.execPath,args:[path.join(m.dependencies,'node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint',`ws://127.0.0.1:${server.address().port}${endpointPath}`,'--output-dir',m.output,'--timeout-action','10000','--timeout-navigation','15000',...(protocol==='owned-cef-v1'?['--snapshot-mode','none']:[])],env:process.env,stderr:'pipe'});
-  client=new Client({name:'DSH-Work-browser',version:'0.2.0'});const connecting=client.connect(transport);transport.stderr?.resume();await connecting;
-  const all=(await client.listTools()).tools;
+  client=new Client({name:'DSH-Work-browser',version:'0.2.0'});diagnostic('sdk-connect-start');const connecting=client.connect(transport);transport.stderr?.resume();await connecting;diagnostic('sdk-connected');
+  const all=(await client.listTools()).tools;diagnostic('tools-ready');
   // SDK result is the contract; never invent schemas/descriptions for tools.
   schemas=all.filter(t=>allowed.has(t.name));send({kind:'ready',schemas,allSchemas:all,pid:transport.pid});
  }else if(m.kind==='wire'){
   if(!model)throw Error('BROWSER_ADAPTER_NOT_INITIALIZED');const v=m.payload;
   if(v.id!==undefined){const p=commands.get(v.id);if(!p)return;commands.delete(v.id);clearTimeout(p.timer);v.error?p.reject(Error(String(v.error))):p.resolve(v.result)}else model.handleExtensionEvent(v.method,v.params);
  }else if(m.kind==='call'){
-  if(m.tool==='__dsh_inspect'){geometry.clear();try{send({kind:'result',id:m.id,result:await inspectBrowser(client,refs,m.arguments??{},(target,rect)=>{if(target!==undefined)geometry.set(refs.argumentsForMCP({target}).target,rect)})})}catch(e){send({kind:'result',id:m.id,error:e.message})}return;}
+  if(m.tool==='__dsh_inspect'){diagnostic('inspect-start');geometry.clear();try{send({kind:'result',id:m.id,result:await inspectBrowser(client,refs,m.arguments??{},(target,rect)=>{if(target!==undefined)geometry.set(refs.argumentsForMCP({target}).target,rect)})});diagnostic('inspect-complete')}catch(e){diagnostic('inspect-error');send({kind:'result',id:m.id,error:e.message})}return;}
   try{
    const schema=schemas?.find(t=>t.name===m.tool);if(!schema)throw Error('BROWSER_TOOL_UNAVAILABLE');
    const args=m.arguments;if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(schema.inputSchema.properties??{},k)))throw Error('BROWSER_INVALID_ARGUMENT');
@@ -104,6 +117,6 @@ async function receive(m){
    try{rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
    finally{indicator({running:false})}
    send({kind:'result',id:m.id,result:refs.resultForAgent(rawResult),rawResult})
-  }catch(e){send({kind:'result',id:m.id,error:e.message,fatal:true});void stop()}
+  }catch(e){send({kind:'result',id:m.id,error:e.message,fatal:true});void stop('call-fatal')}
  }else throw Error('BROWSER_ADAPTER_OPERATION_REJECTED');
 }
