@@ -190,6 +190,7 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 		err    error
 		log    *os.File
 	}
+	aSession := ""
 	launch := func(label, mode string) *peer {
 		t.Helper()
 		dir := filepath.Join(out, label)
@@ -208,7 +209,7 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 		}
 		env["DSH_WORK_EMBEDDED_UI_INSTANCE"] = "2"
 		env["WEBKIT_INSPECTOR_HTTP_SERVER"] = "127.0.0.1:" + strconv.Itoa(port)
-		save(dir, "session", map[string]string{"key": "session:" + strings.TrimSuffix(bSlot.Slot, "/"+filepath.Base(bSlot.Slot)), "workspace": selectedWorkspace.Row})
+		save(dir, "session", map[string]string{"key": aSession, "bKey": "session:" + strings.TrimSuffix(bSlot.Slot, "/"+filepath.Base(bSlot.Slot)), "workspace": selectedWorkspace.Row})
 		w := start(label, nil, env)
 		deferFailureCapture := func() {
 			if !t.Failed() {
@@ -299,6 +300,15 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	a := launch("dual-a-initial", "--dual-peer")
 	var aSlot linuxUISlot
 	read(a, "visible", &aSlot)
+	var aSelected struct {
+		Key, Label string
+		BlankLabel bool
+	}
+	read(a, "session-selected", &aSelected)
+	aSession = "session:" + strings.TrimSuffix(aSlot.Slot, "/"+filepath.Base(aSlot.Slot))
+	if aSelected.Key != aSession || !strings.HasPrefix(aSession, "session:session-") {
+		t.Fatal("A slot/session selection mismatch", aSelected, aSlot)
+	}
 	if aSlot.State.Instance == "" || aSlot.State.Instance == bSlot.State.Instance || aSlot.State.BrokerGeneration == bSlot.State.BrokerGeneration || aSlot.State.Lease == bSlot.State.Lease {
 		t.Fatal("instances/brokers/view leases not distinct", aSlot, bSlot)
 	}
@@ -352,7 +362,7 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 		}
 		profiles[id] = path
 	}
-	save(out, "dual-scope", map[string]any{"a": map[string]any{"pid": a.ui.Diagnostics().PID, "started": a.ui.Diagnostics().ProcessStarted}, "b": map[string]any{"pid": bUI.Diagnostics().PID, "started": bUI.Diagnostics().ProcessStarted}, "aSlot": aSlot, "bSlot": bSlot, "aGuest": aGuest, "bGuest": bGuest, "profiles": profiles, "sameOrigin": address, "aWindowAdmission": aAdmission, "bWindowAdmission": bAdmission})
+	save(out, "dual-scope", map[string]any{"a": map[string]any{"pid": a.ui.Diagnostics().PID, "started": a.ui.Diagnostics().ProcessStarted}, "b": map[string]any{"pid": bUI.Diagnostics().PID, "started": bUI.Diagnostics().ProcessStarted}, "aSlot": aSlot, "bSlot": bSlot, "aSessionSelection": aSelected, "aGuest": aGuest, "bGuest": bGuest, "profiles": profiles, "sameOrigin": address, "aWindowAdmission": aAdmission, "bWindowAdmission": bAdmission})
 	save(a.dir, "document", first)
 	before := verifyB("before-a-exit", bBaseline)
 	signal(a.dir, "exit")
@@ -381,7 +391,7 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	reopened := launch("dual-a-reopened", "--dual-reopen")
 	var needs linuxUISlot
 	read(reopened, "needs-reload", &needs)
-	if needs.State.Instance != aSlot.State.Instance || needs.State.Lease == aSlot.State.Lease || needs.State.Document != "" || needs.State.Target != "" {
+	if needs.Slot != aSlot.Slot || needs.State.Instance != aSlot.State.Instance || needs.State.Lease == aSlot.State.Lease || needs.State.Document != "" || needs.State.Target != "" {
 		t.Fatal("reopen revived old live identity", needs, aSlot)
 	}
 	_, all := readReports(bBaseline.Nonce)
@@ -401,7 +411,7 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	if recoveredAdmission.Lease == aAdmission.Lease || recoveredAdmission.Surface != aAdmission.Surface {
 		t.Fatal("window admission revived across process", recoveredAdmission, aAdmission)
 	}
-	if recovered.State.Instance != aSlot.State.Instance || recovered.State.Lease == needs.State.Lease || recovered.State.BrokerGeneration == aSlot.State.BrokerGeneration || recovered.State.Document == "" {
+	if recovered.Slot != aSlot.Slot || recovered.State.Instance != aSlot.State.Instance || recovered.State.Lease == needs.State.Lease || recovered.State.BrokerGeneration == aSlot.State.BrokerGeneration || recovered.State.Document == "" {
 		t.Fatal("recovered identity not fresh", recovered)
 	}
 	recoveredGuest := guestOf(reopened.ui, reopened.dir)

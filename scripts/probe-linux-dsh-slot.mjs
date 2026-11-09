@@ -91,16 +91,25 @@ try {
  // Never send a prompt or manufacture a session/turn event to get a sidebar.
  const click=pattern=>inspector.evaluate(dsh,`(()=>{const r=new RegExp(${JSON.stringify(pattern)},'i');const b=[...document.querySelectorAll('button,[role="button"]')].find(e=>!e.disabled&&e.getClientRects().length&&r.test(e.getAttribute('aria-label')||e.getAttribute('title')||e.textContent.trim()));if(b){b.click();return true}return false})()`);
  const workspace=join(out,'workspace');mkdirSync(workspace,{recursive:true});
+ const readSessionSelection=()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('[role="treeitem"][data-row-key^="session:"]')].filter(e=>e.getClientRects().length).map(e=>({key:e.getAttribute('data-row-key'),selected:e.getAttribute('aria-selected')==='true',label:e.textContent.trim(),blankLabel:/^(New Session|新会话)$/.test(e.textContent.trim())}));const selected=rows.filter(e=>e.selected);return selected.length===1?{...selected[0],rows}:undefined})()`);
  // A new WebView can mount the provider before the shared Host workspace
  // projection hydrates. For peers the workspace is already known from B's
  // actual picker readback; absence in one DOM tick never means a fresh Host.
  if(mode?.startsWith('--dual-')){
   const expected=JSON.parse(readFileSync(join(out,'session.json'),'utf8'));
-  const prepared=await until('shared own workspace row and real new-session action',()=>inspector.evaluate(dsh,`(()=>{const row=[...document.querySelectorAll('[role="treeitem"][data-row-key]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected.workspace)}&&e.getClientRects().length);if(!row)return;const buttons=[...row.querySelectorAll('button')].filter(e=>!e.disabled&&/^(New session in |在“.*”中新建会话$)/.test(e.getAttribute('aria-label')||''));if(buttons.length!==1)return;const result={workspace:row.getAttribute('data-row-key'),label:row.textContent.trim(),action:buttons[0].getAttribute('aria-label')};buttons[0].click();return result})()`));
-  save('workspace-reused',prepared);
-  // The locked UI's connectBlank reuses the first compatible blank in this
-  // Workspace. Require the expected real session rather than assuming reuse.
-  await until('original fixture session selected',()=>inspector.evaluate(dsh,`(()=>{const e=[...document.querySelectorAll('[role="treeitem"][data-row-key][aria-selected="true"]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected.key)}&&e.getClientRects().length);return !!e})()`));
+  if(mode==='--dual-peer'){
+   const prepared=await until('shared own workspace row and real new-session action',()=>inspector.evaluate(dsh,`(()=>{const row=[...document.querySelectorAll('[role="treeitem"][data-row-key]')].find(e=>e.getAttribute('data-row-key')===${JSON.stringify(expected.workspace)}&&e.getClientRects().length);if(!row)return;const buttons=[...row.querySelectorAll('button')].filter(e=>!e.disabled&&/^(New session in |在“.*”中新建会话$)/.test(e.getAttribute('aria-label')||''));if(buttons.length!==1)return;const result={workspace:row.getAttribute('data-row-key'),label:row.textContent.trim(),action:buttons[0].getAttribute('aria-label')};buttons[0].click();return result})()`));
+   save('workspace-reused',prepared);
+  }else{
+   // Existing trusted shell navigation refreshes and opens an existing real
+   // Session. It neither creates a Session nor appends a turn/tool event.
+   if(typeof expected.key!=='string'||!expected.key.startsWith('session:session-'))throw Error('Exact original A session missing');
+   const opened=await inspector.evaluate(shell,`(()=>new Promise((resolve,reject)=>{const frame=document.querySelector('iframe'),origin=globalThis.__DSH_WORK_ORIGINS__?.origin(frame.src),id=crypto.randomUUID();if(!origin||origin==='null'||origin!==${JSON.stringify(workerOrigin.origin)})throw Error('Unsafe Worker origin');const timer=setTimeout(()=>{removeEventListener('message',receive);reject(Error('Existing session navigation acknowledgment deadline'))},5000);function receive(e){if(e.source!==frame.contentWindow||e.origin!==origin||e.data?.type!=='dsh-work/open-session-result'||e.data?.version!==1||e.data?.id!==id)return;clearTimeout(timer);removeEventListener('message',receive);resolve(e.data)}addEventListener('message',receive);frame.contentWindow.postMessage({version:1,type:'dsh-work/open-session',id,sessionId:${JSON.stringify(expected.key.slice(8))}},origin)}))()`);
+   save('session-opened',opened);if(opened.error)throw Error('Original A session unavailable: '+opened.error);
+  }
+  const selected=await until('unique actual selected fixture session',async()=>{const value=await readSessionSelection();return mode!=='--dual-reopen'||value?.key===expected.key?value:undefined});
+  save('session-selected',selected);
+  if(mode==='--dual-reopen'&&selected.key!==expected.key)throw Error('Reopen selected a different session from original A');
  }else{
 
  await until('Choose workspace action',()=>click('^(Choose workspace|选择工作区)$'));
@@ -138,6 +147,7 @@ try {
  }
  }
  const visible=await until('native slot ready',async()=>{const rows=await state();return rows.find(r=>r.state?.state==='ready'&&r.state.visible&&r.state.url===fixture)});
+ if(mode?.startsWith('--dual-')){const selected=await readSessionSelection();save('session-selected',selected??{});if(!selected||!visible.slot.startsWith(selected.key.slice(8)+'/'))throw Error('Native slot does not belong to actual selected A session')}
  save('visible',visible);
  save('window-admission',await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return Call.ByID(${ids.admission})})()`));
  if(mode==='--dual-peer'||mode==='--dual-reopen'){
@@ -179,6 +189,6 @@ try {
 } catch(error) {
  if(lastSlotStates)save('last-slot-states',lastSlotStates);
  if(inspector)save('inspector-protocol',{events:inspector.trace,targets:[...inspector.targets.values()],contextCount:inspector.contexts.size});
- if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh){save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));save('failure-browser-chrome',await inspector.evaluate(dsh,`({addresses:[...document.querySelectorAll('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')].map(e=>({value:e.value,visible:!!e.getClientRects().length})),tabs:[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].map(e=>({text:e.textContent.trim(),visible:!!e.getClientRects().length}))})`).catch(()=>({})));}}
+ if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh){save('failure-session-rows',await inspector.evaluate(dsh,`[...document.querySelectorAll('[role="treeitem"][data-row-key]')].filter(e=>e.getClientRects().length).map(e=>({key:e.getAttribute('data-row-key'),selected:e.getAttribute('aria-selected'),label:e.textContent.trim(),blankLabel:/^(New Session|新会话)$/.test(e.textContent.trim())}))`).catch(()=>[]));save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));save('failure-browser-chrome',await inspector.evaluate(dsh,`({addresses:[...document.querySelectorAll('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')].map(e=>({value:e.value,visible:!!e.getClientRects().length})),tabs:[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].map(e=>({text:e.textContent.trim(),visible:!!e.getClientRects().length}))})`).catch(()=>({})));}}
  save(mode==='--boot-diagnostic'?'boot-inspector-unavailable':'failure',{error:String(error)});process.exitCode=1;
 } finally {inspector?.close();}
