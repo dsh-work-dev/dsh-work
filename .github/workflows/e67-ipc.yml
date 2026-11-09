@@ -11,6 +11,8 @@ on:
       - 'bootstrap_linux.go'
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
+      - 'scripts/probe-linux-dsh-slot.mjs'
+      - 'tools/dsh/package*.json'
       - 'go.mod'
       - 'go.sum'
       - 'tools/posix-ipc-probe/**'
@@ -55,6 +57,9 @@ jobs:
               - 'bootstrap_linux.go'
               - 'native/embeddedbrowser/**'
               - 'scripts/build-embedded-cef-linux.sh'
+              - 'scripts/probe-linux-dsh-slot.mjs'
+              - 'tools/linux-runtime-probe/window.cc'
+              - 'tools/dsh/package*.json'
             linux_peer:
               - '.github/workflows/e67-ipc.yml'
               - 'go.{mod,sum}'
@@ -143,7 +148,7 @@ jobs:
       - name: Install native build and X11 dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-res0-dev libxcb-xfixes0-dev libxres-dev libssl-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-res0-dev libxcb-xfixes0-dev libxres-dev libssl-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick x11-utils dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
       - name: Prepare pinned CEF SDK and locked MCP publication
         run: |
           mkdir -p "$RUNNER_TEMP/e67-cef-sdk" "$RUNNER_TEMP/e67-browser-dependencies" results/e67-linux-native
@@ -185,6 +190,33 @@ jobs:
         run: |
           set -o pipefail
           dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & go test -tags "server,e67presenter,e67nativefixture" -count=1 -v -timeout=90s ./internal/embeddedbrowser -run "^TestLiveLinuxManagedPrivateCEFService$"' 2>&1 | tee results/e67-linux-native/managed-cef.log
+      - name: Prepare locked DSH and self-owned window observer
+        run: |
+          npm ci --ignore-scripts --prefix tools/dsh
+          c++ -std=c++20 -Wall -Wextra tools/linux-runtime-probe/window.cc -o "$RUNNER_TEMP/e67-x11-window" $(pkg-config --cflags --libs xcb xcb-res)
+          mkdir -p results/e67-linux-wails
+      - name: Exercise the actual Wails DSH embedded browser slot
+        env:
+          GDK_BACKEND: x11
+          DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-wails
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash <<'SH' 2>&1 | tee results/e67-linux-wails/integration.log
+          set -euo pipefail
+          openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & wm=$!
+          trap 'kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'; then break; fi
+            sleep 0.1
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
+          go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
+          SH
       - name: Remove isolated namespace grant
         if: always()
         run: |
@@ -197,6 +229,9 @@ jobs:
             results/e67-linux-native/*.log
             results/e67-linux-native/*.json
             results/e67-linux-native/*.png
+            results/e67-linux-wails/*.log
+            results/e67-linux-wails/*.json
+            results/e67-linux-wails/*.png
 
   mac-launchd-tree:
     needs: changes
