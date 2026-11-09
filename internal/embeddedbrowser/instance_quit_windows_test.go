@@ -20,7 +20,7 @@ func TestQuitOwnedFencesNativeLiveOwnersAndRestoresOnRefusal(t *testing.T) {
 	called := 0
 	quit := func() { called++ }
 	expires := time.Now().Add(time.Second).UnixMilli()
-	if err := r.QuitOwned(context.Background(), nil, expires, quit); err == nil || r.closed || called != 0 {
+	if err := r.QuitOwned(context.Background(), nil, expires, quit); err == nil || r.closed || r.quitAdmission || called != 0 {
 		t.Fatal("foreign live registry owner not fenced safely", err)
 	}
 	expected := []ExpectedUIOwner{{PID: peer.PID, Started: peer.Started}}
@@ -32,11 +32,15 @@ func TestQuitOwnedFencesNativeLiveOwnersAndRestoresOnRefusal(t *testing.T) {
 	}()
 	time.Sleep(40 * time.Millisecond)
 	r.shutdown.Unlock()
-	if err := <-result; err == nil || r.closed || called != 0 {
+	if err := <-result; err == nil || r.closed || r.quitAdmission || called != 0 {
 		t.Fatal("expired queued quit executed", err)
 	}
-	if err := r.QuitOwned(context.Background(), expected, expires, quit); err != nil || !r.closed || called != 1 {
+	if err := r.QuitOwned(context.Background(), expected, expires, quit); err != nil || !r.quitAdmission || r.closed || called != 1 {
 		t.Fatal("matching native owner not accepted", err)
+	}
+	r.CancelQuitAdmission()
+	if r.closed || r.quitAdmission {
+		t.Fatal("download refusal retained runner quit fence")
 	}
 	t.Log("live kernel PID+creation foreign inventory rejected; admission restored; expired queued quit rejected; matching scope fences admissions before callback")
 }

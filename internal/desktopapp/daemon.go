@@ -554,6 +554,9 @@ func runDaemon(identity string, resources Resources) {
 		defer store.Close()
 		registry, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{
 			Store: store, AcquireProfile: acquire,
+			DownloadDecision: func(ctx context.Context) (bool, error) {
+				return askDownloadShutdown(ctx, desktop, loadNativeLocale(&activeLocale))
+			},
 			StartBroker: func(ctx context.Context, instance embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
 				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
 			},
@@ -575,6 +578,11 @@ func runDaemon(identity string, resources Resources) {
 			}
 		}()
 	}
+	downloadShutdown := &downloadShutdownLease{}
+	if embeddedService.Registry != nil {
+		downloadShutdown.begin = embeddedService.Registry.PrepareDownloadShutdown
+		downloadShutdown.cancelQuitAdmission = embeddedService.Registry.CancelQuitAdmission
+	}
 	daemonHostService := &daemon.HostService{HostService: hostService}
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
 		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
@@ -582,6 +590,7 @@ func runDaemon(identity string, resources Resources) {
 		"DSHPageService":         &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
 		"AutomationService":      automationService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
+	server.PrepareQuit = downloadShutdown.prepare
 	if registry := embeddedService.Registry; registry != nil {
 		clearWindow := func(surface string) { tracker.Clear(surface); interactions.ClearWindow(surface) }
 		registry.WindowRetired = func(_ embeddedbrowser.PresenterPeer, surface string) { clearWindow(surface) }
@@ -1029,18 +1038,44 @@ func runDaemon(identity string, resources Resources) {
 			refreshLifecycleMenu()
 		}
 	}
+	var downloadQuitBusy atomic.Bool
+	reportDownloadQuitFailure := func(err error) {
+		logging.Module(logging.ModLifecycle).Warn("download shutdown deferred", "error", err)
+		if errors.Is(err, embeddedbrowser.ErrDownloadShutdownDeclined) {
+			return
+		}
+		message := "Could not finish exiting. Try again."
+		switch loadNativeLocale(&activeLocale) {
+		case dshworksettings.LocaleChinese:
+			message = "暂时无法退出，请重试。"
+		case dshworksettings.LocaleJapanese:
+			message = "終了できませんでした。もう一度お試しください。"
+		}
+		go desktop.Dialog.Error().SetTitle("DSH Work").SetMessage(message).Show()
+	}
 	quitDSHWork := func() {
 		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
 			return
 		}
-		if updates.InstallOnExit(func() { host.Quit() }) {
+		if !downloadQuitBusy.CompareAndSwap(false, true) {
 			return
 		}
-		server.BeginDrain()
-		host.Quit()
-		if refreshLifecycleMenu != nil {
-			refreshLifecycleMenu()
-		}
+		go func() {
+			defer downloadQuitBusy.Store(false)
+			if err := downloadShutdown.prepare(context.Background()); err != nil {
+				downloadShutdown.withdraw()
+				reportDownloadQuitFailure(err)
+				return
+			}
+			if updates.InstallOnExit(func() { host.Quit() }) {
+				return
+			}
+			server.BeginDrain()
+			host.Quit()
+			if refreshLifecycleMenu != nil {
+				refreshLifecycleMenu()
+			}
+		}()
 	}
 	embeddedService.Quit = quitDSHWork
 	quitConfirmation := &quitConfirmation{
@@ -1370,11 +1405,50 @@ func runDaemon(identity string, resources Resources) {
 			if err := automationState.StopBrowserUse("", ""); err != nil {
 				return err
 			}
-			return embeddedService.Registry.Close()
+			if err := embeddedService.Registry.Close(); err != nil {
+				if !embeddedService.Registry.CleanupComplete() {
+					return err
+				}
+				logging.Module(logging.ModRuntime).Error("embedded cleanup completed-abnormally", "error", err)
+			}
 		}
 		return nil
 	}
+	updates.beforeInstall = func(ctx context.Context) error {
+		if err := downloadShutdown.prepare(ctx); err != nil {
+			return err
+		}
+		if err := closeEmbeddedInstances(); err != nil {
+			downloadShutdown.withdraw()
+			return err
+		}
+		return nil
+	}
+	updates.installFailed = func() error {
+		if embeddedService.Registry != nil {
+			if err := embeddedService.Registry.ReopenAfterMaintenance(); err != nil {
+				return err
+			}
+		}
+		downloadShutdown.reset()
+		server.ResetDrain()
+		message := "Update failed. Reopen the workbench from the tray to try again."
+		switch loadNativeLocale(&activeLocale) {
+		case dshworksettings.LocaleChinese:
+			message = "更新失败。请从托盘重新打开工作台后重试。"
+		case dshworksettings.LocaleJapanese:
+			message = "更新に失敗しました。トレイからワークベンチを開き直して再試行してください。"
+		}
+		go desktop.Dialog.Error().SetTitle("DSH Work").SetMessage(message).Show()
+		return nil
+	}
 	host.SetQuitHandler(func() {
+		// Direct/internal host exits also retain the UI owner while downloads
+		// finish. Interactive exits acquired this same lease before host.Quit.
+		if err := downloadShutdown.prepare(context.Background()); err != nil {
+			reportDownloadQuitFailure(err)
+			return
+		}
 		windowLedger.BeginQuit()
 		quitFlow.Begin(
 			hideBackgroundSurfaces,
@@ -1383,10 +1457,7 @@ func runDaemon(identity string, resources Resources) {
 				// documents and supervised process trees have joined. QuitFlow retains
 				// the normal retry/recovery route if this barrier fails.
 				if err := closeEmbeddedInstances(); err != nil {
-					if embeddedService.Registry == nil || !embeddedService.Registry.CleanupComplete() {
-						return err
-					}
-					logging.Module(logging.ModRuntime).Error("embedded cleanup completed-abnormally", "error", err)
+					return err
 				}
 				petWindowCloseAllowed.Store(true)
 				if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
@@ -1406,6 +1477,7 @@ func runDaemon(identity string, resources Resources) {
 				}
 				server.ResetDrain()
 				windowLedger.CancelQuit()
+				downloadShutdown.withdraw()
 				if openSettings != nil {
 					openSettings("overview")
 				}

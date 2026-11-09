@@ -51,6 +51,7 @@ type Server struct {
 	Root            string
 	PID             int
 	OpenUI          func(string) error
+	PrepareQuit     func(context.Context) error
 	// UpdateState and UpdateCommand expose the daemon-owned updater to trusted
 	// local clients. The UI renders UpdateState and sends explicit actions;
 	// provider and staging details remain inside the daemon process.
@@ -119,6 +120,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if isQuitCall(call) {
+			if s.PrepareQuit != nil {
+				if err := s.PrepareQuit(r.Context()); err != nil {
+					writeJSON(w, Result{Error: err.Error()})
+					return
+				}
+			}
 			// Quit is the installer's stop handshake. Mark the daemon draining
 			// before invoking it so a concurrent mutable call cannot pass the
 			// maintenance check, and cancel calls that were already in flight.

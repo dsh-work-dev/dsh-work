@@ -25,6 +25,64 @@ func fixtureManager(t *testing.T, dir string) *Manager {
 	}
 	return m
 }
+
+func TestManagerShutdownCancelInvalidatesRiskFinalizerBeforeCleanup(t *testing.T) {
+	dir := t.TempDir()
+	m := fixtureManager(t, filepath.Join(dir, "ledger"))
+	p := fixturePending()
+	if err := m.Offer(p); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "fixture.txt")
+	id, err := m.Approve(context.Background(), p.ID, Selection{Path: path}, func(context.Context, Pending) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Arm(id, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h, err := m.DuplicateWriter(id, win.CurrentProcess())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A PNG signature under an approved text name exercises the real MIME
+	// mismatch question without invoking any native UI or executing content.
+	var written uint32
+	err = win.WriteFile(win.Handle(h), []byte("\x89PNG\r\n\x1a\nowned fixture"), &written, nil)
+	closeErr := win.CloseHandle(win.Handle(h))
+	if err != nil || closeErr != nil {
+		t.Fatal(err, closeErr)
+	}
+	if err = m.Running(id); err != nil {
+		t.Fatal(err)
+	}
+	question := false
+	err = m.Complete(id, func(Snapshot) bool {
+		question = true
+		if err := m.RequestCancel(id, false); err != nil {
+			t.Fatal(err)
+		}
+		if m.transfers[id].destination == nil {
+			t.Fatal("cancel invalidation closed the active finalizer file")
+		}
+		return false
+	})
+	if !question || !errors.Is(err, ErrApprovalExpired) || m.Snapshots()[0].State != "stopping" {
+		t.Fatal("risk finalizer ignored shutdown cancellation", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("canceled finalizer published", err)
+	}
+	if err = m.Drained(id, "", int64(written)); err != nil {
+		t.Fatal(err)
+	}
+	if m.Snapshots()[0].State != "canceled" {
+		t.Fatal("explicit cancellation became a risk failure")
+	}
+	if err = m.ReadyForShutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestManagerRealFileCompleteAndRestartDoesNotReplay(t *testing.T) {
 	dir := t.TempDir()
 	m := fixtureManager(t, filepath.Join(dir, "ledger"))
@@ -274,5 +332,62 @@ func TestRiskReopenFailureRetainsCleanupLedgerUntilOwnedRecovery(t *testing.T) {
 		if s.ID == id && s.CleanupRequired {
 			t.Fatal("recovery still claims cleanup required")
 		}
+	}
+}
+
+func TestShutdownRetriesTerminalOwnedCleanupWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	m := fixtureManager(t, filepath.Join(dir, "ledger"))
+	p := fixturePending()
+	if err := m.Offer(p); err != nil {
+		t.Fatal(err)
+	}
+	id, err := m.Approve(context.Background(), p.ID, Selection{Path: filepath.Join(dir, "owned.txt")}, func(context.Context, Pending) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := m.transfers[id]
+	d := tx.destination
+	if _, err := d.Write([]byte("owned cleanup retry fixture")); err != nil {
+		t.Fatal(err)
+	}
+	var blocker win.Handle
+	err = d.checkRisk(p.URL, p.SourceURL, func(path, name, source, referrer string) error {
+		if err := saveAttachment(path, name, source, referrer); err != nil {
+			return err
+		}
+		var err error
+		blocker, err = openChild(d.parent, d.record.Stage, win.FILE_GENERIC_READ, win.FILE_SHARE_READ|win.FILE_SHARE_WRITE, win.FILE_OPEN)
+		return err
+	})
+	if err == nil || blocker == 0 {
+		t.Fatal("real trust-service sharing failure not established", err)
+	}
+	defer func() {
+		if blocker != 0 {
+			win.CloseHandle(blocker)
+		}
+	}()
+	m.mu.Lock()
+	failure := m.failLocked(tx, "DOWNLOAD_RISK_CHECK_FAILED")
+	m.mu.Unlock()
+	if failure == nil || !tx.entry.CleanupRequired {
+		t.Fatal("missing terminal cleanup failure")
+	}
+	if err := m.ReadyForShutdown(); err == nil {
+		t.Fatal("blocked owned stage was declared cleaned")
+	}
+	if err := win.CloseHandle(blocker); err != nil {
+		t.Fatal(err)
+	}
+	blocker = 0
+	if err := m.ReadyForShutdown(); err != nil {
+		t.Fatal("same live Manager could not retry", err)
+	}
+	if tx.entry.CleanupRequired || tx.entry.File.Phase != "discarded" {
+		t.Fatal("retry did not settle transaction")
+	}
+	if _, err := os.Stat(filepath.Join(tx.entry.File.Parent, tx.entry.File.Stage)); !os.IsNotExist(err) {
+		t.Fatal("owned stage remains", err)
 	}
 }

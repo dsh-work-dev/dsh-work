@@ -13,13 +13,16 @@ import (
 // InstanceRegistryConfig is daemon-owned. A tool or frame cannot choose a
 // profile directory, broker factory, or persistent instance identity.
 type InstanceRegistryConfig struct {
-	Store          *InstanceStore
-	AcquireProfile func(string) (io.Closer, error)
-	StartBroker    func(context.Context, InstanceConfig) (*Broker, error)
-	OnFailure      func(string, error)
+	Store            *InstanceStore
+	AcquireProfile   func(string) (io.Closer, error)
+	StartBroker      func(context.Context, InstanceConfig) (*Broker, error)
+	OnFailure        func(string, error)
+	DownloadDecision DownloadDecision
 }
 
 type instancePresenter struct {
+	downloadResume    func()
+	downloadPreparing bool
 	serial            sync.Mutex
 	config            InstanceConfig
 	peer              PresenterPeer
@@ -39,14 +42,16 @@ type instancePresenter struct {
 // InstancePresenterRegistry is the sole multi-instance lifetime owner. The
 // existing presenter module remains local to exactly one broker namespace.
 type InstancePresenterRegistry struct {
-	mu            sync.Mutex
-	shutdown      sync.Mutex
-	config        InstanceRegistryConfig
-	instances     map[string]*instancePresenter
-	surfaces      map[string]*instancePresenter
-	processes     map[PresenterPeer]*instancePresenter
-	closed        bool
-	WindowRetired func(PresenterPeer, string)
+	mu             sync.Mutex
+	shutdown       sync.Mutex
+	config         InstanceRegistryConfig
+	instances      map[string]*instancePresenter
+	surfaces       map[string]*instancePresenter
+	processes      map[PresenterPeer]*instancePresenter
+	closed         bool
+	downloadPaused bool
+	quitAdmission  bool
+	WindowRetired  func(PresenterPeer, string)
 }
 
 func NewInstancePresenterRegistry(c InstanceRegistryConfig) (*InstancePresenterRegistry, error) {
@@ -69,7 +74,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 	}
 	defer verified.Close()
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.downloadPaused || r.quitAdmission {
 		r.mu.Unlock()
 		return WindowAdmission{}, ErrClosed
 	}
@@ -87,7 +92,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 	i.serial.Lock()
 	defer i.serial.Unlock()
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.downloadPaused || r.quitAdmission {
 		r.mu.Unlock()
 		return WindowAdmission{}, ErrClosed
 	}
@@ -231,6 +236,12 @@ func (r *InstancePresenterRegistry) startLocked(ctx context.Context, i *instance
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	paused := r.downloadPaused || r.quitAdmission
+	r.mu.Unlock()
+	if paused || i.downloadResume != nil {
+		return errors.New("DOWNLOAD_SHUTDOWN_BUSY")
+	}
 	if i.broker != nil {
 		select {
 		case <-i.broker.done:
@@ -366,6 +377,11 @@ func (r *InstancePresenterRegistry) retireInstanceLocked(i *instancePresenter, f
 			i.profile = nil
 		}
 	}
+	if i.downloadResume != nil {
+		i.downloadResume()
+		i.downloadResume = nil
+		i.downloadPreparing = false
+	}
 	if result != nil && !force {
 		return errors.Join(i.cleanupErr, result)
 	}
@@ -438,11 +454,20 @@ func (r *InstancePresenterRegistry) CloseInstance(ctx context.Context, peer Pres
 	if i == nil {
 		return nil
 	}
+	if err := r.PrepareCloseInstance(ctx, peer, surface); err != nil {
+		return err
+	}
 	i.serial.Lock()
 	defer i.serial.Unlock()
 	if i.peer != peer {
 		return errors.New("CEF_INSTANCE_OWNER_REJECTED")
 	}
+	defer func() {
+		if i.downloadResume != nil {
+			i.downloadResume()
+			i.downloadResume = nil
+		}
+	}()
 	return r.retireLocked(i, false)
 }
 func (r *InstancePresenterRegistry) Close() error {
@@ -450,6 +475,7 @@ func (r *InstancePresenterRegistry) Close() error {
 	defer r.shutdown.Unlock()
 	r.mu.Lock()
 	r.closed = true
+	r.quitAdmission = false
 	instances := make([]*instancePresenter, 0, len(r.instances))
 	for _, i := range r.instances {
 		instances = append(instances, i)
@@ -719,8 +745,8 @@ func (r *InstancePresenterRegistry) QuitOwned(ctx context.Context, owners []Expe
 		return errors.New("CEF_QUIT_REQUEST_EXPIRED")
 	}
 	r.mu.Lock()
-	prior := r.closed
-	r.closed = true
+	prior := r.quitAdmission
+	r.quitAdmission = true
 	list := make([]*instancePresenter, 0, len(r.instances))
 	for _, i := range r.instances {
 		list = append(list, i)
@@ -730,7 +756,7 @@ func (r *InstancePresenterRegistry) QuitOwned(ctx context.Context, owners []Expe
 	defer func() {
 		if !accepted {
 			r.mu.Lock()
-			r.closed = prior
+			r.quitAdmission = prior
 			r.mu.Unlock()
 		}
 	}()

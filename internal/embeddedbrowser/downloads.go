@@ -3,7 +3,10 @@ package embeddedbrowser
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
+
+var ErrDownloadShutdownDeclined = errors.New("DOWNLOAD_SHUTDOWN_DECLINED")
 
 // DownloadConsent is a trusted Host dependency, never an RPC/site argument.
 // Prepared must be a live Windows downloads.Destination object, not a path DTO.
@@ -34,7 +37,14 @@ type brokerDownloads interface {
 	cancel(context.Context, string, bool) error
 	afterJoin() error
 	pending() bool
+	quiesce() (func(), error)
+	drain(context.Context, bool) error
+	busy() bool
 }
+
+// DownloadDecision is a trusted Host choice: false waits for completion, true
+// cancels the remaining work. An error keeps the application running.
+type DownloadDecision func(context.Context) (cancel bool, err error)
 
 func (b *Broker) DownloadState() []DownloadView {
 	if b.downloads == nil {

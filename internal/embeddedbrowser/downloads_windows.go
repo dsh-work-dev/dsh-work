@@ -16,6 +16,9 @@ import (
 )
 
 type liveDownload struct {
+	serial      sync.Mutex
+	life        context.Context
+	stop        context.CancelFunc
 	owner       string
 	writer      uintptr
 	ready       chan struct{}
@@ -41,6 +44,7 @@ type windowsDownloads struct {
 	closeWait    chan struct{}
 	closeOnce    sync.Once
 	closed       bool
+	quiescing    bool
 	life         context.Context
 	stop         context.CancelFunc
 }
@@ -118,15 +122,18 @@ func (c *windowsDownloads) message(raw json.RawMessage) error {
 			return errors.New("DOWNLOAD_OWNER_REJECTED")
 		}
 		p := downloads.Pending{ID: e.Pending, Generation: e.Generation, Owner: e.Owner, Profile: c.profile, RequestID: e.RequestID, FrameID: e.FrameID, Document: e.Document, Presentation: e.Presentation, SourceOrigin: e.SourceOrigin, SourceURL: e.Source, URL: e.URL, Method: "GET", MIME: e.MIME, SuggestedName: e.Name, TotalBytes: total}
-		if err = c.manager.Offer(p); err != nil {
-			return err
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		c.mu.Lock()
-		if c.closed {
+		if c.closed || c.quiescing {
 			c.mu.Unlock()
 			cancel()
+			go c.dismiss(p.Owner, p.ID)
 			return nil
+		}
+		if err = c.manager.Offer(p); err != nil {
+			c.mu.Unlock()
+			cancel()
+			return err
 		}
 		c.prompts[p.ID] = downloadPrompt{p.Owner, cancel}
 		c.tasks.Add(1)
@@ -176,7 +183,7 @@ func (c *windowsDownloads) offer(ctx context.Context, cancel context.CancelFunc,
 	defer c.tasks.Done()
 	defer cancel()
 	defer c.dismiss(p.Owner, p.ID)
-	defer func() { c.mu.Lock(); delete(c.prompts, p.ID); c.mu.Unlock() }()
+	defer func() { c.manager.Dismiss(p.ID); c.mu.Lock(); delete(c.prompts, p.ID); c.mu.Unlock() }()
 	c.promptSerial.Lock()
 	defer c.promptSerial.Unlock()
 	if ctx.Err() != nil {
@@ -207,10 +214,12 @@ func (c *windowsDownloads) offer(ctx context.Context, cancel context.CancelFunc,
 		}
 		return
 	}
-	live := &liveDownload{owner: p.Owner, ready: make(chan struct{}), events: newDownloadMailbox(), dialogOwner: owner}
+	life, stop := context.WithCancel(c.life)
+	live := &liveDownload{life: life, stop: stop, owner: p.Owner, ready: make(chan struct{}), events: newDownloadMailbox(), dialogOwner: owner}
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
+		stop()
 		_ = c.manager.Cancel(context.Background(), grant, false)
 		return
 	}
@@ -219,6 +228,7 @@ func (c *windowsDownloads) offer(ctx context.Context, cancel context.CancelFunc,
 	c.mu.Unlock()
 	go func() {
 		defer c.tasks.Done()
+		defer stop()
 		live.events.run(c.life.Done(), live.ready, func(e downloadEvent) { c.consume(grant, live, e) })
 	}()
 	defer close(live.ready)
@@ -270,7 +280,22 @@ func (c *windowsDownloads) stopNative(ctx context.Context, id string) error {
 	return nil
 }
 func (c *windowsDownloads) cancel(ctx context.Context, id string, revoke bool) error {
-	return c.manager.Cancel(ctx, id, revoke)
+	persistErr := c.manager.RequestCancel(id, revoke)
+	c.mu.Lock()
+	live := c.active[id]
+	c.mu.Unlock()
+	if live != nil {
+		live.stop() // Dismiss a content-risk question before joining finalization.
+		for !live.serial.TryLock() {
+			select {
+			case <-ctx.Done():
+				return errors.Join(persistErr, ctx.Err())
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		defer live.serial.Unlock()
+	}
+	return errors.Join(persistErr, c.manager.Cancel(ctx, id, revoke))
 }
 func (c *windowsDownloads) afterJoin() error {
 	c.closeOnce.Do(func() {
@@ -309,9 +334,11 @@ func (c *windowsDownloads) pending() bool {
 }
 
 func (c *windowsDownloads) consume(id string, live *liveDownload, e downloadEvent) {
+	live.serial.Lock()
+	defer live.serial.Unlock()
 	if !e.finished {
 		if err := c.manager.Progress(id, e.received, e.total); err != nil && !errors.Is(err, downloads.ErrApprovalExpired) {
-			_ = c.cancel(context.Background(), id, false)
+			_ = c.manager.Cancel(context.Background(), id, false)
 		}
 		return
 	}
@@ -321,15 +348,15 @@ func (c *windowsDownloads) consume(id string, live *liveDownload, e downloadEven
 	}
 	if err := c.manager.Progress(id, e.received, e.total); err != nil {
 		if !errors.Is(err, downloads.ErrApprovalExpired) {
-			_ = c.cancel(context.Background(), id, false)
+			_ = c.manager.Cancel(context.Background(), id, false)
 		}
 		_ = c.manager.Drained(id, "", e.received)
 		return
 	}
-	err := c.manager.Complete(id, func(s downloads.Snapshot) bool { return downloads.ConfirmContentRisk(c.life, live.dialogOwner, s) })
+	err := c.manager.Complete(id, func(s downloads.Snapshot) bool { return downloads.ConfirmContentRisk(live.life, live.dialogOwner, s) })
 	if errors.Is(err, downloads.ErrApprovalExpired) {
 		_ = c.manager.Drained(id, "", e.received)
 	} else if err != nil {
-		_ = c.cancel(context.Background(), id, false)
+		_ = c.manager.Cancel(context.Background(), id, false)
 	}
 }

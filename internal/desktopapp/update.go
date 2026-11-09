@@ -198,11 +198,13 @@ func (b *installerBackend) Install(ctx context.Context, restart bool) error {
 // checks download silently; an install action or confirmed exit stops the UI and
 // hands the authenticated installer to the operating system.
 type updateRunner struct {
-	backend  updateBackend
-	current  string
-	selected string
-	stopUI   func() error
-	publish  func(daemon.UpdateSnapshot)
+	backend       updateBackend
+	current       string
+	selected      string
+	stopUI        func() error
+	beforeInstall func(context.Context) error
+	installFailed func() error
+	publish       func(daemon.UpdateSnapshot)
 
 	exitPending    atomic.Bool
 	busy           atomic.Bool
@@ -489,10 +491,27 @@ func (r *updateRunner) runInstall(ctx context.Context, restart bool) daemon.Upda
 		logging.Module(logging.ModUpdate).Warn("staged installer recheck failed", logging.ErrAttrs(err, "")...)
 		return r.errorState("install")
 	}
+	if r.beforeInstall != nil {
+		if err := r.beforeInstall(ctx); err != nil {
+			logging.Module(logging.ModUpdate).Warn("update shutdown deferred", "error", err)
+			state := r.Snapshot()
+			state.Phase = daemon.UpdateReady
+			state.ErrorCode = "shutdown"
+			return state
+		}
+	}
+	failure := func() daemon.UpdateSnapshot {
+		if restart && r.installFailed != nil {
+			if err := r.installFailed(); err != nil {
+				logging.Module(logging.ModUpdate).Error("update recovery failed", "error", err)
+			}
+		}
+		return r.errorState("install")
+	}
 	if r.stopUI != nil {
 		if err := r.stopUI(); err != nil {
 			logging.Module(logging.ModUpdate).Warn("ui stop before update failed", logging.ErrAttrs(err, "")...)
-			return r.errorState("install")
+			return failure()
 		}
 	}
 	// The UI stop is the daemon's handover. The installer then takes the
@@ -506,7 +525,7 @@ func (r *updateRunner) runInstall(ctx context.Context, restart bool) daemon.Upda
 	})
 	if err := r.backend.Install(ctx, restart); err != nil {
 		logging.Module(logging.ModUpdate).Error("update install failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateInstallFailed)...)
-		return r.errorState("install")
+		return failure()
 	}
 	return r.Snapshot()
 }
@@ -529,8 +548,15 @@ func (r *updateRunner) InstallOnExit(quit func()) bool {
 	r.Stop()
 	go func() {
 		defer r.exitPending.Store(false)
-		r.completeOperation(r.runInstall(context.Background(), false))
-		quit()
+		state := r.runInstall(context.Background(), false)
+		r.completeOperation(state)
+		// A live download/native owner vetoed the handoff. Ordinary installer
+		// failures still complete the user's already-confirmed exit.
+		if state.ErrorCode != "shutdown" {
+			quit()
+		} else {
+			r.Start()
+		}
 	}()
 	return true
 }

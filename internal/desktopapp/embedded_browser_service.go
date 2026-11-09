@@ -115,6 +115,14 @@ func (s *embeddedBrowserService) CloseInstance(ctx context.Context) error {
 	return s.Registry.CloseInstance(ctx, peer, surface)
 }
 
+func (s *embeddedBrowserService) PrepareCloseInstance(ctx context.Context) error {
+	peer, surface, err := s.nativePeer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.PrepareCloseInstance(ctx, peer, surface)
+}
+
 func (s *embeddedBrowserService) QuitOwned(ctx context.Context, owners []embeddedbrowser.ExpectedUIOwner, expires int64) error {
 	if s == nil || s.Registry == nil || s.Quit == nil || len(owners) > 2 {
 		return errors.New("CEF_RUNNER_QUIT_UNAVAILABLE")

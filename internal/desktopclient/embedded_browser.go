@@ -145,6 +145,11 @@ func (s *EmbeddedBrowserService) ExitUI(ctx context.Context) error {
 	if _, err := trustedWindow(ctx); err != nil {
 		return err
 	}
+	// Only the download decision/wait is interactive. Native disposal retains
+	// its original deadline, including when there was no download to await.
+	if err := call(context.WithoutCancel(ctx), s.Client, "EmbeddedBrowserService", "PrepareCloseInstance", nil, nil); err != nil {
+		return err
+	}
 	cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer stop()
 	// The binding runs off the GUI thread. Keep the message pump alive through

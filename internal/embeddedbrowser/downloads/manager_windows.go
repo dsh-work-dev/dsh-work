@@ -61,6 +61,7 @@ type entry struct {
 	Updated         time.Time `json:"updated"`
 }
 type transfer struct {
+	dirty         bool
 	entry         entry
 	pending       Pending // Full URLs are in memory only; never replayed from journal.
 	destination   *Destination
@@ -190,6 +191,11 @@ func (m *Manager) Pending(id string) (Pending, bool) {
 	defer m.mu.Unlock()
 	p, ok := m.pending[id]
 	return p, ok
+}
+func (m *Manager) Dismiss(id string) {
+	m.mu.Lock()
+	delete(m.pending, id)
+	m.mu.Unlock()
 }
 func (m *Manager) Invalidate(owner, document, presentation string) {
 	m.mu.Lock()
@@ -352,6 +358,27 @@ func (m *Manager) Snapshots() []Snapshot {
 		out = append(out, snapshot(t))
 	}
 	return out
+}
+
+// RequestCancel invalidates final publication before the caller dismisses a
+// risk dialog and joins its finalizer. It does not close a file still in use.
+// Cancel must follow once that owner has joined to stop/drain the writer.
+func (m *Manager) RequestCancel(id string, revoke bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.transfers[id]
+	if t == nil {
+		return ErrApprovalExpired
+	}
+	if terminal(t.entry.State) {
+		return nil
+	}
+	t.entry.State = "stopping"
+	t.entry.Error = "canceled"
+	if revoke {
+		t.entry.Error = "revoked"
+	}
+	return m.save(t)
 }
 func (m *Manager) Cancel(ctx context.Context, id string, revoke bool) error {
 	defer m.emit(id)
@@ -555,7 +582,48 @@ func (m *Manager) BrokerFailed(generation string) error {
 	}
 	return errors.Join(errs...)
 }
-func (m *Manager) save(t *transfer) error {
+
+// ReadyForShutdown never treats a terminal in-memory state as a durable
+// transaction. Retry a failed terminal journal write before releasing owners.
+func (m *Manager) ReadyForShutdown() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.pending) != 0 {
+		return errors.New("DOWNLOAD_PENDING")
+	}
+	for _, t := range m.transfers {
+		if !terminal(t.entry.State) || t.destination != nil {
+			return errors.New("DOWNLOAD_ACTIVE")
+		}
+		if t.dirty {
+			if err := m.save(t); err != nil {
+				return err
+			}
+		}
+		if t.entry.CleanupRequired {
+			// This terminal transaction has no writer/finalizer/destination owner.
+			// Reuse the same identity-checked recovery as startup under our still
+			// held profile lease, rather than requiring a broker restart to retry.
+			recovered, err := RecoverFile(t.entry.File)
+			t.entry.File = recovered
+			t.entry.CleanupRequired = err != nil
+			if saveErr := m.save(t); err != nil || saveErr != nil {
+				return errors.Join(err, saveErr)
+			}
+			if recovered.Published && recovered.Recovery != "" {
+				cleaned, err := CleanupPublishedRecovery(recovered)
+				t.entry.File = cleaned
+				t.entry.CleanupRequired = err != nil
+				if saveErr := m.save(t); err != nil || saveErr != nil {
+					return errors.Join(err, saveErr)
+				}
+			}
+		}
+	}
+	return nil
+}
+func (m *Manager) save(t *transfer) (err error) {
+	defer func() { t.dirty = err != nil }()
 	t.entry.Updated = time.Now().UTC()
 	data, e := json.Marshal(t.entry)
 	if e != nil {

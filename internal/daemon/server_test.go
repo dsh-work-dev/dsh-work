@@ -27,6 +27,26 @@ type maintenanceTestService struct {
 	quit    bool
 }
 
+func TestQuitPreflightRejectsBeforeDrainOrHostStop(t *testing.T) {
+	service := &maintenanceTestService{}
+	server := &Server{Services: map[string]any{"HostService": service}}
+	server.PrepareQuit = func(context.Context) error {
+		if server.draining.Load() || service.quit {
+			t.Fatal("owner stopped before download decision")
+		}
+		return errors.New("download still live")
+	}
+	result := postCall(t, server, Call{Service: "HostService", Method: "Quit", Surface: "workspace"})
+	if result.Error == "" || server.draining.Load() || service.quit {
+		t.Fatal("preflight veto lost live owner", result)
+	}
+	server.PrepareQuit = func(context.Context) error { return nil }
+	result = postCall(t, server, Call{Service: "HostService", Method: "Quit", Surface: "workspace"})
+	if result.Error != "" || !server.draining.Load() || !service.quit {
+		t.Fatal("retry did not enter original stop", result)
+	}
+}
+
 func TestRequestQuitDoesNotDrainAndIsBlockedDuringMaintenance(t *testing.T) {
 	host := app.NewHost(app.Dependencies{}, app.Config{})
 	service := app.NewHostService(host, nil)
