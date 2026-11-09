@@ -300,6 +300,47 @@ func exerciseLinuxDualLifecycle(t *testing.T, ctx context.Context, repo, root, o
 			t.Fatal("peer driver join", ctx.Err())
 		}
 	}
+	// Observe the real UI-side ACK, not merely the daemon's earlier Present.
+	// The GDK/XRes parent owner is checked before its X client inserts the set.
+	protectionACK := func(w supervisor.Worker, g x11FixtureWindow, dir string) {
+		t.Helper()
+		wait("actual UI-owned CEF save-set ACK", func() bool {
+			data, e := os.ReadFile(filepath.Join(root, "logs", "ui.log"))
+			if e != nil {
+				return false
+			}
+			type ack struct {
+				Msg       string
+				PID       uint32
+				Created   uint64
+				Parent    uint32
+				Protected int
+				Windows   []struct {
+					ID, PID uint32
+					Started uint64
+				}
+			}
+			var latest ack
+			for _, line := range strings.Split(string(data), "\n") {
+				var event ack
+				if json.Unmarshal([]byte(line), &event) == nil && event.Msg == "native CEF UI save-set ready" && event.PID == w.Diagnostics().PID && event.Created == w.Diagnostics().ProcessStarted && event.Parent == g.Parent {
+					latest = event
+				}
+			}
+			// Require the current ACK for this UI/parent and this exact held guest,
+			// not an earlier protection of some other tab under the same parent.
+			if latest.Protected > 0 {
+				for _, window := range latest.Windows {
+					if window.ID == g.ID && window.PID == g.PID && window.Started == g.Started {
+						save(dir, "save-set-ack", latest)
+						return true
+					}
+				}
+			}
+			return false
+		})
+	}
+	protectionACK(bUI, bGuest, out)
 	_, known := readReports(bBaseline.Nonce)
 	a := launch("dual-a-initial", "--dual-peer")
 	var aSlot linuxUISlot
@@ -327,6 +368,7 @@ func exerciseLinuxDualLifecycle(t *testing.T, ctx context.Context, repo, root, o
 		t.Fatal("A and B share broker/parent", aGuest, bGuest)
 	}
 	aNative := hold(aGuest)
+	protectionACK(a.ui, aGuest, a.dir)
 	var first linuxFixtureReport
 	wait("A same-origin isolated page report", func() bool {
 		_, all := readReports(bBaseline.Nonce)
@@ -422,6 +464,21 @@ func exerciseLinuxDualLifecycle(t *testing.T, ctx context.Context, repo, root, o
 	if r := a.ui.ExitResult(); r.Code != expectedExit || r.Err != "" {
 		t.Fatal("A actual root exit differs from injected lifecycle", r)
 	}
+	if fault {
+		// A is dead: use the still-held B as the observer's live UI anchor. Read
+		// actual A XIDs/pidfd before any fixture cleanup; disappearance is evidence,
+		// not an excuse to look at a reused PID or force the native broker directly.
+		rows := windows(bUI)
+		owned := []x11FixtureWindow{}
+		for _, g := range rows {
+			if g.PID == aGuest.PID && g.Started == aGuest.Started {
+				owned = append(owned, g)
+			}
+		}
+		poll := []unix.PollFd{{Fd: int32(aNative.fd), Events: unix.POLLIN}}
+		ready, pollErr := unix.Poll(poll, 0)
+		save(out, "dual-a-post-fault-native", map[string]any{"pid": aGuest.PID, "started": aGuest.Started, "windows": owned, "pidfdReady": ready, "pidfdRevents": poll[0].Revents, "pollError": fmt.Sprint(pollErr)})
+	}
 	if err = a.ui.WaitEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -508,6 +565,7 @@ func exerciseLinuxDualLifecycle(t *testing.T, ctx context.Context, repo, root, o
 		t.Fatal("native process instance revived", recoveredGuest)
 	}
 	recoveredNative := hold(recoveredGuest)
+	protectionACK(reopened.ui, recoveredGuest, reopened.dir)
 	var recoveredReport linuxFixtureReport
 	wait("A persistent profile restored after explicit Reload", func() bool {
 		_, all := readReports(bBaseline.Nonce)

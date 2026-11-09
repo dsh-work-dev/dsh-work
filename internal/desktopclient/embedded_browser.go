@@ -62,6 +62,21 @@ func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, add
 		return state, err
 	}
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, admission.Lease, slot, address, bounds, zoom, visible}, &state)
+	// Native Present can succeed while the document is still loading. Protect
+	// that guest now: later State polling alone does not issue another Update.
+	if err == nil && state.Visible {
+		if protectionErr := protectPresenterWindow(window); protectionErr != nil {
+			// Preserve this window's gate and trusted context through the Hide barrier.
+			// Never hide another UI or turn a failed protection into a successful ACK.
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			hideErr := call(cleanup, s.Client, "EmbeddedBrowserService", "Hide", nil, nil)
+			cancel()
+			if hideErr == nil {
+				state.Visible = false
+			}
+			return state, errors.Join(protectionErr, hideErr)
+		}
+	}
 	return state, err
 }
 func (s *EmbeddedBrowserService) State(ctx context.Context, document, slot string) (embeddedbrowser.ViewState, error) {
