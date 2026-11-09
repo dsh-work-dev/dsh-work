@@ -14,6 +14,7 @@ on:
       - 'tools/linux-runtime-probe/**'
       - 'scripts/build-workeripc-mac.mjs'
       - 'scripts/with-workeripc-mac.mjs'
+      - 'scripts/probe-mac-launchd-tree.mjs'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
 
@@ -21,6 +22,27 @@ permissions:
   contents: read
 
 jobs:
+  mac-launchd-tree:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Measure current-user LaunchAgent descendant ownership
+        run: node scripts/probe-mac-launchd-tree.mjs --output-dir "$RUNNER_TEMP/e67-launchd-tree"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-launchd-tree
+          path: |
+            ${{ runner.temp }}/e67-launchd-tree/**/*.json
+            ${{ runner.temp }}/e67-launchd-tree/**/*.log
+            ${{ runner.temp }}/e67-launchd-tree/**/*.identity
+            ${{ runner.temp }}/e67-launchd-tree/**/*.heartbeats
+
   linux-runtime-facilities:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
