@@ -28,7 +28,7 @@ run('cmake',['--build',build,'--parallel','3']);
 run('ditto',[join(official,'tests/cefsimple/Release/cefsimple.app'),app]);
 const executable=join(app,'Contents/MacOS/cefsimple'),owner=join(app,'Contents/MacOS/dsh-cef-owner');
 copyFileSync(join(build,'out/dsh_cef_broker'),executable);
-run('go',['build','-o',owner,'./cmd/dsh-cef-owner-mac'],{cwd:repo});
+run('go',['build','-o',owner,'./cmd/dsh-cef-owner-mac'],{cwd:repo,env:{...process.env,MACOSX_DEPLOYMENT_TARGET:'15.0',CGO_CFLAGS:`${process.env.CGO_CFLAGS||''} -mmacosx-version-min=15.0`,CGO_LDFLAGS:`${process.env.CGO_LDFLAGS||''} -mmacosx-version-min=15.0`}});
 const helpers=[];
 for (const entry of readdirSync(join(app,'Contents/Frameworks'),{withFileTypes:true})) {
   if (!entry.isDirectory() || !/^cefsimple Helper.*\.app$/.test(entry.name)) continue;

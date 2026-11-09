@@ -6,6 +6,7 @@
 #include <string>
 
 namespace dsh_platform {
+void Lifecycle(const char* event);
 using Window = CefWindowHandle;
 bool Transfer(bool write, void* bytes, uint32_t size);
 std::string TakeEnvironment(const char* name);

@@ -121,7 +121,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p results/e67-mac-private
-          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
+          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner|TestNativeLifecycleEvidenceFiltersStderr)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
       - name: Prepare the approved unmodified CEF SDK
         run: |
           mkdir -p "$RUNNER_TEMP/cef-sdk" results/e67-mac-private

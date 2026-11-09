@@ -221,7 +221,7 @@ func (g *guard) startBroker() error {
 	cmd := exec.Command(g.cfg.Plan.Executable, g.cfg.Plan.Args...)
 	cmd.Dir = g.cfg.Plan.WorkingDirectory
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &nativeEventWriter{guard: g}
 	cmd.Env = []string{}
 	for key, value := range g.cfg.Plan.Env {
 		cmd.Env = append(cmd.Env, key+"="+value)
@@ -250,6 +250,10 @@ func (g *guard) startBroker() error {
 		g.mu.Lock()
 		g.exited = true
 		g.state.Exit = supervisor.ExitResult{Started: true, Code: cmd.ProcessState.ExitCode()}
+		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			g.state.ExitSignal = int(status.Signal())
+			g.state.ExitCoreDump = status.CoreDump()
+		}
 		if e != nil {
 			g.state.Exit.Err = "MAC_CEF_BROKER_EXIT_FAILED"
 		}
@@ -626,4 +630,73 @@ func RunGuard(configPath string) error {
 		}
 		g.mu.Unlock()
 	}
+}
+
+// Drain all stderr without retaining CEF/error/page text. Only our fixed native
+// lifecycle markers become uploadable measurements; oversized lines are dropped.
+type nativeEventWriter struct {
+	guard     *guard
+	line      []byte
+	oversized bool
+}
+
+func (w *nativeEventWriter) Write(data []byte) (int, error) {
+	for _, b := range data {
+		if b == '\n' {
+			if !w.oversized {
+				w.record(string(w.line))
+			}
+			w.line = w.line[:0]
+			w.oversized = false
+		} else if len(w.line) < 127 && !w.oversized {
+			w.line = append(w.line, b)
+		} else {
+			w.oversized = true
+		}
+	}
+	return len(data), nil
+}
+func (w *nativeEventWriter) record(line string) {
+	name := ""
+	switch line {
+	case "DSH_CEF_EVENT shutdown-enter":
+		name = "shutdown-enter"
+	case "DSH_CEF_EVENT before-close":
+		name = "before-close"
+	case "DSH_CEF_EVENT loop-returned":
+		name = "loop-returned"
+	case "DSH_CEF_EVENT owner-stop":
+		name = "owner-stop"
+	case "DSH_CEF_EVENT owner-read-failed":
+		name = "owner-read-failed"
+	case "DSH_CEF_EVENT monitor-join-start":
+		name = "monitor-join-start"
+	case "DSH_CEF_EVENT monitor-joined":
+		name = "monitor-joined"
+	case "DSH_CEF_EVENT shutdown-request":
+		name = "shutdown-request"
+	case "DSH_CEF_EVENT shutdown-ack":
+		name = "shutdown-ack"
+	case "DSH_CEF_EVENT shutdown-ack-failed":
+		name = "shutdown-ack-failed"
+	case "DSH_CEF_EVENT shutdown-returned":
+		name = "shutdown-returned"
+	case "DSH_CEF_EVENT quiescent-sent":
+		name = "quiescent-sent"
+	case "DSH_CEF_EVENT quiescent-failed":
+		name = "quiescent-failed"
+	case "DSH_CEF_EVENT release-received":
+		name = "release-received"
+	case "DSH_CEF_EVENT release-failed":
+		name = "release-failed"
+	default:
+		return
+	}
+	w.guard.mu.Lock()
+	defer w.guard.mu.Unlock()
+	if len(w.guard.state.NativeEvents) == 64 {
+		w.guard.state.NativeEventsTruncated = true
+		return
+	}
+	w.guard.state.NativeEvents = append(w.guard.state.NativeEvents, nativeEvent{Name: name, At: time.Now().UTC()})
 }

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"syscall"
+	"time"
 
 	"github.com/local/dsh-work/internal/localipc"
 	"github.com/local/dsh-work/internal/supervisor"
@@ -31,17 +32,26 @@ type owned struct {
 	Role    string                  `json:"role"`
 }
 
+type nativeEvent struct {
+	Name string    `json:"name"`
+	At   time.Time `json:"at"`
+}
+
 type journal struct {
-	Generation     string                `json:"generation"`
-	Job            string                `json:"job"`
-	Owner          Process               `json:"owner"`
-	Broker         Process               `json:"broker"`
-	Phase          string                `json:"phase"`
-	Owned          map[string]owned      `json:"owned"`
-	Children       []Process             `json:"quiescentChildren,omitempty"`
-	RuntimeVersion string                `json:"runtimeVersion,omitempty"`
-	RuntimeReady   bool                  `json:"runtimeReady"`
-	Exit           supervisor.ExitResult `json:"exit"`
+	ExitSignal            int                   `json:"exitSignal,omitempty"`
+	ExitCoreDump          bool                  `json:"exitCoreDump"`
+	NativeEvents          []nativeEvent         `json:"nativeEvents,omitempty"`
+	NativeEventsTruncated bool                  `json:"nativeEventsTruncated"`
+	Generation            string                `json:"generation"`
+	Job                   string                `json:"job"`
+	Owner                 Process               `json:"owner"`
+	Broker                Process               `json:"broker"`
+	Phase                 string                `json:"phase"`
+	Owned                 map[string]owned      `json:"owned"`
+	Children              []Process             `json:"quiescentChildren,omitempty"`
+	RuntimeVersion        string                `json:"runtimeVersion,omitempty"`
+	RuntimeReady          bool                  `json:"runtimeReady"`
+	Exit                  supervisor.ExitResult `json:"exit"`
 }
 
 type signedJournal struct {

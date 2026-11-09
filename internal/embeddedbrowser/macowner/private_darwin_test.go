@@ -303,6 +303,10 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 		QueryError string    `json:"queryError,omitempty"`
 	}
 	var proof struct {
+		ExitSignal                 int                `json:"brokerExitSignal"`
+		ExitCoreDump               bool               `json:"brokerCoreDump"`
+		NativeEvents               []nativeEvent      `json:"nativeEvents"`
+		NativeEventsTruncated      bool               `json:"nativeEventsTruncated"`
 		Generation                 string             `json:"generation"`
 		ObservedAt                 time.Time          `json:"observedAt"`
 		Phase                      string             `json:"authenticatedTerminalPhase"`
@@ -329,6 +333,10 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 	if err != nil {
 		proof.Errors = append(proof.Errors, "terminal-record-unavailable")
 	} else {
+		proof.ExitSignal = state.ExitSignal
+		proof.ExitCoreDump = state.ExitCoreDump
+		proof.NativeEvents = state.NativeEvents
+		proof.NativeEventsTruncated = state.NativeEventsTruncated
 		proof.Phase = state.Phase
 		proof.RuntimeVersion = state.RuntimeVersion
 		proof.ExitCode = state.Exit.Code

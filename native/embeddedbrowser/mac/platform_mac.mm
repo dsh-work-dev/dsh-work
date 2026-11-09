@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstring>
 #include <cstdlib>
+#include <cstdio>
 #include <string.h>
 #include <fcntl.h>
 #include <libproc.h>
@@ -92,6 +93,16 @@ bool RegisterProcess(const char* kind,int argc,char** argv);
 }
 
 namespace dsh_platform {
+void Lifecycle(const char* event) {
+  // Fixed state markers only; never write a URL, page data, token or error body.
+  for (const char* allowed : {"shutdown-enter","before-close","loop-returned","owner-stop","owner-read-failed","monitor-join-start","monitor-joined","shutdown-request","shutdown-ack","shutdown-ack-failed","shutdown-returned","quiescent-sent","quiescent-failed","release-received","release-failed"}) {
+    if(std::strcmp(event,allowed)!=0)continue;
+    char line[128];const int n=std::snprintf(line,sizeof(line),"DSH_CEF_EVENT %s\n",allowed);
+    if(n>0&&n<static_cast<int>(sizeof(line))) (void)write(STDERR_FILENO,line,n);
+    return;
+  }
+}
+
 std::string TakeEnvironment(const char* name) { auto text=Get(name); unsetenv(name); return text; }
 bool OpenTransport(const std::string& path) {
   if(!Number(TakeEnvironment("DSH_WORK_CEF_OWNER_FD"),owner) || fcntl(owner,F_SETFD,FD_CLOEXEC)<0) return false;
@@ -125,7 +136,7 @@ void Erase(std::string& value) {
   if (!value.empty() && memset_s(value.data(),value.size(),0,value.size()) != 0) std::abort();
   value.clear();
 }
-void CancelTransport() { if(transport>=0)shutdown(transport,SHUT_RDWR); }
+void CancelTransport() { Lifecycle("loop-returned"); if(transport>=0)shutdown(transport,SHUT_RDWR); }
 void CloseTransport() { if(transport>=0)close(transport);transport=-1;if(owner>=0)close(owner);owner=-1; }
 bool Visible(Window) { return false; }
 std::string Hide(Window) { return {}; }
@@ -142,17 +153,24 @@ void StartOwnerMonitor(std::function<void()> stop) {
       if(!Ready(owner,POLLIN,Clock::now()+std::chrono::milliseconds(50)))continue;
       std::string text;
       bool ok=Frame(owner,false,text);if(!ok || text!="{\"kind\":\"stop\"}")owner_failed=true;
+      Lifecycle(ok?"owner-stop":"owner-read-failed");
       stop();return;
     }
   });
 }
 void PrepareOwnedShutdown() {
+  Lifecycle("monitor-join-start");
   monitor_running=false;if(owner_monitor.joinable())owner_monitor.join();
-  if(!OwnerSend(@{@"kind":@"shutdown-start"})||!OwnerReply("{\"kind\":\"shutdown-start\"}",3))owner_failed=true;
+  Lifecycle("monitor-joined");Lifecycle("shutdown-request");
+  const bool ack=OwnerSend(@{@"kind":@"shutdown-start"})&&OwnerReply("{\"kind\":\"shutdown-start\"}",3);
+  Lifecycle(ack?"shutdown-ack":"shutdown-ack-failed");if(!ack)owner_failed=true;
 }
 int FinishOwnedShutdown() {
-  if(owner_failed || !OwnerSend(@{@"kind":@"quiescent",@"broker":Identity(getpid()),@"group":Census(false),@"children":Census(true)})) return 75;
-  return OwnerReply("{\"kind\":\"release\"}",15)?0:75;
+  Lifecycle("shutdown-returned");
+  if(owner_failed || !OwnerSend(@{@"kind":@"quiescent",@"broker":Identity(getpid()),@"group":Census(false),@"children":Census(true)})) {Lifecycle("quiescent-failed");return 75;}
+  Lifecycle("quiescent-sent");
+  const bool released=OwnerReply("{\"kind\":\"release\"}",15);
+  Lifecycle(released?"release-received":"release-failed");return released?0:75;
 }
 }
 

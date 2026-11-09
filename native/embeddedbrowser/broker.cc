@@ -310,6 +310,9 @@ bool RequiresGuard()const{return guard_required_;}
 #endif
   }
   void OnBeforeClose(CefRefPtr<CefBrowser>) override {
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close");
+#endif
     browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
     tabs.erase(tab_);
     if(artifact_){artifact_->closed_browsers++;FinishArtifact(artifact_);}
@@ -450,6 +453,9 @@ void RevokeArtifact(std::shared_ptr<ArtifactState> state) {
   },state)));
 }
 void Shutdown() {
+#if defined(__APPLE__)
+  dsh_platform::Lifecycle("shutdown-enter");
+#endif
   if (stopping.exchange(true)) return;
   std::vector<std::shared_ptr<ArtifactState>> states;
   for(const auto& [_,state]:artifacts)states.push_back(state);
