@@ -29,6 +29,11 @@ on:
       - 'tools/browser-lab/native/posix/**'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
+    inputs:
+      mac_validation:
+        description: Explicitly run Mac feature validation (normal development uses a Mac device)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -106,7 +111,7 @@ jobs:
 
   mac-private-cef:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_native == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -211,7 +216,7 @@ jobs:
 
   mac-cef-owner:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_cef == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -430,7 +435,7 @@ jobs:
 
   mac-launchd-tree:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_launchd == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -516,7 +521,7 @@ jobs:
 
   mac-sender-probe:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_probe == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -552,7 +557,7 @@ jobs:
 
   mac-product-ipc:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_product == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:
