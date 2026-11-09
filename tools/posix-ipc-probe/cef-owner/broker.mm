@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/wait.h>
 #include <thread>
 
 @interface OwnerProbeApplication : NSApplication <CefAppProtocol> { BOOL handling_; }
@@ -107,7 +108,31 @@ int main(int argc,char** argv) {
       if(reading) CefPostTask(TID_UI,base::BindOnce(CloseAll));
     });
     CefRunMessageLoop(); reading=false; monitor.join(); CefShutdown();
-    owner_probe::Emit("{\"event\":\"shutdown-return\",\"group\":"+owner_probe::Census(getpgrp())+"}");
-    return closed==2?0:5;
+    const auto shutdown_at=owner_probe::Now();
+    owner_probe::Emit("{\"event\":\"shutdown-return\",\"returned_at_ms\":"+std::to_string(shutdown_at)+",\"group\":"+owner_probe::Census(getpgrp())+"}");
+    // Keep the actual LaunchAgent root alive after CEF shutdown. Otherwise its
+    // exit would trigger launchd's group fallback before the observer can prove
+    // natural child quiescence. Only the observer may release this diagnostic
+    // root after original helpers and the kernel group satisfy the joint gate.
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+    while(std::chrono::steady_clock::now()<deadline) {
+      for(;;) {
+        int status=0; pid_t child=waitpid(-1,&status,WNOHANG);
+        if(child>0) {
+          owner_probe::Emit("{\"event\":\"child-reaped\",\"pid\":"+std::to_string(child)+",\"wait_status\":"+std::to_string(status)+"}");
+          continue;
+        }
+        if(child<0 && errno==EINTR) continue;
+        if(child<0 && errno!=ECHILD) { owner_probe::Emit("{\"event\":\"reap-error\",\"error\":"+std::to_string(errno)+"}"); return 7; }
+        break;
+      }
+      if(access((directory+"/release").c_str(),F_OK)==0) {
+        owner_probe::Emit("{\"event\":\"root-release\",\"group\":"+owner_probe::Census(getpgrp())+"}");
+        return closed==2?0:5;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    owner_probe::Emit("{\"event\":\"root-release-timeout\"}");
+    return 6;
   }
 }
