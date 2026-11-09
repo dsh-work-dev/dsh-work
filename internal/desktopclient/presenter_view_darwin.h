@@ -19,3 +19,14 @@ int dsh_mac_view_replace_frame(uintptr_t,const char*,size_t);
 #ifdef __cplusplus
 }
 #endif
+// Fixture-only, process-local consumers of the already-owned native view.
+#ifdef __cplusplus
+extern "C" {
+#endif
+char* dsh_mac_fixture_observe(uintptr_t);
+int dsh_mac_fixture_interact(uintptr_t);
+int dsh_mac_fixture_render(uintptr_t,const char*);
+
+#ifdef __cplusplus
+}
+#endif

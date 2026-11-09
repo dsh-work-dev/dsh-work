@@ -157,6 +157,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
+	configureEmbeddedPreviewAssets(workerSurface)
 	var open func(section, window string) string
 	commands := newCommandDispatcher(func(name string, data any) {
 		if desktop != nil {
@@ -353,6 +354,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
 		registerWorkspaceWindow(primarySurface, workspaceWindow)
+		installEmbeddedPreviewConsumer(desktop, workspaceWindow, embeddedClient)
 		remember(workspace, workOptions)
 		if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 			desktopprobe.InstallClient(desktop, workspace, report)
