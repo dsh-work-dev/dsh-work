@@ -1,7 +1,7 @@
 #ifndef DSH_LOCALIPC_MACH_PEER_H
 #define DSH_LOCALIPC_MACH_PEER_H
 #include <stdint.h>
-#include <bsm/audit.h>
+#include <mach/message.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

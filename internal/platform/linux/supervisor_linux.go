@@ -202,7 +202,7 @@ func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, 
 	if err != nil {
 		stdout.Close()
 		stderr.Close()
-		return nil, fmt.Errorf("%s: atomic cgroup/pidfd launch: %w", unavailable, err)
+		return nil, fmt.Errorf("%s: atomic cgroup/pidfd launch: %w; containment=%s", unavailable, err, launchDiagnostic(w.group, plan.Executable, w.anchorPID, err))
 	}
 	w.cmd = cmd
 	w.pid = uint32(cmd.Process.Pid)

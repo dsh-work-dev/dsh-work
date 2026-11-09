@@ -172,6 +172,9 @@ func TestLiveSystemdFailedLaunchCleanup(t *testing.T) {
 	if len(a.pending) != 0 {
 		t.Fatal("failed launch cleanup retained unresolved unit", e)
 	}
+	if !errors.Is(e, syscall.ENOENT) {
+		t.Fatal("owned startup cleanup completed, but missing-executable gate was not reached; earlier launch failure", e)
+	}
 	if e = a.Close(); e != nil {
 		t.Fatal(e)
 	}
