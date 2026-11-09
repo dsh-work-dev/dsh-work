@@ -51,7 +51,7 @@ class Inspector {
  async find(which){for(const c of this.contexts.values()){try{const value=await this.evaluate(c,`({shell:parent===window&&!!document.querySelector('iframe'),dsh:globalThis.__DSH_WORK_BROWSER_PROVIDER__?.protocolVersion===1})`);if(value?.[which])return c}catch{}}}
  close(){this.ws.close();}
 }
-let inspector;
+let inspector,lastSlotStates;
 try {
  if(mode==='--boot-diagnostic'){
   // One channel attempt at the checkpoint. If WebKit cannot list/connect its
@@ -112,18 +112,19 @@ try {
  await until('real address toolbar',()=>inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')`));
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(fixture)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');e.form.requestSubmit();return true})()`);
- const state=()=>inspector.evaluate(shell,`(async()=>{const frame=document.querySelector('iframe');const doc=decodeURIComponent(new URL(frame.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const rows=[];for(const slot of __e67Slots)rows.push({slot,state:await Call.ByID(${ids.state},doc,slot)});return rows})()`);
- const visible=await until('native slot ready',async()=>{const rows=await state();return rows.find(r=>r.state.state==='ready'&&r.state.visible&&r.state.url===fixture)});
+ const state=async()=>lastSlotStates=await inspector.evaluate(shell,`(async()=>{const frame=document.querySelector('iframe');const doc=decodeURIComponent(new URL(frame.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const rows=[];for(const slot of __e67Slots){try{rows.push({slot,state:await Call.ByID(${ids.state},doc,slot)})}catch(error){rows.push({slot,error:String(error)})}}return rows})()`);
+ const visible=await until('native slot ready',async()=>{const rows=await state();return rows.find(r=>r.state?.state==='ready'&&r.state.visible&&r.state.url===fixture)});
  save('visible',visible);
  await until('capture visible barrier',()=>existsSync(join(out,'hide.request')),30000);
  await until('collapse existing sidebar control',()=>click('^(Collapse right sidebar|收起右侧边栏)$'));
- const hidden=await until('native Hide ACK',async()=>{const rows=await state();return rows.find(r=>r.slot===visible.slot&&!r.state.visible&&r.state.document===visible.state.document)});
+ const hidden=await until('native Hide ACK',async()=>{const rows=await state();return rows.find(r=>r.slot===visible.slot&&r.state&&!r.state.visible&&r.state.document===visible.state.document)});
  save('hidden',hidden);
  await until('capture hidden barrier',()=>existsSync(join(out,'quit.request')),30000);
  save('quit-requested',{method:'HostService.Quit'});
  await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return await Call.ByID(${ids.quit})})()`).catch(e=>save('quit-response',{error:String(e)}));
  }
 } catch(error) {
+ if(lastSlotStates)save('last-slot-states',lastSlotStates);
  if(inspector)save('inspector-protocol',{events:inspector.trace,targets:[...inspector.targets.values()],contextCount:inspector.contexts.size});
  if(inspector){const dsh=await inspector.find('dsh').catch(()=>{});if(dsh)save('failure-controls',await inspector.evaluate(dsh,`[...document.querySelectorAll('button,[role="button"]')].filter(e=>e.getClientRects().length).slice(0,100).map(e=>({label:e.getAttribute('aria-label'),title:e.getAttribute('title'),text:e.textContent.trim().slice(0,80)}))`).catch(()=>[]));}
  save(mode==='--boot-diagnostic'?'boot-inspector-unavailable':'failure',{error:String(error)});process.exitCode=1;

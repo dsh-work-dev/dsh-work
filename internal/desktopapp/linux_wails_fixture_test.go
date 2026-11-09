@@ -339,6 +339,11 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		if !t.Failed() {
 			return
 		}
+		if nativeFD >= 0 {
+			poll := []unix.PollFd{{Fd: int32(nativeFD), Events: unix.POLLIN}}
+			ready, pollErr := unix.Poll(poll, 0)
+			save("native-held-at-failure", map[string]any{"pidfdReady": ready, "revents": poll[0].Revents, "error": fmt.Sprint(pollErr)})
+		}
 		// One failure capture of the still-held UI only, before owned cleanup.
 		// XRes PID + creation verification is the same as the normal capture.
 		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
