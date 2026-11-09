@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {basename} from 'node:path';
 import {sleep,waitFor} from '../lib/context.mjs';
+import {createInvalidTLSFixture} from '../fixtures/invalid-tls.mjs';
 const view=(s,name)=>s.views.find(v=>v.name===name);
 const doc=async(a,name='A')=>(await a.docs())[name];
 const intact=(a,b)=>a.instance===b.instance&&a.value===b.value&&a.result===b.result;
@@ -57,7 +58,20 @@ export const nativeCases={
  async 'sandbox.renderer'(c){const evidence=await c.adapter.sandboxAssessment();assert(evidence.rendererSandboxed);return {evidence}},
  async 'content.html'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:a.session.endpoints.artifact+'/'});const before=await doc(a);await input(c,'HTML-'+c.options.runId);await c.action('browser_click','#apply');const after=await doc(a),assets=await a.call('backend','/artifact-state');assert.equal(after.instance,before.instance);assert.equal(after.result,'HTML-'+c.options.runId);assert(assets.imageLoaded&&assets.js.includes('已加载')&&assets.css==='rgb(18, 62, 80)');return {evidence:{assets,before,after,picture:await picture(a,c.caseId)}}},
  async 'content.localhost'(c){const a=c.adapter;await a.call('backend','/display',{tab:'A',url:fixture(a,'A','localhost')});await input(c,'localhost');await c.action('browser_click','#apply');const d=await doc(a);assert.equal(d.result,'localhost');return {evidence:d}},
- async 'content.https'(c){const a=c.adapter,display=await a.call('backend','/display',{tab:'A',url:'https://example.com/'});assert.equal(display.status,200);assert(display.security?.protocol);const actual=await a.call('backend','/page-text');assert(actual.text.length>0);const result=await c.action('browser_snapshot','body');assert.equal(result.value.text,actual.text);const invalid=await a.api('backend','/display',{tab:'B',url:'https://expired.badssl.com/'});assert(!invalid.ok&&/CERT_/.test(JSON.stringify(invalid.value)));return {evidence:{display,readMatchesActualDocument:true,invalid,picture:await picture(a,c.caseId)}}},
+ async 'content.https'(c){
+  const a=c.adapter,display=await a.call('backend','/display',{tab:'A',url:'https://example.com/'});
+  assert.equal(display.status,200);assert(display.security?.protocol);
+  const actual=await a.call('backend','/page-text');assert(actual.text.length>0);
+  const result=await c.action('browser_snapshot','body');assert.equal(result.value.text,actual.text);
+  const tls=await createInvalidTLSFixture();
+  try{
+   const invalid=await a.api('backend','/display',{tab:'B',url:tls.url});
+   const evidence={invalid,url:tls.url,certificate:tls.certificate,audit:tls.audit};
+   assert(!invalid.ok&&/CERT_/.test(JSON.stringify(invalid.value)),JSON.stringify(evidence));
+   assert(tls.audit.connections>0&&tls.audit.requests===0,JSON.stringify(evidence));
+   return {evidence:{display,readMatchesActualDocument:true,...evidence,picture:await picture(a,c.caseId)}};
+  }finally{await tls.close()}
+ },
  async 'tabs.retention'(c){const a=c.adapter;await input(c,'keep-A');const beforeA=await doc(a);await a.command('tab',{tab:'B'});await input(c,'keep-B');const beforeB=await doc(a,'B'),initial=await a.state();await sleep(1200);await a.command('tab',{tab:'A'});const final=await a.state();assert(intact(beforeA,await doc(a))&&intact(beforeB,await doc(a,'B')));for(const n of ['A','B'])assert.equal(view(initial,n).id,view(final,n).id);assert(view(final,'A').visible&&!view(final,'B').visible);return {evidence:{beforeA,beforeB,views:final.views}}},
  async 'views.float-dock'(c){const a=c.adapter;await input(c,'retained');const before=await doc(a),initial=await a.state();await a.command('float');const floating=await a.state();assert.equal(view(floating,'A').id,view(initial,'A').id);assert.equal(view(floating,'A').parentId,floating.floatingHost.id);const shot=await picture(a,c.caseId,'float');await a.command('dock');const final=await a.state();assert.equal(view(final,'A').parentId,final.host.id);assert(intact(before,await doc(a)));return {evidence:{initial,floating,final,picture:shot}}},
  async 'dpi.current'(c){const s=await c.adapter.state(),d=await doc(c.adapter);assert.equal(s.host.dpi,view(s,'A').dpi);assert.equal(d.dpr,view(s,'A').dpi/96);return {evidence:{hostDpi:s.host.dpi,guestDpi:view(s,'A').dpi,dpr:d.dpr,monitorCount:s.monitors.length,scope:'current monitor only'}}},

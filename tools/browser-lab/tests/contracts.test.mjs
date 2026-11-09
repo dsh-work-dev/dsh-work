@@ -10,6 +10,24 @@ import {platformSupport,validateSession} from '../platforms/index.mjs';
 import {createFixtureServer} from '../fixtures/server.mjs';
 import {evaluateIME,evaluateMixedDPI} from '../lib/manual.mjs';
 import {makeContext} from '../lib/context.mjs';
+import https from 'node:https';
+import {createInvalidTLSFixture} from '../fixtures/invalid-tls.mjs';
+
+test('TLS negative fixture: default verification rejects its own certificate before HTTP',async()=>{
+ const fixture=await createInvalidTLSFixture();
+ const request=options=>new Promise((resolve,reject)=>{
+  const req=https.get(fixture.url,options,res=>{res.resume();res.once('end',()=>resolve(res.statusCode))});
+  req.setTimeout(3000,()=>req.destroy(Error('TLS fixture timeout')));req.once('error',reject);
+ });
+ try{
+  await assert.rejects(request({}),error=>error.code==='DEPTH_ZERO_SELF_SIGNED_CERT');
+  assert(fixture.audit.connections>0);assert.equal(fixture.audit.requests,0);
+  // Trust only this fixture in this separate control client, proving that the
+  // listener is functional. No browser or global TLS configuration is changed.
+  assert.equal(await request({ca:readFileSync(new URL('../fixtures/tls-untrusted-cert.pem',import.meta.url))}),200);
+  assert.equal(fixture.audit.requests,1);
+ }finally{await fixture.close()}
+});
 
 test('catalog: stable unique IDs, every automatic requirement has an executable case',()=>{
  assert.equal(validateCatalog().length,cases.length);
