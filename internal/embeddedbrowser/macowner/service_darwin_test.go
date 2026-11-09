@@ -118,7 +118,9 @@ func TestLiveMacEngineServiceMCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	broker, err := embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: pub.Executable, Profile: native.profile, Supervisor: native})
+	broker, err := embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: pub.Executable, Profile: native.profile, Supervisor: native, ObserveCommand: func(o embeddedbrowser.ProtocolObservation) {
+		t.Log("browser-cdp", o.Stage, o.Route, o.ID, o.Method, o.At.UTC())
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
