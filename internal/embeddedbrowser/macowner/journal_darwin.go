@@ -38,6 +38,9 @@ type nativeEvent struct {
 }
 
 type journal struct {
+	StopRequested         bool                  `json:"stopRequested,omitempty"`
+	ForceRequested        bool                  `json:"forceRequested,omitempty"`
+	Component             string                `json:"component,omitempty"`
 	ExitSignal            int                   `json:"exitSignal,omitempty"`
 	ExitCoreDump          bool                  `json:"exitCoreDump"`
 	NativeEvents          []nativeEvent         `json:"nativeEvents,omitempty"`

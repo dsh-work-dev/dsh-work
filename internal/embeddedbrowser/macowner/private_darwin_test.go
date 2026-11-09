@@ -303,6 +303,10 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 		QueryError string    `json:"queryError,omitempty"`
 	}
 	var proof struct {
+		StopRequested              bool               `json:"stopRequested"`
+		ForceRequested             bool               `json:"forceRequested"`
+		TerminalEvidenceSource     string             `json:"terminalEvidenceSource"`
+		Component                  string             `json:"component"`
 		Job                        jobMeasurement     `json:"job"`
 		JobBootoutConfirmed        bool               `json:"jobBootoutConfirmed"`
 		RunFilesRetired            bool               `json:"runFilesRetired"`
@@ -341,10 +345,28 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 	proof.AttemptRecordRetired = w.attempt == nil
 	proof.Generation = id
 	state, err := loadGeneration(w.directory, w.key, id)
+	proof.TerminalEvidenceSource = "signed-generation-record"
+	if errors.Is(err, os.ErrNotExist) && w.retired {
+		w.mu.Lock()
+		retained := w.state
+		w.mu.Unlock()
+		if retained.Generation == id && retained.Job == w.job && retained.Phase == "empty" {
+			state = retained
+			err = nil
+			proof.TerminalEvidenceSource = "authenticated-retired-worker-snapshot"
+		}
+	}
 	if err != nil {
 		proof.Errors = append(proof.Errors, "terminal-record-unavailable")
 	} else {
-		proof.SystemCrash = conditionalSystemCrash(state)
+		proof.StopRequested = state.StopRequested
+		proof.ForceRequested = state.ForceRequested
+		proof.Component = state.Component
+		if state.Component == "owned-cef-mcp" {
+			proof.SystemCrash = &safeCrash{Status: "not-cef-component"}
+		} else {
+			proof.SystemCrash = conditionalSystemCrash(state)
+		}
 		proof.ExitSignal = state.ExitSignal
 		proof.ExitCoreDump = state.ExitCoreDump
 		proof.NativeEvents = state.NativeEvents

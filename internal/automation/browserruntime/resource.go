@@ -220,7 +220,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		}()
 		bounded, stop := context.WithTimeout(ctx, 25*time.Second)
 		defer stop()
-		r.conn, err = r.ipc.Connect(bounded)
+		r.conn, err = connectRuntimeProcess(bounded, r.ipc, r.worker)
 		if err != nil {
 			return nil, err
 		}
@@ -538,4 +538,17 @@ func (r *resource) AutomationTerminal() bool {
 	default:
 		return false
 	}
+}
+
+// New component supervisors can bind their actual kernel process instance.
+// Older supervisors retain the original authenticated carrier contract.
+func connectRuntimeProcess(ctx context.Context, ipc *workeripc.Transport, worker supervisor.Worker) (net.Conn, error) {
+	if instance, ok := worker.(interface{ PrivateConnectionProcess() (uint32, uint64) }); ok {
+		pid, started := instance.PrivateConnectionProcess()
+		if pid == 0 || started == 0 {
+			return nil, errors.New("BROWSER_RUNTIME_PROCESS_INSTANCE_REQUIRED")
+		}
+		return ipc.ConnectProcessInstance(ctx, pid, started)
+	}
+	return ipc.Connect(ctx)
 }

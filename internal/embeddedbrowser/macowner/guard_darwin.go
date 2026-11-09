@@ -36,6 +36,7 @@ type guard struct {
 	stopping, engine, quiescent, released, exited bool
 	knownError                                    error
 	pendingSnapshot                               *message
+	mcpStopAt                                     time.Time
 }
 
 func (g *guard) wakeup() {
@@ -82,10 +83,18 @@ func (g *guard) requestStop() {
 	g.mu.Lock()
 	g.stopping = true
 	g.mu.Unlock()
-	_ = g.nativeCommand("stop")
+	if g.cfg.MCP != nil {
+		g.stopMCP(false)
+	} else {
+		_ = g.nativeCommand("stop")
+	}
 	g.wakeup()
 }
 func (g *guard) force() {
+	if g.cfg.MCP != nil {
+		g.stopMCP(true)
+		return
+	}
 	g.mu.Lock()
 	g.stopping = true
 	targets := []localipc.ProcessTarget{}
@@ -149,6 +158,10 @@ func (g *guard) serve(c net.Conn) {
 			}
 		}
 	}
+	if g.cfg.MCP != nil {
+		g.registerMCP(c, hello, target)
+		return
+	}
 	select {
 	case <-g.brokerReady:
 	case <-time.After(3 * time.Second):
@@ -204,6 +217,9 @@ func (g *guard) serve(c net.Conn) {
 }
 
 func (g *guard) startBroker() error {
+	if g.cfg.MCP != nil {
+		return g.startMCPBroker()
+	}
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
 		return err
@@ -245,23 +261,7 @@ func (g *guard) startBroker() error {
 	g.mu.Unlock()
 	close(g.brokerReady)
 	go g.readNative(c)
-	go func() {
-		e := cmd.Wait()
-		g.mu.Lock()
-		g.exited = true
-		g.state.Exit = supervisor.ExitResult{Started: true, Code: cmd.ProcessState.ExitCode()}
-		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-			g.state.ExitSignal = int(status.Signal())
-			g.state.ExitCoreDump = status.CoreDump()
-		}
-		if e != nil {
-			g.state.Exit.Err = "MAC_CEF_BROKER_EXIT_FAILED"
-		}
-		_ = g.persist()
-		g.mu.Unlock()
-		g.notify("exited")
-		g.wakeup()
-	}()
+	g.watchProcess(cmd)
 	g.notify("started")
 	return err
 }
@@ -346,6 +346,9 @@ func (g *guard) commitSnapshotLocked() error {
 }
 
 func (g *guard) admitLocked(c Census, children bool) error {
+	if g.cfg.MCP != nil {
+		return g.admitMCPGroupLocked(c)
+	}
 	if c.Error != 0 || c.Truncated {
 		return ErrCleanupPending
 	}
@@ -476,7 +479,11 @@ func RunGuard(configPath string) error {
 	if err != nil {
 		return err
 	}
-	fd, err := unix.Open(filepath.Join(cfg.Profile, ".dsh-cef-profile.lock"), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+	leaseName := ".dsh-cef-profile.lock"
+	if cfg.MCP != nil {
+		leaseName = ".dsh-mcp-component.lock"
+	}
+	fd, err := unix.Open(filepath.Join(cfg.Profile, leaseName), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if err != nil {
 		return err
 	}
@@ -494,6 +501,9 @@ func RunGuard(configPath string) error {
 		return errors.Join(ErrCleanupPending, err)
 	}
 	g := &guard{cfg: cfg, key: key, state: journal{Generation: cfg.Plan.GenerationID, Job: cfg.Job, Owner: self, Phase: "starting", Owned: map[string]owned{}}, brokerReady: make(chan struct{}), start: make(chan struct{}), wake: make(chan struct{}, 1)}
+	if cfg.MCP != nil {
+		g.state.Component = "owned-cef-mcp"
+	}
 	if err = g.persist(); err != nil {
 		return err
 	}
@@ -545,6 +555,16 @@ func RunGuard(configPath string) error {
 			return ctx.Err()
 		}
 		g.mu.Lock()
+		if cfg.MCP != nil && !g.mcpStopAt.IsZero() && time.Since(g.mcpStopAt) > 3*time.Second {
+			// The LaunchAgent still holds the original PGID here. Returning
+			// lets launchd finish its owned inherited group, including a child
+			// stopped before its mandatory registration. Recovery still needs
+			// actual instance/group empty; this is not a completion record.
+			g.state.Phase = "mcp-retiring"
+			err := g.persist()
+			g.mu.Unlock()
+			return errors.Join(ErrCleanupPending, err)
+		}
 		if g.pendingSnapshot != nil && g.knownError != nil {
 			if g.quiescent {
 				g.knownError = g.persist()
@@ -561,7 +581,7 @@ func RunGuard(configPath string) error {
 			continue
 		}
 		pendingNotified = false
-		if g.engine && !g.quiescent && !g.exited {
+		if (g.engine || cfg.MCP != nil) && !g.quiescent && !g.exited {
 			before := len(g.state.Owned)
 			c, e := group(g.state.Owner.PGID)
 			if e == nil {
@@ -707,4 +727,24 @@ func (w *nativeEventWriter) record(line string) {
 		return
 	}
 	w.guard.state.NativeEvents = append(w.guard.state.NativeEvents, nativeEvent{Name: name, At: time.Now().UTC()})
+}
+
+func (g *guard) watchProcess(cmd *exec.Cmd) {
+	go func() {
+		e := cmd.Wait()
+		g.mu.Lock()
+		g.exited = true
+		g.state.Exit = supervisor.ExitResult{Started: true, Code: cmd.ProcessState.ExitCode()}
+		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			g.state.ExitSignal = int(status.Signal())
+			g.state.ExitCoreDump = status.CoreDump()
+		}
+		if e != nil {
+			g.state.Exit.Err = "MAC_CEF_BROKER_EXIT_FAILED"
+		}
+		_ = g.persist()
+		g.mu.Unlock()
+		g.notify("exited")
+		g.wakeup()
+	}()
 }

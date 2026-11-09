@@ -30,6 +30,7 @@ type message struct {
 }
 
 type launchConfig struct {
+	MCP       *mcpConfig            `json:"mcp,omitempty"`
 	Directory string                `json:"directory"`
 	Profile   string                `json:"profile"`
 	Socket    string                `json:"socket"`

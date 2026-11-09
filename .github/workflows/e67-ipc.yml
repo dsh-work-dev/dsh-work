@@ -142,6 +142,20 @@ jobs:
         run: |
           set -o pipefail
           go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^(TestCrashProjectionRequiresGeneration|TestLiveMacPrivateCEF)$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
+      - name: Prepare the formal Mac same-process carrier and locked MCP
+        run: |
+          node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge"
+          mkdir -p "$RUNNER_TEMP/e67-browser-dependencies"
+          cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
+          npm ci --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Exercise formal Mac engine Service and locked MCP
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacEngineServiceMCP$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-mcp.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:

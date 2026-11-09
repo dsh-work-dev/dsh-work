@@ -95,6 +95,7 @@ type Adapter struct {
 	publication        Publication
 	profile, directory string
 	worker             *Worker
+	mcp                *mcpConfig
 }
 
 // New is per-profile and CEF-specific. It deliberately does not become the
@@ -133,7 +134,11 @@ func launchctl(ctx context.Context, args ...string) ([]byte, error) {
 var jobPID = regexp.MustCompile(`(?m)^\s*pid = ([0-9]+)\s*$`)
 
 func recoverState(ctx context.Context, dir string, key []byte, s journal) error {
-	if s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
+	// Only the pinned CDP-attached Node/stdio component keeps all spawn paths
+	// in the LaunchAgent's inherited PGID. CEF still needs quiescence because
+	// its real post-root cleanup helper can create a separate process group.
+	mcpRecoverable := s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")
+	if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
 		return ErrCleanupPending
 	}
 	for {
@@ -184,7 +189,20 @@ func (w *Worker) recover(ctx context.Context) error {
 	if s.Job != w.job {
 		return ErrCleanupPending
 	}
-	return recoverState(ctx, w.directory, w.key, s)
+	if err = recoverState(ctx, w.directory, w.key, s); err != nil {
+		return err
+	}
+	terminal, err := loadGeneration(w.directory, w.key, id)
+	if err != nil || terminal.Job != w.job || terminal.Phase != "empty" {
+		return errors.Join(ErrCleanupPending, err)
+	}
+	// The resource owner may delete its temporary generated-code directory
+	// immediately after Close. Retain the authenticated completion snapshot,
+	// not the key or raw journal, for Diagnostics and safe final evidence.
+	w.mu.Lock()
+	w.state = terminal
+	w.mu.Unlock()
+	return nil
 }
 
 func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (result supervisor.Worker, retErr error) {
@@ -195,12 +213,21 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err := plan.Validate(); err != nil {
 		return nil, err
 	}
-	profile, profileErr := filepath.EvalSymlinks(plan.Env["DSH_WORK_CEF_PROFILE"])
-	if profileErr != nil || plan.Executable != a.publication.Executable || len(plan.Args) != 0 || plan.WorkingDirectory != filepath.Dir(a.publication.Executable) || profile != a.profile || plan.ExpectedOrigin != workeripc.Origin || !regexp.MustCompile(`^cef-[A-Za-z0-9]+$`).MatchString(plan.GenerationID) {
+	if a.mcp == nil {
+		profile, profileErr := filepath.EvalSymlinks(plan.Env["DSH_WORK_CEF_PROFILE"])
+		if profileErr != nil || plan.Executable != a.publication.Executable || len(plan.Args) != 0 || plan.WorkingDirectory != filepath.Dir(a.publication.Executable) || profile != a.profile {
+			return nil, errors.New("MAC_CEF_LAUNCH_PLAN_REJECTED")
+		}
+	} else if !sameJobFile(plan.Executable, a.mcp.Node) || len(plan.Args) != 1 || !sameJobFile(plan.Args[0], a.mcp.Adapter) {
+		return nil, errors.New("MAC_MCP_LAUNCH_PLAN_REJECTED")
+	}
+	if plan.ExpectedOrigin != workeripc.Origin || !regexp.MustCompile(`^cef-[A-Za-z0-9]+$`).MatchString(plan.GenerationID) {
 		return nil, errors.New("MAC_CEF_LAUNCH_PLAN_REJECTED")
 	}
 	plan.Env = maps.Clone(plan.Env)
-	plan.Env["DSH_WORK_CEF_PROFILE"] = a.profile
+	if a.mcp == nil {
+		plan.Env["DSH_WORK_CEF_PROFILE"] = a.profile
+	}
 	if a.worker != nil {
 		if err := a.worker.Close(); err != nil {
 			return nil, err
@@ -255,7 +282,7 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err != nil {
 		return nil, err
 	}
-	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Plan: plan, Job: job}
+	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Plan: plan, Job: job, MCP: a.mcp}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -348,9 +375,13 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 			return nil, ErrCleanupPending
 		}
 		w.state = *m.State
-		if m.Kind == "runtime" && m.State.RuntimeReady && m.State.RuntimeVersion == Version {
+		expectedVersion := Version
+		if a.mcp != nil {
+			expectedVersion = mcpVersion
+		}
+		if m.Kind == "runtime" && m.State.RuntimeReady && m.State.RuntimeVersion == expectedVersion {
 			durable, e := loadGeneration(w.directory, w.key, plan.GenerationID)
-			if e != nil || durable.Job != w.job || durable.Owner.PID != w.owner.PID || durable.Owner.Started != w.owner.Started || !durable.RuntimeReady || durable.RuntimeVersion != Version {
+			if e != nil || durable.Job != w.job || durable.Owner.PID != w.owner.PID || durable.Owner.Started != w.owner.Started || !durable.RuntimeReady || durable.RuntimeVersion != expectedVersion {
 				return nil, errors.Join(ErrCleanupPending, e)
 			}
 			w.handedOff = true // durable attempt remains until complete job/run retirement.
@@ -589,7 +620,7 @@ func (w *Worker) removeRun() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock"} {
+	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock", "mcp-bootstrap.json", "mcp-bootstrap.mjs"} {
 		if err := os.Remove(filepath.Join(w.run, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
