@@ -255,6 +255,7 @@ func (b *Broker) receive() {
 		}
 		var m struct {
 			Kind, Generation, Route, Scope, Method, Owner string
+			Code                                          int
 			Protocol                                      int
 			ID                                            json.RawMessage
 			Payload                                       json.RawMessage
@@ -266,6 +267,12 @@ func (b *Broker) receive() {
 		if m.Generation != b.generation {
 			b.abort(errors.New("CEF_GENERATION_REJECTED"))
 			return
+		}
+		if m.Kind == "origin.observed" {
+			if b.observe != nil {
+				b.observe("origin", fmt.Sprintf("%s %s code=%d", m.Scope, m.Method, m.Code))
+			}
+			continue
 		}
 		if strings.HasPrefix(m.Kind, "download.") {
 			if b.downloads == nil {

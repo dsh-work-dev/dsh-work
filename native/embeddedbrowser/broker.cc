@@ -196,6 +196,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   }
 public:
   #ifdef _WIN32
+  #include "download_origin_win.inc"
   #include "download_gate_win.inc"
   #include "popup_gate_win.inc"
   #endif
@@ -359,7 +360,11 @@ public:
     RejectUnsupportedPolicy("CEF_DOWNLOAD_UNSUPPORTED");return true;
   }
   const std::string& PolicyDenial()const{return policy_denied_;}
-  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else{scope_epoch_++;
+  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{
+#ifdef _WIN32
+    download_committed_frames_.insert(frame->GetIdentifier().ToString());
+#endif
+if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else{scope_epoch_++;
 #ifdef _WIN32
 PopupFrameChanged(frame);
 #endif
@@ -457,7 +462,7 @@ PopupFrameChanged(frame);
   }
   bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();
 #ifdef _WIN32
-CancelPopups(false);
+CancelPopups(false);DownloadOriginRetire();
 #endif
 closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
   std::string Present(Dict args){
@@ -560,12 +565,14 @@ bool RequiresGuard()const{return guard_required_;}
   void OnFrameAttached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,bool reattached)override {frame_graph.Attached(owner_route_,frame,reattached);}
   void OnFrameDetached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {
 #ifdef _WIN32
+    if(download_committed_frames_.contains(frame->GetIdentifier().ToString()))CancelDownloadPending();
     PopupFrameChanged(frame);
 #endif
     frame_graph.Detached(owner_route_,frame);}
   void OnMainFrameChanged(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> previous,CefRefPtr<CefFrame> next)override {frame_graph.MainChanged(owner_route_,tab_,graph_browser_,previous,next);}
   void OnFrameDestroyed(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame)override {
 #ifdef _WIN32
+    if(download_committed_frames_.erase(frame->GetIdentifier().ToString()))CancelDownloadPending();
     PopupFrameChanged(frame);popup_frame_epochs_.erase(frame->GetIdentifier().ToString());
 #endif
     frame_graph.Destroyed(owner_route_,frame);
@@ -595,7 +602,7 @@ bool RequiresGuard()const{return guard_required_;}
     b->GetHost()->SendDevToolsMessage(enable_json.data(),enable_json.size());
 #endif
 #ifdef _WIN32
-    if(!artifact_){auto params=CefDictionaryValue::Create();auto patterns=CefListValue::Create();auto pattern=CefDictionaryValue::Create();pattern->SetString("urlPattern","*");pattern->SetString("requestStage","Response");patterns->SetDictionary(0,pattern);params->SetList("patterns",patterns);DownloadCommand("Fetch.enable",params);DownloadCommand("Page.getFrameTree",CefDictionaryValue::Create());params=CefDictionaryValue::Create();params->SetString("behavior","deny");DownloadCommand("Browser.setDownloadBehavior",params);}
+    if(!artifact_){auto params=CefDictionaryValue::Create();auto patterns=CefListValue::Create();auto pattern=CefDictionaryValue::Create();pattern->SetString("urlPattern","*");pattern->SetString("requestStage","Response");patterns->SetDictionary(0,pattern);params->SetList("patterns",patterns);DownloadCommand("Fetch.enable",params);DownloadCommand("Target.getTargetInfo",CefDictionaryValue::Create());params=CefDictionaryValue::Create();params->SetString("behavior","deny");DownloadCommand("Browser.setDownloadBehavior",params);}
 #endif
     if(artifact_){artifact_->browser=b->GetIdentifier();ArtifactEvent(artifact_,"artifact.bound",b->GetIdentifier());artifact_->admitted=true;CefPostTask(TID_IO,base::BindOnce(AdmitArtifactResources,artifact_));}
     auto tab = CefDictionaryValue::Create(); tab->SetInt("id", tab_);
@@ -607,6 +614,7 @@ bool RequiresGuard()const{return guard_required_;}
   }
   bool DoClose(CefRefPtr<CefBrowser> browser) override {
 #ifdef _WIN32
+    DownloadOriginRetire();
     CancelPopups(false);
 #endif
     CancelFilePicker();closing_=true;RevokeGuard();view_visible_=false;
@@ -751,7 +759,7 @@ bool RequiresGuard()const{return guard_required_;}
       const auto method = m->GetString("method").ToString();
       auto params = m->GetDictionary("params");
 #ifdef _WIN32
-      if(DownloadIntercept(method,params))return true;
+      if(DownloadIntercept(method,params,m->GetString("sessionId").ToString()))return true;
       if(params&&method=="Page.javascriptDialogOpening"){
         bool truncated=false;
         auto message=DialogText(params->GetString("message"),kDialogMessageUnits,truncated);

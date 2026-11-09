@@ -1,24 +1,24 @@
 // Members of Client. UI-thread owned; only CEF engine events create pending.
 struct DownloadPending {
- std::string id,request,frame,loader,url,source,document,scope,view,presentation,mime,name;
+ std::string id,request,frame,loader,url,source,source_origin,context_session,context_unique,document,scope,view,presentation,mime,name;
+ uint64_t context_revision=0;
  std::chrono::steady_clock::time_point expires;
 };
-std::map<std::string,std::pair<std::string,std::string>> download_frames_;
-std::map<int,std::string> download_commands_;
+std::map<int,DownloadCommandInfo> download_commands_;
 std::map<std::string,DownloadPending> download_pending_;
 bool download_ready_=false;
-void DownloadCommand(const std::string& method,Dict params){
- if(!tabs.contains(tab_))return;auto id=++next_command_;download_commands_[id]=method;
- // DevTools observers disallow recursive dispatch. Keep FIFO order but return
- // from the observer before entering its agent again.
- CefPostTask(TID_UI,base::BindOnce([](CefRefPtr<Client> self,int id,std::string method,Dict params){
-  if(self->closing_||!tabs.contains(self->tab_)){self->download_commands_.erase(id);return;}
-  tabs.at(self->tab_).browser->GetHost()->ExecuteDevToolsMethod(id,method,params);
- },CefRefPtr<Client>(this),id,method,params));
-}
-void DownloadRememberFrames(Dict tree){
- if(!tree)return;auto f=tree->GetDictionary("frame");if(f)download_frames_[f->GetString("id").ToString()]={f->GetString("url"),f->GetString("loaderId")};
- auto children=tree->GetList("childFrames");if(children)for(size_t n=0;n<children->GetSize();++n)DownloadRememberFrames(children->GetDictionary(n));
+void DownloadCommand(const std::string& method,Dict params,const std::string& session={}){
+ if(!tabs.contains(tab_))return;auto id=++next_command_;download_commands_[id]={method,session,download_observation_revision_};
+ // Never recursively enter the DevTools agent from its observer callback.
+ CefPostTask(TID_UI,base::BindOnce([](CefRefPtr<Client> self,int id,std::string method,Dict params,std::string session){
+  if(self->closing_||!tabs.contains(self->tab_)||!session.empty()&&!self->download_origin_sessions_.contains(session)){self->download_commands_.erase(id);return;}
+  auto message=CefDictionaryValue::Create();message->SetInt("id",id);message->SetString("method",method);if(params)message->SetDictionary("params",params);if(!session.empty())message->SetString("sessionId",session);
+  auto value=CefValue::Create();value->SetDictionary(message);auto json=CefWriteJSON(value,JSON_WRITER_DEFAULT).ToString();
+  if(!tabs.at(self->tab_).browser->GetHost()->SendDevToolsMessage(json.data(),json.size())){
+   self->download_commands_.erase(id);self->DownloadOriginObserved("failed",method);
+   if(!session.empty()&&session!=self->download_origin_session_){self->DownloadOriginClearSession(session);self->download_origin_retired_sessions_.insert(session);self->download_origin_sessions_.erase(session);}else self->DownloadOriginRetire();
+  }
+ },CefRefPtr<Client>(this),id,method,params,session));
 }
 void CancelDownloadPending(){
  if(download_pending_.empty())return;download_pending_.clear();
@@ -34,17 +34,23 @@ bool DownloadOwner(dsh_file_picker::Owner& peer){
  bool ok=dsh_file_picker::SameOwner(peer,process);if(process)CloseHandle(process);return ok;
 }
 bool DownloadValid(const DownloadPending& p){
- auto f=download_frames_.find(p.frame);dsh_file_picker::Owner owner{};
- return !closing_&&!control_blocked&&download_ready_&&ViewVisible()&&
-  p.document==std::to_string(document_epoch_)&&p.scope==std::to_string(scope_epoch_)&&p.view==view_lease_&&p.presentation==presentation_epoch_&&
-  f!=download_frames_.end()&&f->second.first==p.source&&f->second.second==p.loader&&
-  std::chrono::steady_clock::now()<p.expires&&DownloadOwner(owner);
+ auto reject=[this](const std::string& reason){DownloadOriginObserved("stale",reason);return false;};
+ if(closing_||control_blocked||!download_ready_||!ViewVisible())return reject("source.visibility");
+ if(p.document!=std::to_string(document_epoch_))return reject("source.main-document");
+ // scope_epoch_ is the automation-wide frame graph epoch; CEF increments it
+ // even for an aborted attachment navigation. It is not the initiating
+ // document's lifetime. The private default-context unique identity + exact
+ // source loader below now provides that stronger per-frame proof instead.
+ if(p.view!=view_lease_||p.presentation!=presentation_epoch_)return reject("source.presentation");
+ auto f=download_frames_.find(p.frame);if(f==download_frames_.end()||f->second.url!=p.source||f->second.loader!=p.loader)return reject("source.loader");
+ auto context=download_contexts_.find(p.frame);
+ if(context==download_contexts_.end()||context->second.loader!=p.loader||context->second.unique!=p.context_unique||context->second.session!=p.context_session||context->second.origin!=p.source_origin||context->second.revision!=p.context_revision)return reject("source.context");
+ if(std::chrono::steady_clock::now()>=p.expires)return reject("source.expiry");
+ dsh_file_picker::Owner owner{};return DownloadOwner(owner)?true:reject("source.owner");
 }
-bool DownloadIntercept(const std::string& method,Dict params){
- if(!params)return false;
- if(method=="Page.frameNavigated"){
-  auto frame=params->GetDictionary("frame");if(frame){CancelDownloadPending();download_frames_[frame->GetString("id").ToString()]={frame->GetString("url"),frame->GetString("loaderId")};}
- }else if(method=="Page.frameDetached"){CancelDownloadPending();download_frames_.erase(params->GetString("frameId").ToString());}
+bool DownloadIntercept(const std::string& method,Dict params,const std::string& session){
+ if(DownloadOriginEvent(method,params,session))return true;
+ if(!params||!session.empty())return false;
  if(method!="Fetch.requestPaused")return false;
  auto request=params->GetDictionary("request");const auto request_id=params->GetString("requestId").ToString();
  auto headers=params->GetList("responseHeaders");bool attachment=false;std::string mime;int64_t total=-1;
@@ -60,28 +66,30 @@ bool DownloadIntercept(const std::string& method,Dict params){
  // Other native/PDF/download-attribute paths remain explicitly denied.
  if(!attachment||params->GetString("resourceType")!="Document"){DownloadCommand("Fetch.continueRequest",resolution);return true;}
  resolution->SetString("errorReason","Aborted");DownloadCommand("Fetch.failRequest",resolution);
- dsh_file_picker::Owner peer{};auto frame=params->GetString("frameId").ToString();auto source=download_frames_.find(frame);
+ dsh_file_picker::Owner peer{};auto frame=params->GetString("frameId").ToString();auto source=download_frames_.find(frame);auto context=download_contexts_.find(frame);
  if(!request||request->GetString("method")!="GET"||request->HasKey("postData")||request->GetBool("hasPostData")||!download_ready_||!download_pending_.empty()||
-    source==download_frames_.end()||DownloadOrigin(source->second.first).empty()||DownloadOrigin(request->GetString("url")).empty()||!DownloadOwner(peer))return true;
+    source==download_frames_.end()||context==download_contexts_.end()||context->second.loader!=source->second.loader||DownloadOrigin(request->GetString("url")).empty()||!DownloadOwner(peer))return true;
  DownloadPending p;p.id=DownloadNonce();if(p.id.empty())return true;
- p.request=request_id;p.frame=frame;p.loader=source->second.second;p.source=source->second.first;p.url=request->GetString("url");p.mime=mime;
+ p.request=request_id;p.frame=frame;p.loader=source->second.loader;p.source=source->second.url;
+ p.source_origin=context->second.origin;p.context_session=context->second.session;p.context_unique=context->second.unique;p.context_revision=context->second.revision;p.url=request->GetString("url");p.mime=mime;
  p.document=std::to_string(document_epoch_);p.scope=std::to_string(scope_epoch_);p.view=view_lease_;p.presentation=presentation_epoch_;p.expires=std::chrono::steady_clock::now()+std::chrono::minutes(2);
  // The website suggestion is advisory; Go normalizes it and the system Save
  // dialog chooses the directory. No page-supplied destination is accepted.
  CefURLParts url_parts;if(CefParseURL(p.url,url_parts)){auto path=CefString(&url_parts.path).ToString();auto slash=path.find_last_of('/');p.name=slash==std::string::npos?path:path.substr(slash+1);}
  download_pending_[p.id]=p;
  auto e=CefDictionaryValue::Create();e->SetString("kind","download.pending");e->SetString("generation",generation);e->SetString("owner",owner_route_);
- e->SetString("pending",p.id);e->SetString("requestId",p.request);e->SetString("frameId",p.frame);e->SetString("document",p.document+"/"+p.scope+"/"+p.loader);
- e->SetString("presentation",p.presentation);e->SetString("source",p.source);e->SetString("sourceOrigin",DownloadOrigin(p.source));e->SetString("url",p.url);e->SetString("mime",p.mime);e->SetString("name",p.name);e->SetString("total",std::to_string(total));
+ e->SetString("pending",p.id);e->SetString("requestId",p.request);e->SetString("frameId",p.frame);e->SetString("document",p.document+"/"+p.scope+"/"+p.loader+"/"+p.context_unique+"/"+std::to_string(p.context_revision));
+ e->SetString("presentation",p.presentation);e->SetString("source",p.source);e->SetString("sourceOrigin",p.source_origin);e->SetString("url",p.url);e->SetString("mime",p.mime);e->SetString("name",p.name);e->SetString("total",std::to_string(total));
  e->SetString("parent",std::to_string(reinterpret_cast<uintptr_t>(peer.root)));e->SetInt("pid",static_cast<int>(peer.pid));e->SetString("started",std::to_string(peer.started));Write(e);
  return true;
 }
 bool DownloadResult(int id,Dict response){
  auto command=download_commands_.find(id);if(command==download_commands_.end())return false;
- auto method=command->second;download_commands_.erase(command);
+ auto info=command->second;download_commands_.erase(command);
+ if(DownloadOriginResult(info,response))return true;
+ const auto& method=info.method;
  if(response->HasKey("error")){download_ready_=false;CancelDownloadPending();return true;}
  if(method=="Fetch.enable")download_ready_=true;
- if(method=="Page.getFrameTree"&&response->GetDictionary("result"))DownloadRememberFrames(response->GetDictionary("result")->GetDictionary("frameTree"));
  return true;
 }
 Dict DownloadPendingState(Dict args){
