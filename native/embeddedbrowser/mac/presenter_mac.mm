@@ -1,6 +1,7 @@
 #include "presenter_mac.h"
 #include "../../../internal/localipc/mach_peer.h"
 #include "include/cef_parser.h"
+#include "include/base/cef_bind.h"
 #include "include/wrapper/cef_closure_task.h"
 #include <CommonCrypto/CommonHMAC.h>
 #include <sys/file.h>
