@@ -788,3 +788,21 @@ func (r *InstancePresenterRegistry) OwnedWindowViewTarget(peer PresenterPeer, su
 	}
 	return p.target, nil
 }
+
+func (r *InstancePresenterRegistry) AnswerDialog(ctx context.Context, p PresenterPeer, surface, slot string, dialog WebDialog, accept bool, text ...string) error {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return err
+	}
+	defer i.serial.Unlock()
+	return i.views.AnswerDialog(ctx, p, surface, slot, dialog, accept, text...)
+}
+
+func (r *InstancePresenterRegistry) PresentDialog(ctx context.Context, p PresenterPeer, surface, slot string, dialog WebDialog, ready bool) error {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return err
+	}
+	defer i.serial.Unlock()
+	return i.views.PresentDialog(ctx, p, surface, slot, dialog, ready)
+}

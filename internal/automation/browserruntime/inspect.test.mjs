@@ -31,3 +31,14 @@ test('upload inspection requires current MCP file chooser metadata without evalu
   await assert.rejects(inspectBrowser({callTool:async()=>({content:[{type:'text',text}]})},{},{modal:'file-upload'}),/BROWSER_UPLOAD_CHOOSER_REQUIRED/);
  }
 });
+
+test('dialog inspection uses locked MCP live modal metadata, never renderer evaluate',async()=>{
+ for(const kind of ['alert','confirm','prompt','beforeunload']){
+  const calls=[];
+  const text=`### Result\n- 0: (current) [Local](http://localhost/dialog)\n### Modal state\n- ["${kind}" dialog with message "fixed"]: can be handled by browser_handle_dialog`;
+  const value=await inspectBrowser({callTool:async call=>{calls.push(call.name);return {content:[{type:'text',text}]}}},{},{modal:'dialog'});
+  assert.deepEqual(value,{url:'http://localhost/dialog',elements:[],tabs:[]});
+  assert.deepEqual(calls,['browser_tabs']);
+ }
+ await assert.rejects(inspectBrowser({callTool:async()=>({content:[{type:'text',text:'### Result\n- 0: (current) [Local](http://localhost/dialog)'}]})},{},{modal:'dialog'}),/BROWSER_DIALOG_REQUIRED/);
+});

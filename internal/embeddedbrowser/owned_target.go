@@ -174,6 +174,13 @@ func (t *OwnedTarget) BeginOwnedCall(ctx context.Context, call automation.OwnedB
 		}
 	}
 	if _, err := t.broker.controlCall(ctx, "target.begin", t.owner, call); err != nil {
+		// This authenticated native result is a definite refusal before any
+		// new guard token is installed. Revoking/draining here would cancel a
+		// replacement page dialog even though this stale call never owned it.
+		if err.Error() == "CEF_DOCUMENT_AUTHORIZATION_CHANGED" {
+			t.call.Unlock()
+			return nil, fmt.Errorf("%w: %v", automation.ErrOwnedGuardRefused, err)
+		}
 		cleanup := t.confirmGuardRevoked()
 		t.call.Unlock()
 		return nil, errors.Join(err, cleanup)

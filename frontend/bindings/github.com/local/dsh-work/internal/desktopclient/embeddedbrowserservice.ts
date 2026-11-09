@@ -16,6 +16,10 @@ export function Action(document: string, slot: string, action: string): $Cancell
     return $Call.ByID(1070156010, document, slot, action);
 }
 
+export function AnswerDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, accept: boolean, text: string): $CancellablePromise<void> {
+    return $Call.ByID(2939582890, document, slot, dialog, accept, text);
+}
+
 /**
  * BeginDocument is called by the trusted shell before replacing its iframe.
  * The gate retires old calls before the daemon's native frame-close barrier.
@@ -46,6 +50,10 @@ export function Hide(): $CancellablePromise<void> {
 
 export function Overlay(blocked: boolean): $CancellablePromise<void> {
     return $Call.ByID(1081105216, blocked);
+}
+
+export function PresentDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, ready: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2715742487, document, slot, dialog, ready);
 }
 
 export function Recover(document: string, slot: string, address: string): $CancellablePromise<embeddedbrowser$0.ViewState> {

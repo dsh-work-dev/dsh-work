@@ -16,18 +16,33 @@ type PresenterPeer struct {
 }
 type SlotBounds struct{ X, Y, Width, Height float64 }
 type PixelBounds struct{ X, Y, Width, Height int }
+
+// WebDialog is authenticated engine metadata. Website message text is absent.
+type WebDialog struct {
+	Epoch         string `json:"epoch"`
+	Document      string `json:"document"`
+	View          string `json:"view"`
+	Presentation  string `json:"presentation"`
+	Origin        string `json:"origin"`
+	Kind          string `json:"kind"`
+	Message       string `json:"message"`
+	DefaultPrompt string `json:"defaultPrompt"`
+	Truncated     bool   `json:"truncated"`
+}
 type ViewState struct {
-	Instance         string `json:"instance,omitempty"`
-	BrokerGeneration string `json:"brokerGeneration,omitempty"`
-	Title            string `json:"title"`
-	CanGoBack        bool   `json:"canGoBack"`
-	CanGoForward     bool   `json:"canGoForward"`
-	Lease            string `json:"lease"`
-	State            string `json:"state"`
-	URL              string `json:"url"`
-	Visible          bool   `json:"visible"`
-	Target           string `json:"target"`
-	Document         string `json:"document"`
+	Dialog           *WebDialog `json:"dialog,omitempty"`
+	DialogVisible    bool       `json:"dialogVisible,omitempty"`
+	Instance         string     `json:"instance,omitempty"`
+	BrokerGeneration string     `json:"brokerGeneration,omitempty"`
+	Title            string     `json:"title"`
+	CanGoBack        bool       `json:"canGoBack"`
+	CanGoForward     bool       `json:"canGoForward"`
+	Lease            string     `json:"lease"`
+	State            string     `json:"state"`
+	URL              string     `json:"url"`
+	Visible          bool       `json:"visible"`
+	Target           string     `json:"target"`
+	Document         string     `json:"document"`
 	// Read-only CEF identity evidence; never accepts authority from a caller.
 	Frame   string      `json:"frame,omitempty"`
 	Epoch   string      `json:"epoch"`
@@ -427,6 +442,9 @@ func (r *PresenterRegistry) closeWindowViews(ctx context.Context, peer Presenter
 }
 
 type navigationState struct {
+	PresentationFailure              string
+	DialogVisible                    bool
+	Dialog                           *WebDialog `json:"dialog"`
 	URL, Title                       string
 	Loading, CanGoBack, CanGoForward bool
 }
@@ -440,6 +458,14 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 	if json.Unmarshal(raw, &state) != nil {
 		return errors.New("CEF_NAVIGATION_STATE_REJECTED")
 	}
+	if state.PresentationFailure != "" {
+		p.view.State = "presentationFailed"
+		p.view.Visible = false
+		p.view.Failure = state.PresentationFailure
+		return nil
+	}
+	p.view.Dialog = state.Dialog
+	p.view.DialogVisible = state.DialogVisible
 	p.view.URL = state.URL
 	p.view.Title = state.Title
 	p.view.CanGoBack = state.CanGoBack
@@ -472,5 +498,41 @@ func (r *PresenterRegistry) Action(ctx context.Context, peer PresenterPeer, surf
 		return ErrClosed
 	}
 	_, err := p.target.broker.controlCall(ctx, "target.action", p.target.owner, map[string]any{"action": action})
+	return err
+}
+
+func (r *PresenterRegistry) AnswerDialog(ctx context.Context, peer PresenterPeer, surface, slot string, dialog WebDialog, accept bool, text ...string) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != dialog.View {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
+	input := ""
+	if len(text) > 0 {
+		input = text[0]
+	}
+	_, err := p.target.broker.controlCall(ctx, "target.dialog.answer", p.target.owner, map[string]any{"dialog": dialog, "accept": accept, "text": input})
+	return err
+}
+
+func (r *PresenterRegistry) PresentDialog(ctx context.Context, peer PresenterPeer, surface, slot string, dialog WebDialog, ready bool) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != dialog.View || !p.view.Visible {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
+	method := "target.dialog.suspend"
+	if ready {
+		method = "target.dialog.ready"
+	}
+	_, err := p.target.broker.controlCall(ctx, method, p.target.owner, map[string]any{"dialog": dialog})
 	return err
 }

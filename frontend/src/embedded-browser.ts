@@ -1,6 +1,6 @@
 import {EmbeddedBrowserService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
-import type {SlotBounds} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
+import type {SlotBounds, WebDialog} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
 
 /** DSH supplies CSS slot intent; this shell owns the iframe transform and clip. */
 export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (blocked:boolean)=>Promise<void>) {
@@ -45,6 +45,13 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
      case "state":return EmbeddedBrowserService.State(token,slot);
      case "select-control":if(typeof m.session!=="string"||m.session.length>1024||typeof m.lease!=="string")throw Error("Invalid browser selection");return EmbeddedBrowserService.SelectControl(token,new URL(frame.src).searchParams.get("generation")||"",m.session,slot,m.lease);
      case "recover":if(typeof m.address!=="string"||m.address.length>8192)throw Error("Invalid browser address");return EmbeddedBrowserService.Recover(token,slot,m.address);
+     case "dialog-suspend":case "dialog-ready":case "dialog-answer":{
+      const d=m.dialog as WebDialog;
+      if(!d||![d.epoch,d.document,d.view,d.presentation,d.origin,d.kind,d.message,d.defaultPrompt].every(v=>typeof v==="string")||typeof d.truncated!=="boolean"||!["alert","confirm","prompt","beforeunload"].includes(d.kind))throw Error("Invalid webpage dialog");
+      if(m.action!=="dialog-answer")return EmbeddedBrowserService.PresentDialog(token,slot,d,m.action==="dialog-ready");
+      if(typeof m.accept!=="boolean"||typeof m.text!=="string")throw Error("Invalid webpage answer");
+      return EmbeddedBrowserService.AnswerDialog(token,slot,d,m.accept,m.text);
+     }
      case "detach":return EmbeddedBrowserService.Detach(token,slot);
      case "action":if(!["back","forward","reload"].includes(String(m.command)))throw Error("Invalid browser action");return EmbeddedBrowserService.Action(token,slot,String(m.command));
      default:throw Error("Unsupported browser request");

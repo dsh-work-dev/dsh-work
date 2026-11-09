@@ -19,14 +19,15 @@ export async function inspectBrowser(client, refs, args, observeGeometry) {
  // MCP disallows tab tools (including snapshot/evaluate) while its file chooser
  // is pending. The context-level tabs list still reports URL and modal state.
  // Require that state; never substitute cached page evidence for an upload.
- if(args.modal==='file-upload'){
+ if(args.modal==='file-upload'||args.modal==='dialog'){
   const result=await client.callTool({name:'browser_tabs',arguments:{action:'list'}},undefined,{timeout:5000});
   if(result.isError)throw Error('BROWSER_POLICY_INSPECTION_FAILED');
   const text=(result.content??[]).filter(v=>v.type==='text').map(v=>v.text).join('\n').split(/\r?\n### Snapshot(?:\r?\n|$)/)[0];
   const listing=/(?:^|\r?\n)### Result\r?\n([\s\S]*?)(?=\r?\n### |$)/.exec(text);
   const page=listing&&/^- \d+: \(current\) \[.*\]\((.*)\)\s*$/m.exec(listing[1]);
   const modal=/(?:^|\r?\n)### Modal state\r?\n([\s\S]*?)(?=\r?\n### |$)/.exec(text);
-  if(!page||!modal||!/^\- \[File chooser\]: can be handled by browser_file_upload\s*$/m.test(modal[1]))throw Error('BROWSER_UPLOAD_CHOOSER_REQUIRED');
+  const required=args.modal==='dialog'?/^\- \["(?:alert|confirm|prompt|beforeunload)" dialog with message /m:/^\- \[File chooser\]: can be handled by browser_file_upload\s*$/m;
+  if(!page||!modal||!required.test(modal[1]))throw Error(args.modal==='dialog'?'BROWSER_DIALOG_REQUIRED':'BROWSER_UPLOAD_CHOOSER_REQUIRED');
   return {url:page[1],elements:[],tabs:[]};
  }
  const targets=Array.isArray(args.targets)&&args.targets.length?args.targets:[undefined];

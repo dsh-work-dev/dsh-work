@@ -5,5 +5,6 @@ export type {
     PixelBounds,
     SlotBounds,
     ViewState,
+    WebDialog,
     WindowAdmission
 } from "./models.js";

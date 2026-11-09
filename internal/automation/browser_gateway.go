@@ -567,6 +567,9 @@ func (s *Service) inspectBrowser(ctx context.Context, r Request) (BrowserEvidenc
 	copy := r
 	copy.Tool = "__dsh_inspect"
 	copy.Arguments = map[string]any{"targets": targets, "tabs": r.Tool == "browser_tabs"}
+	if _, owned := OwnedBrowserCallFromContext(ctx); owned && r.Tool == "browser_handle_dialog" {
+		copy.Arguments["modal"] = "dialog"
+	}
 	if r.Tool == "browser_file_upload" {
 		// Locked MCP permits context-level tabs/list during a chooser, while
 		// tab-level evaluate and snapshot are blocked. Require its live modal

@@ -16,6 +16,8 @@ export interface SlotBounds {
 }
 
 export interface ViewState {
+    "dialog"?: WebDialog | null;
+    "dialogVisible"?: boolean;
     "instance"?: string;
     "brokerGeneration"?: string;
     "title": string;
@@ -35,6 +37,21 @@ export interface ViewState {
     "epoch": string;
     "bounds": PixelBounds;
     "failure"?: string;
+}
+
+/**
+ * WebDialog is authenticated engine metadata. Website message text is absent.
+ */
+export interface WebDialog {
+    "epoch": string;
+    "document": string;
+    "view": string;
+    "presentation": string;
+    "origin": string;
+    "kind": string;
+    "message": string;
+    "defaultPrompt": string;
+    "truncated": boolean;
 }
 
 export interface WindowAdmission {

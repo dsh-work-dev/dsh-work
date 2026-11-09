@@ -300,7 +300,7 @@ func (b *Broker) receive() {
 			continue
 		}
 		if m.Kind == "policy.denied" {
-			if m.Owner == "" || (m.Method != "CEF_DIALOG_UNSUPPORTED" && m.Method != "CEF_DOWNLOAD_UNSUPPORTED") {
+			if m.Owner == "" || (m.Method != "CEF_DIALOG_UNSUPPORTED" && m.Method != "CEF_DOWNLOAD_UNSUPPORTED" && m.Method != "CEF_DIALOG_PAYLOAD_TOO_LARGE") {
 				b.abort(errors.New("CEF_POLICY_EVENT_REJECTED"))
 				return
 			}

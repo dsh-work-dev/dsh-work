@@ -115,11 +115,32 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   auto closed=std::move(close_waiters_);close_waiters_.clear();for(auto& cb:closed)cb();
  }
 }
+#ifdef _WIN32
+  // Dialog authority is independent of Host approvals and is bound to the
+  // pending engine dialog observed when this call's guard is installed.
+  bool dialog_pending_=false;
+  CefRefPtr<CefJSDialogCallback> dialog_callback_;
+  std::string dialog_origin_,dialog_kind_,dialog_message_,dialog_default_;
+  bool dialog_message_truncated_=false;
+  static constexpr size_t kDialogMessageUnits=16*1024,kDialogDefaultUnits=32*1024;
+  static std::string DialogText(const CefString& value,size_t limit,bool& truncated){
+    auto text=value.ToWString();truncated=text.size()>limit;
+    if(truncated){text.resize(limit);if(!text.empty()&&text.back()>=0xd800&&text.back()<=0xdbff)text.pop_back();}
+    return CefString(text).ToString();
+  }
+  bool dialog_suspended_=false,dialog_overlay_visible_=false,guard_dialog_only_=false;
+  Dict last_present_args_;
+  std::string dialog_restore_error_;
+  uint64_t dialog_epoch_=0,guard_dialog_epoch_=0;
+#endif
   uint64_t document_epoch_=1,scope_epoch_=1;
   bool loaded_=false,guard_required_=false,guard_active_=false,navigating_=false;
   std::string document_url_,guard_document_,guard_url_,guard_token_,navigation_origin_,guard_scope_;
   static std::string Origin(const std::string& url){CefURLParts parts;if(!CefParseURL(url,parts))return {};auto origin=CefString(&parts.origin).ToString();if(!origin.empty()&&origin.back()=='/')origin.pop_back();return origin;}
   void DocumentChanged(const std::string& url){
+#ifdef _WIN32
+    CancelDialog(true);
+#endif
     document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
 
   }
@@ -170,13 +191,80 @@ public:
     for(const auto& [_,id]:pending_)Result(route_,id,nullptr,error);
     pending_.clear();pending_methods_.clear();FlushRevocation();
   }
-  bool OnJSDialog(CefRefPtr<CefBrowser>,const CefString&,JSDialogType,const CefString&,const CefString&,CefRefPtr<CefJSDialogCallback>,bool& suppress)override{
+  bool OnJSDialog(CefRefPtr<CefBrowser>,const CefString& origin,JSDialogType type,const CefString& message,const CefString& prompt,CefRefPtr<CefJSDialogCallback> callback,bool& suppress)override{
+#ifdef _WIN32
+    suppress=false;
+    if(closing_||!revoke_waiters_.empty()||!ViewVisible()){suppress=true;return false;}
+    // Message presentation is bounded and visibly marked. A prompt default
+    // is an actual input value: never silently truncate it into another value.
+    if(prompt.length()>kDialogDefaultUnits){RejectUnsupportedPolicy("CEF_DIALOG_PAYLOAD_TOO_LARGE");callback->Continue(false,{});return true;}
+    OpenDialog(callback,type==JSDIALOGTYPE_ALERT?"alert":type==JSDIALOGTYPE_CONFIRM?"confirm":"prompt",Origin(origin),message,prompt);
+    return true;
+#else
     suppress=true;RejectUnsupportedPolicy("CEF_DIALOG_UNSUPPORTED");return false;
+#endif
   }
   bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser>,const CefString&,bool,CefRefPtr<CefJSDialogCallback> callback)override{
     if(closing_){callback->Continue(true,{});return true;}
+#ifdef _WIN32
+    if(!revoke_waiters_.empty()||!ViewVisible()){callback->Continue(false,{});return true;}
+    OpenDialog(callback,"beforeunload",Origin(tabs.at(tab_).browser->GetMainFrame()->GetURL()),{},{});
+    return true;
+#else
     RejectUnsupportedPolicy("CEF_DIALOG_UNSUPPORTED");callback->Continue(false,{});return true;
+#endif
   }
+#ifdef _WIN32
+  void OpenDialog(CefRefPtr<CefJSDialogCallback> callback,const std::string& kind,const std::string& origin,const CefString& message,const CefString& prompt){
+    CancelDialog(true);
+    dialog_callback_=callback;dialog_pending_=true;++dialog_epoch_;
+    dialog_kind_=kind;dialog_origin_=origin;dialog_message_=DialogText(message,kDialogMessageUnits,dialog_message_truncated_);dialog_default_=prompt;
+  }
+  // State is consumed before Continue: reentrant/new dialogs keep their own epoch.
+  bool CompleteDialog(bool accept,const std::string& text,bool restore){
+    if(!dialog_callback_)return false;
+    auto callback=dialog_callback_;
+    std::string error;
+    if(restore&&dialog_suspended_&&view_visible_&&!closing_&&tabs.contains(tab_)&&last_present_args_)
+      error=dsh_platform::Present(tabs.at(tab_).browser->GetHost()->GetWindowHandle(),last_present_args_);
+    dialog_restore_error_=error;
+    dialog_callback_=nullptr;dialog_pending_=false;dialog_suspended_=false;dialog_overlay_visible_=false;
+    callback->Continue(error.empty()&&accept,text);
+    return error.empty();
+  }
+  void CancelDialog(bool restore){CompleteDialog(false,{},restore);}
+  Dict PendingDialog(){
+    if(!dialog_pending_||!dialog_callback_)return nullptr;
+    auto value=CefDictionaryValue::Create();
+    value->SetString("epoch",std::to_string(dialog_epoch_));value->SetString("document",std::to_string(document_epoch_));
+    value->SetString("view",view_lease_);value->SetString("presentation",presentation_epoch_);value->SetString("origin",dialog_origin_);
+    value->SetString("kind",dialog_kind_);value->SetString("message",dialog_message_);value->SetString("defaultPrompt",dialog_default_);value->SetBool("truncated",dialog_message_truncated_);
+    return value;
+  }
+  bool DialogVisible(){
+    if(closing_||!view_visible_||!dialog_overlay_visible_||!dialog_suspended_||!dialog_callback_||!tabs.contains(tab_))return false;
+    auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
+    return !dsh_platform::Visible(hwnd)&&dsh_platform::Visible(GetParent(hwnd));
+  }
+  bool DialogMatches(Dict expected){auto actual=PendingDialog();return actual&&expected&&actual->IsEqual(expected);}
+  bool SuspendDialog(Dict expected){
+    if(!DialogMatches(expected)||(!ViewVisible()&&!dialog_suspended_))return false;
+    if(!dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle()).empty())return false;
+    dialog_suspended_=true;dialog_overlay_visible_=false;return true;
+  }
+  bool ReadyDialog(Dict expected){
+    if(!DialogMatches(expected)||!dialog_suspended_||!view_visible_||!tabs.contains(tab_))return false;
+    auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
+    if(dsh_platform::Visible(hwnd)||!dsh_platform::Visible(GetParent(hwnd)))return false;
+    dialog_overlay_visible_=true;return true;
+  }
+  bool AnswerDialog(Dict expected,bool accept,const std::string& text){
+    if(!DialogMatches(expected)||!DialogVisible())return false;
+    return CompleteDialog(accept,dialog_kind_=="prompt"?text:std::string{},true);
+  }
+  void OnResetDialogState(CefRefPtr<CefBrowser>)override{CancelDialog(true);}
+  void OnDialogClosed(CefRefPtr<CefBrowser>)override{CancelDialog(true);}
+#endif
   bool CanDownload(CefRefPtr<CefBrowser>,const CefString&,const CefString&)override{
     RejectUnsupportedPolicy("CEF_DOWNLOAD_UNSUPPORTED");return false;
   }
@@ -197,7 +285,13 @@ public:
     return dsh_platform::Visible(hwnd);
 #endif
   }
-  Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());return value;}
+  Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());
+#ifdef _WIN32
+    if(auto dialog=PendingDialog())value->SetDictionary("dialog",dialog);
+    if(DialogVisible())value->SetBool("dialogVisible",true);
+    if(!dialog_restore_error_.empty())value->SetString("presentationFailure",dialog_restore_error_);
+#endif
+    return value;}
   bool NavigationAction(const std::string& action){if(control_blocked||closing_||!tabs.contains(tab_))return false;auto browser=tabs.at(tab_).browser;RevokeGuard();if(action=="reload")browser->Reload();else if(action=="back"&&browser->CanGoBack())browser->GoBack();else if(action=="forward"&&browser->CanGoForward())browser->GoForward();else return false;return true;}
   bool FrameScopeReady(){
     if(!tabs.contains(tab_))return false;
@@ -211,6 +305,11 @@ public:
     auto frame=tabs.at(tab_).browser->GetMainFrame();if(!frame||!frame->IsValid())return nullptr;
     auto state=CefDictionaryValue::Create();state->SetString("brokerGeneration",generation);state->SetString("target",std::to_string(tab_));
     state->SetString("frame",frame->GetIdentifier());state->SetString("document",std::to_string(document_epoch_));state->SetString("url",frame->GetURL());
+#ifdef _WIN32
+    if(dialog_pending_){state->SetString("dialog",std::to_string(dialog_epoch_));if(!dialog_origin_.empty())state->SetString("dialogOrigin",dialog_origin_);}
+    if(DialogVisible())state->SetBool("dialogVisible",true);
+    if(dialog_pending_&&dialog_suspended_)state->SetBool("dialogSuspended",true);
+#endif
     state->SetBool("viewVisible",ViewVisible());if(!view_lease_.empty()){state->SetString("viewLease",view_lease_);state->SetString("presentationEpoch",presentation_epoch_);}
     state->SetBool("frameScopeReady",FrameScopeReady());state->SetString("scopeEpoch",std::to_string(scope_epoch_));
     if(artifact_){state->SetString("artifactLease",artifact_->lease);state->SetString("artifactOrigin",artifact_->origin);}return state;
@@ -220,7 +319,17 @@ public:
  if(control_blocked||closing_)return false;
     guard_required_=true;
     auto actual=OwnedState(),expected=call?call->GetDictionary("identity"):nullptr;
-    if(!actual||!ViewVisible()||!actual->GetBool("frameScopeReady")||!expected||!actual->IsEqual(expected)||call->GetString("token").empty())return false;
+    if(!actual||!actual->GetBool("frameScopeReady")||!expected||!actual->IsEqual(expected)||call->GetString("token").empty())return false;
+#ifdef _WIN32
+    bool dialog_only=call->GetBool("dialogOnly");
+    if(dialog_only?(!DialogVisible()||!dialog_pending_):!ViewVisible())return false;
+    guard_dialog_only_=dialog_only;
+#else
+    if(!ViewVisible())return false;
+#endif
+#ifdef _WIN32
+    guard_dialog_epoch_=dialog_pending_?dialog_epoch_:0;
+#endif
     guard_document_=actual->GetString("document");guard_url_=actual->GetString("url");guard_token_=call->GetString("token");
     navigation_origin_=call->GetString("navigationOrigin");guard_scope_=actual->GetString("scopeEpoch");guard_view_=view_lease_;guard_presentation_=presentation_epoch_;navigating_=false;guard_active_=true;
     return true;
@@ -228,15 +337,29 @@ public:
   bool EndGuard(const std::string& token){if(guard_active_&&token!=guard_token_)return false;RevokeGuard();return true;}
   void RevokeGuard(){guard_active_=false;navigating_=false;policy_denied_.clear();}
   void PauseControl(){
+#ifdef _WIN32
+    CancelDialog(true);
+#endif
     RevokeGuard();
     // Retire result ownership immediately. A renderer promise need not finish
     // before control cleanup; late replies to these serials are discarded.
     for(const auto& [_,id]:pending_)Result(route_,id,nullptr,"CEF_BROKER_CONTROL_PAUSED");
     pending_.clear();pending_methods_.clear();FlushRevocation();
   }
-  void RevokeWhenDrained(std::function<void()> done){RevokeGuard();revoke_waiters_.push_back(std::move(done));FlushRevocation();}
+  void RevokeWhenDrained(std::function<void()> done){
+    RevokeGuard();revoke_waiters_.push_back(std::move(done));
+#ifdef _WIN32
+    CancelDialog(true);
+#endif
+    FlushRevocation();
+  }
   bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
   std::string Present(Dict args){
+#ifdef _WIN32
+    bool requested_visible=args&&args->GetBool("visible");
+    if(!requested_visible)CancelDialog(false);
+    if(dialog_suspended_)dialog_overlay_visible_=false;
+#endif
  if(control_blocked)return "CEF_BROKER_CONTROL_PAUSED";
  if(closing_)return "CEF_TARGET_CLOSING";
     managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;
@@ -246,15 +369,27 @@ public:
     auto self=CefRefPtr<Client>(this);
     auto error=dsh_platform::PresentBrowser(browser,args,[self]{self->RevokeGuard();});
 #else
+#ifdef _WIN32
+    auto effective=args->Copy(false);if(dialog_suspended_)effective->SetBool("visible",false);
+    auto error=dsh_platform::Present(hwnd,effective);
+#else
     auto error=dsh_platform::Present(hwnd,args);
 #endif
+#endif
     if(!error.empty())return error;
+#ifdef _WIN32
+    last_present_args_=args->Copy(false);dialog_restore_error_.clear();
+#endif
     auto bounds=args->GetDictionary("bounds");bool visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
     // No identity changes until every operation and final OS readback passed.
     view_lease_=args->GetString("view");presentation_epoch_=args->GetString("epoch");view_visible_=visible;
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
-  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
+  std::string Hide(Dict args){
+#ifdef _WIN32
+    CancelDialog(false);
+#endif
+    managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
 #ifdef __APPLE__
     return dsh_platform::HideBrowser(tabs.at(tab_).browser,args);
 #else
@@ -265,7 +400,11 @@ public:
   bool GuardValid(){
  if(control_blocked||closing_)return false;
     if(!guard_required_)return true;
-    if(!guard_active_||!ViewVisible()||view_lease_!=guard_view_||presentation_epoch_!=guard_presentation_||navigating_||!tabs.contains(tab_)||!FrameScopeReady()||guard_scope_!=std::to_string(scope_epoch_))return false;
+    bool visible=ViewVisible();
+#ifdef _WIN32
+    if(guard_dialog_only_)visible=DialogVisible()&&dialog_pending_&&guard_dialog_epoch_==dialog_epoch_;
+#endif
+    if(!guard_active_||!visible||view_lease_!=guard_view_||presentation_epoch_!=guard_presentation_||navigating_||!tabs.contains(tab_)||!FrameScopeReady()||guard_scope_!=std::to_string(scope_epoch_))return false;
     return guard_document_==std::to_string(document_epoch_)&&guard_url_==tabs.at(tab_).browser->GetMainFrame()->GetURL().ToString();
   }
   // Old-document authority never migrates to a navigation result. Only target-
@@ -286,7 +425,11 @@ bool RequiresGuard()const{return guard_required_;}
     // CEF retains its per-browser DevTools agent across observer registrations.
     // Reset only this target domain subscription so the replacement SDK gets
     // fresh executionContextCreated/frame events rather than stale enabled state.
-    for(const auto& method:{"Runtime.disable","Page.disable","Network.disable","Log.disable"}){
+    for(const auto& method:{"Runtime.disable",
+#ifndef _WIN32
+      "Page.disable",
+#endif
+      "Network.disable","Log.disable"}){
       auto reset=CefDictionaryValue::Create();reset->SetInt("id",++next_command_);reset->SetString("method",method);auto value=CefValue::Create();value->SetDictionary(reset);auto json=CefWriteJSON(value,JSON_WRITER_DEFAULT).ToString();if(!tab.browser->GetHost()->SendDevToolsMessage(json.data(),json.size()))return false;
     }
     if(!tab.observer)tab.observer=tab.browser->GetHost()->AddDevToolsMessageObserver(this);
@@ -321,6 +464,14 @@ bool RequiresGuard()const{return guard_required_;}
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
     graph_browser_=b->GetIdentifier();frame_graph.Bound(owner_route_,graph_browser_);
     tabs.emplace(tab_, Tab{route_, b, b->GetHost()->AddDevToolsMessageObserver(this),artifact_});
+#ifdef _WIN32
+    // Keep read-only engine dialog events available across Agent attachments.
+    // Callback/epoch ownership remains native even when no SDK is attached.
+    auto enable=CefDictionaryValue::Create();enable->SetInt("id",++next_command_);enable->SetString("method","Page.enable");
+    auto enable_value=CefValue::Create();enable_value->SetDictionary(enable);
+    auto enable_json=CefWriteJSON(enable_value,JSON_WRITER_DEFAULT).ToString();
+    b->GetHost()->SendDevToolsMessage(enable_json.data(),enable_json.size());
+#endif
     if(artifact_){artifact_->browser=b->GetIdentifier();ArtifactEvent(artifact_,"artifact.bound",b->GetIdentifier());artifact_->admitted=true;CefPostTask(TID_IO,base::BindOnce(AdmitArtifactResources,artifact_));}
     auto tab = CefDictionaryValue::Create(); tab->SetInt("id", tab_);
     tab->SetString("url", b->GetMainFrame()->GetURL());
@@ -396,7 +547,22 @@ bool RequiresGuard()const{return guard_required_;}
  if(closing_){Result(route_,id,nullptr,"CEF_TARGET_CLOSING");return;}
     if(!policy_denied_.empty()){Result(route_,id,nullptr,policy_denied_);return;}
     if(artifact_&&artifact_->revoked){Result(route_,id,nullptr,"CEF_ARTIFACT_REVOKED");return;}
+#ifdef _WIN32
+    if(guard_dialog_only_&&method!="Page.handleJavaScriptDialog"){Result(route_,id,nullptr,"CEF_DIALOG_ONLY_COMMAND_REJECTED");return;}
+#endif
     if(!GuardValid()&&!NavigationWaitMethod(method)){Result(route_,id,nullptr,"CEF_DOCUMENT_AUTHORIZATION_CHANGED");return;}
+#ifdef _WIN32
+    if(method=="Page.handleJavaScriptDialog"&&(!dialog_pending_||guard_required_&&guard_dialog_epoch_!=dialog_epoch_)){
+      Result(route_,id,nullptr,"CEF_DIALOG_AUTHORIZATION_CHANGED");return;
+    }
+#endif
+#ifdef _WIN32
+    if(method=="Page.handleJavaScriptDialog"){
+      if(!guard_dialog_only_||!DialogVisible()||!CompleteDialog(params->GetBool("accept"),params->HasKey("promptText")?params->GetString("promptText").ToString():dialog_default_,true))
+        Result(route_,id,nullptr,"CEF_DIALOG_AUTHORIZATION_CHANGED");
+      else Result(route_,id,Empty());return;
+    }
+#endif
     if(guard_required_&&method=="Page.navigate"){
       if(!params||navigation_origin_.empty()||Origin(params->GetString("url"))!=navigation_origin_){Result(route_,id,nullptr,"CEF_ORIGIN_AUTHORIZATION_REQUIRED");return;}
       navigating_=true;
@@ -438,6 +604,15 @@ bool RequiresGuard()const{return guard_required_;}
     } else {
       const auto method = m->GetString("method").ToString();
       auto params = m->GetDictionary("params");
+#ifdef _WIN32
+      if(params&&method=="Page.javascriptDialogOpening"){
+        bool truncated=false;
+        auto message=DialogText(params->GetString("message"),kDialogMessageUnits,truncated);
+        params->SetString("message",message+(truncated?"\n[网页提示过长，已截取显示]":""));
+        bool default_truncated=false;
+        params->SetString("defaultPrompt",DialogText(params->GetString("defaultPrompt"),kDialogDefaultUnits,default_truncated));
+      }
+#endif
       if (params && method == "Target.attachedToTarget") child_sessions_.insert(params->GetString("sessionId").ToString());
       if (params && method == "Target.detachedFromTarget") child_sessions_.erase(params->GetString("sessionId").ToString());
       if (params && method == "Page.frameNavigated" && params->GetDictionary("frame")) frames_.insert(params->GetDictionary("frame")->GetString("id").ToString());
@@ -542,6 +717,9 @@ bool Admitted(const std::string& method, Dict params) {
     {"Page.enable", {"enableFileChooserOpenedEvent"}},
     {"Page.getFrameTree", {}},
     {"Page.getLayoutMetrics", {}},
+#ifdef _WIN32
+    {"Page.handleJavaScriptDialog", {"accept","promptText"}},
+#endif
     {"Page.navigate", {"url","referrer","transitionType","frameId","referrerPolicy"}},
     {"Page.setInterceptFileChooserDialog", {"enabled","cancel"}},
     {"Page.setLifecycleEventsEnabled", {"enabled"}},
@@ -561,6 +739,11 @@ bool Admitted(const std::string& method, Dict params) {
     for (const auto& key : keys) if (!rule->second.contains(key.ToString())) return false;
     if (method == "Target.setAutoAttach" &&
         (!params->GetBool("flatten") || params->GetType("autoAttach")!=VTYPE_BOOL || params->GetType("waitForDebuggerOnStart")!=VTYPE_BOOL)) return false;
+#ifdef _WIN32
+    if(method=="Page.handleJavaScriptDialog"&&
+       (params->GetType("accept")!=VTYPE_BOOL||
+        params->HasKey("promptText")&&params->GetType("promptText")!=VTYPE_STRING))return false;
+#endif
     // Locked Playwright requests its private utility world with this flag.
     // Dispatch additionally binds frameId to this browser's observed frame set.
     if (method == "Page.createIsolatedWorld" && params->GetString("worldName").ToString().rfind("__playwright_utility_world_",0)!=0) return false;
@@ -581,6 +764,17 @@ void Command(Dict m) {
     if(!client&&closing_clients.contains(route))client=closing_clients.at(route).get();
     if(!client){if(kind=="target.revoke"||kind=="target.end")response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_TARGET_NOT_READY");}
     else if(control_blocked&&kind!="target.state"&&kind!="target.navigation"&&kind!="target.hide"&&kind!="target.end"&&kind!="target.revoke"&&kind!="target.close")response->SetString("error","CEF_BROKER_CONTROL_PAUSED");
+#ifdef _WIN32
+    else if(kind=="target.dialog.answer"||kind=="target.dialog.suspend"||kind=="target.dialog.ready"){
+      auto args=m->GetDictionary("arguments");bool ok=false;
+      if(args){auto expected=args->GetDictionary("dialog");
+        if(kind=="target.dialog.suspend")ok=client->SuspendDialog(expected);
+        else if(kind=="target.dialog.ready")ok=client->ReadyDialog(expected);
+        else if(args->GetType("accept")==VTYPE_BOOL)ok=client->AnswerDialog(expected,args->GetBool("accept"),args->GetString("text"));
+      }
+      if(ok)response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_DIALOG_AUTHORIZATION_CHANGED");
+    }
+#endif
     else if(kind=="target.state"){auto state=client->OwnedState();if(state)response->SetDictionary("result",state);else response->SetString("error",client->StateStatus());}
     else if(kind=="target.attach"){if(client->AttachRoute(m->GetDictionary("arguments")->GetString("route")))response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_OBSERVER_REATTACH_REJECTED");}
     else if(kind=="target.navigation"){auto state=client->NavigationState();if(state)response->SetDictionary("result",state);else response->SetString("error","CEF_TARGET_NOT_READY");}
@@ -605,7 +799,11 @@ void Command(Dict m) {
   // Lifecycle disposal remains available while control is conservatively
   // paused. Releasing an Agent route never destroys broker-owned documents.
   if (kind == "release") {
-    for (auto& [_, t] : tabs) if (t.route == route) {auto client=static_cast<Client*>(t.browser->GetHost()->GetClient().get());client->RevokeGuard();t.route.clear();if(!client->HasPending())t.observer = nullptr; }
+    for (auto& [_, t] : tabs) if (t.route == route) {auto client=static_cast<Client*>(t.browser->GetHost()->GetClient().get());client->RevokeGuard();t.route.clear();
+#ifndef _WIN32
+    if(!client->HasPending())t.observer = nullptr;
+#endif
+     }
     return;
   }
   if (kind == "close") {

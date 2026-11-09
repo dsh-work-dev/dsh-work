@@ -15,12 +15,20 @@ import (
 	"golang.org/x/net/idna"
 )
 
+// ErrOwnedGuardRefused means the authenticated native owner definitely did
+// not install the attempted guard. It is not a canceled/ambiguous dispatch.
+var ErrOwnedGuardRefused = errors.New("BROWSER_OWNED_GUARD_REFUSED")
+
 // OwnedBrowserIdentity is engine/manager evidence, never a Worker tool argument.
 type OwnedBrowserIdentity struct {
 	BrokerGeneration  string `json:"brokerGeneration"`
 	Target            string `json:"target"`
 	Frame             string `json:"frame"`
 	Document          string `json:"document"`
+	Dialog            string `json:"dialog,omitempty"`
+	DialogOrigin      string `json:"dialogOrigin,omitempty"`
+	DialogVisible     bool   `json:"dialogVisible,omitempty"`
+	DialogSuspended   bool   `json:"dialogSuspended,omitempty"`
 	URL               string `json:"url"`
 	ArtifactLease     string `json:"artifactLease,omitempty"`
 	ArtifactOrigin    string `json:"artifactOrigin,omitempty"`
@@ -40,7 +48,12 @@ type OwnedBrowserNavigation struct {
 	Identity OwnedBrowserIdentity
 	Result   any
 }
+type OwnedBrowserDialog struct {
+	Identity OwnedBrowserIdentity
+	Result   any
+}
 type OwnedBrowserCall struct {
+	DialogOnly       bool                 `json:"dialogOnly,omitempty"`
 	Owner            Request              `json:"-"`
 	Identity         OwnedBrowserIdentity `json:"identity"`
 	NavigationOrigin string               `json:"navigationOrigin,omitempty"`
@@ -163,7 +176,21 @@ func (s *Service) ownedCall(ctx context.Context, r Request) (OwnedBrowserCall, b
 	if err != nil {
 		return OwnedBrowserCall{}, true, err
 	}
-	if identity.ViewLease != "" && !identity.ViewVisible {
+	dialogOnly := r.Tool == "browser_handle_dialog"
+	if dialogOnly {
+		if identity.Dialog == "" {
+			return OwnedBrowserCall{}, true, errors.New("BROWSER_DIALOG_REQUIRED")
+		}
+		if !identity.DialogVisible {
+			return OwnedBrowserCall{}, true, errors.New("BROWSER_DIALOG_NOT_PRESENTED")
+		}
+		origin, e := BrowserOrigin(identity.DialogOrigin)
+		pageOrigin, pageError := BrowserOrigin(identity.URL)
+		if e != nil || pageError != nil || origin != pageOrigin {
+			return OwnedBrowserCall{}, true, errors.New("BROWSER_DIALOG_ORIGIN_UNVERIFIED")
+		}
+	}
+	if identity.ViewLease != "" && !identity.ViewVisible && !(dialogOnly && identity.DialogVisible) {
 		return OwnedBrowserCall{}, true, errors.New("BROWSER_VIEW_HIDDEN")
 	}
 	if !identity.FrameScopeReady {
@@ -176,7 +203,7 @@ func (s *Service) ownedCall(ctx context.Context, r Request) (OwnedBrowserCall, b
 	if !valid {
 		return OwnedBrowserCall{}, true, ErrRevoked
 	}
-	return OwnedBrowserCall{Identity: identity, Token: rand.Text(), Owner: r}, true, nil
+	return OwnedBrowserCall{DialogOnly: dialogOnly, Identity: identity, Token: rand.Text(), Owner: r}, true, nil
 }
 
 // BrowserOrigin preserves the exact DNS name, scheme and non-default port. It
@@ -232,6 +259,10 @@ func (s *Service) finishOwnedBrowserCall(ctx context.Context, r Request, p brows
 		return value, err
 	}
 	navigation, navigated := value.(OwnedBrowserNavigation)
+	dialog, dialogPending := value.(OwnedBrowserDialog)
+	if dialogPending {
+		value = dialog.Result
+	}
 	actual := p.host
 	address := browserResultURL(value)
 	if address == "" {
@@ -268,7 +299,7 @@ func (s *Service) finishOwnedBrowserCall(ctx context.Context, r Request, p brows
 	if blocked {
 		return nil, errors.New("BROWSER_SITE_BLOCKED")
 	}
-	if navigated || ownedAutomaticSnapshot(r) {
+	if navigated || ownedAutomaticSnapshot(r) && !dialogPending {
 		if !allowed {
 			if e := s.browserConsent(ctx, r, c, p.binding, "site", actual, nil); e != nil {
 				return map[string]any{"content": []any{map[string]any{"type": "text", "text": "Navigation completed; access to the new site is awaiting approval."}}}, fmt.Errorf("BROWSER_NAVIGATION_COMPLETED_ACCESS_REQUIRED: %w", e)
@@ -291,22 +322,35 @@ func (s *Service) finishOwnedBrowserCall(ctx context.Context, r Request, p brows
 		if navigated {
 			expected = navigation.Identity
 		}
-		if call.Identity != expected {
+		currentDocument := call.Identity
+		currentDocument.Dialog = ""
+		currentDocument.DialogOrigin = ""
+		currentDocument.DialogVisible = false
+		currentDocument.DialogSuspended = false
+		expected.Dialog = ""
+		expected.DialogOrigin = ""
+		expected.DialogVisible = false
+		expected.DialogSuspended = false
+		if currentDocument != expected {
 			return nil, errors.New("BROWSER_PAGE_CHANGED")
 		}
-		read := r
-		read.Tool = "browser_snapshot"
-		read.Arguments = map[string]any{}
-		original := value
-		if navigated {
-			original = navigation.Result
-		}
-		value, err = s.executeOwned(WithOwnedBrowserCall(ctx, call), read)
-		if _, again := value.(OwnedBrowserNavigation); again {
-			return nil, errors.New("BROWSER_PAGE_CHANGED")
-		}
-		if err == nil {
-			value = mergeOwnedReadback(original, value)
+		// The action's locked-MCP result already contains live Modal state.
+		// A renderer snapshot cannot run while that dialog blocks the page.
+		if call.Identity.Dialog == "" {
+			read := r
+			read.Tool = "browser_snapshot"
+			read.Arguments = map[string]any{}
+			original := value
+			if navigated {
+				original = navigation.Result
+			}
+			value, err = s.executeOwned(WithOwnedBrowserCall(ctx, call), read)
+			if _, again := value.(OwnedBrowserNavigation); again {
+				return nil, errors.New("BROWSER_PAGE_CHANGED")
+			}
+			if err == nil {
+				value = mergeOwnedReadback(original, value)
+			}
 		}
 	}
 	s.mu.Lock()

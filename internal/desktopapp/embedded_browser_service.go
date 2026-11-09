@@ -155,3 +155,19 @@ func (s *embeddedBrowserService) ConfigureMacPresenter(ctx context.Context, pare
 	}
 	return embeddedbrowser.ConfigureMacPresenter(peer, uintptr(parent), endpoint, token)
 }
+
+func (s *embeddedBrowserService) AnswerDialog(ctx context.Context, slot string, dialog embeddedbrowser.WebDialog, accept bool, text string) error {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.AnswerDialog(ctx, peer, surface, slot, dialog, accept, text)
+}
+
+func (s *embeddedBrowserService) PresentDialog(ctx context.Context, slot string, dialog embeddedbrowser.WebDialog, ready bool) error {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.PresentDialog(ctx, peer, surface, slot, dialog, ready)
+}

@@ -289,3 +289,26 @@ func (s *EmbeddedBrowserService) SelectControl(ctx context.Context, document, ge
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "SelectControl", []any{parent, admission.Lease, document, generation, session, slot, viewLease}, &result)
 	return result, err
 }
+
+func (s *EmbeddedBrowserService) PresentDialog(ctx context.Context, document, slot string, dialog embeddedbrowser.WebDialog, ready bool) error {
+	gate, err := s.lockDocument(ctx, document)
+	if err != nil {
+		return err
+	}
+	defer gate.Unlock()
+	if !s.Enabled {
+		return errors.New("CEF_PRESENTER_UNAVAILABLE")
+	}
+	return call(ctx, s.Client, "EmbeddedBrowserService", "PresentDialog", []any{slot, dialog, ready}, nil)
+}
+func (s *EmbeddedBrowserService) AnswerDialog(ctx context.Context, document, slot string, dialog embeddedbrowser.WebDialog, accept bool, text string) error {
+	gate, err := s.lockDocument(ctx, document)
+	if err != nil {
+		return err
+	}
+	defer gate.Unlock()
+	if !s.Enabled || len(text) > 256*1024 {
+		return errors.New("CEF_DIALOG_ARGUMENT_REJECTED")
+	}
+	return call(ctx, s.Client, "EmbeddedBrowserService", "AnswerDialog", []any{slot, dialog, accept, text}, nil)
+}

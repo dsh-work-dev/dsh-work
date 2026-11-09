@@ -112,15 +112,7 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 	parent, peer, closeParent := policyParent(t)
 	defer closeParent()
 	var downloadRequests atomic.Int32
-	var manualDialog atomic.Bool
-	var deniedDialogs atomic.Int32
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/manual" {
-			if manualDialog.Swap(false) {
-				fmt.Fprint(w, "fire")
-			}
-			return
-		}
 		if r.URL.Path == "/bytes" {
 			downloadRequests.Add(1)
 			w.Header().Set("Content-Disposition", `attachment; filename="e67-fixed.txt"`)
@@ -133,7 +125,7 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 			fmt.Fprint(w, "<p>Own child</p>")
 			return
 		}
-		fmt.Fprint(w, `<!doctype html><title>Policy fixture</title><button onclick="document.querySelector('output').textContent=String(confirm('fixed fixture confirm'))">Dialog</button><button onclick="let f=document.createElement('iframe');f.src='/child';document.body.append(f)">Frame</button><a href="/bytes" download="e67-fixed.txt">Download</a><input value="unchanged"><output>ready</output><script>setInterval(async()=>{if(await fetch('/manual').then(r=>r.text())==='fire')confirm('manual fixture')},100)</script>`)
+		fmt.Fprint(w, `<!doctype html><title>Policy fixture</title><button onclick="document.querySelector('output').textContent=String(confirm('fixed fixture confirm'))">Dialog</button><button onclick="let f=document.createElement('iframe');f.src='/child';document.body.append(f)">Frame</button><a href="/bytes" download="e67-fixed.txt">Download</a><button onclick="alert('fixed alert');document.querySelector('output').textContent='alert done'">Alert</button><button onclick="document.querySelector('output').textContent=String(prompt('fixed prompt','default text'))">Prompt</button><button onclick="alert('x'.repeat(9*1024*1024));document.querySelector('output').textContent='long done'">Long message</button><button onclick="let v=prompt('oversized default','x'.repeat(32769));document.querySelector('output').textContent='default:'+(v===null?'cancel':v.length)">Oversized default</button><button onclick="window.onbeforeunload=e=>{e.preventDefault();e.returnValue=''};document.querySelector('output').textContent='armed'">Arm unload</button><a href='/next'>Leave</a><input value="unchanged"><output>ready</output>`)
 	}))
 	defer fixture.Close()
 	acquire := func(dir string) (io.Closer, error) {
@@ -149,9 +141,6 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 	reg, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{Store: store, AcquireProfile: acquire, StartBroker: func(c context.Context, i embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
 		var e error
 		broker, e = embeddedbrowser.Start(c, embeddedbrowser.Config{Executable: exe, Profile: i.Profile, Supervisor: nativeAdapter, ObserveProtocol: func(d, m string) {
-			if d == "policy" && m == "CEF_DIALOG_UNSUPPORTED" {
-				deniedDialogs.Add(1)
-			}
 			if d == "result" || d == "policy" {
 				t.Log("native", d, m)
 			}
@@ -281,18 +270,216 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 			}
 
 			if scenario == "dialog" {
-				manualDialog.Store(true)
-				for deniedDialogs.Load() == 0 {
-					select {
-					case <-ctx.Done():
-						t.Fatal(ctx.Err())
-					case <-time.After(10 * time.Millisecond):
+				before, _ := target.OwnedIdentity(ctx)
+				presentDialog := func() automation.OwnedBrowserIdentity {
+					t.Helper()
+					state, e := reg.State(ctx, peer, "window", slot)
+					if e != nil || state.Dialog == nil || state.Dialog.Origin != fixture.URL {
+						t.Fatal("missing authenticated panel dialog", state.Dialog, e)
+					}
+					if e = reg.PresentDialog(ctx, peer, "window", slot, *state.Dialog, false); e != nil {
+						t.Fatal("dialog suspend", e)
+					}
+					suspended, e := target.OwnedIdentity(ctx)
+					if e != nil || suspended.ViewVisible || suspended.DialogVisible {
+						t.Fatal("suspend granted hidden-page control", suspended, e)
+					}
+					if done, e := target.BeginOwnedCall(ctx, automation.OwnedBrowserCall{Identity: suspended, Token: "not-a-dialog-permit"}); e == nil {
+						done()
+						t.Fatal("ordinary guard accepted suspended page")
+					}
+					if e = reg.PresentDialog(ctx, peer, "window", slot, *state.Dialog, true); e != nil {
+						t.Fatal("dialog ready", e)
+					}
+					presented, e := target.OwnedIdentity(ctx)
+					if e != nil || presented.ViewVisible || !presented.DialogVisible {
+						t.Fatal("missing dedicated panel-dialog visibility", presented, e)
+					}
+					if _, e = call("browser_snapshot", map[string]any{}); e == nil {
+						t.Fatal("normal browser snapshot admitted dialog-hidden page")
+					}
+					return presented
+				}
+				for _, step := range []struct {
+					label, want, text string
+					accept            bool
+				}{
+					{"Alert", "alert done", "", true},
+					{"Dialog", "false", "", false},
+					{"Prompt", "entered exact", "entered exact", true},
+					{"Prompt", "default text", "", true},
+					{"Prompt", "null", "", false},
+				} {
+					v, e = call("browser_click", map[string]any{"target": fmt.Sprintf("getByRole('button', { name: '%s', exact: true })", step.label)})
+					raw, _ := json.Marshal(v)
+					t.Logf("dialog click %s result=%s error=%v", step.label, raw, e)
+					if e != nil {
+						t.Fatal(e)
+					}
+					pending, e := target.OwnedIdentity(ctx)
+					if e != nil || pending.Dialog == "" {
+						t.Fatal("missing real pending dialog", pending, e)
+					}
+
+					presentDialog()
+					args := map[string]any{"accept": step.accept}
+					if step.text != "" {
+						args["promptText"] = step.text
+					}
+					v, e = call("browser_handle_dialog", args)
+					raw, _ = json.Marshal(v)
+					t.Logf("dialog handle %s result=%s error=%v", step.label, raw, e)
+					if e != nil {
+						t.Fatal(e)
+					}
+					after, e := target.OwnedIdentity(ctx)
+					if e != nil || after.Dialog != "" || !after.ViewVisible || after.DialogVisible || after.Document != before.Document {
+						t.Fatal("dialog close lost document or pending state", after, e)
+					}
+					v, e = call("browser_snapshot", map[string]any{})
+					raw, _ = json.Marshal(v)
+					if e != nil || !strings.Contains(string(raw), step.want) {
+						t.Fatal("dialog result missing", string(raw), e)
 					}
 				}
-				if _, e = call("browser_snapshot", map[string]any{}); e != nil {
-					t.Fatal("manual dialog poisoned unrelated call", e)
+				if _, e = call("browser_handle_dialog", map[string]any{"accept": true}); e == nil {
+					t.Fatal("stale answer accepted with no pending dialog")
 				}
-				t.Log("manual dialog diagnosed without guard; subsequent real snapshot succeeded")
+				t.Log("no-pending answer rejected; document retained")
+				longResult, e := call("browser_click", map[string]any{"target": "getByRole('button', { name: 'Long message', exact: true })"})
+				if e != nil {
+					t.Fatal("long-message opening", e)
+				}
+				longRaw, _ := json.Marshal(longResult)
+				t.Logf("long message actual SDK result bytes=%d head=%s", len(longRaw), string(longRaw[:min(len(longRaw), 500)]))
+				longState, e := reg.State(ctx, peer, "window", slot)
+				if longState.Dialog != nil {
+					t.Logf("long actual projection: kind=%s truncated=%v bytes=%d", longState.Dialog.Kind, longState.Dialog.Truncated, len(longState.Dialog.Message))
+				} else {
+					t.Logf("long actual state=%s visible=%v failure=%s", longState.State, longState.Visible, longState.Failure)
+				}
+				if e != nil || longState.Dialog == nil || len(longState.Dialog.Message) > 16*1024 {
+					t.Fatal("long message lacked bounded marked projection", e)
+				}
+				presentDialog()
+				if _, e = call("browser_handle_dialog", map[string]any{"accept": true}); e != nil {
+					t.Fatal("bounded message could not be answered", e)
+				}
+				_, defaultError := call("browser_click", map[string]any{"target": "getByRole('button', { name: 'Oversized default', exact: true })"})
+				if defaultError != nil {
+					if !strings.Contains(defaultError.Error(), "CEF_DIALOG_PAYLOAD_TOO_LARGE") {
+						t.Fatal(defaultError)
+					}
+					t.Log("actual CEF default exceeded host input budget; typed cancellation observed")
+				} else {
+					defaultState, e := reg.State(ctx, peer, "window", slot)
+					if e != nil || defaultState.Dialog == nil || len(defaultState.Dialog.DefaultPrompt) > 32*1024 {
+						t.Fatal("actual prompt default not bounded", e)
+					}
+					actualDefaultLength := len(defaultState.Dialog.DefaultPrompt)
+					t.Logf("actual pinned CEF default bytes=%d from requested32769; host preserves this real input unchanged", actualDefaultLength)
+					presentDialog()
+					if _, e = call("browser_handle_dialog", map[string]any{"accept": true}); e != nil {
+						t.Fatal("accept default prompt", e)
+					}
+					snapshot, e := call("browser_snapshot", map[string]any{})
+					raw, _ := json.Marshal(snapshot)
+					if e != nil || !strings.Contains(string(raw), fmt.Sprintf("default:%d", actualDefaultLength)) {
+						t.Fatal("omitted promptText did not preserve actual CEF default", e)
+					}
+				}
+				afterBudget, e := target.OwnedIdentity(ctx)
+				if e != nil || afterBudget.Document != before.Document || afterBudget.Dialog != "" {
+					t.Fatal("budget refusal lost page or left callback", afterBudget, e)
+				}
+				if _, e = call("browser_snapshot", map[string]any{}); e != nil {
+					t.Fatal("budget refusal poisoned next permitted observation", e)
+				}
+				t.Log("9MiB website source message remained bounded and answerable; real default contract checked; original document and next snapshot retained")
+				if _, e = call("browser_click", map[string]any{"target": "getByRole('button', { name: 'Alert', exact: true })"}); e != nil {
+					t.Fatal(e)
+				}
+				presentDialog()
+				if e = reg.Hide(ctx, peer, "window"); e != nil {
+					t.Fatal(e)
+				}
+				hidden, e := target.OwnedIdentity(ctx)
+				if e != nil || hidden.Dialog != "" || hidden.DialogVisible || hidden.ViewVisible {
+					t.Fatal("hide did not cancel panel dialog", hidden, e)
+				}
+				view, e = reg.Update(ctx, peer, "window", parent, window.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+				if e != nil {
+					t.Fatal(e)
+				}
+				v, e = call("browser_snapshot", map[string]any{})
+				rawHidden, _ := json.Marshal(v)
+				if e != nil || !strings.Contains(string(rawHidden), "alert done") {
+					t.Fatal("show after cancel did not retain page", string(rawHidden), e)
+				}
+				t.Log("panel hide canceled pending callback; re-present retained original document and usable snapshot")
+				if _, e = call("browser_click", map[string]any{"target": "getByRole('button', { name: 'Arm unload', exact: true })"}); e != nil {
+					t.Fatal(e)
+				}
+				v, e = call("browser_click", map[string]any{"target": "getByRole('link', { name: 'Leave', exact: true })"})
+				raw, _ := json.Marshal(v)
+				t.Logf("beforeunload click result=%s error=%v", raw, e)
+				if e != nil {
+					t.Fatal(e)
+				}
+				pending, e := target.OwnedIdentity(ctx)
+				if e != nil || pending.Dialog == "" {
+					t.Fatal("beforeunload missing", pending, e)
+				}
+				pending = presentDialog()
+				v, e = call("browser_handle_dialog", map[string]any{"accept": false})
+				raw, _ = json.Marshal(v)
+				t.Logf("beforeunload cancel result=%s error=%v", raw, e)
+				if e != nil {
+					t.Fatal(e)
+				}
+				after, e := target.OwnedIdentity(ctx)
+				if e != nil || after.Dialog != "" || after.Document != before.Document || after.URL != before.URL {
+					t.Fatal("beforeunload cancellation lost original document", after, e)
+				}
+				v, e = call("browser_snapshot", map[string]any{})
+				raw, _ = json.Marshal(v)
+				if e != nil || !strings.Contains(string(raw), "armed") {
+					t.Fatal("beforeunload cancellation lost page state", string(raw), e)
+				}
+				t.Log("actual beforeunload cancel retained original document, URL and dirty page state")
+				if _, e = call("browser_click", map[string]any{"target": "getByRole('link', { name: 'Leave', exact: true })"}); e != nil {
+					t.Fatal(e)
+				}
+				presentDialog()
+				if cleanup, e := target.BeginOwnedCall(ctx, automation.OwnedBrowserCall{Identity: pending, Token: "expired-dialog-fixture", DialogOnly: true}); e == nil {
+					cleanup()
+					t.Fatal("old pending-dialog identity installed a new dialog guard")
+				}
+				state, e := reg.State(ctx, peer, "window", slot)
+				if e != nil || state.Dialog == nil || state.Dialog.Origin != fixture.URL {
+					t.Fatal("host dialog missing authenticated origin metadata", state.Dialog, e)
+				}
+				old := *state.Dialog
+				wrong := old
+				wrong.Epoch += "-expired"
+				if e = reg.AnswerDialog(ctx, peer, "window", slot, wrong, true); e == nil {
+					t.Fatal("expired host answer accepted")
+				}
+				if e = reg.AnswerDialog(ctx, peer, "window", slot, old, false); e != nil {
+					t.Fatal("host cancellation failed", e)
+				}
+				if e = reg.AnswerDialog(ctx, peer, "window", slot, old, true); e == nil {
+					t.Fatal("duplicate host answer accepted")
+				}
+				after, e = target.OwnedIdentity(ctx)
+				if e != nil || after.Dialog != "" || after.Document != before.Document {
+					t.Fatal("host cancellation lost original document", after, e)
+				}
+				t.Log("old pending guard, expired/duplicate host answers rejected; host cancel retained original document and true origin")
+				if e = target.CloseNative(ctx); e != nil {
+					t.Fatal(e)
+				}
+				return
 			}
 			label := map[string]string{"dialog": "Dialog", "download": "Download", "frame": "Frame"}[scenario]
 			role := "button"
@@ -303,9 +490,6 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 			v, e = call("browser_click", map[string]any{"target": fmt.Sprintf("getByRole('%s', { name: '%s', exact: true })", role, label)})
 			raw, _ := json.Marshal(v)
 			t.Logf("real MCP %s result=%s error=%v", scenario, raw, e)
-			if scenario == "dialog" && (e == nil || !strings.Contains(e.Error(), "CEF_DIALOG_UNSUPPORTED")) {
-				t.Fatal("dialog was not explicitly rejected", e)
-			}
 			if scenario == "frame" {
 				after, e := target.OwnedIdentity(ctx)
 				if e != nil || after.FrameScopeReady || after.ScopeEpoch == before.ScopeEpoch {
