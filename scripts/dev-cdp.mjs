@@ -40,9 +40,11 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 await send('Runtime.enable');
 await sleep(400);
 const contexts = events.filter(e => e.method === 'Runtime.executionContextCreated').map(e => e.params.context);
+const frameTree = await send('Page.getFrameTree');
+const shellFrameId = frameTree.result?.frameTree?.frame?.id;
 const contextFor = which => which === 'dsh'
   ? [...contexts].reverse().find(c => DSH_ORIGIN.test(c.origin))?.id
-  : contexts.find(c => !DSH_ORIGIN.test(c.origin) && c.auxData?.isDefault)?.id;
+  : contexts.find(c => c.auxData?.frameId === shellFrameId && c.auxData?.isDefault)?.id;
 
 async function evaluate(which, expression) {
   const contextId = contextFor(which);

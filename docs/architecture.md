@@ -60,6 +60,7 @@ system-wide Windows service.
 | `internal/accountcallback` | daemon-owned loopback OAuth callback listener, callback-origin rewrite and result pages |
 | `internal/hostplugins` | DSH Work's own DSH plugins (`@dsh-work/shell`, `@dsh-work/account`, `@dsh-work/pet`), installed per application version, and the per-launch core overlay that mounts them |
 | `internal/dshactivity` | DSH session activity projection for the desktop pet, fed by `@dsh-work/pet` |
+| `internal/overviewpc` | read-only machine sampling for the overview: CPU, memory, data volume and Worker Job members with their roles |
 | `internal/dshinteraction` | pending DSH questions, approvals and plan reviews reported by each workbench window's DSH page |
 | `internal/settings` | versioned Host preferences and persistence contract |
 | `internal/automation` | capability state, browser bindings, consent/policy, one-use execution permits and resource lifetime |
@@ -240,6 +241,7 @@ frame loading) or Not loaded, and offers no switches.
 | `@dsh-work/shell` | Injects the page bootstrap through DSH's `webserver/index-inject`: the generation, `__DSH_TRANSPORT__`, and the boot reporter and transport bridge scripts, ahead of DSH's entry | Shell protocol (command catalog and results, sidebar state, Alt/F10 and window keys), link policy, DSH Work theme, modal mask reports |
 | `@dsh-work/account` | Injects the `dshDesktop` marker so DSH mounts its account UI | Opens a waiting authorization URL in the system browser; reports sign-out progress to the shell's status line |
 | `@dsh-work/pet` | Streams the session activity snapshot the desktop pet uses, for one generation | Reports session titles and parent sessions when the session list changes, and opens the conversations its workbench window is asked to open |
+| `@dsh-work/overview` | Serves `GET /__dshwork/overview` on the Worker channel: sessions, output, usage, workspaces, skills, schedules and privacy plugin state for a period | Registers the `sidebar.panellist` icon that opens the Host overview, and reports waiting/running counts from DSH's session status store; see [Overview](overview.md) |
 | `@dsh-work/automation` | Resolves real ToolExecution agents to their top-level session and forwards browser authorization/execution through the authenticated Host channel | None |
 
 `__DSH_TRANSPORT__` declares `ownsHost: true`. DSH otherwise treats the
@@ -426,6 +428,10 @@ DSH Work keeps app data and user data in separate places. `config.toml` records 
 The user data folder is DSH Work's managed DSH home, laid out exactly as official DSH lays out `$DSH_HOME`. It holds profiles with their plugins and patch layers, sessions, storages, attachments, `.credentials.yaml`, and any directories plugins create. DSH Work patches none of these paths, so the profiles in one home share its sessions and credentials, as they do in DSH and dsh-tauri. Each profile also has a `.dsh-work/` folder that only DSH Work reads. It holds the profile's version recovery points (`recovery.json`), plugin provenance (`provenance.json`) and backups. These records travel with the profile, and cloning, backing up and exporting a profile all skip that folder.
 
 App data holds what DSH Work can rebuild: runtimes and Node, host plugins, the bootstrap directory, `settings.json`, update files, and `state.json`. `state.json` stores the runtime catalog, release caches, registered data directories, the selected Run context and the in-flight recovery operation. The managed data directory's path always comes from `config.toml`; a path saved in `state.json` never overrides it.
+
+The overview keeps `overview-journal.json` (lifecycle and operation events,
+automatic-recovery count) and `overview-cache.json` (the latest DSH overview
+payloads) in app data; see [Overview](overview.md#data).
 
 Browser native-host manifests, ownership markers and the stable unpacked
 extension directory live under app data's `browser-native/`. Cache
@@ -1006,14 +1012,15 @@ option and is covered by the same `TestRealShellFrame` check after upgrades.
 The menu bar is drawn by the shell (`frontend/src/shell-menu*.ts`). Menus are
 grouped by what the user does, not by who implements an item. Per-session
 actions (rename, fork, archive, stop) stay in DSH's own menus; environment
-switching and version records stay in Settings Overview. Not offered: new
+switching and version records stay in the environment dialog opened from the
+overview's DSH Work tile. Not offered: new
 window, command palette, focus mode, always on top and recent workspaces.
 
 | Menu | Items (DSH commands marked *) |
 |---|---|
 | 文件 | 新会话*, 搜索会话*, 添加工作区* · 新终端*, 新浏览器* · 刷新, 重启 DSH · 关闭窗口, 退出 |
-| 视图 | 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
-| 设置 | 概览 · 通用, 通知, 宠物 · 运行环境, 配置, 插件 · 存储位置 · DSH 设置* |
+| 视图 | 概览 · 左侧栏*, 右侧栏* · 放大, 缩小, 实际大小, 全屏 · 显示桌面宠物 |
+| 设置 | 通用, 通知, 浏览器, 电脑操作, 宠物 · 运行环境, 配置, 插件 · 存储位置, 诊断 · DSH 设置* |
 | 帮助 | 文档, 键盘快捷键* · 桌面版反馈, DeepSeek 反馈 · 复制诊断信息, 打开调试窗口 · 检查更新 (or 有新版本可安装 / 更新中…), 关于 DSH Work |
 
 Host items call trusted bindings. `ShellService` runs in the UI process: it

@@ -74,15 +74,20 @@ Every Settings page follows one grammar so pages read as one application:
 
 ## Navigation and pages
 
-Overview stands alone. The sidebar groups Application (General, Notifications,
+The sidebar groups Application (General, Notifications,
 Browser, Computer, Pets), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
 Diagnostics, About). The narrow-window selector uses the same groups. Switching sections
 preserves their selection and remembers content scroll and return focus within
 the current Settings instance.
 
+Settings has no overview page; the [overview](overview.md) is its own
+surface. The current environment facts (state, DSH, profile, Node) with Switch
+environment, the configured and last-working context when they differ, and the
+version-record summary with history/save form the environment dialog, opened
+from the overview's DSH Work tile.
+
 | Page | Current layout |
 |---|---|
-| Overview | Current environment facts (state, DSH, profile, Node) with Switch environment on the section heading; configured and last-working context when they differ; version-record summary row with history/save. |
 | Browser | Browser-control and default-browser switches, installation/binding guidance, selected browser profile, native-host recheck, component preparation/repair and optional profile launch directory. Access, website, operation-category and duration preferences follow below, with browser activity and stop controls. See [Set up browser control](browser-setup.md). |
 | Computer | Capability switch, selected engine and explicit component management, application rules, permission duration and action-confirmation categories. Cua provides scoped background Windows control; see [Computer control](computer-control.md) for current boundaries and acceptance status. |
 | Runtimes | DSH and Node management directly on the same page, separated by headings. Installed versions, acquisition controls, progress and errors remain in their respective section. Removing a runtime shows a short confirmation below the runtime list. |

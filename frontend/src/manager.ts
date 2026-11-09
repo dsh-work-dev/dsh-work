@@ -134,16 +134,17 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "overview" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "about";
+type ManagerSection = "environment" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "about";
 
 type DesktopUpdateState = UpdateSnapshot;
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
-  if (value === "overview" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "about") {
+  if (value === "overview") return "settings";
+  if (value === "environment" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "about") {
     return value;
   }
-  return "overview";
+  return "settings";
 }
 
 // filterLoaderLayers keeps the loader entries whose id or package matches the
@@ -352,7 +353,7 @@ export function mountManager() {
   }
 
   const sectionCopy: Record<ManagerSection, {title: string}> = {
-    overview: {title: "manager.overview"},
+    environment: {title: "manager.currentEnvironment"},
     settings: {title: "manager.general"},
     profiles: {title: "manager.profiles"},
     plugins: {title: "manager.plugins"},
@@ -404,7 +405,7 @@ export function mountManager() {
       if (display === "transient") expiry = window.setTimeout(() => { if (result.textContent === message) clear(); }, 5000);
     };
   }
-  const setFeedback = feedbackFor("overview");
+  const setFeedback = feedbackFor("environment", document.getElementById("overview-environment-controls")!);
   const settingsFeedback = feedbackFor("settings");
   const profilesFeedback = feedbackFor("profiles");
   const versionPoints = mountRestorePoints(document.getElementById("version-restore-points")!, next => {snapshot=next;renderSelection();renderOverview();renderProfiles();renderRuntimes();});
@@ -444,13 +445,24 @@ export function mountManager() {
       sectionFocus.set(sectionName(panel.dataset.managerPanel ?? null), {element: target, selector});
     }
   });
+  const environmentDialog = document.getElementById("overview-environment-dialog") as HTMLDialogElement;
+  document.getElementById("overview-environment-close")!.onclick = () => environmentDialog.close();
+  function showEnvironment() { if (!environmentDialog.open) environmentDialog.showModal(); }
+  window.addEventListener("dsh-work:environment", event => {
+    showEnvironment();
+    const action = (event as CustomEvent<string>).detail;
+    if (action === "switch") editEnvironment();
+    if (action === "save") versionPoints.save();
+    if (action === "restore") versionPoints.browse();
+  });
   function showSection(next: ManagerSection) {
+    if (next === "environment") { showEnvironment(); return; }
     const changed = next !== currentSection;
     if (changed) sectionPositions.set(currentSection, contentScroller.scrollTop);
     currentSection = next;
     if (next === "diagnostics") void diagnosticsPanel.refresh();
     const sharedState = document.querySelector<HTMLElement>(".manager-load-state");
-    if (sharedState) sharedState.style.display = ["overview", "profiles", "plugins", "runtimes"].includes(next) ? "" : "none";
+    if (sharedState) sharedState.style.display = ["environment", "profiles", "plugins", "runtimes"].includes(next) ? "" : "none";
     managerTitle.textContent = t(sectionCopy[next].title);
     sectionPicker.value = next;
     for (const panel of panels) {
@@ -616,7 +628,7 @@ export function mountManager() {
     }
     editingEnvironment = true;
     environmentEditor.hidden = false;
-    showSection("overview");
+    showSection("environment");
     runtime.focus();
   }
   document.getElementById("environment-edit")!.addEventListener("click", () => editEnvironment());
@@ -1770,6 +1782,7 @@ export function mountManager() {
   }
   Events.On("settings-section", event => {
     if (typeof event.data !== "string") return;
+    if (event.data === "overview") { window.dispatchEvent(new Event("dsh-work:overview-open")); return; }
     const section = sectionName(event.data);
     if (section === "profiles" && profileView === "detail") { profileView = "list"; renderProfiles(); }
     showSection(section);

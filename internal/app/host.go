@@ -299,6 +299,34 @@ func (h *Host) Diagnostics() supervisor.Diagnostics {
 	return h.lastDiagnostics
 }
 
+// OwnedProcesses is the read-only metrics seam for the current Worker boundary.
+// Adapters without authoritative membership enumeration report unavailable.
+func (h *Host) OwnedProcesses(ctx context.Context) (generation string, pids []int32, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.current == nil {
+		return "", []int32{}, nil
+	}
+	h.current.mu.RLock()
+	worker := h.current.worker
+	generation = h.current.generation
+	h.current.mu.RUnlock()
+	if worker == nil {
+		return generation, []int32{}, nil
+	}
+	provider, ok := worker.(interface {
+		OwnedProcessIDs(context.Context) ([]int32, error)
+	})
+	if !ok {
+		return generation, nil, fmt.Errorf("Worker process ownership enumeration unavailable")
+	}
+	pids, err = provider.OwnedProcessIDs(ctx)
+	return generation, pids, err
+}
+
 func (h *Host) Start() lifecycle.Status {
 	h.switchMu.Lock()
 	defer h.switchMu.Unlock()

@@ -201,5 +201,5 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   confirm.onclick = () => {const id = selected?.id; closePreview(); if (id) void run(() => ManagerService.RestorePoint(id), true);};
   cancel.onclick = () => void ManagerService.CancelRestore().catch(error => {feedback.textContent = String(error);});
   subscribeLocale(() => render());
-  return {closePreview, render(next: Snapshot | undefined, disabled: boolean) {snapshot = next; blocked = disabled; render();}};
+  return {closePreview, save: () => save.click(), browse: () => browse.click(), render(next: Snapshot | undefined, disabled: boolean) {snapshot = next; blocked = disabled; render();}};
 }

@@ -1,0 +1,9 @@
+.overview-shell{position:fixed;inset:40px 0 0;z-index:9;overflow:auto;background:var(--canvas);color:var(--text);isolation:isolate}
+.overview-shell[hidden]{display:none}
+.shell-overview-toggle{display:grid;place-items:center;width:34px;height:30px;border:0;border-radius:var(--radius-control);background:transparent;color:inherit;position:relative}
+.shell-overview-toggle svg{width:17px;height:17px}
+.shell-overview-toggle:hover,.shell-overview-toggle[aria-pressed=true]{background:var(--bar-hover)}
+.shell-overview-toggle[data-attention=offline]:after,.shell-overview-toggle[data-attention=pending]:after{content:'';position:absolute;right:3px;top:4px;width:5px;height:5px;border-radius:50%;background:var(--failed)}
+.overview-environment-dialog{width:min(780px,calc(100vw - 48px));max-height:calc(100vh - 64px);overflow:auto;padding:24px;border:var(--dialog-border);border-radius:var(--radius-group);background:var(--canvas);color:var(--text)}
+.overview-environment-dialog .dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.overview-environment-dialog .section{margin-bottom:24px}

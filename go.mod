@@ -10,6 +10,7 @@ require (
 	github.com/google/safeopen v0.0.0-20260327150837-43626d6f4685
 	github.com/otiai10/copy v1.14.1
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/shirou/gopsutil/v4 v4.26.8
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	github.com/wailsapp/wails/v3 v3.0.0-beta.16
 	golang.org/x/image v0.41.0
@@ -20,7 +21,15 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require golang.org/x/text v0.39.0 // indirect
+require (
+	github.com/ebitengine/purego v0.10.2 // indirect
+	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
+	github.com/tklauser/go-sysconf v0.3.16 // indirect
+	github.com/tklauser/numcpus v0.11.0 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/text v0.39.0 // indirect
+)
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

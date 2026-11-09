@@ -29,8 +29,36 @@ type ManagerService struct {
 	manager            *dshmanager.Manager
 	host               *Host
 	publishAcquisition func(acquisition.OperationStatus)
+	onOverviewEvent    func(ManagerOverviewEvent)
 	runtimeMu          sync.Mutex
 	runtimeCancel      context.CancelFunc
+}
+
+// ManagerOverviewEvent is a terminal result observed at the actual operation
+// boundary. It contains no command output or raw errors.
+type ManagerOverviewEvent struct {
+	ID    string
+	At    string
+	Kind  string
+	State string
+}
+
+// SetManagerOverviewEvent is configured at composition time, outside bindings.
+func SetManagerOverviewEvent(s *ManagerService, callback func(ManagerOverviewEvent)) {
+	if s != nil {
+		s.onOverviewEvent = callback
+	}
+}
+
+func (s *ManagerService) recordOverviewEvent(id, kind string, err error) {
+	if s.onOverviewEvent == nil {
+		return
+	}
+	state := "completed"
+	if err != nil {
+		state = "failed"
+	}
+	s.onOverviewEvent(ManagerOverviewEvent{ID: id, At: time.Now().UTC().Format(time.RFC3339Nano), Kind: kind, State: state})
 }
 
 func (s *ManagerService) RegisterRuntime(ctx context.Context, runtime dshmanager.RuntimeInfo) (dshmanager.Snapshot, error) {
@@ -102,7 +130,7 @@ func (s *ManagerService) RetryLastSwitch(ctx context.Context) (dshmanager.Snapsh
 	return s.host.RetryLastSwitch(ctx)
 }
 
-func (s *ManagerService) RestoreKnownGood(ctx context.Context) (dshmanager.Snapshot, error) {
+func (s *ManagerService) RestoreKnownGood(ctx context.Context) (result dshmanager.Snapshot, resultErr error) {
 	if s == nil || s.host == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -111,6 +139,8 @@ func (s *ManagerService) RestoreKnownGood(ctx context.Context) (dshmanager.Snaps
 	}
 	ctx, cancel := contextWithTimeout(ctx, runtimeOperationTimeout)
 	defer cancel()
+	operationID := lifecycle.NewCorrelationID()
+	defer func() { s.recordOverviewEvent(operationID, "restore", resultErr) }()
 	return s.host.RestoreKnownGood(ctx)
 }
 
@@ -607,6 +637,7 @@ func (s *ManagerService) UpgradePlugin(ctx context.Context, request dshmanager.P
 	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
 	defer func() {
 		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+		s.recordOverviewEvent(operationID, "plugin-update", resultErr)
 	}()
 	if s.host != nil {
 		return s.host.UpgradePlugin(ctx, request)
@@ -633,6 +664,7 @@ func (s *ManagerService) UpgradePlugins(ctx context.Context, request dshmanager.
 	s.publishOperationStatus(operationID, artifact, lifecycle.RuntimePreparation{State: lifecycle.RuntimePreparationAcquiringDSH, Operation: lifecycle.RuntimePreparationOperationInstallDSH})
 	defer func() {
 		s.publishTerminalPreparation(operationID, artifact, "", lifecycle.RuntimePreparation{}, resultErr)
+		s.recordOverviewEvent(operationID, "plugin-update", resultErr)
 	}()
 	if s.host != nil {
 		return s.host.UpgradePlugins(ctx, request)

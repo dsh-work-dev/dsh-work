@@ -6,6 +6,7 @@ import * as DiagnosticsService from "./diagnosticsservice.js";
 import * as HostService from "./hostservice.js";
 import * as LogService from "./logservice.js";
 import * as ManagerService from "./managerservice.js";
+import * as OverviewService from "./overviewservice.js";
 import * as PetSettingsService from "./petsettingsservice.js";
 import * as SettingsService from "./settingsservice.js";
 import * as ShellService from "./shellservice.js";
@@ -16,6 +17,7 @@ export {
     HostService,
     LogService,
     ManagerService,
+    OverviewService,
     PetSettingsService,
     SettingsService,
     ShellService,

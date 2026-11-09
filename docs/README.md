@@ -15,6 +15,8 @@ preserve.
    restoration, failure policy and supported limits.
 5. [Settings and startup](settings.md) — navigation, selective hierarchy and
    contextual feedback.
+   [Overview](overview.md) — the overview page's tiles, layout editing, data
+   sources and why DSH Work draws it.
 6. [Safety standards](standards/safety.md) — authority, data and failure
    containment rules.
 7. [Interface standards](standards/interface.md) — trusted UI, copy, states and
