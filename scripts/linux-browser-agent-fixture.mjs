@@ -3,7 +3,8 @@
 import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {existsSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 
 export async function runLinuxBrowserAgent({inspector,shell,dsh,visible,fixture,out,save,call,click}) {
@@ -90,7 +91,21 @@ export async function runLinuxBrowserAgent({inspector,shell,dsh,visible,fixture,
   save('agent-trajectory',trajectory);save('agent-model-result',{requests,emitted,events,toolResult});
   const access=await call('GetAutomation');save('agent-authority',access.browserAccess);
   if(access.browserAccess?.sessions?.length!==1||access.browserAccess.sessions[0].session!==session)throw Error('Unexpected post-tool authority');
- } catch(error) { primaryError=error;save('agent-first-error',{error:String(error),requests,emitted,events,rejected,toolResult});throw error;
+ } catch(error) {
+  primaryError=error;save('agent-first-error',{at:Date.now(),error:String(error),requests,emitted,events,rejected,toolResult});
+  save('agent-failure-observation-request',{at:Date.now()});
+  try{
+   const repo=fileURLToPath(new URL('../',import.meta.url));
+   const binding=readFileSync(join(repo,'frontend/bindings/github.com/local/dsh-work/internal/desktopclient/embeddedbrowserservice.ts'),'utf8');
+   const match=binding.match(/export function State\([^]*?\$Call\.ByID\((\d+)/);if(!match)throw Error('State binding unavailable');
+   const observe=inspector.evaluate(shell,`(async()=>{const f=document.querySelector('iframe');const doc=decodeURIComponent(new URL(f.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const s=await Call.ByID(${Number(match[1])},doc,${JSON.stringify(visible.slot)});return{instance:s.instance,brokerGeneration:s.brokerGeneration,lease:s.lease,state:s.state,visible:s.visible,target:s.target,document:s.document,frame:s.frame,epoch:s.epoch}})()`);
+   let timer;try{
+    const current=await Promise.race([observe,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Failure State observation deadline')),1500)})]);
+    save('agent-failure-current-document',{at:Date.now(),current,sameDocument:['instance','brokerGeneration','lease','target','document','frame'].every(key=>current[key]===visible.state[key])});
+   }finally{clearTimeout(timer)}
+  }catch(observationError){save('agent-failure-current-document',{unavailable:true,errorType:observationError.name||'Error'})}
+  try{await wait('failure heartbeat observation',()=>existsSync(join(out,'agent-failure-observation.json')),2000)}catch{save('agent-failure-observation-missing',{at:Date.now()})}
+  throw error;
  } finally {
   const failures=[];const cleanup=async(label,fn)=>{try{await fn()}catch(error){failures.push({label,error:String(error)})}};
   if(sent)await cleanup('cancel own agent',()=>rpc('session/cancel',{request:{sessionId:session}}));
