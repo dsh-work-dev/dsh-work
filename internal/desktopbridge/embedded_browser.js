@@ -2,7 +2,7 @@
 // presentation intent and observable toolbar state; Go owns native authority.
 (() => {
  globalThis.__DSH_WORK_EMBEDDED_VERSION__='0.2.2-rc.1';
- const shellOrigin=location.ancestorOrigins?.[0];if(!shellOrigin||parent===window)return;
+ const shellOrigin=location.ancestorOrigins?.[0];if(!shellOrigin||shellOrigin==='null'||parent===window)return;
  const documentToken=decodeURIComponent(location.hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');
  const pending=new Map();let blocked=false;
  const pages=new Set();

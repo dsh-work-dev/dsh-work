@@ -1,4 +1,5 @@
 import {EmbeddedBrowserService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
 import type {SlotBounds} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
 
 /** DSH supplies CSS slot intent; this shell owns the iframe transform and clip. */
@@ -6,7 +7,7 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
  let enabled=false,candidate=false,documentToken="",accepting=false;
  let nativeQueue=Promise.resolve();
  const native=<T>(task:()=>PromiseLike<T>):Promise<T>=>{const result=nativeQueue.then(task);nativeQueue=result.then(()=>{},()=>{});return result};
- const send=(id:string,value:unknown,error="")=>{const src=frame.getAttribute("src");if(src)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-result",id,value,error},new URL(src).origin)};
+ const send=(id:string,value:unknown,error="")=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-result",id,value,error},origin)};
  const clamp=(raw:unknown)=>{
   const value=raw as Record<string,unknown>;
   if(!value||![value.x,value.y,value.width,value.height].every(n=>typeof n==="number"&&Number.isFinite(n)&&Math.abs(n)<1e6))throw Error("Invalid browser bounds");
@@ -21,7 +22,7 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
   async retireDocument(token:string){documentToken=token;accepting=false;return native(async()=>{candidate=await EmbeddedBrowserService.BeginDocument(token);return candidate})},
   acceptsDocument(token:unknown){return !candidate||(accepting&&token===documentToken)},
   activateDocument(token:string){if(documentToken===token)accepting=true},
-  async overlay(blocked:boolean){if(!enabled)return;const post=()=>{const src=frame.getAttribute("src");if(src)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",blocked},new URL(src).origin)};if(blocked)post();await native(()=>EmbeddedBrowserService.Overlay(blocked));if(!blocked)post()},
+  async overlay(blocked:boolean){if(!enabled)return;const post=()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",blocked},origin)};if(blocked)post();await native(()=>EmbeddedBrowserService.Overlay(blocked));if(!blocked)post()},
   handle(event:MessageEvent){
    const m=event.data as Record<string,unknown>;
    if(m?.version!==1||m.type!=="dsh-work/browser")return false;

@@ -18,9 +18,6 @@ type Surface struct {
 	Window  func() application.Window
 	Current func() *Bridge
 	Assets  func(*Bridge) http.Handler
-	// Optional bounded development diagnostics. Query, headers and body never
-	// cross this seam; observing a request supplies no authority.
-	Trace func(method, scheme, host, path string)
 }
 
 func (s *Surface) forWindow(window application.Window) *Bridge {
@@ -58,9 +55,6 @@ func (s *Surface) fromWorker(r *http.Request) bool {
 
 func (s *Surface) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.Trace != nil {
-			s.Trace(r.Method, r.URL.Scheme, r.Host, r.URL.Path)
-		}
 		if !s.worker(r) {
 			// A Worker that navigates its frame to the shell authority would
 			// become same-origin with the shell, so shell pages are never framed.

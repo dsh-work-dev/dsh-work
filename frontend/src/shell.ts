@@ -1,4 +1,5 @@
 import {Browser, Events, Window} from "@wailsio/runtime";
+import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 import {copyReport, latestProblem} from "./diagnostics";
@@ -169,7 +170,8 @@ export function mountShell() {
   const sendFrameMessage = (message: Record<string, unknown>) => {
     const src = frame.getAttribute("src");
     if (!src) return;
-    frame.contentWindow?.postMessage({version: 1, ...message}, new URL(src).origin);
+    const origin=bridgeOrigin(src);if(!origin)return;
+    frame.contentWindow?.postMessage({version: 1, ...message}, origin);
   };
   // Any CSS colour (color-mix, transparent, nested var()) resolved to RGBA by painting one pixel.
   const pixel = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
@@ -331,14 +333,14 @@ export function mountShell() {
     const command = event.data as {id?: unknown; sessionId?: unknown; parentSessionId?: unknown} | undefined;
     const src = frame.getAttribute("src");
     if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
-    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
-      sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/open-session", id: command.id,
+      sessionId: command.sessionId, parentSessionId: command.parentSessionId});
   });
   Events.On("dsh-answer-approval", event => {
     const command = parseAnswerApprovalCommand(event.data);
     const src = frame.getAttribute("src");
     if (!src || !command) return;
-    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/answer-approval", ...command}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/answer-approval", ...command});
   });
   void fetch("/__shell/worker").then(response => response.json()).then((value: {url: string}) => {
     if (!eventSeen) show(value.url);
@@ -347,7 +349,8 @@ export function mountShell() {
   // Only the framed DSH document talks to the shell: colours, its command catalog and menu keys.
   window.addEventListener("message", event => {
     const src = frame.getAttribute("src");
-    if (!src || event.source !== frame.contentWindow || event.origin !== new URL(src).origin) return;
+    const origin=src?bridgeOrigin(src):undefined;
+    if (!origin || event.source !== frame.contentWindow || event.origin !== origin) return;
     if(embeddedBrowser.handle(event))return;
     const message = parseFrameMessage(event.data,currentLocale());
     if (!message) return;
@@ -386,8 +389,7 @@ export function mountShell() {
     else if (message.type === "menu-key") menuBar.focus();
   });
   sendCommand = id => {
-    const src = frame.getAttribute("src");
-    if (src) frame.contentWindow?.postMessage({version: 1, type: "dsh-work/command", id}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/command", id});
   };
 
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.

@@ -19,6 +19,9 @@ var bootScript string
 //go:embed embedded_browser.js
 var embeddedBrowserScript string
 
+//go:embed origin.js
+var originScript string
+
 // Assets serves a dedicated Worker-only WebView. Do not attach management
 // bindings to this surface: DSH plugins share its origin.
 func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +47,13 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "GET" && r.Method != "HEAD" {
 		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if r.URL.Path == "/__work/origin.js" {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		if r.Method != "HEAD" {
+			io.WriteString(w, originScript)
+		}
 		return
 	}
 	if r.URL.Path == "/__work/embedded-browser.js" && b.EmbeddedBrowserVersion == EmbeddedBrowserRuntime {

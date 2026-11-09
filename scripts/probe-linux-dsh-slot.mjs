@@ -14,20 +14,32 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function until(label,fn,ms=30000){const deadline=Date.now()+ms;let last;while(Date.now()<deadline){try{const v=await fn();if(v)return v}catch(e){last=e}await delay(100)}throw Error(label+': '+(last?.message??'bounded deadline'));}
 function save(name,value){writeFileSync(join(out,name+'.json'),JSON.stringify(value,null,2).replace(/([?&](?:token|auth)=)[^&#"\s]+/gi,'$1[REDACTED]')+'\n',{mode:0o600});}
 class Inspector {
- constructor(url){this.pending=new Map();this.targets=new Map();this.contexts=new Map();this.trace=[];this.messages=[];this.seq=0;this.ws=new WebSocket(url);this.ws.onmessage=e=>this.receive(JSON.parse(e.data));this.ws.onclose=()=>{for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('WebKit inspector disconnected'))}this.pending.clear()};}
+ constructor(url){this.pending=new Map();this.targets=new Map();this.parents=new Map();this.contexts=new Map();this.trace=[];this.messages=[];this.seq=0;this.ws=new WebSocket(url);this.ws.onmessage=e=>this.receive(JSON.parse(e.data));this.ws.onclose=()=>{for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(Error('WebKit inspector disconnected'))}this.pending.clear()};}
  receive(m,target=''){
-  this.trace.push({method:m.method??'reply',target,error:m.error?.message});if(this.trace.length>150)this.trace.shift();
+  this.trace.push({method:m.method??'reply',target,replyTo:m.id?this.pending.get(target+':'+m.id)?.method:undefined,resultKeys:m.result?Object.keys(m.result):undefined,error:m.error?.message});if(this.trace.length>150)this.trace.shift();
   if(m.method==='Console.messageAdded'){const c=m.params.message;this.messages.push({source:c.source,level:c.level,text:String(c.text).slice(0,1000)});if(this.messages.length>50)this.messages.shift();}
   if(m.method==='Target.dispatchMessageFromTarget'){this.receive(JSON.parse(m.params.message),m.params.targetId);return}
-  if(m.method==='Target.targetCreated'){const t=m.params.targetInfo;if(!t.isProvisional&&['page','frame'].includes(t.type)){this.targets.set(t.targetId,t);void this.send('Runtime.enable',{},t.targetId).catch(()=>{});}return}
+  if(m.method==='Target.targetCreated'){const t=m.params.targetInfo;if(!t.isProvisional&&['page','frame'].includes(t.type)){this.targets.set(t.targetId,t);this.parents.set(t.targetId,target);void this.initialize(t.targetId).catch(e=>this.trace.push({target:t.targetId,initializationError:String(e)}));}return}
   if(m.method==='Target.targetDestroyed'){this.targets.delete(m.params.targetId);for(const [key,c] of this.contexts)if(c.target===m.params.targetId)this.contexts.delete(key);return}
   if(m.method==='Runtime.executionContextCreated'){const c=m.params.context;if(c.isPageContext!==false)this.contexts.set(target+':'+c.id,{target,contextId:c.id});}
   if(m.id){const p=this.pending.get(target+':'+m.id);if(p){this.pending.delete(target+':'+m.id);clearTimeout(p.timer);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}}
  }
+ async initialize(target){
+  // Follow WebInspector's Inspector-first/initialized lifecycle. Some older
+  // WebKit builds announce placeholder frame targets without Runtime agents.
+  await this.send('Inspector.enable',{},target).catch(()=>{});
+  await this.send('Page.enable',{},target).catch(()=>{});
+  await this.send('Runtime.enable',{},target);
+  // Context 0 is the documented default inspected-page context, not a claimed
+  // frame identity. Every consumer still evaluates the actual document.
+  this.contexts.set(target+':0',{target,contextId:0});
+  await this.send('Console.enable',{},target).catch(()=>{});
+  await this.send('Inspector.initialized',{},target).catch(()=>{});
+ }
  async open(){await new Promise((yes,no)=>{this.ws.onopen=yes;this.ws.onerror=no});await this.send('Target.setPauseOnStart',{pauseOnStart:false}).catch(()=>{});}
  send(method,params={},target=''){
   const id=++this.seq,key=target+':'+id;
-  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(key);reject(Error('Inspector timeout '+method))},12000);this.pending.set(key,{resolve,reject,timer});const value={id,method,params};if(target){const outer=++this.seq;this.ws.send(JSON.stringify({id:outer,method:'Target.sendMessageToTarget',params:{targetId:target,message:JSON.stringify(value)}}))}else this.ws.send(JSON.stringify(value));});
+  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(key);reject(Error('Inspector timeout '+method))},12000);this.pending.set(key,{resolve,reject,timer,method});const value={id,method,params};if(target){const parent=this.parents.get(target)??'';if(parent===target){clearTimeout(timer);this.pending.delete(key);reject(Error('Cyclic inspector target'));return}void this.send('Target.sendMessageToTarget',{targetId:target,message:JSON.stringify(value)},parent).catch(e=>{const p=this.pending.get(key);if(p){clearTimeout(p.timer);this.pending.delete(key);p.reject(e)}})}else this.ws.send(JSON.stringify(value));});
  }
  async evaluate(where,expression){
   let r=await this.send('Runtime.evaluate',{expression:`Promise.resolve((${expression})).then(v=>JSON.stringify(v))`,contextId:where.contextId,returnByValue:false},where.target);
@@ -56,6 +68,8 @@ try {
     try{pages.push(await inspector.evaluate(where,`(()=>{const safe=u=>{try{const p=new URL(u,location.href);return p.protocol+'//'+p.host+p.pathname}catch{return String(u).slice(0,100)}};return{url:safe(location.href),origin:location.origin,top:parent===window,ready:document.readyState,title:document.title,body:document.body?.innerText.slice(0,2000),frames:[...document.querySelectorAll('iframe')].map(f=>({src:safe(f.src),origin:new URL(f.src).origin,documentPresent:!!f.contentDocument})),generation:globalThis.__WORK_GENERATION__,provider:globalThis.__DSH_WORK_BROWSER_PROVIDER__?.protocolVersion,embeddedVersion:globalThis.__DSH_WORK_EMBEDDED_VERSION__,boot:document.querySelector('[data-dsh-boot]')?.textContent.slice(0,1000),resources:performance.getEntriesByType('resource').slice(-30).map(r=>({url:safe(r.name),duration:r.duration,bytes:r.transferSize}))}})()`))}catch(error){pages.push({contextError:String(error)})}
    }
    save('boot-webview',{pages,console:inspector.messages,protocol:inspector.trace});
+   const opaque=pages.find(p=>typeof p.url==='string'&&p.url.startsWith('wails://')&&p.origin==='null');
+   if(opaque)save('boot-origin-unsafe',{reason:'Registered WebView document has an opaque browser origin',url:opaque.url,origin:opaque.origin});
   }
  }else{
  const path=await until('Wails inspectable page',async()=>{const html=await(await fetch(base,{signal:AbortSignal.timeout(2000)})).text();return html.match(/\/socket\/\d+\/\d+\/WebPage/)?.[0]});
@@ -63,6 +77,10 @@ try {
  const shell=await until('shell execution context',()=>inspector.find('shell'));
  await inspector.evaluate(shell,`(()=>{globalThis.__e67Slots=new Set();addEventListener('message',e=>{if(e.source!==document.querySelector('iframe')?.contentWindow)return;const m=e.data;if(m?.version===1&&m.type==='dsh-work/browser'&&typeof m.slot==='string')__e67Slots.add(m.slot)});return true})()`);
  const dsh=await until('real DSH provider',()=>inspector.find('dsh'),60000);
+ const shellOrigin=await inspector.evaluate(shell,`(()=>{const frame=document.querySelector('iframe');if(!frame)throw Error('Worker frame missing');let denied=false,error;try{void frame.contentWindow.document.body}catch(e){error=e.name;denied=e.name==='SecurityError'}return{origin:location.origin,denied,error}})()`);
+ const workerOrigin=await inspector.evaluate(dsh,`(async()=>{let denied=false,error;try{void parent.document.body}catch(e){error=e.name;denied=e.name==='SecurityError'}const r=await fetch('/wails/runtime?object=0&method=0',{headers:{'x-wails-window-name':'settings','x-wails-window-id':'0'}});return{origin:location.origin,ancestor:location.ancestorOrigins?.[0],denied,error,privilegedRuntimeStatus:r.status}})()`);
+ save('origin-isolation',{shell:shellOrigin,worker:workerOrigin});
+ if(shellOrigin.origin!=='wails://localhost'||workerOrigin.origin!=='wails://wails.localhost:48217'||workerOrigin.ancestor!==shellOrigin.origin||!shellOrigin.denied||!workerOrigin.denied||workerOrigin.privilegedRuntimeStatus!==403)throw Error('Actual WebView origin isolation/privileged-route gate rejected; no browser actions permitted');
  const initial=await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return{capability:await Call.ByID(${ids.cap})}})()`);
  if(!initial.capability)throw Error('formal embedded provider capability unavailable');
  save('provider-ready',initial);

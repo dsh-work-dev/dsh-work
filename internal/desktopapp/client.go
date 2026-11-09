@@ -154,18 +154,6 @@ func runDesktopClient(identity string, resources Resources) error {
 			},
 		}
 	}}
-	if embeddedDevelopmentRoot() != "" && os.Getenv("DSH_WORK_EMBEDDED_TRACE_SURFACE") == "1" {
-		var shellRequests, workerRequests atomic.Int32
-		workerSurface.Trace = func(method, scheme, host, path string) {
-			counter := &shellRequests
-			if strings.EqualFold(host, shellWorkerHost) {
-				counter = &workerRequests
-			}
-			if counter.Add(1) <= 32 {
-				logging.Module(logging.ModIPC).Info("development WebView surface request", "method", method, "scheme", scheme, "host", host, "path", path)
-			}
-		}
-	}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 		workerSurface.Assets = func(b *desktopbridge.Bridge) http.Handler { return desktopprobe.Assets(b) }
 	}
@@ -539,17 +527,16 @@ func isWorkspaceOpenURL(raw string) bool {
 	return strings.EqualFold(launched.Scheme, "dsh") || strings.EqualFold(launched.Scheme, accountcallback.DesktopReturnScheme)
 }
 
-// shellWorkerHost is the fixed authority of the framed Worker document. Wails
-// intercepts any wails.localhost authority inside the WebView, so the port is
-// an origin label only and nothing listens on it. It stays fixed so DSH's
-// browser storage survives Worker generations.
+// shellWorkerHost is the fixed, separate Worker authority inside the WebView's
+// platform-registered scheme. The port is an origin label, not a listener, and
+// stays stable so DSH storage survives Worker generations.
 const shellWorkerHost = "wails.localhost:48217"
 
 func shellWorkerURL(relative string) string {
 	if relative == "" {
 		return ""
 	}
-	return "http://" + shellWorkerHost + relative
+	return shellWorkerScheme + "://" + shellWorkerHost + relative
 }
 
 // shellState answers the shell's initial frame address; later changes arrive

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,19 @@ import (
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/settings"
 )
+
+func TestShellWorkerPlatformURL(t *testing.T) {
+	want := "http://wails.localhost:48217/path?generation=g"
+	if runtime.GOOS == "linux" {
+		want = "wails://wails.localhost:48217/path?generation=g"
+	}
+	if got := shellWorkerURL("/path?generation=g"); got != want {
+		t.Fatalf("worker address = %q, want %q", got, want)
+	}
+	if got := shellWorkerURL(""); got != "" {
+		t.Fatalf("empty worker address = %q", got)
+	}
+}
 
 func TestStreamProcessorMapsTopicsAndEmitsOnlyPreferenceChanges(t *testing.T) {
 	var current daemon.Snapshot

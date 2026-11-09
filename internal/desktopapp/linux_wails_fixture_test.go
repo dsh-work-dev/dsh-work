@@ -234,7 +234,6 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		uiEnv[k] = v
 	}
 	uiEnv["WEBKIT_INSPECTOR_HTTP_SERVER"] = "127.0.0.1:" + strconv.Itoa(port)
-	uiEnv["DSH_WORK_EMBEDDED_TRACE_SURFACE"] = "1"
 	ui := start("ui", nil, uiEnv)
 	uiIdentity := ui.Diagnostics()
 	node, e := exec.LookPath("node")
@@ -286,6 +285,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		}()
 	}
 	wait("real daemon Ready after UI mount", func() bool {
+		if evidence, e := os.ReadFile(filepath.Join(out, "boot-origin-unsafe.json")); e == nil {
+			t.Fatalf("opaque WebView origin is unsupported: %s", evidence)
+		}
 		select {
 		case <-ui.Exited():
 			t.Fatal("owned UI exited before mount confirmation", ui.ExitResult())

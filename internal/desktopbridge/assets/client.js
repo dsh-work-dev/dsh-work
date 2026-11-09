@@ -1,23 +1,50 @@
 import { Stream as e } from "/wails/runtime.js";
+(() => {
+	if (globalThis.__DSH_WORK_ORIGINS__) return;
+	let e = (e, t) => {
+		try {
+			let n = new URL(e, t);
+			return n.username || n.password ? void 0 : n;
+		} catch {}
+	}, t = (t, n) => {
+		let r = e(t, n);
+		if (r) {
+			if (r.protocol === "http:" || r.protocol === "https:") return r.origin;
+			if (r.protocol === "wails:" && (r.host === "localhost" || r.host === "wails.localhost:48217")) return "wails://" + r.host;
+		}
+	};
+	Object.defineProperty(globalThis, "__DSH_WORK_ORIGINS__", { value: Object.freeze({
+		origin: t,
+		same: (e, n) => {
+			let r = t(e, n), i = t(n);
+			return r !== void 0 && i !== void 0 && r === i;
+		},
+		gateway: (t, n) => {
+			let r = e(n), i = e(t, n);
+			return !r || !i || i.pathname !== "/api/remote.mux" ? !1 : r.protocol === "wails:" ? r.host === "wails.localhost:48217" && i.host === r.host && (i.protocol === "wails:" || i.protocol === "ws:") : ["http:", "https:"].includes(r.protocol) ? (i.protocol === "ws:" ? "http:" : i.protocol === "wss:" ? "https:" : i.protocol) === r.protocol && i.host === r.host : !1;
+		}
+	}) });
+})(), globalThis.__DSH_WORK_ORIGINS__.origin;
+var t = globalThis.__DSH_WORK_ORIGINS__.same, n = globalThis.__DSH_WORK_ORIGINS__.gateway;
+//#endregion
 //#region internal/desktopbridge/transport-core.ts
-function t(e, t) {
+function r(e, t) {
 	try {
-		let n = new URL(t), r = new URL(e, n), i = r.origin.replace(/^ws:/, "http:").replace(/^wss:/, "https:");
-		return r.username === "" && r.password === "" && i === n.origin && r.pathname === "/api/remote.mux";
+		return n(e, t);
 	} catch {
 		return !1;
 	}
 }
-function n(e, t) {
+function i(e, n) {
 	try {
-		let n = new URL(t), r = new URL(e, n);
-		return r.origin === n.origin && r.pathname === "/api/session/uploadFileBinary";
+		let r = new URL(n), i = new URL(e, r);
+		return t(i, r.href) && i.pathname === "/api/session/uploadFileBinary";
 	} catch {
 		return !1;
 	}
 }
-function r(e, t, r) {
-	let i, a = !1, o = () => {
+function a(e, t, n) {
+	let r, a = !1, o = () => {
 		a || (a = !0, e.terminate());
 	}, s = (t) => {
 		let n = new MessageEvent("message", { data: t });
@@ -28,7 +55,7 @@ function r(e, t, r) {
 			e.postMessage(a, c);
 			return;
 		}
-		if (!n(l.url, r)) {
+		if (!i(l.url, n)) {
 			e.postMessage(a, c);
 			return;
 		}
@@ -39,7 +66,7 @@ function r(e, t, r) {
 			});
 			return;
 		}
-		if (i) {
+		if (r) {
 			s({
 				kind: "error",
 				message: "background upload worker already has an active request"
@@ -47,7 +74,7 @@ function r(e, t, r) {
 			return;
 		}
 		let u = new AbortController();
-		i = u;
+		r = u;
 		let d = l.body instanceof Blob ? l.body.size : void 0, f = {
 			method: "POST",
 			headers: l.headers ?? {},
@@ -74,14 +101,14 @@ function r(e, t, r) {
 				message: e instanceof Error ? e.message : String(e)
 			});
 		}).finally(() => {
-			i === u && (i = void 0);
+			r === u && (r = void 0);
 		});
 	};
 	return new Proxy(e, {
 		get(e, t) {
 			if (t === "postMessage") return c;
 			if (t === "terminate") return () => {
-				i?.abort(), i = void 0, o();
+				r?.abort(), r = void 0, o();
 			};
 			let n = Reflect.get(e, t, e);
 			return typeof n == "function" ? n.bind(e) : n;
@@ -91,171 +118,171 @@ function r(e, t, r) {
 		}
 	});
 }
-function i(e, t) {
+function o(e, n) {
 	try {
-		let n = new URL(t), r = new URL(e, n), i = r.searchParams.getAll("sessionId"), a = r.searchParams.getAll("includeDescendants");
-		if (r.username !== "" || r.password !== "" || r.origin !== n.origin || r.pathname !== "/api/session.export" || i.length !== 1 || i[0] === "" || i[0].length > 4096 || a.length > 1) return;
-		let o = a[0] ?? "false";
-		return o !== "true" && o !== "false" ? void 0 : {
-			sessionId: i[0],
-			includeDescendants: o === "true"
+		let r = new URL(n), i = new URL(e, r), a = i.searchParams.getAll("sessionId"), o = i.searchParams.getAll("includeDescendants");
+		if (!t(i, r.href) || i.pathname !== "/api/session.export" || a.length !== 1 || a[0] === "" || a[0].length > 4096 || o.length > 1) return;
+		let s = o[0] ?? "false";
+		return s !== "true" && s !== "false" ? void 0 : {
+			sessionId: a[0],
+			includeDescendants: s === "true"
 		};
 	} catch {
 		return;
 	}
 }
-function a(e) {
+function s(e) {
 	return `/__work/session-export?${new URLSearchParams({
 		sessionId: e.sessionId,
 		includeDescendants: String(e.includeDescendants)
 	}).toString()}`;
 }
-function o(e, t, n) {
-	if (t !== "") return i(e, n);
+function c(e, t, n) {
+	if (t !== "") return o(e, n);
 }
 //#endregion
 //#region internal/desktopbridge/client.ts
-var s = globalThis.fetch.bind(globalThis), c = globalThis.__WORK_GENERATION__, l = 64 * 1024;
-async function u(t, n) {
-	let r = { ...n }, i = r.uploadTotal, a = r.onUploadProgress;
-	delete r.duplex, delete r.uploadTotal, delete r.onUploadProgress;
-	let o = new Request(t, r), u = new URL(o.url);
-	if (u.origin !== location.origin || u.pathname.startsWith("/wails/")) return s(o);
-	let d = e("worker-fetch");
-	d.binaryType = "arraybuffer";
-	let f = !1, p = !1, m, h, g, _, v, y = o.signal, b = () => {
-		p = !0, y.removeEventListener("abort", x), g?.(/* @__PURE__ */ Error("Worker upload closed")), _?.(), v?.cancel().catch(() => {}), d.close();
-	}, x = () => C(y.reason ?? new DOMException("Aborted", "AbortError")), S, C = (e) => {
-		if (!p) {
-			if (!f) S(e);
+var l = globalThis.fetch.bind(globalThis), u = globalThis.__WORK_GENERATION__, d = 64 * 1024;
+async function f(n, r) {
+	let i = { ...r }, a = i.uploadTotal, o = i.onUploadProgress;
+	delete i.duplex, delete i.uploadTotal, delete i.onUploadProgress;
+	let s = new Request(n, i), c = new URL(s.url);
+	if (!t(c, location.href) || c.pathname.startsWith("/wails/")) return l(s);
+	let f = e("worker-fetch");
+	f.binaryType = "arraybuffer";
+	let p = !1, m = !1, h, g, _, v, y, b = s.signal, x = () => {
+		m = !0, b.removeEventListener("abort", S), _?.(/* @__PURE__ */ Error("Worker upload closed")), v?.(), y?.cancel().catch(() => {}), f.close();
+	}, S = () => w(b.reason ?? new DOMException("Aborted", "AbortError")), C, w = (e) => {
+		if (!m) {
+			if (!p) C(e);
 			else try {
-				m?.error(e);
+				h?.error(e);
 			} catch {}
-			g?.(e), _?.(), b();
+			_?.(e), v?.(), x();
 		}
-	}, w = new Promise((e, t) => {
-		S = t, d.onclose = () => {
-			p || C(/* @__PURE__ */ Error("Worker connection closed"));
-		}, d.onerror = () => C(/* @__PURE__ */ Error("Worker transport failed")), d.onmessage = (t) => {
+	}, T = new Promise((e, t) => {
+		C = t, f.onclose = () => {
+			m || w(/* @__PURE__ */ Error("Worker connection closed"));
+		}, f.onerror = () => w(/* @__PURE__ */ Error("Worker transport failed")), f.onmessage = (t) => {
 			try {
 				let n = new Uint8Array(t.data);
 				switch (n[0]) {
 					case 0: {
-						if (f) throw Error("duplicate headers");
+						if (p) throw Error("duplicate headers");
 						let t = JSON.parse(new TextDecoder().decode(n.subarray(1))), r = new Headers();
 						for (let [e, n] of Object.entries(t.headers)) for (let t of n) r.append(e, t);
-						let i = o.method === "HEAD" || [
+						let i = s.method === "HEAD" || [
 							204,
 							205,
 							304
 						].includes(t.status), a = new ReadableStream({
 							start(e) {
-								m = e;
+								h = e;
 							},
 							pull() {
 								return new Promise((e) => {
-									_ = e, d.send(new Uint8Array([4]));
+									v = e, f.send(new Uint8Array([4]));
 								});
 							},
 							cancel() {
-								b();
+								x();
 							}
 						}, { highWaterMark: 0 });
-						f = !0, e(new Response(i ? null : a, {
+						p = !0, e(new Response(i ? null : a, {
 							status: t.status,
 							headers: r
-						})), i && b();
+						})), i && x();
 						break;
 					}
 					case 1: {
-						m.enqueue(n.slice(1));
-						let e = _;
-						_ = void 0, e?.();
+						h.enqueue(n.slice(1));
+						let e = v;
+						v = void 0, e?.();
 						break;
 					}
 					case 2:
-						m?.close(), _?.(), b();
+						h?.close(), v?.(), x();
 						break;
 					case 3: {
-						let e = h;
-						h = void 0, g = void 0, e?.();
+						let e = g;
+						g = void 0, _ = void 0, e?.();
 						break;
 					}
 					default: throw Error("invalid Worker frame");
 				}
 			} catch (e) {
-				C(e);
+				w(e);
 			}
-		}, d.onopen = () => {
+		}, f.onopen = () => {
 			let e = {};
-			o.headers.forEach((t, n) => e[n] = [t]), d.send(new TextEncoder().encode(JSON.stringify({
-				generation: c,
-				url: u.pathname + u.search,
-				method: o.method,
+			s.headers.forEach((t, n) => e[n] = [t]), f.send(new TextEncoder().encode(JSON.stringify({
+				generation: u,
+				url: c.pathname + c.search,
+				method: s.method,
 				headers: e,
-				hasBody: !!o.body
+				hasBody: !!s.body
 			}))), (async () => {
-				if (!o.body) return;
-				let e = o.body.getReader();
-				v = e;
+				if (!s.body) return;
+				let e = s.body.getReader();
+				y = e;
 				let t = 0;
 				try {
 					for (;;) {
 						let { done: n, value: r } = await e.read();
 						if (n) break;
-						for (let e = 0; e < r.length; e += l) {
-							if (p) throw Error("Worker upload closed");
-							let n = r.subarray(e, e + l), o = new Uint8Array(n.length + 1);
-							o[0] = 1, o.set(n, 1), await new Promise((e, t) => {
-								h = e, g = t, d.send(o);
-							}), t += n.length, a?.({
+						for (let e = 0; e < r.length; e += d) {
+							if (m) throw Error("Worker upload closed");
+							let n = r.subarray(e, e + d), i = new Uint8Array(n.length + 1);
+							i[0] = 1, i.set(n, 1), await new Promise((e, t) => {
+								g = e, _ = t, f.send(i);
+							}), t += n.length, o?.({
 								loaded: t,
-								...i === void 0 ? {} : { total: i }
+								...a === void 0 ? {} : { total: a }
 							});
 						}
 					}
-					p || d.send(new Uint8Array([2]));
+					m || f.send(new Uint8Array([2]));
 				} finally {
 					await e.cancel().catch(() => {}), e.releaseLock();
 				}
-			})().catch(C);
+			})().catch(w);
 		};
 	});
-	return y.addEventListener("abort", x, { once: !0 }), y.aborted && x(), w;
+	return b.addEventListener("abort", S, { once: !0 }), b.aborted && S(), T;
 }
 globalThis.WorkerBridge = {
 	Stream: e,
-	workerFetch: u
+	workerFetch: f
 };
-function d(e) {
+function p(e) {
 	let t = window.parent === window ? void 0 : location.ancestorOrigins?.[0];
-	t && window.parent.postMessage({
+	t && t !== "null" && window.parent.postMessage({
 		version: 1,
 		type: "dsh-work/export-result",
 		result: e
 	}, t);
 }
-var f = /* @__PURE__ */ new Set(), p = globalThis.HTMLAnchorElement;
-if (typeof p == "function") {
-	let e = p.prototype.click;
-	p.prototype.click = function() {
-		let t = o(this.href, this.download, location.href);
+var m = /* @__PURE__ */ new Set(), h = globalThis.HTMLAnchorElement;
+if (typeof h == "function") {
+	let e = h.prototype.click;
+	h.prototype.click = function() {
+		let t = c(this.href, this.download, location.href);
 		if (!t || !this.download) {
 			e.call(this);
 			return;
 		}
-		f.has(t.sessionId) || (f.add(t.sessionId), u(a(t), { method: "POST" }).then(async (e) => {
+		m.has(t.sessionId) || (m.add(t.sessionId), f(s(t), { method: "POST" }).then(async (e) => {
 			let t = await e.json();
-			t.result === "saved" ? d("saved") : t.result === "cancelled" ? d("cancelled") : d("error");
-		}).catch(() => d("error")).finally(() => f.delete(t.sessionId)));
+			t.result === "saved" ? p("saved") : t.result === "cancelled" ? p("cancelled") : p("error");
+		}).catch(() => p("error")).finally(() => m.delete(t.sessionId)));
 	};
 }
-var m = globalThis.Worker;
-typeof m == "function" && (globalThis.Worker = new Proxy(m, { construct(e, t, n) {
-	let i = Reflect.construct(e, t, n);
-	return t[1]?.name === "dsh-file-upload" ? r(i, u, location.href) : i;
+var g = globalThis.Worker;
+typeof g == "function" && (globalThis.Worker = new Proxy(g, { construct(e, t, n) {
+	let r = Reflect.construct(e, t, n);
+	return t[1]?.name === "dsh-file-upload" ? a(r, f, location.href) : r;
 } }));
-var h = globalThis.WebSocket, g = class extends EventTarget {
+var _ = globalThis.WebSocket, v = class extends EventTarget {
 	static {
 		this.CONNECTING = 0;
 	}
@@ -273,7 +300,7 @@ var h = globalThis.WebSocket, g = class extends EventTarget {
 			let e = new URL(this.url);
 			this.socket.send(new TextEncoder().encode(JSON.stringify({
 				url: e.pathname + e.search,
-				generation: c,
+				generation: u,
 				protocols: typeof n == "string" ? [n] : n ?? []
 			})));
 		}, this.socket.onmessage = (e) => {
@@ -328,8 +355,8 @@ var h = globalThis.WebSocket, g = class extends EventTarget {
 		let n = typeof e == "string" ? new TextEncoder().encode(e).length : e instanceof Blob ? e.size : e.byteLength;
 		this.bufferedAmount += n, this.queue = this.queue.then(async () => {
 			let r = typeof e == "string" ? new TextEncoder().encode(e) : e instanceof Blob ? new Uint8Array(await e.arrayBuffer()) : ArrayBuffer.isView(e) ? new Uint8Array(e.buffer, e.byteOffset, e.byteLength) : new Uint8Array(e);
-			for (let e = 0; e < r.length || e === 0; e += l) {
-				let n = r.subarray(e, e + l), i = new Uint8Array(n.length + 1);
+			for (let e = 0; e < r.length || e === 0; e += d) {
+				let n = r.subarray(e, e + d), i = new Uint8Array(n.length + 1);
 				i[0] = t, i.set(n, 1), await this.write(i);
 			}
 			await this.write(new Uint8Array([5])), this.bufferedAmount -= n;
@@ -360,8 +387,8 @@ var h = globalThis.WebSocket, g = class extends EventTarget {
 		r[0] = 6, r.set(n, 1), this.socket.send(r);
 	}
 };
-globalThis.WebSocket = new Proxy(h, { construct(e, n, r) {
-	return t(n[0], location.href) ? new g(n[0], n[1]) : Reflect.construct(e, n, r);
+globalThis.WebSocket = new Proxy(_, { construct(e, t, n) {
+	return r(t[0], location.href) ? new v(t[0], t[1]) : Reflect.construct(e, t, n);
 } });
 //#endregion
-export { e as Stream, u as workerFetch };
+export { e as Stream, f as workerFetch };
