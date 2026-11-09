@@ -289,7 +289,9 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 		exe  string
 		args []string
 	}{
-		{n.tools["python"], []string{"-m", "cmake", "--build", "bin/embedded-cef-vs2022", "--config", "Release", "--target", "dsh_cef_broker", "--parallel", "8"}},
+		// Reusable MSBuild nodes outlive a successful root process, keeping its
+		// supervised Job nonempty and preventing the next build stage.
+		{n.tools["python"], []string{"-m", "cmake", "--build", "bin/embedded-cef-vs2022", "--config", "Release", "--target", "dsh_cef_broker", "--parallel", "8", "--", "/nodeReuse:false"}},
 		{n.tools["powershell"], []string{"-NoProfile", "-File", filepath.Join(n.config.Workspace, "scripts", "start-embedded-development.ps1"), "-BuildOnly", "-Runtime", n.config.Runtime}},
 	}
 	for _, command := range commands {
@@ -673,6 +675,15 @@ func (n *Native) reapBuild(ctx context.Context) error {
 	}
 	if live(w) {
 		return errors.New("build is still active; cleanup owner retained")
+	}
+	// A failed earlier join can retain reusable build-tool descendants after
+	// the root exits. Stop only this owned Job, then prove it empty before
+	// releasing ownership; a root exit alone is not cleanup completion.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := w.ForceStop(ctx); err != nil {
+		return fmt.Errorf("build tree cleanup stop failed; owner retained: %w", err)
 	}
 	if err := w.WaitEmpty(ctx); err != nil {
 		return fmt.Errorf("build tree cleanup unfinished: %w", err)

@@ -9,6 +9,7 @@ import (
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/lifecycle"
 	win "github.com/local/dsh-work/internal/platform/windows"
+	"github.com/local/dsh-work/internal/supervisor"
 	"io"
 	"net/http"
 	"os"
@@ -407,4 +408,57 @@ func TestBuildInterpreterUsesExplicitLauncherImage(t *testing.T) {
 		t.Fatal("wrong actual child image", string(output), err)
 	}
 	t.Logf("real -File child=%s policy=%s; no fallback or policy override", observed.Path, observed.Policy)
+}
+
+func TestRunnerBuildDescendantHelper(t *testing.T) {
+	if os.Getenv("E67_RUNNER_BUILD_TREE") != "1" {
+		t.Skip("process fixture")
+	}
+	if os.Args[len(os.Args)-1] == "child" {
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestRunnerBuildDescendantHelper$", "child")
+	child.Stdout, child.Stderr = os.Stdout, os.Stderr
+	if err := child.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func TestReapBuildJoinsOwnedDescendantsAfterRootExit(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := win.NewJobObjectAdapter().Start(context.Background(), supervisor.LaunchPlan{
+		GenerationID: "runner-build-descendants", Executable: executable,
+		Args: []string{"-test.run=^TestRunnerBuildDescendantHelper$"}, Env: map[string]string{"E67_RUNNER_BUILD_TREE": "1"},
+		WorkingDirectory: t.TempDir(), ExpectedOrigin: "http://127.0.0.1:1",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Close()
+	select {
+	case <-worker.Exited():
+	case <-time.After(5 * time.Second):
+		t.Fatal("root did not exit")
+	}
+	if result := worker.ExitResult(); result.Code != 0 {
+		t.Fatalf("root failed: %+v", result)
+	}
+	if worker.Diagnostics().ActiveProcesses == 0 {
+		t.Fatal("fixture did not retain owned descendant")
+	}
+	n := &Native{buildOwner: worker}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := n.reapBuild(ctx); err != nil {
+		t.Fatalf("reap build: %v", err)
+	}
+	if n.buildOwner != nil || worker.Diagnostics().ActiveProcesses != 0 {
+		t.Fatal("build owner/tree was not joined")
+	}
 }
