@@ -106,7 +106,9 @@ try {
  const workspaceRow=await until('actual workspace row',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('[role="treeitem"][data-row-key^="workspace:"]')].filter(e=>e.getClientRects().length);return rows.length===1&&rows[0].textContent.includes('workspace')?{row:rows[0].getAttribute('data-row-key'),label:rows[0].textContent.trim()}:undefined})()`));
  save('workspace-selected',{landedPath:landing.path,...workspaceRow,method:'existing directory picker UI'});
  await until('real session right-sidebar mount',()=>inspector.evaluate(dsh,`(()=>{const e=document.querySelector('button[data-sidebar-right-expand]');if(!e||e.disabled||!e.getClientRects().length)return false;e.click();return true})()`));
- await until('Browser UI action',()=>click('^(Browser|浏览器)$'));
+ // Guide cards include a description in textContent. Use the real card's
+ // exact registered kind, not a substring label match or an internal action.
+ await until('Browser UI action',()=>inspector.evaluate(dsh,`(()=>{const rows=[...document.querySelectorAll('button[data-sidebar-right-guide-entry="browser"]')].filter(e=>!e.disabled&&e.getClientRects().length);if(rows.length!==1)return false;rows[0].click();return true})()`));
  await until('real address toolbar',()=>inspector.evaluate(dsh,`!!document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')`));
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(fixture)});e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return true})()`);
  await inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');e.form.requestSubmit();return true})()`);
