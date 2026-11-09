@@ -178,6 +178,9 @@ jobs:
           profile e67-formal-cef-ci "$RUNNER_TEMP/e67-formal-cef/Release/dsh_cef_broker" flags=(unconfined) {
             userns,
           }
+          profile e67-wails-ci "$RUNNER_TEMP/dsh-work-candidate" flags=(unconfined) {
+            userns,
+          }
           EOF
           sudo apparmor_parser -r "$RUNNER_TEMP/e67-formal-cef.apparmor"
       - name: Exercise formal registry Service MCP and native lifetime
@@ -217,6 +220,15 @@ jobs:
           xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
           go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
           SH
+      - name: Capture scoped sandbox denial evidence
+        if: failure()
+        run: |
+          mkdir -p results/e67-linux-wails
+          {
+            sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone
+            sudo aa-status
+            sudo journalctl -k --no-pager | grep -E 'apparmor=.*(userns|uid_map|bwrap|dsh-work-candidate)|bwrap.*(DENIED|denied)' | tail -n 80
+          } > results/e67-linux-wails/sandbox-diagnostic.log 2>&1 || true
       - name: Remove isolated namespace grant
         if: always()
         run: |
