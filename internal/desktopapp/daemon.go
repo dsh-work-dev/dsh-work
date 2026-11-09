@@ -363,7 +363,7 @@ func runDaemon(identity string, resources Resources) {
 	automationState.BrowserDiscovery(browserhost.Discover())
 	agentDiagnostic := newEmbeddedAgentDiagnostic()
 	automationState.ConfigureBrowserBackend(browserruntime.NewFactory(browserruntime.Config{
-		ObserveStage: agentDiagnostic.stage, Service: automationState, Supervisor: dependencies.Supervisor, Root: filepath.Join(config.CacheDirectory, "automation", "browser-sessions"),
+		ObserveStage: agentDiagnostic.stage, Service: automationState, Supervisor: embeddedBrowserSupervisor(dependencies.Supervisor, config.CacheDirectory), Root: filepath.Join(config.CacheDirectory, "automation", "browser-sessions"),
 		Resolve: func(ctx context.Context) (browserruntime.Runtime, error) {
 			if manager == nil {
 				return browserruntime.Runtime{}, automation.ErrUnavailable
@@ -555,7 +555,7 @@ func runDaemon(identity string, resources Resources) {
 		registry, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{
 			Store: store, AcquireProfile: acquire,
 			StartBroker: func(ctx context.Context, instance embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
-				return embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
+				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
 			},
 			OnFailure: func(instance string, err error) {
 				logging.Module(logging.ModRuntime).Warn("embedded instance cleanup failed", "instance", instance, "error", err)

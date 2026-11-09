@@ -203,6 +203,9 @@ func (s *EmbeddedBrowserService) RegisterWindow(ctx context.Context) (embeddedbr
 	if err != nil {
 		return embeddedbrowser.WindowAdmission{}, err
 	}
+	if err = preparePresenterWindow(ctx, s, window); err != nil {
+		return embeddedbrowser.WindowAdmission{}, err
+	}
 	var admission embeddedbrowser.WindowAdmission
 	parent, _, err := presenterNativeWindow(window)
 	if err != nil {

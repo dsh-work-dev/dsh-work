@@ -36,6 +36,7 @@
 #include "platform_win.h"
 #elif defined(__APPLE__)
 #include "mac/platform_mac.h"
+#include "mac/presenter_mac.h"
 #else
 #include "platform_linux.h"
 #endif
@@ -144,13 +145,19 @@ public:
   CefRefPtr<CefDownloadHandler> GetDownloadHandler()override{return this;}
 #ifdef __APPLE__
   CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
-  void GetViewRect(CefRefPtr<CefBrowser>, CefRect& rect) override {
-    dsh_platform::ViewRect(rect);
+  void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override {
+    dsh_platform::BrowserViewRect(browser->GetIdentifier(),rect);
   }
-  void OnPaint(CefRefPtr<CefBrowser>, CefRenderHandler::PaintElementType,
+  bool GetScreenInfo(CefRefPtr<CefBrowser> browser,CefScreenInfo& info)override {
+    return dsh_platform::BrowserScreenInfo(browser->GetIdentifier(),info);
+  }
+  void OnPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::PaintElementType type,
                const CefRenderHandler::RectList&, const void* buffer,
                int width, int height) override {
-    dsh_platform::Paint(buffer, width, height);
+    dsh_platform::BrowserPaint(browser->GetIdentifier(),type,buffer,width,height);
+  }
+  void OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser,const CefRange& range,const CefRenderHandler::RectList& rects)override{
+    dsh_platform::BrowserIME(browser->GetIdentifier(),range,rects);
   }
 #endif
   void RejectUnsupportedPolicy(const std::string& error){
@@ -183,7 +190,13 @@ public:
   void OnLoadEnd(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,int)override{if(frame->IsMain()){loaded_=true;}}
   void OnTitleChange(CefRefPtr<CefBrowser>,const CefString& title)override{page_title_=title;}
   void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else scope_epoch_++;}
-  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();return dsh_platform::Visible(hwnd);}
+  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
+#ifdef __APPLE__
+    return dsh_platform::BrowserVisible(tabs.at(tab_).browser);
+#else
+    return dsh_platform::Visible(hwnd);
+#endif
+  }
   Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());return value;}
   bool NavigationAction(const std::string& action){if(control_blocked||closing_||!tabs.contains(tab_))return false;auto browser=tabs.at(tab_).browser;RevokeGuard();if(action=="reload")browser->Reload();else if(action=="back"&&browser->CanGoBack())browser->GoBack();else if(action=="forward"&&browser->CanGoForward())browser->GoForward();else return false;return true;}
   bool FrameScopeReady(){
@@ -229,13 +242,25 @@ public:
     managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;
     if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
     auto browser=tabs.at(tab_).browser;auto hwnd=browser->GetHost()->GetWindowHandle();
-    auto error=dsh_platform::Present(hwnd,args);if(!error.empty())return error;
+#ifdef __APPLE__
+    auto self=CefRefPtr<Client>(this);
+    auto error=dsh_platform::PresentBrowser(browser,args,[self]{self->RevokeGuard();});
+#else
+    auto error=dsh_platform::Present(hwnd,args);
+#endif
+    if(!error.empty())return error;
     auto bounds=args->GetDictionary("bounds");bool visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
     // No identity changes until every operation and final OS readback passed.
     view_lease_=args->GetString("view");presentation_epoch_=args->GetString("epoch");view_visible_=visible;
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
-  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());}
+  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
+#ifdef __APPLE__
+    return dsh_platform::HideBrowser(tabs.at(tab_).browser,args);
+#else
+    return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());
+#endif
+  }
   bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
   bool GuardValid(){
  if(control_blocked||closing_)return false;
@@ -324,9 +349,10 @@ bool RequiresGuard()const{return guard_required_;}
     return true;
 #endif
   }
-  void OnBeforeClose(CefRefPtr<CefBrowser>) override {
+  void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("before-close");
+    dsh_platform::RetireBrowser(browser->GetIdentifier());
 #endif
     browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
     tabs.erase(tab_);

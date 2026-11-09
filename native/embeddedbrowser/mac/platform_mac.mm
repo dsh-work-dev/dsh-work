@@ -138,12 +138,7 @@ void Erase(std::string& value) {
 }
 void CancelTransport() { Lifecycle("loop-returned"); if(transport>=0)shutdown(transport,SHUT_RDWR); }
 void CloseTransport() { if(transport>=0)close(transport);transport=-1;if(owner>=0)close(owner);owner=-1; }
-bool Visible(Window) { return false; }
-std::string Hide(Window) { return {}; }
-std::string Present(Window,CefRefPtr<CefDictionaryValue>) { return "CEF_PRESENT_UNAVAILABLE"; }
 bool ConfigureWindow(CefWindowInfo& window) { window.SetAsWindowless(nullptr);window.runtime_style=CEF_RUNTIME_STYLE_ALLOY;return true; }
-void ViewRect(CefRect& rect) { rect=CefRect(0,0,1024,768); }
-void Paint(const void*,int,int) {} // CPU OSR engine checkpoint; no UI presentation claim.
 void StartOwnerMonitor(std::function<void()> stop) {
   const char* version=cef_version_full();
   if(!OwnerSend(@{@"kind":@"runtime",@"version":version?@(version):@"",@"crashReporting":@(CefCrashReportingEnabled())})) {owner_failed=true;stop();return;}

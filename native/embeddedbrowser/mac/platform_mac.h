@@ -15,13 +15,9 @@ bool Authenticate(const std::string& token);
 void Erase(std::string& value);
 void CancelTransport();
 void CloseTransport();
-bool Visible(Window);
-std::string Hide(Window);
-std::string Present(Window, CefRefPtr<CefDictionaryValue>);
 bool ConfigureWindow(CefWindowInfo&);
-void ViewRect(CefRect&);
-void Paint(const void* buffer, int width, int height);
 void StartOwnerMonitor(std::function<void()> onStop);
 void PrepareOwnedShutdown();
 int FinishOwnedShutdown();
 }
+#include "presenter_mac.h"

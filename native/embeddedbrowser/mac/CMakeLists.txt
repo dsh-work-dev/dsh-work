@@ -15,7 +15,7 @@ set_target_properties(owned_official_wrapper PROPERTIES IMPORTED_LOCATION "${CEF
 set(BROKER "${CMAKE_CURRENT_SOURCE_DIR}/../broker.cc")
 set_source_files_properties("${BROKER}" PROPERTIES LANGUAGE OBJCXX)
 set(MACH "${CMAKE_CURRENT_SOURCE_DIR}/../../../internal/localipc/mach_peer_darwin.c")
-add_executable(dsh_cef_broker "${BROKER}" main.mm platform_mac.mm "${MACH}")
+add_executable(dsh_cef_broker "${BROKER}" main.mm platform_mac.mm presenter_mac.mm "${MACH}")
 add_executable(dsh_cef_helper helper_main.cc platform_mac.mm "${MACH}")
 foreach(target dsh_cef_broker dsh_cef_helper)
   SET_EXECUTABLE_TARGET_PROPERTIES(${target})
