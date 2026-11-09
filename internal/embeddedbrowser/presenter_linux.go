@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/local/dsh-work/internal/localipc"
+	"github.com/local/dsh-work/internal/logging"
 	"golang.org/x/sys/unix"
 	"math"
 	"os"
@@ -48,9 +49,41 @@ func presenterAlive(peer PresenterPeer) bool {
 		return false
 	}
 	defer unix.Close(fd)
-	poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-	n, e := unix.Poll(poll, 0)
-	return e == nil && n == 0
+	alive, _ := pollPresenterAlive(fd, unix.Poll)
+	return alive
+}
+
+type presenterPoll func([]unix.PollFd, int) (int, error)
+
+func pollPresenterAlive(fd int, poll presenterPoll) (bool, error) {
+	for {
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		n, err := poll(fds, 0)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err == nil && n == 0, err
+	}
+}
+
+func waitPresenterProcess(fd int, stop <-chan struct{}, poll presenterPoll) (released bool, revents int16, err error) {
+	for {
+		select {
+		case <-stop:
+			return true, 0, nil
+		default:
+		}
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		n, e := poll(fds, 100)
+		// Go/runtime signals can interrupt a healthy pidfd wait. Recheck the
+		// owner cancellation on every retry; an interrupt is not process death.
+		if errors.Is(e, unix.EINTR) {
+			continue
+		}
+		if n > 0 || e != nil {
+			return false, fds[0].Revents, e
+		}
+	}
 }
 func parentBounds(peer PresenterPeer, parent uintptr) (int, int, error) {
 	var width, height C.int
@@ -80,18 +113,15 @@ func admitPresenter(peer PresenterPeer, parent uintptr) (presenterOwner, error) 
 		defer close(p.joined)
 		defer close(p.done)
 		defer unix.Close(fd)
-		for {
-			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-			n, e := unix.Poll(poll, 100)
-			if n > 0 || e != nil {
-				return
-			}
-			select {
-			case <-p.stop:
-				return
-			default:
-			}
+		released, revents, pollErr := waitPresenterProcess(fd, p.stop, unix.Poll)
+		reason := "pidfd-ready"
+		if released {
+			reason = "owner-released"
+		} else if pollErr != nil {
+			reason = "poll-failed"
 		}
+		live, probeErr := pollPresenterAlive(fd, unix.Poll)
+		logging.Module(logging.ModRuntime).Info("native presenter process watch ended", "pid", peer.PID, "created", peer.Started, "reason", reason, "revents", revents, "pollError", pollErr, "pidfdLive", live, "probeError", probeErr)
 	}()
 	return p, nil
 }

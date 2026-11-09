@@ -192,7 +192,7 @@ jobs:
           DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-native
         run: |
           set -o pipefail
-          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & go test -tags "server,e67presenter,e67nativefixture" -count=1 -v -timeout=90s ./internal/embeddedbrowser -run "^TestLiveLinuxManagedPrivateCEFService$"' 2>&1 | tee results/e67-linux-native/managed-cef.log
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & go test -tags "server,e67presenter,e67nativefixture" -count=1 -v -timeout=90s ./internal/embeddedbrowser -run "^(TestLiveLinuxManagedPrivateCEFService|TestLinuxPresenterInterruptedPoll)$"' 2>&1 | tee results/e67-linux-native/managed-cef.log
       - name: Prepare locked DSH and self-owned window observer
         run: |
           npm ci --ignore-scripts --prefix tools/dsh
