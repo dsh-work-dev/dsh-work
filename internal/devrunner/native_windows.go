@@ -314,9 +314,23 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 			err = errors.Join(ctx.Err(), w.ForceStop(force))
 			stop()
 		}
+		// Preserve the root result before stopping any surviving descendants.
+		exit := w.ExitResult()
 		cleanup, stop := context.WithTimeout(context.Background(), 8*time.Second)
 		joinErr := w.WaitEmpty(cleanup)
 		stop()
+		if errors.Is(joinErr, context.DeadlineExceeded) && !live(w) {
+			d := w.Diagnostics()
+			n.log("build root exited pid=%d exit=%d; stopping remaining owned Job processes active=%d", d.PID, exit.Code, d.ActiveProcesses)
+			force, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			joinErr = w.ForceStop(force)
+			cancel()
+			if joinErr == nil {
+				joined, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				joinErr = w.WaitEmpty(joined)
+				cancel()
+			}
+		}
 		if joinErr == nil {
 			joinErr = w.Close()
 		}
@@ -325,7 +339,9 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 			n.buildOwner = nil
 			n.mu.Unlock()
 		}
-		exit := w.ExitResult()
+		if !exit.Started {
+			exit = w.ExitResult()
+		}
 		if err != nil || joinErr != nil || !exit.Started || exit.Code != 0 || exit.Err != "" {
 			n.setBuildFailure()
 			return errors.Join(err, joinErr, fmt.Errorf("build failed: exit=%d error=%s; see %s", exit.Code, exit.Err, n.buildLog))
