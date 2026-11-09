@@ -45,6 +45,22 @@ test('ancestor clipping hides retained pages and late Present cannot revive an u
  assert.equal(requests[0].visible,false);respond(requests.shift(),{state:'ready',visible:false});await tick();
  assert.equal(requests[0].visible,false);respond(requests.shift(),{state:'ready',visible:false});await tick();
  const closing=fresh.frame.dispose();await tick();respond(requests.shift(),true);await closing;
+ // A daemon descriptor may arrive before this new WebView has any DSH page
+ // checkpoint. Publish saved metadata, not a fictional live frame or load error.
+ const saved=[],changes=[];
+ const restored=context.__DSH_WORK_BROWSER_PROVIDER__.createPage('session',{key:'restore',persist:s=>saved.push(s)});
+ restored.frame.subscribe(()=>changes.push({saved:saved.length,frame:restored.frame.getSnapshot()}));
+ restored.presentation.mount('viewport');await tick();
+ respond(requests.shift(),{state:'NeedsReload',url:'https://example.test/saved',title:'Saved page',visible:false});await tick();
+ assert.equal(requests.length,0,'descriptor arrival must not navigate or recover automatically');
+ assert.equal(saved.length,1);assert.equal(saved[0].entries[0].url,'https://example.test/saved');assert.equal(saved[0].entries[0].title,'Saved page');
+ assert.equal(changes.length,1,'an initially empty snapshot still needs a checkpoint notification');assert.equal(changes[0].saved,1);
+ assert.equal(restored.frame.getSnapshot().target,undefined,'saved address is not a live document');assert.equal(restored.frame.getSnapshot().error,undefined,'standard restore state is not a load failure');
+ restored.frame.loadUrl({url:'https://example.test/saved'});await tick();assert.equal(requests[0].action,'update');
+ respond(requests.shift(),{state:'NeedsReload',url:'https://example.test/saved'});await tick();assert.equal(requests[0].action,'recover','only explicit restore requests a new document');
+ respond(requests.shift(),{state:'empty'});await tick();assert.equal(requests[0].action,'update');
+ respond(requests.shift(),{state:'ready',url:'https://example.test/saved',title:'Saved page',visible:true});await tick();assert.equal(restored.frame.getSnapshot().target.url,'https://example.test/saved');
+ const finish=restored.frame.dispose();await tick();respond(requests.shift(),true);await finish;
 });
 
 test('shell document revision rejects an old update delayed in Capability',async()=>{

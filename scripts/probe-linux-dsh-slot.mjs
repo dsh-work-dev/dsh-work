@@ -136,9 +136,11 @@ try {
  const state=async()=>lastSlotStates=await inspector.evaluate(shell,`(async()=>{const frame=document.querySelector('iframe');const doc=decodeURIComponent(new URL(frame.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const rows=[];for(const slot of __e67Slots){try{rows.push({slot,state:await Call.ByID(${ids.state},doc,slot)})}catch(error){rows.push({slot,error:String(error)})}}return rows})()`);
  if(mode==='--dual-reopen'){
   const pending=await until('explicit NeedsReload after instance reopen',async()=>{const rows=await state();return rows.find(r=>r.state?.state==='NeedsReload'&&r.state.url===fixture&&!r.state.document&&!r.state.target)});
+  const savedChrome=await until('visible safe descriptor and explicit restore action',()=>inspector.evaluate(dsh,`(()=>{const address=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]'),panel=document.querySelector('section[aria-label="Previously opened"],section[aria-label="上次打开"]');const tabs=[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].filter(e=>e.getClientRects().length).map(e=>e.textContent.trim());const action=panel&&[...panel.querySelectorAll('button')].find(e=>!e.disabled&&e.getClientRects().length&&/^(Restore page|恢复页面)$/.test(e.textContent.trim()));return address?.value===${JSON.stringify(fixture)}&&panel?.getClientRects().length&&panel.textContent.includes(${JSON.stringify(pending.state.title)})&&panel.textContent.includes(${JSON.stringify(fixture)})&&tabs.some(t=>t.includes(${JSON.stringify(pending.state.title)}))&&action?{address:address.value,tabs,restoreText:panel.textContent.trim(),action:action.textContent.trim()}:undefined})()`));
+  save('needs-reload-chrome',savedChrome);
   save('needs-reload',pending);
   await until('explicit reload barrier',()=>existsSync(join(out,'reload.request')));
-  await until('original Reload action',()=>click('^(Reload|Reload page|重新加载|刷新)$'));
+  await until('original explicit Restore page action',()=>click('^(Restore page|恢复页面)$'));
  }else{
  const requested=mode==='--dual-peer'?await inspector.evaluate(dsh,`document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]')?.value`):undefined;
  if(requested!==fixture){
@@ -147,6 +149,9 @@ try {
  }
  }
  const visible=await until('native slot ready',async()=>{const rows=await state();return rows.find(r=>r.state?.state==='ready'&&r.state.visible&&r.state.url===fixture)});
+ if(mode?.startsWith('--dual-')){
+  const chrome=await until('actual A toolbar title and URL synchronized',()=>inspector.evaluate(dsh,`(()=>{const address=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]'),tabs=[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].filter(e=>e.getClientRects().length).map(e=>e.textContent.trim());return address?.value===${JSON.stringify(fixture)}&&tabs.some(t=>t.includes(${JSON.stringify(visible.state.title)}))?{address:address.value,tabs}:undefined})()`));save('visible-chrome',chrome);
+ }
  if(mode?.startsWith('--dual-')){const selected=await readSessionSelection();save('session-selected',selected??{});if(!selected||!visible.slot.startsWith(selected.key.slice(8)+'/'))throw Error('Native slot does not belong to actual selected A session')}
  save('visible',visible);
  save('window-admission',await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return Call.ByID(${ids.admission})})()`));

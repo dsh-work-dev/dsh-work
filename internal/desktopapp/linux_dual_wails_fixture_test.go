@@ -145,8 +145,12 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	}
 	verifyB := func(label string, previous linuxFixtureReport) linuxFixtureReport {
 		t.Helper()
+		boundary, _ := readReports(bBaseline.Nonce)
 		var current linuxFixtureReport
-		wait("B heartbeat after "+label, func() bool { current, _ = readReports(bBaseline.Nonce); return current.Tick > previous.Tick })
+		wait("B heartbeat after "+label, func() bool {
+			current, _ = readReports(bBaseline.Nonce)
+			return current.Tick > previous.Tick && current.Tick > boundary.Tick
+		})
 		if current.Nonce != bBaseline.Nonce || current.Input != bBaseline.Input || !current.Dirty || current.Marker != bBaseline.Marker {
 			t.Fatal("A lifecycle changed B page", current)
 		}
@@ -398,10 +402,48 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	if len(all) != len(known) {
 		t.Fatal("A reopened document before explicit Reload", all)
 	}
-	for _, g := range windows(reopened.ui) {
-		if g.Native && g.Parent != bGuest.Parent && g.Visible {
-			t.Fatal("unexpected native page before Reload", g)
+	beforeReload := windows(reopened.ui)
+	save(reopened.dir, "needs-reload-windows", beforeReload)
+	byID := map[uint32]x11FixtureWindow{}
+	var parent x11FixtureWindow
+	for _, w := range beforeReload {
+		byID[w.ID] = w
+		if w.PID == reopened.ui.Diagnostics().PID && w.Started == reopened.ui.Diagnostics().ProcessStarted && w.Visible && w.Width*w.Height > parent.Width*parent.Height {
+			parent = w
 		}
+	}
+	// The observer also returns child XIDs inside B's admitted CEF guest. Bind
+	// its anchor to the held process instance, then follow actual XRes ancestry;
+	// comparing only each child's direct parent misidentifies B as a new A page.
+	bAnchor, ok := byID[bGuest.ID]
+	if !ok || bAnchor.PID != bGuest.PID || bAnchor.Started != bGuest.Started || bAnchor.Parent != bGuest.Parent {
+		t.Fatal("B guest anchor changed before A Reload", bAnchor)
+	}
+	inB := func(w x11FixtureWindow) bool {
+		seen := map[uint32]bool{}
+		for w.ID != 0 && !seen[w.ID] {
+			if w.ID == bGuest.ID {
+				return true
+			}
+			seen[w.ID] = true
+			next, ok := byID[w.Parent]
+			if !ok {
+				return false
+			}
+			w = next
+		}
+		return false
+	}
+	for _, g := range beforeReload {
+		if g.Native && g.Visible && !inB(g) {
+			t.Fatal("unexpected native page outside held B subtree before Reload", g)
+		}
+	}
+	if parent.ID == 0 {
+		t.Fatal("reopened A has no verified mapped UI parent")
+	}
+	if output, e := exec.CommandContext(ctx, "import", "-window", strconv.FormatUint(uint64(parent.ID), 10), filepath.Join(reopened.dir, "needs-reload-ui.png")).CombinedOutput(); e != nil {
+		t.Fatal("capture A descriptor before explicit restore", e, string(output))
 	}
 	signal(reopened.dir, "reload")
 	var recovered linuxUISlot
