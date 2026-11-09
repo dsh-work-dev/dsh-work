@@ -271,6 +271,11 @@ execute:
 		t.Fatal("hidden view admitted")
 	}
 	t.Log("actual hidden view rejected without losing document")
+	// The Service owns its observer/MCP executor. Release that owner while its
+	// broker can still acknowledge revocation/detach, before destroying pages.
+	if e = s.StopBrowserUse(request.Session, request.Lifetime); e != nil {
+		t.Fatal("managed automation resource cleanup before native close", e)
+	}
 	if e = registry.CloseInstance(ctx, peer, "window"); e != nil {
 		t.Fatal("normal native/frame/tree barrier", e)
 	}

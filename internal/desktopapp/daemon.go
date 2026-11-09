@@ -536,10 +536,11 @@ func runDaemon(identity string, resources Resources) {
 	hub.SetTopic("automation", automationState.Snapshot())
 	tracker := presence.New()
 	interactions := dshinteraction.New()
+	embeddedAvailable := embeddedPlatformAvailable()
 	embeddedService := &embeddedBrowserService{Automation: automationState, Compatible: func(context.Context) bool {
 		status := host.Status()
 		selection := status.LaunchSelection
-		return embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(config.DSHDataDirectory)
+		return embeddedAvailable && embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(config.DSHDataDirectory)
 	}}
 	if embeddedDevelopmentRoot() != "" {
 		acquire := func(directory string) (io.Closer, error) {
@@ -1361,6 +1362,11 @@ func runDaemon(identity string, resources Resources) {
 	})
 	closeEmbeddedInstances := func() error {
 		if embeddedService.Registry != nil {
+			// Executors must revoke/detach while their native brokers still
+			// accept lifecycle cleanup. Keep the broker/GUI owner on failure.
+			if err := automationState.StopBrowserUse("", ""); err != nil {
+				return err
+			}
 			return embeddedService.Registry.Close()
 		}
 		return nil

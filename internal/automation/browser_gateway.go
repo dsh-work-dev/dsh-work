@@ -1051,20 +1051,39 @@ func (s *Service) StopBrowserUse(session, lifetime string) error {
 		s.mu.Unlock()
 		return ErrUnavailable
 	}
+	cleanupOnly := false
 	if session != "" {
 		c := s.gate.sessions[session]
 		if c == nil || c.life != lifetime {
-			s.mu.Unlock()
-			return ErrRevoked
+			for _, owner := range s.browserCleanup {
+				if owner.session == session && owner.lifetime == lifetime {
+					cleanupOnly = true
+					break
+				}
+			}
+			if !cleanupOnly {
+				s.mu.Unlock()
+				return ErrRevoked
+			}
+		}
+	}
+	var retry []*browserCleanupOwner
+	for _, owner := range s.browserCleanup {
+		if session == "" || owner.session == session && owner.lifetime == lifetime {
+			retry = append(retry, owner)
 		}
 	}
 	for id, intent := range s.gate.ownedIntents {
-		if session == "" || id == session {
+		if !cleanupOnly && (session == "" || id == session) {
 			intent.invalid = true
 		}
 	}
 	var old []*entry
+	var cleanupOwners []*browserCleanupOwner
 	for id, c := range s.gate.sessions {
+		if cleanupOnly {
+			continue
+		}
 		if session != "" && id != session {
 			continue
 		}
@@ -1074,17 +1093,27 @@ func (s *Service) StopBrowserUse(session, lifetime string) error {
 		host := c.host
 		c.stopped = true
 		s.stopped[revocationKey(Request{Capability: Browser, Epoch: s.slots[Browser].state.Epoch, Session: id, Lifetime: c.life})] = true
-		old = append(old, s.revokeLocked(Browser, id+"/"+c.life)...)
+		retired := s.revokeLocked(Browser, id+"/"+c.life)
+		old = append(old, retired...)
+		if s.browserCleanup == nil {
+			s.browserCleanup = map[*entry]*browserCleanupOwner{}
+		}
+		for _, e := range retired {
+			owner := &browserCleanupOwner{entry: e, session: id, lifetime: c.life}
+			s.browserCleanup[e] = owner
+			cleanupOwners = append(cleanupOwners, owner)
+		}
 		s.browserActivityLocked(Request{Session: id, Title: c.title}, host, "", "stopped")
 	}
 	s.publishLocked()
 	s.mu.Unlock()
 	s.release(old)
 	var cleanup error
-	for _, entry := range old {
-		if bound, ok := entry.resource.(interface{ OwnedBrowserBinding() OwnedBrowserIdentity }); ok && bound.OwnedBrowserBinding().BrokerGeneration != "" {
-			cleanup = errors.Join(cleanup, entry.closeErr)
-		}
+	for _, owner := range retry {
+		cleanup = errors.Join(cleanup, s.finishBrowserCleanup(owner, true))
+	}
+	for _, owner := range cleanupOwners {
+		cleanup = errors.Join(cleanup, s.finishBrowserCleanup(owner, false))
 	}
 	return cleanup
 }

@@ -115,6 +115,7 @@ type Service struct {
 	state              Snapshot
 	slots              map[Capability]*slot
 	entries            map[string]*entry
+	browserCleanup     map[*entry]*browserCleanupOwner
 	stopped            map[string]bool
 	factory            Factory // validation probes only; browser execution uses its own backend
 	changed            func(Snapshot)

@@ -134,3 +134,9 @@ func (r *ownedResource) AutomationTerminal() bool {
 	}
 	return false
 }
+
+func (r *ownedResource) CleanupPending() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.current != nil
+}

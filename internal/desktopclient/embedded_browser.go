@@ -32,6 +32,9 @@ func (s *EmbeddedBrowserService) Capability(ctx context.Context) (bool, error) {
 	}
 	var enabled bool
 	err := call(ctx, s.Client, "EmbeddedBrowserService", "Capability", nil, &enabled)
+	if err == nil && enabled {
+		return presenterCapability(ctx, s)
+	}
 	return enabled, err
 }
 func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, address string, bounds embeddedbrowser.SlotBounds, visible bool) (embeddedbrowser.ViewState, error) {

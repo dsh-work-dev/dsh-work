@@ -32,9 +32,10 @@ import (
 const unavailable = "LINUX_SUPERVISOR_UNAVAILABLE"
 
 type SystemdAdapter struct {
-	mu          sync.Mutex
-	pending     map[string]*systemdWorker
-	beforeAdopt func(int)
+	mu                  sync.Mutex
+	pending             map[string]*systemdWorker
+	beforeAdopt         func(int)
+	beforeInstanceCheck func(int)
 }
 
 func NewSystemdAdapter() supervisor.Adapter { return &SystemdAdapter{} }
@@ -255,13 +256,24 @@ func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, 
 	if err != nil {
 		return nil, err
 	}
-	birth, err := localipc.ProcessStarted(pid)
+	if a.beforeInstanceCheck != nil {
+		a.beforeInstanceCheck(fds[0])
+	}
+	birth, err := ownedProcessStarted(pid, w.anchorPID, fds[0])
 	if err != nil || birth != message.Started {
 		return nil, errors.New("application kernel instance changed")
 	}
 	membership, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err != nil || !strings.Contains(string(membership), "0::"+group+"\n") {
-		return nil, errors.New("application not in owned bootstrap cgroup")
+		// An exited, unreaped child no longer executes in any cgroup. Accept
+		// only the already-exited kernel pidfd plus the same direct child
+		// creation of our verified bootstrap, never a live foreign process.
+		poll := []unix.PollFd{{Fd: int32(fds[0]), Events: unix.POLLIN}}
+		n, pollErr := unix.Poll(poll, 0)
+		exitedBirth, birthErr := ownedProcessStarted(pid, w.anchorPID, fds[0])
+		if pollErr != nil || n != 1 || poll[0].Revents&unix.POLLIN == 0 || birthErr != nil || exitedBirth != birth {
+			return nil, errors.New("application not in owned bootstrap cgroup")
+		}
 	}
 	w.pid = pid
 	w.started = birth

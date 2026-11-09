@@ -4,12 +4,11 @@ on:
   push:
     branches: ['codex/e67-embedded-browser']
     paths:
-      - 'internal/localipc/**'
-      - 'internal/workeripc/**'
-      - 'internal/daemon/**'
-      - 'internal/platform/linux/**'
-      - 'internal/embeddedbrowser/**'
-      - 'internal/desktopclient/presenter_native_linux*'
+      - 'internal/**'
+      - 'main.go'
+      - 'cmd/dsh-work/**'
+      - 'frontend/**'
+      - 'bootstrap_linux.go'
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
       - 'go.mod'
@@ -26,7 +25,59 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      linux_native: ${{ steps.paths.outputs.linux_native }}
+      linux_peer: ${{ steps.paths.outputs.linux_peer }}
+      linux_facilities: ${{ steps.paths.outputs.linux_facilities }}
+      mac_product: ${{ steps.paths.outputs.mac_product }}
+      mac_probe: ${{ steps.paths.outputs.mac_probe }}
+      mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4.0.3
+        id: paths
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            linux_native:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'main.go'
+              - 'cmd/dsh-work/**'
+              - 'frontend/**'
+              - 'bootstrap_linux.go'
+              - 'native/embeddedbrowser/**'
+              - 'scripts/build-embedded-cef-linux.sh'
+            linux_peer:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'cmd/dsh-work/**'
+              - 'bootstrap_linux.go'
+            linux_facilities:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/linux-runtime-probe/**'
+            mac_product:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'scripts/build-workeripc-mac.mjs'
+              - 'scripts/with-workeripc-mac.mjs'
+              - 'tools/posix-ipc-probe/mach_reply_right_darwin.c'
+            mac_probe:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/posix-ipc-probe/mach_peer_darwin.c'
+            mac_launchd:
+              - '.github/workflows/e67-ipc.yml'
+              - 'scripts/probe-mac-launchd-tree.mjs'
+              - 'tools/posix-ipc-probe/launchd_tree_darwin.c'
+
   linux-managed-cef:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_native == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -56,6 +107,12 @@ jobs:
         run: |
           set -o pipefail
           bash scripts/build-embedded-cef-linux.sh "$CEF_ROOT" "$RUNNER_TEMP/e67-formal-cef" 2>&1 | tee results/e67-linux-native/build.log
+      - name: Build the Linux Wails candidate entry point
+        run: |
+          set -o pipefail
+          npm ci --prefix frontend
+          npm run --prefix frontend build:dev
+          go build -tags e67presenter -o "$RUNNER_TEMP/dsh-work-candidate" . 2>&1 | tee results/e67-linux-native/wails-build.log
       - name: Prepare sandbox for this isolated CI component
         run: |
           sudo chown root:root "$RUNNER_TEMP/e67-formal-cef/Release/chrome-sandbox"
@@ -92,6 +149,8 @@ jobs:
             results/e67-linux-native/*.png
 
   mac-launchd-tree:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_launchd == 'true'
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -113,6 +172,8 @@ jobs:
             ${{ runner.temp }}/e67-launchd-tree/**/*.heartbeats
 
   linux-runtime-facilities:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_facilities == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -145,6 +206,8 @@ jobs:
           path: results/e67-linux-runtime/facilities.json
 
   linux-peer:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_peer == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -164,7 +227,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup|TestLiveSystemdCancelBeforeAdoption' 2>&1 | tee results/e67-ipc/linux-supervisor.log
+          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup|TestLiveSystemdCancelBeforeAdoption|TestLiveSystemdCommandExecutor|TestOwnedProcessExitedBeforePublish' 2>&1 | tee results/e67-ipc/linux-supervisor.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -172,6 +235,8 @@ jobs:
           path: results/e67-ipc/*.log
 
   mac-sender-probe:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_probe == 'true'
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -206,6 +271,8 @@ jobs:
           path: results/e67-ipc/*.log
 
   mac-product-ipc:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_product == 'true'
     runs-on: macos-15
     timeout-minutes: 10
     steps:

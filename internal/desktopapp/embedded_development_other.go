@@ -1,4 +1,4 @@
-//go:build !windows || !e67presenter || production
+//go:build (!windows && !linux) || !e67presenter || production || (linux && (!cgo || server))
 
 package desktopapp
 

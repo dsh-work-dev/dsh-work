@@ -18,10 +18,18 @@ static int dsh_gtk_parent(void* value,uint64_t* xid,int* scale){
 import "C"
 
 import (
+	"context"
 	"errors"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"unsafe"
 )
+
+func presenterCapability(ctx context.Context, service *EmbeddedBrowserService) (bool, error) {
+	// RegisterWindow obtains the actual trusted GTK XID, and the daemon checks
+	// its XRes client/kernel instance before advertising native presentation.
+	_, err := service.RegisterWindow(ctx)
+	return err == nil, err
+}
 
 func presenterNativeWindow(window application.Window) (uint64, float64, error) {
 	type geometry struct {

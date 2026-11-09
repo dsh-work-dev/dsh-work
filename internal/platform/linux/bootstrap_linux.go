@@ -237,7 +237,7 @@ func bootstrapMain() int {
 			cmd.Process.Kill()
 		}
 	}()
-	started, e := localipc.ProcessStarted(uint32(cmd.Process.Pid))
+	started, e := ownedProcessStarted(uint32(cmd.Process.Pid), uint32(os.Getpid()), pidfd)
 	if e != nil {
 		return 97
 	}
