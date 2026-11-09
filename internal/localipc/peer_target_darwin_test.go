@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -55,12 +57,30 @@ func TestDarwinAuthenticatedTarget(t *testing.T) {
 	if target.PID != uint32(os.Getpid()) || target.AuditToken[5] != target.PID || target.Started == 0 {
 		t.Fatal("kernel target mismatch")
 	}
-	if err = SignalTarget(target, 0); err != nil {
-		t.Fatal(err)
+	// Unlike kill(pid, 0), Darwin's audit-token API sends real nonzero
+	// signals. SIGCONT is harmless for this running process; observing its
+	// delivery proves the kernel accepted the authenticated instance target.
+	received := make(chan os.Signal, 2)
+	signal.Notify(received, syscall.SIGCONT)
+	defer signal.Stop(received)
+	deliver := func() {
+		t.Helper()
+		if err := SignalTarget(target, syscall.SIGCONT); err != nil {
+			t.Fatal("authenticated SIGCONT:", err)
+		}
+		select {
+		case got := <-received:
+			if got != syscall.SIGCONT {
+				t.Fatal("unexpected signal", got)
+			}
+		case <-ctx.Done():
+			t.Fatal("authenticated signal was not delivered", ctx.Err())
+		}
 	}
+	deliver()
 	changed := target
 	changed.Started++
-	if !errors.Is(SignalTarget(changed, 0), ErrTargetStale) {
+	if !errors.Is(SignalTarget(changed, syscall.SIGCONT), ErrTargetStale) {
 		t.Fatal("changed process instance accepted")
 	}
 	changed = target
@@ -68,12 +88,10 @@ func TestDarwinAuthenticatedTarget(t *testing.T) {
 	if changed.AuditToken[7] == 0 {
 		changed.AuditToken[7]++
 	}
-	if !errors.Is(SignalTarget(changed, 0), os.ErrProcessDone) {
+	if !errors.Is(SignalTarget(changed, syscall.SIGCONT), os.ErrProcessDone) {
 		t.Fatal("stale kernel pidversion was not rejected")
 	}
-	if err = SignalTarget(target, 0); err != nil {
-		t.Fatal("stale signal damaged the live instance:", err)
-	}
+	deliver() // Rejecting stale evidence must leave the real instance usable.
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
