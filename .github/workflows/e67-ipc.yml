@@ -18,6 +18,9 @@ on:
       - 'scripts/build-workeripc-mac.mjs'
       - 'scripts/with-workeripc-mac.mjs'
       - 'scripts/probe-mac-launchd-tree.mjs'
+      - 'scripts/build-mac-cef-owner-probe.mjs'
+      - 'scripts/probe-mac-cef-owner.mjs'
+      - 'tools/browser-lab/native/posix/**'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
 
@@ -34,6 +37,7 @@ jobs:
       mac_product: ${{ steps.paths.outputs.mac_product }}
       mac_probe: ${{ steps.paths.outputs.mac_probe }}
       mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
+      mac_cef: ${{ steps.paths.outputs.mac_cef }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4.0.3
@@ -74,6 +78,52 @@ jobs:
               - '.github/workflows/e67-ipc.yml'
               - 'scripts/probe-mac-launchd-tree.mjs'
               - 'tools/posix-ipc-probe/launchd_tree_darwin.c'
+            mac_cef:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/posix-ipc-probe/cef-owner/**'
+              - 'tools/browser-lab/native/posix/**'
+              - 'scripts/build-mac-cef-owner-probe.mjs'
+              - 'scripts/probe-mac-cef-owner.mjs'
+
+  mac-cef-owner:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_cef == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+          cache-dependency-path: tools/browser-lab/native/posix/host/go.sum
+      - name: Build the existing pinned sandbox bundle
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-cef
+          npm ci --ignore-scripts --prefix tools/browser-lab
+          node tools/browser-lab/native/posix/build.mjs 2>&1 | tee results/e67-mac-cef/lab-build.log
+      - name: Build isolated CEF ownership diagnostic
+        run: |
+          set -o pipefail
+          node scripts/build-mac-cef-owner-probe.mjs --lab-work "$GITHUB_WORKSPACE/tools/browser-lab/.work/posix" --output-dir "$RUNNER_TEMP/e67-cef-owner-build" 2>&1 | tee results/e67-mac-cef/probe-build.log
+      - name: Measure fixed-workload helper and owner lifetimes
+        run: |
+          set -o pipefail
+          node scripts/probe-mac-cef-owner.mjs --manifest "$RUNNER_TEMP/e67-cef-owner-build/cef-owner-bundle.json" --output-dir "$RUNNER_TEMP/e67-cef-owner-results" 2>&1 | tee results/e67-mac-cef/probe.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-cef-owner
+          path: |
+            results/e67-mac-cef/*.log
+            ${{ runner.temp }}/e67-cef-owner-build/cef-owner-bundle.json
+            ${{ runner.temp }}/e67-cef-owner-results/**/*.json
+            ${{ runner.temp }}/e67-cef-owner-results/**/*.log
 
   linux-managed-cef:
     needs: changes
