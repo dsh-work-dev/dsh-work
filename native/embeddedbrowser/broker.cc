@@ -76,9 +76,11 @@ void Event(const std::string& route, const std::string& method, CefRefPtr<CefLis
   auto m = CefDictionaryValue::Create(); m->SetString("method", method);
   m->SetList("params", params); Send(route, m);
 }
+#include "frame_graph.h"
 #include "artifact_resource.h"
 void FinishArtifact(const std::shared_ptr<ArtifactState>& state);
 class Client;
+void PauseAllControl();
 std::map<std::string,CefRefPtr<Client>> closing_clients;
 struct Tab {
   std::string route;
@@ -99,6 +101,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   int create_id_, tab_;
   std::set<std::string> engine_frames_;
   bool browser_closed_=false,closing_=false;
+  int graph_browser_=0;
   std::string policy_denied_;
   std::vector<std::function<void()>> revoke_waiters_,close_waiters_;
   bool close_notified_=false,view_visible_=true,managed_=false;
@@ -116,7 +119,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::string document_url_,guard_document_,guard_url_,guard_token_,navigation_origin_,guard_scope_;
   static std::string Origin(const std::string& url){CefURLParts parts;if(!CefParseURL(url,parts))return {};auto origin=CefString(&parts.origin).ToString();if(!origin.empty()&&origin.back()=='/')origin.pop_back();return origin;}
   void DocumentChanged(const std::string& url){
-    document_epoch_++;document_url_=url;
+    document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
 
   }
   std::map<int, int> pending_;
@@ -176,7 +179,7 @@ public:
     RejectUnsupportedPolicy("CEF_DOWNLOAD_UNSUPPORTED");return true;
   }
   const std::string& PolicyDenial()const{return policy_denied_;}
-  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else scope_epoch_++;}
+  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else scope_epoch_++;frame_graph.Load(owner_route_,frame);}
   void OnLoadEnd(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,int)override{if(frame->IsMain()){loaded_=true;}}
   void OnTitleChange(CefRefPtr<CefBrowser>,const CefString& title)override{page_title_=title;}
   void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else scope_epoch_++;}
@@ -267,10 +270,15 @@ bool RequiresGuard()const{return guard_required_;}
   }
   CefRefPtr<CefFrameHandler> GetFrameHandler()override{return this;}
   void OnFrameCreated(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {
+    frame_graph.Created(owner_route_,tab_,frame);
     engine_frames_.insert(frame->GetIdentifier().ToString());if(!frame->IsMain())scope_epoch_++;
     if(artifact_)artifact_->live_frames.insert(frame->GetIdentifier().ToString());
   }
+  void OnFrameAttached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,bool reattached)override {frame_graph.Attached(owner_route_,frame,reattached);}
+  void OnFrameDetached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {frame_graph.Detached(owner_route_,frame);}
+  void OnMainFrameChanged(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> previous,CefRefPtr<CefFrame> next)override {frame_graph.MainChanged(owner_route_,tab_,graph_browser_,previous,next);}
   void OnFrameDestroyed(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame)override {
+    frame_graph.Destroyed(owner_route_,frame);
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("frame-destroyed-enter");
 #endif
@@ -286,6 +294,7 @@ bool RequiresGuard()const{return guard_required_;}
 #endif
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    graph_browser_=b->GetIdentifier();frame_graph.Bound(owner_route_,graph_browser_);
     tabs.emplace(tab_, Tab{route_, b, b->GetHost()->AddDevToolsMessageObserver(this),artifact_});
     if(artifact_){artifact_->browser=b->GetIdentifier();ArtifactEvent(artifact_,"artifact.bound",b->GetIdentifier());artifact_->admitted=true;CefPostTask(TID_IO,base::BindOnce(AdmitArtifactResources,artifact_));}
     auto tab = CefDictionaryValue::Create(); tab->SetInt("id", tab_);
@@ -345,10 +354,10 @@ bool RequiresGuard()const{return guard_required_;}
       const CefString& error_string) override {
     // This reports a browser callback, not the complete renderer influence set.
     // Pause before publishing the event, and retire all installed authority.
-    control_blocked = true;
-    for(const auto& [_,tab]:tabs)static_cast<Client*>(tab.browser->GetHost()->GetClient().get())->PauseControl();
+    PauseAllControl();
     auto m = CefDictionaryValue::Create(); m->SetString("kind", "fault");
     m->SetString("generation", generation); m->SetString("scope", "broker");
+    m->SetString("graphRevision",std::to_string(frame_graph.Revision()));m->SetString("faultEpoch",std::to_string(frame_graph.Fault()));
     m->SetInt("reportedBrowser",browser->GetIdentifier());m->SetInt("reportedTab",tab_);
     m->SetInt("terminationStatus",static_cast<int>(status));m->SetInt("errorCode",error_code);
     // Arbitrary engine strings may contain page data. Keep typed codes only.
@@ -418,6 +427,13 @@ bool RequiresGuard()const{return guard_required_;}
   }
   IMPLEMENT_REFCOUNTING(Client);
 };
+void PauseAllControl(){
+ control_blocked=true;
+ std::vector<CefRefPtr<Client>> clients;
+ for(const auto& [_,tab]:tabs)clients.emplace_back(static_cast<Client*>(tab.browser->GetHost()->GetClient().get()));
+ for(const auto& client:clients)client->PauseControl();
+}
+
 bool Create(const std::string& route, int id, const std::string& url,std::shared_ptr<ArtifactState> artifact={},bool managed=false) {
   CefWindowInfo window;
   if(!dsh_platform::ConfigureWindow(window)){Result(route,id,nullptr,"CEF_NATIVE_WINDOW_UNAVAILABLE");return false;}
@@ -530,6 +546,9 @@ void Command(Dict m) {
   if (m->GetString("generation").ToString() != generation) return;
   auto route = m->GetString("route").ToString();
   auto kind = m->GetString("kind").ToString();
+  if(kind=="control.pause"){
+    PauseAllControl();auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));response->SetDictionary("result",CefDictionaryValue::Create());Write(response);return;
+  }
   if(kind.rfind("target.",0)==0){
     auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));
     Client* client=nullptr;for(const auto& [_,tab]:tabs){auto candidate=static_cast<Client*>(tab.browser->GetHost()->GetClient().get());if(candidate->OwnsRoute(route)){client=candidate;break;}}

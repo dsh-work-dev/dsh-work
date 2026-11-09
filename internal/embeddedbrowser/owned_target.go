@@ -167,6 +167,12 @@ func (t *OwnedTarget) OpenOwnedRoute(ctx context.Context, _ string) (automation.
 }
 func (t *OwnedTarget) BeginOwnedCall(ctx context.Context, call automation.OwnedBrowserCall) (func() error, error) {
 	t.call.Lock()
+	if t.broker.renderers != nil {
+		if err := t.broker.renderers.arm(); err != nil {
+			t.call.Unlock()
+			return nil, err
+		}
+	}
 	if _, err := t.broker.controlCall(ctx, "target.begin", t.owner, call); err != nil {
 		cleanup := t.confirmGuardRevoked()
 		t.call.Unlock()
