@@ -31,7 +31,7 @@ type linuxFixtureReport struct {
 
 // This is an extension of the original Wails fixture, not a second host. Both
 // real UI processes use the production candidate instance admission and daemon.
-func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out, node, native, observer, address string, environment map[string]string, client *daemon.Client, generation string, bUI supervisor.Worker, bSlot linuxUISlot, bGuest x11FixtureWindow, bBaseline linuxFixtureReport, readReports func(string) (linuxFixtureReport, map[string]linuxFixtureReport), start func(string, []string, map[string]string) supervisor.Worker) (supervisor.Worker, func()) {
+func exerciseLinuxDualLifecycle(t *testing.T, ctx context.Context, repo, root, out, node, native, observer, address string, environment map[string]string, client *daemon.Client, generation string, bUI supervisor.Worker, bSlot linuxUISlot, bGuest x11FixtureWindow, bBaseline linuxFixtureReport, readReports func(string) (linuxFixtureReport, map[string]linuxFixtureReport), start func(string, []string, map[string]string) supervisor.Worker) (supervisor.Worker, func()) {
 	t.Helper()
 	if bBaseline.Marker == "" || !bBaseline.Dirty || bBaseline.StorageBefore != "" || bBaseline.CookieBefore != "" {
 		t.Fatal("B isolation baseline not established", bBaseline)
@@ -368,16 +368,59 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	}
 	save(out, "dual-scope", map[string]any{"a": map[string]any{"pid": a.ui.Diagnostics().PID, "started": a.ui.Diagnostics().ProcessStarted}, "b": map[string]any{"pid": bUI.Diagnostics().PID, "started": bUI.Diagnostics().ProcessStarted}, "aSlot": aSlot, "bSlot": bSlot, "aSessionSelection": aSelected, "aGuest": aGuest, "bGuest": bGuest, "profiles": profiles, "sameOrigin": address, "aWindowAdmission": aAdmission, "bWindowAdmission": bAdmission})
 	save(a.dir, "document", first)
+	fault := os.Getenv("DSH_WORK_LINUX_DUAL_FAULT") == "1"
 	before := verifyB("before-a-exit", bBaseline)
-	signal(a.dir, "exit")
-	read(a, "exit-requested", &map[string]any{})
+	if fault {
+		// Freeze the actual launched UI instance in a kernel pidfd, then disconnect
+		// only its read-only inspector. No GUI close/detach/stop hook runs.
+		identity := a.ui.Diagnostics()
+		uiFD, e := unix.PidfdOpen(int(identity.PID), 0)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer unix.Close(uiFD)
+		verifyHeldUI := func() {
+			birth, e := localipc.ProcessStarted(identity.PID)
+			actual, exeErr := os.Stat(fmt.Sprintf("/proc/%d/exe", identity.PID))
+			expected, pathErr := os.Stat(os.Getenv("DSH_WORK_LINUX_WAILS_EXECUTABLE"))
+			if e != nil || birth != identity.ProcessStarted || exeErr != nil || pathErr != nil || !os.SameFile(actual, expected) || unix.PidfdSendSignal(uiFD, 0, nil, 0) != nil {
+				t.Fatal("held A UI no longer matches own launched instance", e, exeErr, pathErr)
+			}
+		}
+		verifyHeldUI()
+		signal(a.dir, "fault")
+		read(a, "fault-armed", &map[string]any{})
+		driverJoin(a)
+		// Prove inspection disconnect did not itself close the original guest.
+		disconnected, _ := readReports(first.Nonce)
+		wait("A live after read-only inspector disconnect", func() bool {
+			r, _ := readReports(first.Nonce)
+			return r.Nonce == first.Nonce && r.Input == first.Input && r.Tick > disconnected.Tick
+		})
+		original := guestOf(a.ui, a.dir)
+		if original.ID != aGuest.ID || original.PID != aGuest.PID || original.Started != aGuest.Started || original.Parent != aGuest.Parent {
+			t.Fatal("A changed before root-only fault", original, aGuest)
+		}
+		verifyHeldUI()
+		save(out, "dual-a-fault-injection", map[string]any{"pid": identity.PID, "started": identity.ProcessStarted, "signal": int(unix.SIGKILL), "kernelPidfd": true, "uiShutdownCalled": false, "nativeGuest": original})
+		if e = unix.PidfdSendSignal(uiFD, unix.SIGKILL, nil, 0); e != nil {
+			t.Fatal("signal held A UI only", e)
+		}
+	} else {
+		signal(a.dir, "exit")
+		read(a, "exit-requested", &map[string]any{})
+	}
 	select {
 	case <-a.ui.Exited():
 	case <-ctx.Done():
-		t.Fatal("normal A exit", ctx.Err())
+		t.Fatal("A exit deadline", ctx.Err())
 	}
-	if r := a.ui.ExitResult(); r.Code != 0 || r.Err != "" {
-		t.Fatal("normal A root failure", r)
+	expectedExit := 0
+	if fault {
+		expectedExit = 128 + int(unix.SIGKILL)
+	}
+	if r := a.ui.ExitResult(); r.Code != expectedExit || r.Err != "" {
+		t.Fatal("A actual root exit differs from injected lifecycle", r)
 	}
 	if err = a.ui.WaitEmpty(ctx); err != nil {
 		t.Fatal(err)
@@ -387,7 +430,11 @@ func exerciseLinuxDualNormal(t *testing.T, ctx context.Context, repo, root, out,
 	}
 	joined(aNative)
 	driverJoin(a)
-	save(out, "dual-a-normal-close", map[string]any{"ui": a.ui.ExitResult(), "uiTreeEmpty": true, "nativePidfdExited": true, "nativeCgroupEmpty": true})
+	closedEvidence := "dual-a-normal-close"
+	if fault {
+		closedEvidence = "dual-a-fault-close"
+	}
+	save(out, closedEvidence, map[string]any{"faultInjected": fault, "ui": a.ui.ExitResult(), "uiTreeEmpty": true, "nativePidfdExited": true, "nativeCgroupEmpty": true})
 	before = verifyB("after-a-exit", before)
 	// Reopen exactly the same trusted logical instance/profile. The driver must
 	// observe NeedsReload before the only explicit Reload DOM action.

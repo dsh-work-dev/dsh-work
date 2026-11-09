@@ -156,7 +156,8 @@ try {
  save('visible',visible);
  save('window-admission',await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return Call.ByID(${ids.admission})})()`));
  if(mode==='--dual-peer'||mode==='--dual-reopen'){
-  await until('dual peer lifecycle barrier',()=>existsSync(join(out,'exit.request'))||existsSync(join(out,'finish.request')));
+  await until('dual peer lifecycle barrier',()=>existsSync(join(out,'exit.request'))||existsSync(join(out,'finish.request'))||existsSync(join(out,'fault.request')));
+  if(existsSync(join(out,'fault.request')))save('fault-armed',{uiShutdownCalled:false,method:'read-only inspector disconnect before held pidfd SIGKILL'});
   if(existsSync(join(out,'exit.request'))){
    save('exit-requested',{method:'EmbeddedBrowserService.ExitUI'});
    await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return Call.ByID(${ids.exit})})()`).catch(error=>save('exit-response',{error:String(error)}));

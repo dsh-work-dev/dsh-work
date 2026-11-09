@@ -88,6 +88,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	}
 	agentTest := os.Getenv("DSH_WORK_LINUX_AGENT_TEST") == "1"
 	dualTest := os.Getenv("DSH_WORK_LINUX_DUAL_TEST") == "1"
+	if os.Getenv("DSH_WORK_LINUX_DUAL_FAULT") == "1" && !dualTest {
+		t.Fatal("fault lifecycle requires explicit dual fixture mode")
+	}
 	if agentTest && dualTest {
 		t.Fatal("Agent and dual lifecycle fixtures must run independently")
 	}
@@ -676,7 +679,7 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			}
 			return reports[nonce], copy
 		}
-		extraUI, extraNativeJoin = exerciseLinuxDualNormal(t, ctx, repo, root, out, node, native, observer, fixture.URL+"/", env, client, snapshot.Status.GenerationID, ui, restored, guest, resumedBaseline, readReport, start)
+		extraUI, extraNativeJoin = exerciseLinuxDualLifecycle(t, ctx, repo, root, out, node, native, observer, fixture.URL+"/", env, client, snapshot.Status.GenerationID, ui, restored, guest, resumedBaseline, readReport, start)
 	}
 	if e = os.WriteFile(filepath.Join(out, "quit.request"), nil, 0600); e != nil {
 		t.Fatal(e)
