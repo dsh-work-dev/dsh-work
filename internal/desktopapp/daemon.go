@@ -554,7 +554,7 @@ func runDaemon(identity string, resources Resources) {
 		registry, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{
 			Store: store, AcquireProfile: acquire,
 			StartBroker: func(ctx context.Context, instance embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
-				return embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveProtocol: embeddedAgentProtocolObserver(instance.ID)})
+				return embeddedbrowser.Start(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor})
 			},
 			OnFailure: func(instance string, err error) {
 				logging.Module(logging.ModRuntime).Warn("embedded instance cleanup failed", "instance", instance, "error", err)
