@@ -14,6 +14,15 @@ import (
 	"time"
 )
 
+func privateTestDirectory(t *testing.T) string {
+	t.Helper()
+	dir, err := PrivateDirectory(t.TempDir(), "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestPeerProcessAndExit(t *testing.T) {
 	if path := os.Getenv("DSH_LOCALIPC_TEST_SOCKET"); path != "" {
 		c, err := net.Dial("unix", path)
@@ -25,7 +34,7 @@ func TestPeerProcessAndExit(t *testing.T) {
 		os.Stdin.Read(b[:])
 		return
 	}
-	path := filepath.Join(t.TempDir(), "peer.sock")
+	path := filepath.Join(privateTestDirectory(t), "peer.sock")
 	l, err := Listen(path, false)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +78,7 @@ func TestPeerProcessAndExit(t *testing.T) {
 }
 
 func TestSocketOwnershipAndCleanup(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTestDirectory(t)
 	path := filepath.Join(dir, "daemon.sock")
 	l, err := Listen(path, false)
 	if err != nil {
@@ -97,8 +106,8 @@ func TestSocketOwnershipAndCleanup(t *testing.T) {
 	if _, err = os.Lstat(path); !os.IsNotExist(err) {
 		t.Fatalf("socket retained: %v", err)
 	}
-	// A socket left by an interrupted previous owner can be recovered, under
-	// the same persistent lock inode.
+	// A foreign live listener does not participate in this module's lock
+	// protocol. Acquiring our lock must not replace its endpoint.
 	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +116,23 @@ func TestSocketOwnershipAndCleanup(t *testing.T) {
 	if err = os.Chmod(path, 0600); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replacement, err := Listen(path, false); err == nil {
+		replacement.Close()
+		stale.Close()
+		t.Fatal("foreign live listener replaced")
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !os.SameFile(before, after) {
+		stale.Close()
+		t.Fatalf("foreign live endpoint changed: %v", err)
+	}
 	stale.Close()
+	// Once that listener exits, only an explicit connection refusal permits
+	// recovery of the stale socket under the persistent lock inode.
 	l, err = Listen(path, false)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +141,7 @@ func TestSocketOwnershipAndCleanup(t *testing.T) {
 }
 
 func TestRejectUnsafePathsAndPreserveReplacement(t *testing.T) {
-	dir := t.TempDir()
+	dir := privateTestDirectory(t)
 	link := filepath.Join(dir, "link")
 	if err := os.Symlink(dir, link); err != nil {
 		t.Fatal(err)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -95,6 +96,22 @@ func Listen(path string, removeDir bool) (net.Listener, error) {
 		}
 		if info.Mode()&os.ModeSocket == 0 || existing.Uid != uint32(os.Geteuid()) || existing.Mode&0777 != 0600 {
 			return nil, errors.New("local IPC stale endpoint rejected")
+		}
+		probe, connectErr := net.DialTimeout("unix", path, 250*time.Millisecond)
+		if connectErr == nil {
+			probe.Close()
+			return nil, errors.New("local IPC endpoint is live")
+		}
+		if !errors.Is(connectErr, unix.ECONNREFUSED) {
+			return nil, fmt.Errorf("local IPC endpoint is not confirmed stale: %w", connectErr)
+		}
+		// Do not unlink an endpoint replaced while the bounded connect probe ran.
+		current, e := os.Lstat(path)
+		if e != nil {
+			return nil, e
+		}
+		if !os.SameFile(info, current) {
+			return nil, errors.New("local IPC endpoint changed during stale check")
 		}
 		if e = os.Remove(path); e != nil {
 			return nil, e

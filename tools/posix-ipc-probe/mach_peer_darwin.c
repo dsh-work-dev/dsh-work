@@ -52,6 +52,12 @@ static mach_port_t listener(hello_t *hello) {
 #pragma clang diagnostic pop
   return port;
 }
+static void close_listener(mach_port_t port) {
+  // listener owns one local send reference and one receive right. Release
+  // precisely those rights rather than destroying every right at this name.
+  kern_check(mach_port_deallocate(mach_task_self(),port),"release listener send");
+  kern_check(mach_port_mod_refs(mach_task_self(),port,MACH_PORT_RIGHT_RECEIVE,-1),"release listener receive");
+}
 static uint64_t started(pid_t pid) {
   struct proc_bsdinfo info={0};
   if(proc_pidinfo(pid,PROC_PIDTBSDINFO,0,&info,sizeof(info))!=(int)sizeof(info)) fail("PROC_PIDTBSDINFO");
@@ -117,7 +123,7 @@ int main(int argc,char **argv) {
     if(connect(fd,(struct sockaddr*)&addr,sizeof(addr))) fail("connect");
     transfer(fd,&self,sizeof(self),1); transfer(fd,&peer,sizeof(peer),0);
     send_proof(&peer); receive_proof(fd,port,&self,(pid_t)atoi(argv[3]));
-    close(fd); mach_port_destroy(mach_task_self(),port); return 0;
+    close(fd); close_listener(port); return 0;
   }
   if(argc!=1) { fprintf(stderr,"usage: mach-peer\n"); return 2; }
   char dir[]="/tmp/dsh-mach-probe-XXXXXX"; if(!mkdtemp(dir)) fail("mkdtemp");
@@ -135,7 +141,7 @@ int main(int argc,char **argv) {
   send_proof(&peer); receive_proof(fd,port,&self,child);
   close(fd); close(server); unlink(addr.sun_path); rmdir(dir);
   int status=0; if(waitpid(child,&status,0)!=child || !WIFEXITED(status) || WEXITSTATUS(status)) return 1;
-  kern_check(mach_port_destroy(mach_task_self(),port),"destroy receive");
+  close_listener(port);
   puts("PROBE PASS: bidirectional live socket nonce + kernel Mach sender audit token; adversarial and hardened-runtime qualification pending");
   return 0;
 }
