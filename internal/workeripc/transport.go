@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-//go:embed host.mjs
+//go:embed host.mjs native-socket.mjs
 var hostSource embed.FS
 
 const Origin = "http://127.0.0.1:1" // Routing identity only; never dialled as TCP.
@@ -244,6 +244,13 @@ func (t *Transport) Prepare(root, runtimeExecutable, previousPatch string) (stri
 	if err := os.WriteFile(path, source, 0600); err != nil {
 		return "", err
 	}
+	socketSource, err := hostSource.ReadFile("native-socket.mjs")
+	if err != nil {
+		return "", err
+	}
+	if err = os.WriteFile(filepath.Join(root, "native-socket.mjs"), socketSource, 0600); err != nil {
+		return "", err
+	}
 	var rows []any
 	if previousPatch != "" {
 		b, err := os.ReadFile(previousPatch)
@@ -258,7 +265,11 @@ func (t *Transport) Prepare(root, runtimeExecutable, previousPatch string) (stri
 	rows = append(rows, map[string]any{"id": "webserver", "disabled": true}, map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pipe", "name": u, "config": map[string]any{"host": "127.0.0.1", "port": 1, "compression": "none"}}}})
 	// Module imports happen before schema processing. Per-launch sidecar owns
 	// credentials and module resolution; only its path enters the patch graph.
-	config, _ := json.Marshal(map[string]string{"pipe": t.path, "token": t.token, "runtimeExecutable": runtimeExecutable})
+	connection := map[string]string{"pipe": t.path, "token": t.token, "runtimeExecutable": runtimeExecutable}
+	if err := prepareLocalBridge(connection); err != nil {
+		return "", err
+	}
+	config, _ := json.Marshal(connection)
 	if err := os.WriteFile(filepath.Join(root, "connection.json"), config, 0600); err != nil {
 		return "", err
 	}

@@ -7,8 +7,13 @@ on:
       - 'internal/localipc/**'
       - 'internal/workeripc/**'
       - 'internal/daemon/**'
+      - 'internal/platform/linux/**'
+      - 'go.mod'
+      - 'go.sum'
       - 'tools/posix-ipc-probe/**'
       - 'tools/linux-runtime-probe/**'
+      - 'scripts/build-workeripc-mac.mjs'
+      - 'scripts/with-workeripc-mac.mjs'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
 
@@ -64,6 +69,11 @@ jobs:
           mkdir -p results/e67-ipc
           { uname -a; id; go version; test "$(uname -m)" = x86_64; } 2>&1 | tee results/e67-ipc/environment.log
           CGO_ENABLED=0 go test -tags server -count=1 -v -timeout=60s ./internal/localipc ./internal/workeripc ./internal/daemon -run 'TestPeerProcessAndExit|TestSocketOwnershipAndCleanup|TestRejectUnsafePathsAndPreserveReplacement|TestParseProcessCreation|TestLinuxProcessInstanceAdmission|TestLinuxProcessClientAndPeerContext' 2>&1 | tee results/e67-ipc/linux-peer.log
+      - name: Exercise the actual delegated process owner
+        shell: bash
+        run: |
+          set -o pipefail
+          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup' 2>&1 | tee results/e67-ipc/linux-supervisor.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -103,3 +113,40 @@ jobs:
         with:
           name: e67-mac-sender-probe
           path: results/e67-ipc/*.log
+
+  mac-product-ipc:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Build same-process Node bridge
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-ipc
+          { sw_vers; uname -a; node --version; go version; test "$(uname -m)" = arm64; test "$(sw_vers -productVersion | cut -d. -f1)" = 15; } 2>&1 | tee results/e67-mac-ipc/environment.log
+          node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge" 2>&1 | tee results/e67-mac-ipc/build.log
+      - name: Exercise actual Go and Node process admission
+        shell: bash
+        run: |
+          set -o pipefail
+          CGO_ENABLED=1 go test -tags server -count=1 -v -timeout=60s -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/localipc ./internal/workeripc ./internal/daemon -run '^TestDarwin' 2>&1 | tee results/e67-mac-ipc/product-ipc.log
+      - name: Verify rejected Mach reply rights are reclaimed
+        shell: bash
+        run: |
+          set -o pipefail
+          clang -std=c11 -Wall -Wextra -Werror tools/posix-ipc-probe/mach_reply_right_darwin.c internal/localipc/mach_peer_darwin.c -o "$RUNNER_TEMP/mach-reply-right" 2>&1 | tee results/e67-mac-ipc/reply-right-build.log
+          "$RUNNER_TEMP/mach-reply-right" 2>&1 | tee results/e67-mac-ipc/reply-right.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-product-ipc
+          path: results/e67-mac-ipc/*.log

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || (darwin && cgo)
 
 package localipc
 
@@ -9,11 +9,21 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// macOS's default per-user TMPDIR is too long for a deterministic Unix socket
+// name. The endpoint itself still lives inside a checked 0700 user directory.
+func SocketTempRoot() string {
+	if runtime.GOOS == "darwin" {
+		return "/tmp"
+	}
+	return os.TempDir()
+}
 
 // PrivateDirectory refuses pre-existing symlinks and permissive directories.
 // The shared parent must already exist (normally the OS temporary directory).
@@ -39,12 +49,20 @@ func PrivateDirectory(parent, name string) (string, error) {
 
 type listener struct {
 	*net.UnixListener
-	lock      *os.File
-	path      string
-	inode     os.FileInfo
-	removeDir bool
-	once      sync.Once
-	err       error
+	lock       *os.File
+	path       string
+	inode      os.FileInfo
+	removeDir  bool
+	once       sync.Once
+	err        error
+	mu         sync.Mutex
+	cond       *sync.Cond
+	queue      []net.Conn
+	pending    map[net.Conn]struct{}
+	acceptOnce sync.Once
+	acceptErr  error
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 // Listen serializes endpoint ownership with flock. Lock files remain in shared
@@ -53,17 +71,9 @@ type listener struct {
 func Listen(path string, removeDir bool) (net.Listener, error) {
 	// Fail at startup, rather than leaving a listener that rejects every peer
 	// without explaining that this kernel cannot authenticate process instances.
-	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
-	if err != nil {
+	if err := checkSupport(); err != nil {
 		return nil, err
 	}
-	pidfd, probeErr := unix.GetsockoptInt(pair[0], unix.SOL_SOCKET, unix.SO_PEERPIDFD)
-	unix.Close(pair[0])
-	unix.Close(pair[1])
-	if probeErr != nil {
-		return nil, fmt.Errorf("local IPC requires kernel SO_PEERPIDFD: %w", probeErr)
-	}
-	unix.Close(pidfd)
 	dir := filepath.Dir(path)
 	if _, err := PrivateDirectory(filepath.Dir(dir), filepath.Base(dir)); err != nil {
 		return nil, err
@@ -136,25 +146,73 @@ func Listen(path string, removeDir bool) (net.Listener, error) {
 		return nil, err
 	}
 	ok = true
-	return &listener{UnixListener: l, lock: lock, path: path, inode: info, removeDir: removeDir}, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	owned := &listener{UnixListener: l, lock: lock, path: path, inode: info, removeDir: removeDir, pending: make(map[net.Conn]struct{}), ctx: ctx, cancel: cancel}
+	owned.cond = sync.NewCond(&owned.mu)
+	return owned, nil
 }
 
 func (l *listener) Accept() (net.Conn, error) {
+	l.acceptOnce.Do(func() { go l.acceptAuthenticated() })
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for len(l.queue) == 0 && l.acceptErr == nil {
+		l.cond.Wait()
+	}
+	if len(l.queue) > 0 {
+		c := l.queue[0]
+		l.queue = l.queue[1:]
+		return c, nil
+	}
+	return nil, l.acceptErr
+}
+func (l *listener) acceptAuthenticated() {
 	for {
 		c, err := l.UnixListener.AcceptUnix()
 		if err != nil {
-			return nil, err
+			l.mu.Lock()
+			l.acceptErr = err
+			l.cond.Broadcast()
+			l.mu.Unlock()
+			return
 		}
-		if _, err = Peer(c); err == nil {
-			return c, nil
+		l.mu.Lock()
+		if l.ctx.Err() != nil || len(l.pending)+len(l.queue) >= 32 {
+			l.mu.Unlock()
+			c.Close()
+			continue
 		}
-		c.Close()
-		// Reject individual peers without terminating the daemon's Serve loop.
+		l.pending[c] = struct{}{}
+		l.mu.Unlock()
+		go func() {
+			verified, err := authenticateConn(l.ctx, c)
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			delete(l.pending, c)
+			if err != nil || l.ctx.Err() != nil {
+				c.Close()
+				return
+			}
+			l.queue = append(l.queue, verified)
+			l.cond.Signal()
+		}()
 	}
 }
 
 func (l *listener) Close() error {
 	l.once.Do(func() {
+		l.cancel()
+		l.mu.Lock()
+		l.acceptErr = net.ErrClosed
+		for c := range l.pending {
+			c.Close()
+		}
+		for _, c := range l.queue {
+			c.Close()
+		}
+		l.queue = nil
+		l.cond.Broadcast()
+		l.mu.Unlock()
 		l.err = l.UnixListener.Close()
 		if info, err := os.Lstat(l.path); err == nil && os.SameFile(l.inode, info) {
 			if err = os.Remove(l.path); err != nil {
@@ -191,9 +249,10 @@ func Dial(ctx context.Context, path string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = Peer(c); err != nil {
+	verified, err := authenticateConn(ctx, c)
+	if err != nil {
 		c.Close()
 		return nil, err
 	}
-	return c, nil
+	return verified, nil
 }

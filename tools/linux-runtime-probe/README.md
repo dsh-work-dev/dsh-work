@@ -39,3 +39,7 @@ XRes 1.2 to this fixture's actual OS PID. `_NET_WM_PID` is never consulted. A
 positive result establishes server API availability only; the next product
 slice still needs the real Wails UI peer/creation/XID binding, presentation
 readback, and foreign-window rejection.
+
+The XRes 1.2 client query uses `Status == Success` (zero), unlike the Bool
+extension/version queries. This was checked against the official
+[libXres 1.2.2 source](https://www.x.org/releases/individual/lib/libXres-1.2.2.tar.xz).

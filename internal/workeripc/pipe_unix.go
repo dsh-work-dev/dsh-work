@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || (darwin && cgo)
 
 package workeripc
 
@@ -19,7 +19,7 @@ func peerProcessStarted(c net.Conn) (uint64, error) {
 	return p.Started, err
 }
 func listenLocal(string) (net.Listener, string, error) {
-	dir, err := os.MkdirTemp("", "dsh-worker-")
+	dir, err := os.MkdirTemp(localipc.SocketTempRoot(), "dsh-worker-")
 	if err != nil {
 		return nil, "", err
 	}

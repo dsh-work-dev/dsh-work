@@ -7,6 +7,7 @@
 package localipc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,27 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+func checkSupport() error {
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(pair[0])
+	defer unix.Close(pair[1])
+	fd, err := unix.GetsockoptInt(pair[0], unix.SOL_SOCKET, unix.SO_PEERPIDFD)
+	if err != nil {
+		return fmt.Errorf("local IPC requires kernel SO_PEERPIDFD: %w", err)
+	}
+	return unix.Close(fd)
+}
+func authenticateConn(ctx context.Context, c net.Conn) (net.Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	_, err := Peer(c)
+	return c, err
+}
 
 type Process struct {
 	PID uint32

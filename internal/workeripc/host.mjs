@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {createServer} from 'node:http';
-import {connect} from 'node:net';
+import {openPrivateSocket} from './native-socket.mjs';
 import {createHmac, timingSafeEqual} from 'node:crypto';
 
 const config = JSON.parse(readFileSync(new URL('./connection.json', import.meta.url), 'utf8'));
@@ -40,15 +40,22 @@ export default class PipeWebServer extends WebServer {
       if (!route) { socket.destroy(); return; }
       Promise.resolve().then(() => route.handler(req, socket, head)).catch(() => socket.destroy());
     });
-    const open = () => {
+    const retry = () => {
+      if (!stopped) { const timer = setTimeout(() => { timers.delete(timer); open(); }, 100); timers.add(timer); }
+    };
+    const open = async () => {
       if (stopped) return;
-      const socket = connect(config.pipe);
+      let socket;
+      try { socket = await openPrivateSocket(config, () => stopped); }
+      catch { retry(); return; }
+      if (!socket) return;
+      if (stopped) { socket.destroy(); return; }
       sockets.add(socket);
       socket.setTimeout(3000, () => socket.destroy());
       socket.on('error', () => socket.destroy());
       socket.once('close', () => {
         sockets.delete(socket);
-        if (!stopped) { const timer = setTimeout(() => { timers.delete(timer); open(); }, 100); timers.add(timer); }
+        retry();
       });
       let bytes = Buffer.alloc(0), nonce;
       const mac = role => createHmac('sha256', config.token).update(role).update(nonce).digest();

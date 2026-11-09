@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || (darwin && cgo)
 
 package daemon
 
@@ -16,7 +16,7 @@ import (
 )
 
 func endpoint(identity string) (string, string, error) {
-	dir, err := localipc.PrivateDirectory(os.TempDir(), fmt.Sprintf("dsh-work-%d", os.Geteuid()))
+	dir, err := localipc.PrivateDirectory(localipc.SocketTempRoot(), fmt.Sprintf("dsh-work-%d", os.Geteuid()))
 	if err != nil {
 		return "", "", err
 	}
