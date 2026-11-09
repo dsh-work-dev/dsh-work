@@ -161,11 +161,22 @@ jobs:
           CGO_ENABLED=1 go test -c -tags e67nativefixture ./internal/embeddedbrowser/macowner -o "$RUNNER_TEMP/e67-restricted-test/macowner.test"
           DSH_WORK_CEF_MAC_PUBLICATION="$RUNNER_TEMP/e67-formal-mac/publication.json" DSH_WORK_EXECUTABLE="$GITHUB_WORKSPACE/tools/dsh/node_modules/.bin/dsh" node scripts/with-workeripc-mac.mjs --asset "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" "$RUNNER_TEMP/e67-restricted-test/macowner.test" -test.run '^TestLiveMacRestrictedDSH$' -test.v -test.timeout 100s 2>&1 | tee results/e67-mac-private/restricted-runtime.log
       - name: Build the actual Mac Wails preview entry point
+        id: mac_preview_build
         if: success() || (failure() && steps.restricted_runtime.outcome == 'failure')
         run: |
           set -o pipefail
           (cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build:dev)
-          node scripts/build-mac-preview.mjs --output-dir "$RUNNER_TEMP/e67-mac-preview" --bridge "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" --sandbox "$RUNNER_TEMP/e67-restricted-test/dsh-preview-sandbox.node" 2>&1 | tee results/e67-mac-private/preview-build.log
+          node scripts/build-mac-preview.mjs --output-dir "$RUNNER_TEMP/e67-mac-preview" --bridge "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" --sandbox "$RUNNER_TEMP/e67-restricted-test/dsh-preview-sandbox.node" --fixture 1 2>&1 | tee results/e67-mac-private/preview-build.log
+      - name: Exercise the actual Mac Wails DSH browser slot
+        if: ${{ !cancelled() && steps.restricted_runtime.outcome == 'success' && steps.mac_preview_build.outcome == 'success' }}
+        env:
+          DSH_WORK_MAC_PREVIEW_EXECUTABLE: ${{ runner.temp }}/e67-mac-preview/DSH Work Preview.app/Contents/MacOS/dsh-work
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-preview-results
+        run: |
+          set -o pipefail
+          go test -tags e67presenter,e67nativefixture ./internal/desktopapp -run '^TestLiveMacWailsPreviewSlot$' -count=1 -v -timeout=180s 2>&1 | tee results/e67-mac-private/wails-preview.log
       - name: Exercise formal Mac engine Service and locked MCP
         id: mac_browser_service
         if: ${{ !cancelled() && steps.mac_browser_dependencies.outcome == 'success' }}
@@ -193,6 +204,8 @@ jobs:
             results/e67-mac-private/*.log
             ${{ runner.temp }}/e67-formal-mac/publication.json
             ${{ runner.temp }}/e67-mac-preview/mac-preview-build.json
+            ${{ runner.temp }}/e67-mac-preview-results/*.json
+            ${{ runner.temp }}/e67-mac-preview-results/*.png
             ${{ runner.temp }}/e67-mac-private-results/*.json
             ${{ runner.temp }}/e67-mac-private-results/*.png
 
