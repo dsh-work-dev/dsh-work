@@ -324,3 +324,18 @@ func (s *EmbeddedBrowserService) CancelDownload(ctx context.Context, document, s
 	}
 	return call(ctx, s.Client, "EmbeddedBrowserService", "CancelDownload", []any{slot, id}, nil)
 }
+
+func (s *EmbeddedBrowserService) Popup(ctx context.Context, document, slot string, popup embeddedbrowser.WebPopup, action string) (string, error) {
+	gate, err := s.lockDocument(ctx, document)
+	if err != nil {
+		return "", err
+	}
+	defer gate.Unlock()
+	if !s.Enabled || len(popup.ID) > 256 || len(popup.URL) > 8192 || len(popup.SourceURL) > 8192 ||
+		(action != "suspend" && action != "ready" && action != "allow" && action != "deny") {
+		return "", errors.New("CEF_POPUP_ARGUMENT_REJECTED")
+	}
+	var url string
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Popup", []any{slot, popup, action}, &url)
+	return url, err
+}

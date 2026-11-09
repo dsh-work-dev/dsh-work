@@ -815,3 +815,12 @@ func (r *InstancePresenterRegistry) CancelDownload(ctx context.Context, p Presen
 	defer i.serial.Unlock()
 	return i.views.CancelDownload(ctx, p, surface, slot, id)
 }
+
+func (r *InstancePresenterRegistry) Popup(ctx context.Context, p PresenterPeer, surface, slot string, popup WebPopup, action string) (string, error) {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return "", err
+	}
+	defer i.serial.Unlock()
+	return i.views.Popup(ctx, p, surface, slot, popup, action)
+}

@@ -179,3 +179,11 @@ func (s *embeddedBrowserService) CancelDownload(ctx context.Context, slot, id st
 	}
 	return s.Registry.CancelDownload(ctx, peer, surface, slot, id)
 }
+
+func (s *embeddedBrowserService) Popup(ctx context.Context, slot string, popup embeddedbrowser.WebPopup, action string) (string, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return "", err
+	}
+	return s.Registry.Popup(ctx, peer, surface, slot, popup, action)
+}

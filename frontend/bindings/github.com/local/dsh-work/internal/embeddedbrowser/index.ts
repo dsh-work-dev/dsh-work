@@ -7,5 +7,6 @@ export type {
     SlotBounds,
     ViewState,
     WebDialog,
+    WebPopup,
     WindowAdmission
 } from "./models.js";

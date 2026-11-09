@@ -40,6 +40,7 @@
 #include <bcrypt.h>
 #include "platform_win.h"
 #include "file_picker_win.h"
+#include "popup_origin_win.h"
 #elif defined(__APPLE__)
 #include "mac/platform_mac.h"
 #include "mac/presenter_mac.h"
@@ -175,6 +176,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   void DocumentChanged(const std::string& url){
     CancelFilePicker();
 #ifdef _WIN32
+    CancelPopups(true);
     CancelDialog(true);
 #endif
     document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
@@ -195,7 +197,11 @@ class Client final : public CefClient, public CefLifeSpanHandler,
 public:
   #ifdef _WIN32
   #include "download_gate_win.inc"
+  #include "popup_gate_win.inc"
   #endif
+#ifdef _WIN32
+  bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame,CefProcessId source,CefRefPtr<CefProcessMessage> message)override{return PopupOriginMessage(browser,frame,source,message);}
+#endif
   Client(std::string route, int id,std::shared_ptr<ArtifactState> artifact={},bool managed=false) : route_(route),owner_route_(std::move(route)),artifact_(std::move(artifact)), create_id_(id), tab_(++next_tab) {managed_=managed;guard_required_=managed;view_visible_=!managed;}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
@@ -294,6 +300,7 @@ public:
   }
 #ifdef _WIN32
   void OpenDialog(CefRefPtr<CefJSDialogCallback> callback,const std::string& kind,const std::string& origin,const CefString& message,const CefString& prompt){
+    CancelPopups(true);
     CancelDialog(true);
     dialog_callback_=callback;dialog_pending_=true;++dialog_epoch_;
     dialog_kind_=kind;dialog_origin_=origin;dialog_message_=DialogText(message,kDialogMessageUnits,dialog_message_truncated_);dialog_default_=prompt;
@@ -352,10 +359,18 @@ public:
     RejectUnsupportedPolicy("CEF_DOWNLOAD_UNSUPPORTED");return true;
   }
   const std::string& PolicyDenial()const{return policy_denied_;}
-  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else scope_epoch_++;frame_graph.Load(owner_route_,frame);}
+  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else{scope_epoch_++;
+#ifdef _WIN32
+PopupFrameChanged(frame);
+#endif
+}frame_graph.Load(owner_route_,frame);}
   void OnLoadEnd(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,int)override{if(frame->IsMain()){loaded_=true;}}
   void OnTitleChange(CefRefPtr<CefBrowser>,const CefString& title)override{page_title_=title;}
-  void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else scope_epoch_++;}
+  void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else{scope_epoch_++;
+#ifdef _WIN32
+PopupFrameChanged(frame);
+#endif
+}}
   bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
 #ifdef __APPLE__
     return dsh_platform::BrowserVisible(tabs.at(tab_).browser);
@@ -368,6 +383,8 @@ public:
     if(file_picker_){auto picker=CefDictionaryValue::Create();picker->SetInt("phase",file_picker_->phase.load());picker->SetBool("canceled",file_picker_->canceled.load());picker->SetBool("cancelPosted",file_picker_->cancel_posted.load());picker->SetInt("cancelResult",file_picker_->cancel_result.load());picker->SetInt("windowResult",file_picker_->window_result.load());picker->SetInt("showResult",file_picker_->show_result.load());auto hwnd=file_picker_->picker_window.load();picker->SetBool("windowPresent",IsWindow(hwnd));picker->SetBool("windowVisible",IsWindowVisible(hwnd));value->SetDictionary("filePicker",picker);}
 #endif
 #ifdef _WIN32
+    if(auto popup=PendingPopup())value->SetDictionary("popup",popup);
+    if(PopupVisible())value->SetBool("popupVisible",true);
     if(auto dialog=PendingDialog())value->SetDictionary("dialog",dialog);
     if(DialogVisible())value->SetBool("dialogVisible",true);
     if(!dialog_restore_error_.empty())value->SetString("presentationFailure",dialog_restore_error_);
@@ -420,6 +437,7 @@ public:
   void PauseControl(){
     CancelFilePicker();
 #ifdef _WIN32
+    CancelPopups(true);
     CancelDialog(true);
 #endif
     RevokeGuard();
@@ -432,16 +450,23 @@ public:
     CancelFilePicker();
     RevokeGuard();revoke_waiters_.push_back(std::move(done));
 #ifdef _WIN32
+    CancelPopups(true);
     CancelDialog(true);
 #endif
     FlushRevocation();
   }
-  bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
+  bool HasPending()const{return !pending_.empty();}  void CloseWhenDrained(std::function<void()> done){CancelFilePicker();
+#ifdef _WIN32
+CancelPopups(false);
+#endif
+closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::move(done));if(tabs.contains(tab_))tabs.at(tab_).browser->GetHost()->CloseBrowser(true);FlushRevocation();}
   std::string Present(Dict args){
     CancelFilePicker();
 #ifdef _WIN32
     bool requested_visible=args&&args->GetBool("visible");
-    if(!requested_visible)CancelDialog(false);
+    if(!requested_visible){CancelPopups(false);CancelDialog(false);}
+    if(args&&args->GetString("view")!=view_lease_)CancelPopups(false);
+    if(popup_suspended_)popup_overlay_visible_=false;
     if(dialog_suspended_)dialog_overlay_visible_=false;
 #endif
  if(control_blocked)return "CEF_BROKER_CONTROL_PAUSED";
@@ -454,7 +479,7 @@ public:
     auto error=dsh_platform::PresentBrowser(browser,args,[self]{self->RevokeGuard();});
 #else
 #ifdef _WIN32
-    auto effective=args->Copy(false);if(dialog_suspended_)effective->SetBool("visible",false);
+    auto effective=args->Copy(false);if(dialog_suspended_||popup_suspended_)effective->SetBool("visible",false);
     auto error=dsh_platform::Present(hwnd,effective);
 #else
     auto error=dsh_platform::Present(hwnd,args);
@@ -467,11 +492,16 @@ public:
     auto bounds=args->GetDictionary("bounds");bool visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
     // No identity changes until every operation and final OS readback passed.
     view_lease_=args->GetString("view");presentation_epoch_=args->GetString("epoch");view_visible_=visible;
+#ifdef _WIN32
+    // A same-view visible resize changes presentation, not popup source lifetime.
+    for(auto& popup:popup_pending_)popup.identity->SetString("presentation",presentation_epoch_);
+#endif
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
   std::string Hide(Dict args){
     CancelFilePicker();
 #ifdef _WIN32
+    CancelPopups(false);
     CancelDialog(false);
 #endif
     managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
@@ -528,9 +558,16 @@ bool RequiresGuard()const{return guard_required_;}
     if(artifact_)artifact_->live_frames.insert(frame->GetIdentifier().ToString());
   }
   void OnFrameAttached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,bool reattached)override {frame_graph.Attached(owner_route_,frame,reattached);}
-  void OnFrameDetached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {frame_graph.Detached(owner_route_,frame);}
+  void OnFrameDetached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {
+#ifdef _WIN32
+    PopupFrameChanged(frame);
+#endif
+    frame_graph.Detached(owner_route_,frame);}
   void OnMainFrameChanged(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> previous,CefRefPtr<CefFrame> next)override {frame_graph.MainChanged(owner_route_,tab_,graph_browser_,previous,next);}
   void OnFrameDestroyed(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame)override {
+#ifdef _WIN32
+    PopupFrameChanged(frame);popup_frame_epochs_.erase(frame->GetIdentifier().ToString());
+#endif
     frame_graph.Destroyed(owner_route_,frame);
 #if defined(__APPLE__)
     dsh_platform::Lifecycle("frame-destroyed-enter");
@@ -569,6 +606,9 @@ bool RequiresGuard()const{return guard_required_;}
     else Event(route_, "route.ready", CefListValue::Create());
   }
   bool DoClose(CefRefPtr<CefBrowser> browser) override {
+#ifdef _WIN32
+    CancelPopups(false);
+#endif
     CancelFilePicker();closing_=true;RevokeGuard();view_visible_=false;
     if(!managed_)return false;
 #ifndef _WIN32
@@ -606,16 +646,24 @@ bool RequiresGuard()const{return guard_required_;}
     dsh_platform::Lifecycle("before-close-return");
 #endif
   }
-  bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
-      const CefString&, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
+  bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+      const CefString& target_url, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool user_gesture,
       const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
-      CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override { return true; }
+      CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override {
+#ifdef _WIN32
+    QueuePopup(browser,frame,popup_id,target_url,user_gesture);
+#endif
+    return true;
+  }
   bool OnBeforeBrowse(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,CefRefPtr<CefRequest> request,bool,bool)override {
     if(artifact_&&(artifact_->revoked||!ArtifactURL(artifact_,request->GetURL())))return true;
     if(frame->IsMain()&&guard_required_&&guard_active_){auto origin=Origin(request->GetURL());if(origin.empty()||(!navigation_origin_.empty()&&origin!=navigation_origin_))return true;}
     // CEF's chooser callback has no initiating frame identity. Any admitted
     // frame navigation retires it conservatively; rejected requests do not.
     CancelFilePicker();
+#ifdef _WIN32
+    PopupFrameChanged(frame);
+#endif
     return false;
   }
   void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
@@ -897,6 +945,7 @@ void Command(Dict m) {
       auto error=client->DownloadStart(m->GetDictionary("arguments"));if(error.empty())response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error",error);
     }
     else if(kind=="target.download.dismiss"){client->DownloadDismiss(m->GetDictionary("arguments"));response->SetDictionary("result",CefDictionaryValue::Create());}
+    else if(kind=="target.popup"){auto result=client->PopupAction(m->GetDictionary("arguments"));if(result)response->SetDictionary("result",result);else response->SetString("error","CEF_POPUP_AUTHORIZATION_CHANGED");}
     else if(kind=="target.dialog.answer"||kind=="target.dialog.suspend"||kind=="target.dialog.ready"){
       auto args=m->GetDictionary("arguments");bool ok=false;
       if(args){auto expected=args->GetDictionary("dialog");
@@ -1014,7 +1063,12 @@ public:
 } // namespace
 
 int RunBroker(CefMainArgs args,void* sandbox){
-  int code=CefExecuteProcess(args,nullptr,sandbox);if(code>=0)return code;
+#ifdef _WIN32
+  int code=CefExecuteProcess(args,new dsh_popup_origin::RenderApp,sandbox);
+#else
+  int code=CefExecuteProcess(args,nullptr,sandbox);
+#endif
+  if(code>=0)return code;
 #ifdef _WIN32
   if(!sandbox)return 71;
 #endif

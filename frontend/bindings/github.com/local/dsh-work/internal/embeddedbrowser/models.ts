@@ -29,6 +29,8 @@ export interface SlotBounds {
 }
 
 export interface ViewState {
+    "popup"?: WebPopup | null;
+    "popupVisible"?: boolean;
     "downloads"?: DownloadView[] | null;
     "dialog"?: WebDialog | null;
     "dialogVisible"?: boolean;
@@ -66,6 +68,25 @@ export interface WebDialog {
     "message": string;
     "defaultPrompt": string;
     "truncated": boolean;
+}
+
+/**
+ * WebPopup is immutable engine request metadata, never caller-supplied authority.
+ */
+export interface WebPopup {
+    "context": string;
+    "frameDocument": string;
+    "id": string;
+    "browser": string;
+    "popup": string;
+    "frame": string;
+    "document": string;
+    "view": string;
+    "presentation": string;
+    "origin": string;
+    "sourceURL": string;
+    "url": string;
+    "userGesture": boolean;
 }
 
 export interface WindowAdmission {

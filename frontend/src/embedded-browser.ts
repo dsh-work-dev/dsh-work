@@ -1,6 +1,6 @@
 import {EmbeddedBrowserService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
-import type {SlotBounds, WebDialog} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
+import type {SlotBounds, WebDialog, WebPopup} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
 
 /** DSH supplies CSS slot intent; this shell owns the iframe transform and clip. */
 export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (blocked:boolean)=>Promise<void>) {
@@ -51,6 +51,11 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
       if(m.action!=="dialog-answer")return EmbeddedBrowserService.PresentDialog(token,slot,d,m.action==="dialog-ready");
       if(typeof m.accept!=="boolean"||typeof m.text!=="string")throw Error("Invalid webpage answer");
       return EmbeddedBrowserService.AnswerDialog(token,slot,d,m.accept,m.text);
+     }
+     case "popup":{
+      const p=m.popup as WebPopup;
+      if(!p||![p.id,p.context,p.frameDocument,p.browser,p.popup,p.frame,p.document,p.view,p.presentation,p.origin,p.sourceURL,p.url].every(v=>typeof v==="string"&&v.length<=8192)||p.id.length>256||p.userGesture!==true||!["suspend","ready","allow","deny"].includes(String(m.command)))throw Error("Invalid popup request");
+      return EmbeddedBrowserService.Popup(token,slot,p,String(m.command));
      }
      case "download-cancel":if(typeof m.download!=="string"||m.download.length!==26)throw Error("Invalid download");return EmbeddedBrowserService.CancelDownload(token,slot,m.download);
      case "detach":return EmbeddedBrowserService.Detach(token,slot);

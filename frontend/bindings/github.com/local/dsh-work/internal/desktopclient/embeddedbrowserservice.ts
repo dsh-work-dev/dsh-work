@@ -56,6 +56,10 @@ export function Overlay(blocked: boolean): $CancellablePromise<void> {
     return $Call.ByID(1081105216, blocked);
 }
 
+export function Popup(document: string, slot: string, popup: embeddedbrowser$0.WebPopup, action: string): $CancellablePromise<string> {
+    return $Call.ByID(4241183938, document, slot, popup, action);
+}
+
 export function PresentDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, ready: boolean): $CancellablePromise<void> {
     return $Call.ByID(2715742487, document, slot, dialog, ready);
 }

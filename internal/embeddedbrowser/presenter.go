@@ -29,7 +29,27 @@ type WebDialog struct {
 	DefaultPrompt string `json:"defaultPrompt"`
 	Truncated     bool   `json:"truncated"`
 }
+
+// WebPopup is immutable engine request metadata, never caller-supplied authority.
+type WebPopup struct {
+	Context       string `json:"context"`
+	FrameDocument string `json:"frameDocument"`
+	ID            string `json:"id"`
+	Browser       string `json:"browser"`
+	Popup         string `json:"popup"`
+	Frame         string `json:"frame"`
+	Document      string `json:"document"`
+	View          string `json:"view"`
+	Presentation  string `json:"presentation"`
+	Origin        string `json:"origin"`
+	SourceURL     string `json:"sourceURL"`
+	URL           string `json:"url"`
+	UserGesture   bool   `json:"userGesture"`
+}
+
 type ViewState struct {
+	Popup            *WebPopup      `json:"popup,omitempty"`
+	PopupVisible     bool           `json:"popupVisible,omitempty"`
 	Downloads        []DownloadView `json:"downloads,omitempty"`
 	Dialog           *WebDialog     `json:"dialog,omitempty"`
 	DialogVisible    bool           `json:"dialogVisible,omitempty"`
@@ -443,6 +463,8 @@ func (r *PresenterRegistry) closeWindowViews(ctx context.Context, peer Presenter
 }
 
 type navigationState struct {
+	Popup                            *WebPopup `json:"popup"`
+	PopupVisible                     bool
 	PresentationFailure              string
 	DialogVisible                    bool
 	Dialog                           *WebDialog `json:"dialog"`
@@ -471,6 +493,8 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 		p.view.Failure = state.PresentationFailure
 		return nil
 	}
+	p.view.Popup = state.Popup
+	p.view.PopupVisible = state.PopupVisible
 	p.view.Dialog = state.Dialog
 	p.view.DialogVisible = state.DialogVisible
 	p.view.URL = state.URL
@@ -563,4 +587,29 @@ func (r *PresenterRegistry) CancelDownload(ctx context.Context, peer PresenterPe
 		}
 	}
 	return ErrClosed
+}
+
+// Popup only dispatches an approved URL. It grants no automation ownership.
+func (r *PresenterRegistry) Popup(ctx context.Context, peer PresenterPeer, surface, slot string, popup WebPopup, action string) (string, error) {
+	p := r.get(surface, slot)
+	if p == nil {
+		return "", ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != popup.View || !p.view.Visible ||
+		(action != "suspend" && action != "ready" && action != "allow" && action != "deny") {
+		return "", errors.New("CEF_POPUP_AUTHORIZATION_CHANGED")
+	}
+	raw, err := p.target.broker.controlCall(ctx, "target.popup", p.target.owner, map[string]any{"popup": popup, "action": action})
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.URL != "" && (action != "allow" || result.URL != popup.URL) {
+		return "", errors.New("CEF_POPUP_RESULT_REJECTED")
+	}
+	return result.URL, nil
 }
