@@ -1,5 +1,8 @@
 //go:build darwin && cgo && !server
 
+// cmd/go discovers .cc, not .mm. The package's CXXFLAGS select Objective-C++
+// for this translation unit, leaving cgo's generated C wrappers unchanged.
+
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 #include "presenter_view_darwin.h"
