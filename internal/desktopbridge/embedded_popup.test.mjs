@@ -35,7 +35,7 @@ test('popup uses its source-session callback once, after native suspension and s
  const a=await fixture('A'),b=await fixture('B');
  for(const f of[a,b]){
   assert.deepEqual(f.calls.filter(c=>c.action==='popup').map(c=>c.command),['suspend','ready']);
-  const allow=f.button('鎵撳紑鏂版爣绛鹃〉');assert.ok(allow&&!allow.disabled);
+  const allow=f.button('打开新标签页');assert.ok(allow&&!allow.disabled);
   f.hold();allow.onclick();allow.onclick();await tick();
   assert.equal(f.calls.filter(c=>c.command==='allow').length,1);assert.equal(f.opens.length,0);
   f.release();await tick();f.replay();await tick();
@@ -48,7 +48,7 @@ test('popup uses its source-session callback once, after native suspension and s
 
 test('late popup allow cannot open after source hide, disposal, or native document change',async()=>{
  for(const reason of['hide','dispose','navigation']){
-  const f=await fixture(reason);f.hold();f.button('鎵撳紑鏂版爣绛鹃〉').onclick();await tick();
+  const f=await fixture(reason);f.hold();f.button('打开新标签页').onclick();await tick();
   let disposal;if(reason==='hide')f.hide();else if(reason==='dispose')disposal=f.page.frame.dispose();else f.setState({document:'13',url:'https://source.test/next'});
   f.release();await tick();if(disposal)await disposal;
   assert.equal(f.opens.length,0,reason);if(!disposal)await f.page.frame.dispose();
@@ -57,7 +57,7 @@ test('late popup allow cannot open after source hide, disposal, or native docume
 
 test('popup decline consumes only the request and a visible resize re-read keeps approval usable',async()=>{
  const f=await fixture();f.setState({popup:{...f.popup,presentation:'4'},popupVisible:false});await f.poll();
- assert.ok(f.button('鎵撳紑鏂版爣绛鹃〉')&&!f.button('鎵撳紑鏂版爣绛鹃〉').disabled);
- f.button('鎷掔粷').onclick();await tick();assert.equal(f.opens.length,0);
+ assert.ok(f.button('打开新标签页')&&!f.button('打开新标签页').disabled);
+ f.button('拒绝').onclick();await tick();assert.equal(f.opens.length,0);
  assert.equal(f.calls.filter(c=>c.command==='deny').length,1);await f.page.frame.dispose();
 });
