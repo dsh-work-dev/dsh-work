@@ -740,6 +740,22 @@ func (w *nativeEventWriter) record(line string) {
 		name = "mcp-inspect-complete"
 	case "DSH_MCP_EVENT inspect-error":
 		name = "mcp-inspect-error"
+	case "DSH_MCP_EVENT private-end":
+		name = "mcp-private-end"
+	case "DSH_MCP_EVENT private-finish":
+		name = "mcp-private-finish"
+	case "DSH_MCP_EVENT cdp-upgrade":
+		name = "mcp-cdp-upgrade"
+	case "DSH_MCP_EVENT cdp-connected":
+		name = "mcp-cdp-connected"
+	case "DSH_MCP_EVENT uncaught-exception":
+		name = "mcp-uncaught-exception"
+	case "DSH_MCP_EVENT unhandled-rejection":
+		name = "mcp-unhandled-rejection"
+	case "DSH_MCP_EVENT process-exit-zero":
+		name = "mcp-process-exit-zero"
+	case "DSH_MCP_EVENT process-exit-nonzero":
+		name = "mcp-process-exit-nonzero"
 	case "DSH_MCP_EVENT stop-private-error":
 		name = "mcp-stop-private-error"
 	case "DSH_MCP_EVENT stop-private-close":

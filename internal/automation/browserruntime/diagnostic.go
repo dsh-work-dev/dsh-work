@@ -33,7 +33,7 @@ func adapterDiagnosticOutput(enabled bool, observe func(string)) supervisor.RawO
 			return
 		}
 		switch stage {
-		case "entry", "private-connected", "hmac-authenticated", "init", "adapter-ready", "route-ready", "sdk-connect-start", "sdk-connected", "tools-ready", "inspect-start", "inspect-complete", "inspect-error", "stop-private-error", "stop-private-close", "stop-private-timeout", "stop-hmac-rejected", "stop-frame-rejected", "stop-protocol-error", "stop-cdp-error", "stop-cdp-close", "stop-wire-timeout", "stop-call-fatal":
+		case "entry", "private-connected", "hmac-authenticated", "init", "adapter-ready", "route-ready", "sdk-connect-start", "sdk-connected", "tools-ready", "inspect-start", "inspect-complete", "inspect-error", "private-end", "private-finish", "cdp-upgrade", "cdp-connected", "uncaught-exception", "unhandled-rejection", "process-exit-zero", "process-exit-nonzero", "stop-private-error", "stop-private-close", "stop-private-timeout", "stop-hmac-rejected", "stop-frame-rejected", "stop-protocol-error", "stop-cdp-error", "stop-cdp-close", "stop-wire-timeout", "stop-call-fatal":
 		default:
 			return
 		}

@@ -12,7 +12,7 @@ import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
 import {openPrivateSocket} from './native-socket.mjs';
 // Trusted launch-only diagnostics: fixed, once-per-process metadata only.
-const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
+const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','private-end','private-finish','cdp-upgrade','cdp-connected','uncaught-exception','unhandled-rejection','process-exit-zero','process-exit-nonzero','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
 const diagnosticSeen=new Set();
 let diagnosticStop;
 const diagnostic=stage=>{
@@ -22,6 +22,11 @@ const diagnostic=stage=>{
  try{fs.writeSync(2,'DSH_MCP_EVENT '+stage+'\n')}catch{}
 };
 diagnostic('entry');
+if(process.env.DSH_WORK_BROWSER_DIAGNOSTICS==='1'){
+ // Monitor, not a handler: Node retains its default exception/exit behavior.
+ process.on('uncaughtExceptionMonitor',(_error,origin)=>diagnostic(origin==='unhandledRejection'?'unhandled-rejection':'uncaught-exception'));
+ process.on('exit',code=>diagnostic(code===0?'process-exit-zero':'process-exit-nonzero'));
+}
 let stopping=false;
 const connection=JSON.parse(fs.readFileSync(new URL('./native-connection.json',import.meta.url),'utf8'));
 const socket=await openPrivateSocket(connection,()=>stopping);
@@ -38,6 +43,7 @@ const mac=role=>createHmac('sha256',token).update(role).update(nonce).digest();
 const send=m=>{const b=Buffer.from(JSON.stringify(m));if(b.length>8*1024*1024)throw Error('BROWSER_ADAPTER_MESSAGE_TOO_LARGE');const h=Buffer.alloc(4);h.writeUInt32LE(b.length);socket.write(Buffer.concat([h,b]));};
 async function stop(reason){if(stopping)return;stopping=true;diagnostic('stop-'+reason);for(const p of commands.values()){clearTimeout(p.timer);p.reject(Error('BROWSER_ROUTE_CLOSED'))}commands.clear();try{await client?.close()}catch{}try{await transport?.close()}catch{}cdp?.terminate();wss?.close();server?.close();socket.destroy();}
 socket.on('error',()=>void stop('private-error'));socket.on('close',()=>void stop('private-close'));
+socket.on('end',()=>diagnostic('private-end'));socket.on('finish',()=>diagnostic('private-finish'));
 socket.setTimeout(3000,()=>{diagnostic('stop-private-timeout');socket.destroy()});
 let frameScheduled=false;
 function dispatchFrame(){
@@ -86,8 +92,8 @@ async function receive(m){
   };
   const endpointPath='/cdp/'+randomBytes(24).toString('hex');
   server=http.createServer((_req,res)=>res.writeHead(404).end());wss=new WebSocketServer({noServer:true,maxPayload:8*1024*1024});
-  server.on('upgrade',(req,s,head)=>{if(req.url!==endpointPath||req.headers.origin||cdp||stopping){s.destroy();return}wss.handleUpgrade(req,s,head,ws=>wss.emit('connection',ws))});
-  wss.on('connection',ws=>{cdp=ws;model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop('cdp-error'));ws.on('close',()=>void stop('cdp-close'));ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
+  server.on('upgrade',(req,s,head)=>{if(req.url!==endpointPath||req.headers.origin||cdp||stopping){s.destroy();return}diagnostic('cdp-upgrade');wss.handleUpgrade(req,s,head,ws=>wss.emit('connection',ws))});
+  wss.on('connection',ws=>{cdp=ws;diagnostic('cdp-connected');model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop('cdp-error'));ws.on('close',()=>void stop('cdp-close'));ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
   // Go may now flush the extension's initialization messages into this model.
   send({kind:'adapter-ready'});diagnostic('adapter-ready');

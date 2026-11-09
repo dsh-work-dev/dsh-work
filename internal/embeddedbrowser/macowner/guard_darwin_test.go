@@ -38,3 +38,18 @@ func TestMCPLifecycleEvidenceFiltersStderr(t *testing.T) {
 		t.Fatal("non-fixed stderr escaped", g.state.NativeEvents)
 	}
 }
+
+func TestMCPFailureOriginsFilterPrivateErrorText(t *testing.T) {
+	g := &guard{}
+	w := &nativeEventWriter{guard: g}
+	for _, stage := range []string{"private-end", "private-finish", "cdp-upgrade", "cdp-connected", "uncaught-exception", "unhandled-rejection", "process-exit-zero", "process-exit-nonzero"} {
+		_, _ = w.Write([]byte("DSH_MCP_EVENT " + stage + " private-body\n"))
+		_, _ = w.Write([]byte("DSH_MCP_EVENT " + stage + "\n"))
+		if got := g.state.NativeEvents[len(g.state.NativeEvents)-1].Name; got != "mcp-"+stage {
+			t.Fatal("fixed origin missing", stage, got)
+		}
+	}
+	if len(g.state.NativeEvents) != 8 {
+		t.Fatal("private error text escaped", g.state.NativeEvents)
+	}
+}
