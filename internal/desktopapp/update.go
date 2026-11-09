@@ -226,6 +226,16 @@ func (r *updateRunner) Snapshot() daemon.UpdateSnapshot {
 }
 
 func (r *updateRunner) setState(next daemon.UpdateSnapshot) {
+	r.storeState(next, false)
+}
+
+// completeOperation makes the terminal state and the next action available
+// together, after the operation's backend work and deferred cleanup finish.
+func (r *updateRunner) completeOperation(next daemon.UpdateSnapshot) {
+	r.storeState(next, true)
+}
+
+func (r *updateRunner) storeState(next daemon.UpdateSnapshot, complete bool) {
 	if r == nil {
 		return
 	}
@@ -233,6 +243,9 @@ func (r *updateRunner) setState(next daemon.UpdateSnapshot) {
 		next.CurrentVersion = r.current
 	}
 	r.mu.Lock()
+	if complete {
+		r.busy.Store(false)
+	}
 	changed := r.state != next
 	r.state = next
 	publisher, drain := r.queueStatePublishLocked(next, changed)
@@ -285,12 +298,12 @@ func (r *updateRunner) closeStatePublisher() {
 	}
 }
 
-func (r *updateRunner) setError(code string) {
-	r.updateState(func(state *daemon.UpdateSnapshot) {
-		state.Phase = daemon.UpdateError
-		state.ErrorCode = code
-		state.InstallMode = daemon.UpdateInstallNone
-	})
+func (r *updateRunner) errorState(code string) daemon.UpdateSnapshot {
+	state := r.Snapshot()
+	state.Phase = daemon.UpdateError
+	state.ErrorCode = code
+	state.InstallMode = daemon.UpdateInstallNone
+	return state
 }
 
 // Action starts the requested operation and returns quickly. Progress and
@@ -329,8 +342,7 @@ func (r *updateRunner) Action(ctx context.Context, action daemon.UpdateAction) e
 			return errUpdateNoRelease
 		}
 		go func() {
-			defer r.busy.Store(false)
-			r.runDownload(operationCtx)
+			r.completeOperation(r.runDownload(operationCtx))
 		}()
 		return nil
 	case daemon.UpdateActionInstall:
@@ -345,8 +357,7 @@ func (r *updateRunner) Action(ctx context.Context, action daemon.UpdateAction) e
 			return nil
 		}
 		go func() {
-			defer r.busy.Store(false)
-			r.runInstall(operationCtx, true)
+			r.completeOperation(r.runInstall(operationCtx, true))
 		}()
 		return nil
 	default:
@@ -372,12 +383,11 @@ func (r *updateRunner) Trigger(ctx context.Context, automatic bool) {
 		return
 	}
 	go func() {
-		defer r.busy.Store(false)
-		r.runCheck(ctx, automatic)
+		r.completeOperation(r.runCheck(ctx, automatic))
 	}()
 }
 
-func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
+func (r *updateRunner) runCheck(ctx context.Context, automatic bool) daemon.UpdateSnapshot {
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.Phase = daemon.UpdateChecking
 		state.TargetVersion = ""
@@ -392,35 +402,34 @@ func (r *updateRunner) runCheck(ctx context.Context, automatic bool) {
 	})
 	if err != nil {
 		logging.Module(logging.ModUpdate).Warn("update check failed", logging.ErrAttrs(err, "")...)
-		r.setError("check")
-		return
+		return r.errorState("check")
 	}
 	if pending == nil {
-		r.updateState(func(state *daemon.UpdateSnapshot) {
-			state.Phase = daemon.UpdateUpToDate
-			state.TargetVersion = ""
-			state.ErrorCode = ""
-			state.InstallMode = daemon.UpdateInstallNone
-		})
-		return
+		state := r.Snapshot()
+		state.Phase = daemon.UpdateUpToDate
+		state.TargetVersion = ""
+		state.ErrorCode = ""
+		state.InstallMode = daemon.UpdateInstallNone
+		return state
 	}
 	r.mu.Lock()
 	r.pending = pending
 	r.mu.Unlock()
-	r.updateState(func(state *daemon.UpdateSnapshot) {
-		state.Phase = daemon.UpdateAvailable
-		state.TargetVersion = pending.feed.Version
-		state.TotalBytes = pending.feed.Artifact.Size
-		state.ReceivedBytes = 0
-		state.ErrorCode = ""
-		state.InstallMode = daemon.UpdateInstallNone
-	})
+	state := r.Snapshot()
+	state.Phase = daemon.UpdateAvailable
+	state.TargetVersion = pending.feed.Version
+	state.TotalBytes = pending.feed.Artifact.Size
+	state.ReceivedBytes = 0
+	state.ErrorCode = ""
+	state.InstallMode = daemon.UpdateInstallNone
 	if automatic {
-		r.runDownload(ctx)
+		r.setState(state)
+		return r.runDownload(ctx)
 	}
+	return state
 }
 
-func (r *updateRunner) runDownload(ctx context.Context) {
+func (r *updateRunner) runDownload(ctx context.Context) daemon.UpdateSnapshot {
 	downloadCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.activeCancel = cancel
@@ -433,8 +442,7 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 		r.mu.Unlock()
 	}()
 	if pending == nil {
-		r.setError("download")
-		return
+		return r.errorState("download")
 	}
 	r.updateState(func(state *daemon.UpdateSnapshot) {
 		state.Phase = daemon.UpdateDownloading
@@ -460,34 +468,31 @@ func (r *updateRunner) runDownload(ctx context.Context) {
 	}
 	if err := r.backend.Stage(downloadCtx, pending, progress); err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-			return
+			return r.Snapshot()
 		}
 		logging.Module(logging.ModUpdate).Error("update download failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateDownloadFailed)...)
-		r.setError("download")
-		return
+		return r.errorState("download")
 	}
-	r.updateState(func(state *daemon.UpdateSnapshot) {
-		state.Phase = daemon.UpdateReady
-		state.ReceivedBytes = state.TotalBytes
-		state.ErrorCode = ""
-		state.InstallMode = daemon.UpdateInstallInstaller
-	})
+	state := r.Snapshot()
+	state.Phase = daemon.UpdateReady
+	state.ReceivedBytes = state.TotalBytes
+	state.ErrorCode = ""
+	state.InstallMode = daemon.UpdateInstallInstaller
+	return state
 }
 
-func (r *updateRunner) runInstall(ctx context.Context, restart bool) {
+func (r *updateRunner) runInstall(ctx context.Context, restart bool) daemon.UpdateSnapshot {
 	// The staged bytes are authenticated again here, before anything is stopped:
 	// a payload that changed on disk after staging is refused while the running
 	// workbench can still be kept.
 	if err := r.backend.Recheck(); err != nil {
 		logging.Module(logging.ModUpdate).Warn("staged installer recheck failed", logging.ErrAttrs(err, "")...)
-		r.setError("install")
-		return
+		return r.errorState("install")
 	}
 	if r.stopUI != nil {
 		if err := r.stopUI(); err != nil {
 			logging.Module(logging.ModUpdate).Warn("ui stop before update failed", logging.ErrAttrs(err, "")...)
-			r.setError("install")
-			return
+			return r.errorState("install")
 		}
 	}
 	// The UI stop is the daemon's handover. The installer then takes the
@@ -501,8 +506,9 @@ func (r *updateRunner) runInstall(ctx context.Context, restart bool) {
 	})
 	if err := r.backend.Install(ctx, restart); err != nil {
 		logging.Module(logging.ModUpdate).Error("update install failed", logging.ErrAttrs(err, lifecycle.ErrorUpdateInstallFailed)...)
-		r.setError("install")
+		return r.errorState("install")
 	}
+	return r.Snapshot()
 }
 
 // InstallOnExit claims a ready update before handing off the confirmed quit.
@@ -523,8 +529,7 @@ func (r *updateRunner) InstallOnExit(quit func()) bool {
 	r.Stop()
 	go func() {
 		defer r.exitPending.Store(false)
-		defer r.busy.Store(false)
-		r.runInstall(context.Background(), false)
+		r.completeOperation(r.runInstall(context.Background(), false))
 		quit()
 	}()
 	return true

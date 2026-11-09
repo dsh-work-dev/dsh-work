@@ -187,6 +187,64 @@ func TestUpdateRunnerManualDownloadThenExplicitInstall(t *testing.T) {
 	}
 }
 
+func TestUpdateRunnerTerminalPublicationAcceptsNextAction(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		automatic bool
+		initial   daemon.UpdatePhase
+		published daemon.UpdatePhase
+		next      daemon.UpdateAction
+	}{
+		{"manual check", false, daemon.UpdateIdle, daemon.UpdateAvailable, daemon.UpdateActionDownload},
+		{"manual download", false, daemon.UpdateAvailable, daemon.UpdateReady, daemon.UpdateActionInstall},
+		{"automatic download", true, daemon.UpdateIdle, daemon.UpdateReady, daemon.UpdateActionInstall},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &updateBackendFake{release: pendingFor("2.0.0", 100)}
+			runner := &updateRunner{
+				backend: backend, current: "1.0.0", pending: backend.release,
+				state: daemon.UpdateSnapshot{Phase: tc.initial},
+			}
+			type result struct {
+				busy bool
+				err  error
+			}
+			actionResult := make(chan result, 1)
+			// Issue the next action before the publication returns, pinning the
+			// window where Snapshot already exposes an actionable terminal state.
+			runner.publish = func(state daemon.UpdateSnapshot) {
+				if state.Phase == tc.published {
+					busy := runner.busy.Load()
+					actionResult <- result{busy, runner.Action(context.Background(), tc.next)}
+				}
+			}
+			if tc.initial == daemon.UpdateAvailable {
+				if err := runner.Action(context.Background(), daemon.UpdateActionDownload); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				runner.Trigger(context.Background(), tc.automatic)
+			}
+			select {
+			case got := <-actionResult:
+				if got.err != nil {
+					t.Fatal(got.err)
+				}
+				if got.busy {
+					t.Fatal("terminal state was published while the previous operation still owned busy; next action was dropped")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("terminal state was not published")
+			}
+			if tc.next == daemon.UpdateActionDownload {
+				waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateReady })
+			} else {
+				waitForUpdate(t, func() bool { return backend.installs() == 1 })
+			}
+		})
+	}
+}
+
 func TestUpdateRunnerRefusesSwappedPayloadBeforeStoppingTheUI(t *testing.T) {
 	backend := &updateBackendFake{recheckErr: selfupdate.ErrStagedPayloadChanged}
 	var stopUICalled bool
