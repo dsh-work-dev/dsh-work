@@ -1,3 +1,4 @@
+#define __STDC_WANT_LIB_EXT1__ 1
 #include "platform_mac.h"
 #include "owner_mac.h"
 #include "include/cef_version_info.h"
@@ -10,6 +11,8 @@
 #include <charconv>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
+#include <string.h>
 #include <fcntl.h>
 #include <libproc.h>
 #include <poll.h>
@@ -117,7 +120,11 @@ bool Authenticate(const std::string& token) {
   std::string reply;
   return difference==0 && OwnerSend(@{@"kind":@"initialize"}) && Frame(owner,false,reply) && reply=="{\"kind\":\"initialize\"}";
 }
-void Erase(std::string& value) { explicit_bzero(value.data(),value.size()); value.clear(); }
+void Erase(std::string& value) {
+  // Darwin exposes non-elidable C11 Annex K erasure via <string.h> (10.9+).
+  if (!value.empty() && memset_s(value.data(),value.size(),0,value.size()) != 0) std::abort();
+  value.clear();
+}
 void CancelTransport() { if(transport>=0)shutdown(transport,SHUT_RDWR); }
 void CloseTransport() { if(transport>=0)close(transport);transport=-1;if(owner>=0)close(owner);owner=-1; }
 bool Visible(Window) { return false; }
