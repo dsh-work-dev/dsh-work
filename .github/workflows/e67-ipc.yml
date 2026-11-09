@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup' 2>&1 | tee results/e67-ipc/linux-supervisor.log
+          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup|TestLiveSystemdCancelBeforeAdoption' 2>&1 | tee results/e67-ipc/linux-supervisor.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:

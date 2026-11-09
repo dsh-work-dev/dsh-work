@@ -20,6 +20,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestMain(m *testing.M) {
+	if RunBootstrap() {
+		return
+	}
+	os.Exit(m.Run())
+}
+
 func TestSystemdOwnedHelper(t *testing.T) {
 	role := os.Getenv("E67_SYSTEMD_HELPER")
 	if role == "" {
@@ -179,4 +186,42 @@ func TestLiveSystemdFailedLaunchCleanup(t *testing.T) {
 		t.Fatal(e)
 	}
 	t.Log("actual failed os/exec launch drained owned anchor/unit; no application process returned")
+}
+
+func TestLiveSystemdCancelBeforeAdoption(t *testing.T) {
+	if os.Getenv("DSH_WORK_LINUX_SUPERVISOR_TEST") != "1" {
+		t.Skip("requires real user-manager")
+	}
+	root := t.TempDir()
+	exe, e := os.Executable()
+	if e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	held := -1
+	a := &SystemdAdapter{beforeAdopt: func(fd int) {
+		var err error
+		held, err = unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, 0)
+		if err != nil {
+			t.Error(err)
+		}
+		cancel()
+	}}
+	w, e := a.Start(ctx, supervisor.LaunchPlan{GenerationID: "e67-cancel", Executable: exe, Args: []string{"-test.run=^TestSystemdOwnedHelper$"}, WorkingDirectory: root, ExpectedOrigin: workeripc.Origin, Env: map[string]string{"E67_SYSTEMD_HELPER": "root", "E67_SYSTEMD_DIRECTORY": root}}, nil)
+	if held < 0 {
+		t.Fatal("actual application handshake not reached", e)
+	}
+	defer unix.Close(held)
+	if !errors.Is(e, context.Canceled) || w != nil {
+		t.Fatal("canceled adoption returned usable owner", e)
+	}
+	if len(a.pending) != 0 {
+		t.Fatal("canceled partial launch retained unfinished unit", e)
+	}
+	poll := []unix.PollFd{{Fd: int32(held), Events: unix.POLLIN}}
+	if n, err := unix.Poll(poll, 3000); err != nil || n != 1 {
+		t.Fatal("original partially launched application did not exit", n, err)
+	}
+	t.Log("actual application pidfd received before adoption; caller canceled; independent unit cleanup joined original process and all descendants")
 }

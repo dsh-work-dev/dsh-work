@@ -11,9 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,8 +32,9 @@ import (
 const unavailable = "LINUX_SUPERVISOR_UNAVAILABLE"
 
 type SystemdAdapter struct {
-	mu      sync.Mutex
-	pending map[string]*systemdWorker
+	mu          sync.Mutex
+	pending     map[string]*systemdWorker
+	beforeAdopt func(int)
 }
 
 func NewSystemdAdapter() supervisor.Adapter { return &SystemdAdapter{} }
@@ -75,10 +76,10 @@ type systemdWorker struct {
 	mu, cleanup    sync.Mutex
 	conn           *dbus.Conn
 	unit, group    string
-	groupFD        *os.File
-	anchorInput    *os.File
+	control        *net.UnixConn
+	anchorFinished bool
 	anchorPID      uint32
-	cmd            *exec.Cmd
+	bootstrapFD    int
 	pidfd          int
 	pid            uint32
 	started        uint64
@@ -97,34 +98,36 @@ func property(name string, value any) dbus.Property {
 }
 
 func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (worker supervisor.Worker, err error) {
-	if err := plan.Validate(); err != nil {
+	if err = plan.Validate(); err != nil {
 		return nil, err
 	}
 	if !filepath.IsAbs(plan.Executable) || !filepath.IsAbs(plan.WorkingDirectory) {
 		return nil, errors.New("absolute Linux launch paths required")
 	}
-	if err := ctx.Err(); err != nil {
+	if err = ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := a.Close(); err != nil {
-		return nil, fmt.Errorf("prior Linux startup cleanup unfinished: %w", err)
+	if err = a.Close(); err != nil {
+		return nil, err
 	}
 	c, err := manager(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%s: user manager: %w", unavailable, err)
 	}
-	w := &systemdWorker{conn: c, unit: "dsh-owned-" + strings.ToLower(rand.Text()) + ".service", pidfd: -1,
-		exited: make(chan struct{}), readersDone: make(chan struct{}), events: make(chan supervisor.OutputEvent, 128)}
-	anchorRead, anchorWrite, err := os.Pipe()
+	w := &systemdWorker{conn: c, unit: "dsh-owned-" + strings.ToLower(rand.Text()) + ".service", pidfd: -1, bootstrapFD: -1, exited: make(chan struct{}), readersDone: make(chan struct{}), events: make(chan supervisor.OutputEvent, 128)}
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
-	w.anchorInput = anchorWrite
-	// A standard cat holds a private EOF lease. On daemon death EOF makes the
-	// manager deactivate this unit and reclaim its complete cgroup. The actual
-	// child is still launched by os/exec with exactly plan.Env, not manager Env.
-	defer anchorRead.Close()
+	parentFile, childFile := os.NewFile(uintptr(pair[0]), "bootstrap-parent"), os.NewFile(uintptr(pair[1]), "bootstrap-child")
+	defer childFile.Close()
+	w.control, err = unixConnection(parentFile)
+	parentFile.Close()
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
 	failed := true
 	defer func() {
 		if failed {
@@ -140,22 +143,27 @@ func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, 
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
-	cat, err := exec.LookPath("cat")
+	control := w.control
+	stopCancellation := context.AfterFunc(ctx, func() { control.Close() })
+	defer stopCancellation()
+	deadline := time.Now().Add(15 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	w.control.SetDeadline(deadline)
+	self, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	props := []dbus.Property{property("Description", w.unit), property("Type", "exec"), property("Delegate", true),
-		property("KillMode", "control-group"), property("TimeoutStopUSec", uint64(3*time.Second/time.Microsecond)),
-		property("StandardInputFileDescriptor", bus.UnixFD(anchorRead.Fd())), property("StandardOutput", "null"), property("StandardError", "null"),
-		dbus.PropExecStart([]string{cat}, false)}
+	props := []dbus.Property{property("Description", w.unit), property("Type", "exec"), property("KillMode", "control-group"), property("TimeoutStopUSec", uint64(3*time.Second/time.Microsecond)), property("StandardInputFileDescriptor", bus.UnixFD(childFile.Fd())), property("StandardOutput", "null"), property("StandardError", "null"), dbus.PropExecStart([]string{self, bootstrapArgument}, false)}
 	ready := make(chan string, 1)
 	if _, err = c.StartTransientUnitContext(ctx, w.unit, "fail", props, ready); err != nil {
-		return nil, fmt.Errorf("%s: transient unit: %w", unavailable, err)
+		return nil, fmt.Errorf("%s: bootstrap unit: %w", unavailable, err)
 	}
 	select {
 	case status := <-ready:
 		if status != "done" {
-			return nil, fmt.Errorf("%s: unit start %s", unavailable, status)
+			return nil, fmt.Errorf("%s: bootstrap start %s", unavailable, status)
 		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -165,24 +173,38 @@ func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, 
 		return nil, err
 	}
 	w.anchorPID, _ = service["MainPID"].(uint32)
-	delegated, _ := service["Delegate"].(bool)
 	group, _ := service["ControlGroup"].(string)
-	if w.anchorPID == 0 || !delegated || !strings.HasPrefix(group, "/") || filepath.Clean(group) != group || !strings.HasSuffix(group, "/"+w.unit) {
-		return nil, fmt.Errorf("%s: delegated owned cgroup unavailable", unavailable)
+	if w.anchorPID == 0 || !strings.HasPrefix(group, "/") || filepath.Clean(group) != group || !strings.HasSuffix(group, "/"+w.unit) {
+		return nil, fmt.Errorf("%s: own bootstrap cgroup unavailable", unavailable)
 	}
 	w.group = filepath.Join("/sys/fs/cgroup", group)
-	fd, err := unix.Open(w.group, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	w.bootstrapFD, err = unix.PidfdOpen(int(w.anchorPID), 0)
 	if err != nil {
 		return nil, err
 	}
-	w.groupFD = os.NewFile(uintptr(fd), "owned-cgroup")
-	cmd := exec.Command(plan.Executable, plan.Args...)
-	cmd.Dir = plan.WorkingDirectory
-	cmd.Env = make([]string, 0, len(plan.Env))
-	for key, value := range plan.Env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+	anchorBirth, err := localipc.ProcessStarted(w.anchorPID)
+	if err != nil {
+		return nil, err
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{UseCgroupFD: true, CgroupFD: fd, PidFD: &w.pidfd}
+	expected, err := os.Stat(self)
+	if err != nil {
+		return nil, err
+	}
+	actual, err := os.Stat(fmt.Sprintf("/proc/%d/exe", w.anchorPID))
+	if err != nil || !os.SameFile(expected, actual) {
+		return nil, errors.New("bootstrap executable changed")
+	}
+	kind, fds, cred, err := markerRead(w.control)
+	for _, fd := range fds {
+		unix.Close(fd)
+	}
+	if err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	current, e := localipc.ProcessStarted(w.anchorPID)
+	if kind != 'R' || len(fds) != 0 || cred.Pid != int32(w.anchorPID) || cred.Uid != uint32(os.Getuid()) || e != nil || current != anchorBirth || unix.PidfdSendSignal(w.bootstrapFD, 0, nil, 0) != nil {
+		return nil, errors.New("bootstrap kernel sender instance rejected")
+	}
 	stdout, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		return nil, err
@@ -194,60 +216,103 @@ func (a *SystemdAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, 
 		return nil, err
 	}
 	defer stderrWrite.Close()
-	cmd.Stdout = stdoutWrite
-	cmd.Stderr = stderrWrite
-	if err = ctx.Err(); err == nil {
-		err = cmd.Start()
-	}
-	if err != nil {
-		stdout.Close()
-		stderr.Close()
-		return nil, fmt.Errorf("%s: atomic cgroup/pidfd launch: %w; containment=%s", unavailable, err, launchDiagnostic(w.group, plan.Executable, w.anchorPID, err))
-	}
-	w.cmd = cmd
-	w.pid = uint32(cmd.Process.Pid)
-	w.started, err = localipc.ProcessStarted(w.pid)
-	if err == nil {
-		err = unix.PidfdSendSignal(w.pidfd, 0, nil, 0)
-	}
-	if err != nil {
-		w.started = 0
-		w.startedError = err.Error()
-	}
-	w.exit = supervisor.ExitResult{Started: true}
 	w.readers.Add(2)
 	go w.output(supervisor.StreamStdout, stdout, raw)
 	go w.output(supervisor.StreamStderr, stderr, raw)
-	go func() {
-		err := cmd.Wait()
-		result := supervisor.ExitResult{Started: true}
-		if cmd.ProcessState != nil {
-			result.Code = cmd.ProcessState.ExitCode()
-		}
-		if err != nil {
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) {
-				result.Err = err.Error()
+	go func() { w.readers.Wait(); close(w.events); close(w.readersDone) }()
+	if err = markerWrite(w.control, 'P', int(stdoutWrite.Fd()), int(stderrWrite.Fd())); err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	if err = frameWrite(w.control, plan); err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	kind, fds, cred, err = markerRead(w.control)
+	if err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	adopted := false
+	defer func() {
+		if !adopted {
+			for _, fd := range fds {
+				unix.Close(fd)
 			}
 		}
-		w.mu.Lock()
-		w.exit = result
-		w.mu.Unlock()
-		close(w.exited)
-		w.readers.Wait()
-		close(w.events)
-		close(w.readersDone)
 	}()
+	if cred.Pid != int32(w.anchorPID) || cred.Uid != uint32(os.Getuid()) {
+		return nil, errors.New("application pidfd sender rejected")
+	}
+	var message bootstrapMessage
+	if err = frameRead(w.control, &message); err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	if kind == 'E' && len(fds) == 0 && message.Kind == "launch-error" {
+		return nil, fmt.Errorf("bootstrap application start: %w", syscall.Errno(message.Errno))
+	}
+	if kind != 'A' || len(fds) != 1 || message.Kind != "started" || message.Started == 0 {
+		return nil, errors.New("application launch handshake rejected")
+	}
+	pid, err := pidFromFD(fds[0])
+	if err != nil {
+		return nil, err
+	}
+	birth, err := localipc.ProcessStarted(pid)
+	if err != nil || birth != message.Started {
+		return nil, errors.New("application kernel instance changed")
+	}
+	membership, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil || !strings.Contains(string(membership), "0::"+group+"\n") {
+		return nil, errors.New("application not in owned bootstrap cgroup")
+	}
+	w.pid = pid
+	w.started = birth
+	w.pidfd = fds[0]
+	adopted = true
+	if a.beforeAdopt != nil {
+		a.beforeAdopt(w.pidfd)
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err = frameWrite(w.control, bootstrapMessage{Kind: "adopt"}); err != nil {
+		return nil, errors.Join(ctx.Err(), err)
+	}
+	stopCancellation()
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	w.control.SetDeadline(time.Time{})
+	w.exit = supervisor.ExitResult{Started: true}
+	go w.watchApplication()
 	failed = false
 	return w, nil
+}
+
+func (w *systemdWorker) watchApplication() {
+	var message bootstrapMessage
+	err := frameRead(w.control, &message)
+	result := message.Result
+	if err != nil || message.Kind != "exit" || !result.Started {
+		result = supervisor.ExitResult{Started: true, Code: -1, Err: "bootstrap ended before actual application exit result"}
+		for {
+			poll := []unix.PollFd{{Fd: int32(w.pidfd), Events: unix.POLLIN}}
+			n, e := unix.Poll(poll, 100)
+			if n > 0 || e != nil {
+				break
+			}
+		}
+	}
+	w.mu.Lock()
+	w.exit = result
+	w.mu.Unlock()
+	close(w.exited)
 }
 
 // Startup failure cannot leave an unknown late unit: EOF already belongs to
 // the manager-held read descriptor, even if its D-Bus response was lost.
 func (w *systemdWorker) abandonAnchor() error {
-	if w.anchorInput != nil {
-		w.anchorInput.Close()
-		w.anchorInput = nil
+	if w.control != nil {
+		w.control.Close()
+		w.control = nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -258,6 +323,11 @@ func (w *systemdWorker) abandonAnchor() error {
 	if err == nil {
 		if properties["Description"] != w.unit {
 			return errors.New("startup cleanup unit ownership changed")
+		}
+		if w.group == "" {
+			if group, ok := properties["ControlGroup"].(string); ok && strings.HasPrefix(group, "/") && filepath.Clean(group) == group && strings.HasSuffix(group, "/"+w.unit) {
+				w.group = filepath.Join("/sys/fs/cgroup", group)
+			}
 		}
 		finished := make(chan string, 1)
 		if _, err = w.conn.StopUnitContext(ctx, w.unit, "replace", finished); err != nil && !missingUnit(err) {
@@ -274,8 +344,32 @@ func (w *systemdWorker) abandonAnchor() error {
 			}
 		}
 	}
-	if w.groupFD != nil {
-		w.groupFD.Close()
+	if w.group != "" {
+		for {
+			n, e := w.population()
+			if e != nil {
+				return e
+			}
+			if n == 0 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}
+	if e := w.conn.ResetFailedUnitContext(ctx, w.unit); e != nil && !missingUnit(e) {
+		return e
+	}
+	if w.pidfd >= 0 {
+		unix.Close(w.pidfd)
+		w.pidfd = -1
+	}
+	if w.bootstrapFD >= 0 {
+		unix.Close(w.bootstrapFD)
+		w.bootstrapFD = -1
 	}
 	w.conn.Close()
 	return nil
@@ -287,7 +381,7 @@ func missingUnit(err error) bool {
 }
 
 // Retain a failed startup's unit owner until its real cleanup succeeds. No
-// application child was returned in this branch; EOF still deactivates cat.
+// application child was returned in this branch; EOF still retires bootstrap.
 func (a *SystemdAdapter) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -397,15 +491,18 @@ func (w *systemdWorker) WaitEmpty(ctx context.Context) error {
 			}
 			if only {
 				w.mu.Lock()
-				if w.anchorInput != nil {
-					err = w.anchorInput.Close()
-					w.anchorInput = nil
+				if !w.anchorFinished {
+					err = frameWrite(w.control, bootstrapMessage{Kind: "finish"})
+					if err == nil {
+						w.anchorFinished = true
+					}
 				}
 				w.mu.Unlock()
 				if err != nil {
 					return err
 				}
 			}
+
 		default:
 		}
 		select {
@@ -502,17 +599,17 @@ func (w *systemdWorker) Close() error {
 		return err
 	}
 	var result error
+	if w.bootstrapFD >= 0 {
+		result = errors.Join(result, unix.Close(w.bootstrapFD))
+		w.bootstrapFD = -1
+	}
 	if w.pidfd >= 0 {
 		result = errors.Join(result, unix.Close(w.pidfd))
 		w.pidfd = -1
 	}
-	if w.anchorInput != nil {
-		result = errors.Join(result, w.anchorInput.Close())
-		w.anchorInput = nil
-	}
-	if w.groupFD != nil {
-		result = errors.Join(result, w.groupFD.Close())
-		w.groupFD = nil
+	if w.control != nil {
+		result = errors.Join(result, w.control.Close())
+		w.control = nil
 	}
 	w.conn.Close()
 	w.closed = true
