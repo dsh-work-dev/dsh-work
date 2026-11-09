@@ -600,7 +600,8 @@ int RunBroker(CefMainArgs args,void* sandbox){
   auto path=TakeEnvironment("DSH_WORK_BRIDGE_PIPE");auto token=TakeEnvironment("DSH_WORK_BRIDGE_TOKEN");
   generation=TakeEnvironment("DSH_WORK_CEF_GENERATION");auto profile=TakeEnvironment("DSH_WORK_CEF_PROFILE");
   if(path.empty()||token.empty()||generation.empty()||profile.empty())return 72;
-  if(!OpenTransport(path)||!Authenticate(token))return 73;Erase(token);
+  if(!OpenTransport(path)||!Authenticate(token))return 73;
+  Erase(token);
   CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
   CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox))return CefGetExitCode();
   CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();CefShutdown();CloseTransport();return 0;

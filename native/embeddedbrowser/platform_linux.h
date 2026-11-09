@@ -39,10 +39,8 @@ inline bool OpenTransport(const std::string &path) {
        birthText = TakeEnvironment("DSH_WORK_CEF_HOST_STARTED");
   uint32_t expected = 0;
   uint64_t birth = 0;
-  try {
-    expected = static_cast<uint32_t>(std::stoul(pidText));
-    birth = std::stoull(birthText);
-  } catch (...) {
+  if (!dsh_x11::number(pidText, expected) ||
+      !dsh_x11::number(birthText, birth)) {
     return false;
   }
   pipe_handle = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -118,10 +116,8 @@ inline std::string Present(Window hwnd, CefRefPtr<CefDictionaryValue> args) {
   if (!args)
     return fail();
   uint64_t parent = 0, birth = 0;
-  try {
-    parent = std::stoull(args->GetString("parent").ToString());
-    birth = std::stoull(args->GetString("started").ToString());
-  } catch (...) {
+  if (!dsh_x11::number(args->GetString("parent").ToString(), parent) ||
+      !dsh_x11::number(args->GetString("started").ToString(), birth)) {
     return fail();
   }
   auto box = args->GetDictionary("bounds");

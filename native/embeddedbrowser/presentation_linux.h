@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <charconv>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -13,6 +14,10 @@
 // Checked XCB requests avoid a process-global Xlib error handler. XRes supplies
 // the server's local client PID, never a writable _NET_WM_PID property.
 namespace dsh_x11 {
+template <class T> bool number(const std::string &text, T &value) {
+  auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+  return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+}
 template <class T> using Reply = std::unique_ptr<T, decltype(&std::free)>;
 template <class T> Reply<T> own(T *value) {
   return Reply<T>(value, &std::free);
@@ -49,11 +54,8 @@ inline uint64_t started(uint32_t pid) {
   for (int i = 0; i <= 19; i++)
     if (!(fields >> field))
       return 0;
-  try {
-    return std::stoull(field);
-  } catch (...) {
-    return 0;
-  }
+  uint64_t value = 0;
+  return number(field, value) ? value : 0;
 }
 struct Process {
   int fd = -1;
