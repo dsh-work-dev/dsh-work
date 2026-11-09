@@ -8,6 +8,7 @@ on:
       - 'internal/workeripc/**'
       - 'internal/daemon/**'
       - 'tools/posix-ipc-probe/**'
+      - 'tools/linux-runtime-probe/**'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
 
@@ -15,6 +16,38 @@ permissions:
   contents: read
 
 jobs:
+  linux-runtime-facilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install isolated X11 probe dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libxres-dev xvfb dbus-x11
+      - name: Build XRes system API probe
+        run: |
+          mkdir -p results/e67-linux-runtime
+          cc -Wall -Wextra -Werror tools/linux-runtime-probe/xres.c -o "$RUNNER_TEMP/e67-linux-xres" $(pkg-config --cflags --libs gtk4 xres)
+      - name: Observe unprivileged process ownership and X11 identity
+        env:
+          GDK_BACKEND: x11
+        run: |
+          dbus-run-session -- xvfb-run -a python3 tools/linux-runtime-probe/probe.py --xres-probe "$RUNNER_TEMP/e67-linux-xres" --output results/e67-linux-runtime/facilities.json
+      - name: Require both proposed facilities
+        run: |
+          python3 - <<'PY'
+          import json
+          report = json.load(open('results/e67-linux-runtime/facilities.json'))
+          assert report['systemd']['qualified'], 'Unprivileged user-manager process ownership unavailable; inspect facilities.json before selecting the product mechanism'
+          assert report['xres']['code'] == 0 and report['xres']['evidence']['qualified'], 'XRes client PID facility unavailable'
+          PY
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-runtime-facilities
+          path: results/e67-linux-runtime/facilities.json
+
   linux-peer:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
