@@ -3,6 +3,7 @@
 import {readFileSync,writeFileSync,existsSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {runLinuxBrowserAgent} from './linux-browser-agent-fixture.mjs';
 const [base,fixture,directory,mode]=process.argv.slice(2);
 if(mode&&mode!=='--boot-diagnostic')throw Error('Unknown fixed probe mode');
 if(process.platform!=='linux'||!/^http:\/\/127\.0\.0\.1:\d+$/.test(base??'')||!/^http:\/\/127\.0\.0\.1:\d+\/$/.test(fixture??'')||!directory)throw Error('Expected isolated Linux inspector, local fixture and output directory');
@@ -125,6 +126,13 @@ try {
  const chrome=await until('restored toolbar URL and title synchronized',()=>inspector.evaluate(dsh,`(()=>{const e=document.querySelector('input[aria-label="Enter an HTTP(S) address"],input[aria-label="输入 HTTP(S) 地址"]');const title=${JSON.stringify(visible.state.title)};const tabs=[...document.querySelectorAll('[role="tab"],[data-dockkit-float-title]')].filter(e=>e.getClientRects().length).map(e=>e.textContent.trim());return e?.value===${JSON.stringify(fixture)}&&tabs.some(t=>t.includes(title))?{address:e.value,tabs}:undefined})()`));
  save('restored-chrome',chrome);
  save('restored',restored);
+ if(process.env.DSH_WORK_LINUX_AGENT_TEST==='1'){
+  const call=(name,...args)=>inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return Call.ByID(${id('automationservice',name)},...${JSON.stringify(args)})})()`);
+  await runLinuxBrowserAgent({inspector,shell,dsh,visible:restored,fixture,out,save,call,click});
+  const after=(await state()).find(r=>r.slot===restored.slot);
+  save('agent-owned-after',after);
+  if(after?.state?.state!=='ready'||after.state.document!==restored.state.document||after.state.target!==restored.state.target||after.state.lease!==restored.state.lease||after.state.brokerGeneration!==restored.state.brokerGeneration)throw Error('Read-only Agent or Stop replaced the original document');
+ }
  await until('capture restored barrier',()=>existsSync(join(out,'quit.request')),30000);
  save('quit-requested',{method:'HostService.Quit'});
  await inspector.evaluate(shell,`(async()=>{const {Call}=await import('/wails/runtime.js');return await Call.ByID(${ids.quit})})()`).catch(e=>save('quit-response',{error:String(e)}));

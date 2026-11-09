@@ -12,6 +12,7 @@ on:
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
       - 'scripts/probe-linux-dsh-slot.mjs'
+      - 'scripts/linux-browser-agent-fixture.mjs'
       - 'tools/dsh/package*.json'
       - 'go.mod'
       - 'go.sum'
@@ -58,6 +59,7 @@ jobs:
               - 'native/embeddedbrowser/**'
               - 'scripts/build-embedded-cef-linux.sh'
               - 'scripts/probe-linux-dsh-slot.mjs'
+              - 'scripts/linux-browser-agent-fixture.mjs'
               - 'tools/linux-runtime-probe/window.cc'
               - 'tools/dsh/package*.json'
             linux_peer:
@@ -208,6 +210,7 @@ jobs:
         env:
           GDK_BACKEND: x11
           DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_AGENT_TEST: '1'
           DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
           DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
           DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window

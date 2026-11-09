@@ -86,6 +86,14 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	if err = os.MkdirAll(out, 0700); err != nil {
 		t.Fatal(err)
 	}
+	agentTest := os.Getenv("DSH_WORK_LINUX_AGENT_TEST") == "1"
+	if agentTest {
+		for _, name := range []string{"agent-permission-browser.captured", "agent-permission-site.captured", "agent-completed.json"} {
+			if _, err = os.Stat(filepath.Join(out, name)); !os.IsNotExist(err) {
+				t.Fatal("Agent evidence directory contains a stale handshake", name, err)
+			}
+		}
+	}
 	save := func(name string, value any) {
 		b, e := json.MarshalIndent(value, "", "  ")
 		if e == nil {
@@ -525,6 +533,59 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	output, e = exec.CommandContext(ctx, "import", "-window", strconv.FormatUint(uint64(guest.Parent), 10), filepath.Join(out, "real-linux-dsh-slot-restored.png")).CombinedOutput()
 	if e != nil {
 		t.Fatal("capture verified restored UI", e, string(output))
+	}
+	if agentTest {
+		for _, kind := range []string{"browser", "site"} {
+			var permission struct {
+				Request struct {
+					ID, Kind, Session, Browser, Site, Phase string
+					AllowAlways                             bool
+				}
+			}
+			readPhase("agent-permission-"+kind, &permission)
+			request := permission.Request
+			if request.ID == "" || request.Kind != kind || request.Phase != "waiting" || request.Browser != "embedded" || request.AllowAlways || request.Session != strings.TrimSuffix(visible.Slot, "/"+filepath.Base(visible.Slot)) || kind == "site" && request.Site != fixture.URL {
+				t.Fatal("unexpected actual Agent permission", request)
+			}
+			var popup x11FixtureWindow
+			wait("actual native "+kind+" permission window", func() bool {
+				output, err := exec.CommandContext(ctx, observer, strconv.FormatUint(uint64(identity.PID), 10), strconv.FormatUint(identity.ProcessStarted, 10), native).Output()
+				if err != nil {
+					t.Fatal("held daemon XRes observation", err)
+				}
+				var rows []x11FixtureWindow
+				if err = json.Unmarshal(output, &rows); err != nil {
+					t.Fatal(err)
+				}
+				found := 0
+				for _, w := range rows {
+					if w.PID == identity.PID && w.Started == identity.ProcessStarted && w.Visible && w.Width == 540 && w.Height == 410 {
+						popup = w
+						found++
+					}
+				}
+				if found > 1 {
+					t.Fatal("ambiguous own native permission windows", rows)
+				}
+				return found == 1
+			})
+			save("agent-permission-"+kind+"-window", popup)
+			output, e = exec.CommandContext(ctx, "import", "-window", strconv.FormatUint(uint64(popup.ID), 10), filepath.Join(out, "agent-permission-"+kind+".png")).CombinedOutput()
+			if e != nil {
+				t.Fatal("capture own native permission window", e, string(output))
+			}
+			if e = os.WriteFile(filepath.Join(out, "agent-permission-"+kind+".captured"), nil, 0600); e != nil {
+				t.Fatal(e)
+			}
+		}
+		readPhase("agent-completed", &map[string]any{})
+		reportMu.Lock()
+		agentReport := report
+		reportMu.Unlock()
+		save("document-after-agent", agentReport)
+		if agentReport.Nonce != baseline.Nonce || agentReport.Input != baseline.Input || agentReport.Tick <= resumedBaseline.Tick {
+			t.Fatal("read-only Agent tool changed or lost the document", agentReport)
+		}
 	}
 	if e = os.WriteFile(filepath.Join(out, "quit.request"), nil, 0600); e != nil {
 		t.Fatal(e)
