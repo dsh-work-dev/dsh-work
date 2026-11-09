@@ -6,6 +6,7 @@ import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {attach} from '../../lib/attach.mjs';
+import {discoverCEFTargets} from '../../lib/cef-targets.mjs';
 const root=process.env.BROWSER_LAB_ROOT.replaceAll(String.fromCharCode(92),'/')+'/';
 const session=JSON.parse(readFileSync(root+'session.json','utf8'));
 const token=process.env.BROWSER_LAB_TOKEN;if(!token||token.length<24)throw Error('Missing lab token');
@@ -25,15 +26,12 @@ function invalidate(reason){
  return faults;
 }
 async function connectTargets(){
- await waitUntil(async()=>{try{const rows=await(await fetch('http://127.0.0.1:19479/json/list')).json();return ['A','B'].every(name=>rows.some(p=>p.type==='page'&&new URL(p.url).searchParams.get('tab')===name))}catch{return false}},'named CEF targets');
+ let discovered;
+ await waitUntil(async()=>{try{const rows=await(await fetch('http://127.0.0.1:19479/json/list',{signal:AbortSignal.timeout(5000)})).json();discovered=rows.filter(p=>p.type==='page');return ['A','B'].every(name=>discovered.some(p=>new URL(p.url).searchParams.get('tab')===name))}catch{return false}},'named CEF targets');
+ record('target-http-discovery',{targets:discovered.map(p=>({targetId:p.id,url:p.url,type:p.type}))});
  browser=await attach(19479);const own=browser;connectionEpoch++;connected=false;tabs.clear();
  browser.on('disconnected',()=>{if(browser!==own)return;connected=false;invalidate('broker-disconnected')});
- const candidates=[];
- for(const page of browser.contexts().flatMap(c=>c.pages())){
-  const cdp=await page.context().newCDPSession(page);await cdp.send('Page.enable');const info=(await cdp.send('Target.getTargetInfo')).targetInfo;
-  candidates.push({page,cdp,info});
- }
- if(candidates.length!==2||new Set(candidates.map(c=>c.info.targetId)).size!==2)throw Error('Expected two distinct CEF page targets');
+ const candidates=await discoverCEFTargets(browser,discovered.map(p=>p.id),sample=>record('target-playwright-discovery',sample));
  // Discovery and Playwright's initial cached page.url() can disagree while
  // initial navigation events arrive. Bind from each target's actual root
  // document after Page.enable, before issuing any observations or permits.

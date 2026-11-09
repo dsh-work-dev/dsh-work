@@ -12,6 +12,26 @@ import {evaluateIME,evaluateMixedDPI} from '../lib/manual.mjs';
 import {makeContext} from '../lib/context.mjs';
 import https from 'node:https';
 import {createInvalidTLSFixture} from '../fixtures/invalid-tls.mjs';
+import {discoverCEFTargets} from '../lib/cef-targets.mjs';
+
+test('CEF discovery: waits for late page objects but rejects extra, foreign and duplicate targets',async()=>{
+ const fixture=(ids,late=true)=>{
+  let attached=0;const detached=[];
+  const context={pages:()=>ids.map((_,i)=>pages[i]).slice(0,late?++attached:ids.length),newCDPSession:async page=>({send:async method=>method==='Target.getTargetInfo'?{targetInfo:{targetId:page.id}}:{},detach:async()=>detached.push(page.id)})};
+  const pages=ids.map(id=>({id,url:()=>`http://127.0.0.1/?tab=${id}`,context:()=>context}));
+  return {browser:{contexts:()=>[context]},detached};
+ };
+ const late=fixture(['A','B']),samples=[];
+ const result=await discoverCEFTargets(late.browser,['A','B'],sample=>samples.push(sample));
+ assert.deepEqual(result.map(c=>c.info.targetId),['A','B']);assert.equal(samples[0].pages.length,1);assert.equal(samples.at(-1).pages.length,2);
+ for(const ids of [['A','B','C'],['A','foreign'],['A','A']]){
+  const current=fixture(ids,false);await assert.rejects(discoverCEFTargets(current.browser,['A','B'],()=>{}),/Unexpected or duplicate/);
+  assert(current.detached.length>0);
+ }
+ const missing=fixture(['A'],false);
+ await assert.rejects(discoverCEFTargets(missing.browser,['A','B'],()=>{},{timeout:10}),/Timeout: exact discovered/);
+ assert.deepEqual(missing.detached,['A']);
+});
 
 test('TLS negative fixture: default verification rejects its own certificate before HTTP',async()=>{
  const fixture=await createInvalidTLSFixture();
