@@ -12,6 +12,7 @@ on:
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
       - 'scripts/build-embedded-cef-mac.mjs'
+      - 'scripts/build-mac-preview*.mjs'
       - 'cmd/dsh-cef-owner-mac/**'
       - 'scripts/probe-linux-dsh-slot.mjs'
       - 'scripts/linux-browser-agent-fixture.mjs'
@@ -101,6 +102,7 @@ jobs:
               - 'native/embeddedbrowser/**'
               - 'cmd/dsh-cef-owner-mac/**'
               - 'scripts/build-embedded-cef-mac.mjs'
+              - 'scripts/build-mac-preview*.mjs'
 
   mac-private-cef:
     needs: changes
@@ -148,6 +150,19 @@ jobs:
           mkdir -p "$RUNNER_TEMP/e67-browser-dependencies"
           cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
           npm ci --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Build and verify the restricted Mac runtime
+        run: |
+          set -o pipefail
+          npm ci --prefix tools/dsh --no-audit --no-fund
+          mkdir -p "$RUNNER_TEMP/e67-restricted-test"
+          node scripts/build-mac-preview-sandbox.mjs --output-dir "$RUNNER_TEMP/e67-restricted-test"
+          CGO_ENABLED=1 go test -c -tags e67nativefixture ./internal/embeddedbrowser/macowner -o "$RUNNER_TEMP/e67-restricted-test/macowner.test"
+          DSH_WORK_CEF_MAC_PUBLICATION="$RUNNER_TEMP/e67-formal-mac/publication.json" DSH_WORK_EXECUTABLE="$GITHUB_WORKSPACE/tools/dsh/node_modules/.bin/dsh" node scripts/with-workeripc-mac.mjs --asset "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" "$RUNNER_TEMP/e67-restricted-test/macowner.test" -test.run '^TestLiveMacRestrictedDSH$' -test.v -test.timeout 100s 2>&1 | tee results/e67-mac-private/restricted-runtime.log
+      - name: Build the actual Mac Wails preview entry point
+        run: |
+          set -o pipefail
+          (cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build:dev)
+          node scripts/build-mac-preview.mjs --output-dir "$RUNNER_TEMP/e67-mac-preview" --bridge "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" --sandbox "$RUNNER_TEMP/e67-restricted-test/dsh-preview-sandbox.node" 2>&1 | tee results/e67-mac-private/preview-build.log
       - name: Exercise formal Mac engine Service and locked MCP
         env:
           DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
@@ -171,6 +186,7 @@ jobs:
           path: |
             results/e67-mac-private/*.log
             ${{ runner.temp }}/e67-formal-mac/publication.json
+            ${{ runner.temp }}/e67-mac-preview/mac-preview-build.json
             ${{ runner.temp }}/e67-mac-private-results/*.json
             ${{ runner.temp }}/e67-mac-private-results/*.png
 
