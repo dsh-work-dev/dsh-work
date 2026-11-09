@@ -90,3 +90,49 @@ func TestLiveExistingWebViewReadinessOnly(t *testing.T) {
 	}
 	t.Log("existing real WebView shell iframe and DSH provider/version readiness confirmed without launching or changing app state")
 }
+
+func TestBuildDeadlineAllowsCompletePipelineWithoutExtendingOtherCommands(t *testing.T) {
+	now := time.Now()
+	// The observed successful native/ACL stage took 165s; the subsequent
+	// bindings/frontend/Go stage needs its own remaining execution time.
+	if err := validate(Request{Action: "build", Deadline: now.Add(4 * time.Minute).UnixMilli()}, now); err != nil {
+		t.Fatalf("complete build pipeline budget rejected: %v", err)
+	}
+	for _, action := range []string{"build", "status", "shutdown", "start", "restart", "stop"} {
+		instance := 0
+		if action == "start" || action == "restart" {
+			instance = 1
+		}
+		limit := 3 * time.Minute
+		if action == "build" {
+			limit = 5 * time.Minute
+		}
+		for _, deadline := range []time.Time{now, now.Add(limit + time.Millisecond)} {
+			if err := validate(Request{Action: action, Instance: instance, Deadline: deadline.UnixMilli()}, now); err == nil {
+				t.Fatalf("%s accepted expired or excessive deadline %v", action, deadline)
+			}
+		}
+	}
+}
+
+func TestControllerBudgetsPreserveExecutionDeadlineAndBuildDrain(t *testing.T) {
+	for action, want := range map[string]time.Duration{
+		"build": 5 * time.Minute, "status": 10 * time.Second,
+		"start": 90 * time.Second, "restart": 90 * time.Second,
+		"stop": 60 * time.Second, "shutdown": 60 * time.Second,
+	} {
+		if got := commandTimeout(action); got != want {
+			t.Fatalf("%s execution budget %v, want %v", action, got, want)
+		}
+		clientWant := want
+		if action == "build" {
+			clientWant += 35 * time.Second
+		}
+		if got := controllerTimeout(action); got != clientWant {
+			t.Fatalf("%s controller budget %v, want %v", action, got, clientWant)
+		}
+		if err := validate(Request{Action: action, Instance: map[string]int{"start": 1, "restart": 1}[action], Deadline: time.Now().Add(want).UnixMilli()}, time.Now()); err != nil {
+			t.Fatalf("%s controller deadline not accepted: %v", action, err)
+		}
+	}
+}

@@ -65,16 +65,7 @@ func Run(args []string) error {
 			return errors.New("one fixed instance selector allowed")
 		}
 	}
-	duration := 90 * time.Second
-	if action == "build" {
-		duration = 170 * time.Second
-	}
-	if action == "status" {
-		duration = 10 * time.Second
-	}
-	if action == "stop" || action == "shutdown" {
-		duration = 60 * time.Second
-	}
+	duration := commandTimeout(action)
 	req.Deadline = time.Now().Add(duration).UnixMilli()
 	if err = validate(req, time.Now()); err != nil {
 		return err
@@ -88,7 +79,7 @@ func Run(args []string) error {
 		return errors.New("runner metadata does not match this workspace")
 	}
 	req.Generation = owner.Generation
-	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	ctx, cancel := context.WithTimeout(context.Background(), controllerTimeout(action))
 	defer cancel()
 	client := daemon.NewProcessClient(identity(root), daemon.ProcessPeer{PID: uint32(owner.PID), Started: owner.Started})
 	defer client.Close()

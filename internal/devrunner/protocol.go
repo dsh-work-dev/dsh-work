@@ -18,6 +18,33 @@ type Request struct {
 	Instance   int    `json:"instance,omitempty"`
 	Deadline   int64  `json:"deadline"`
 }
+
+const buildCommandTimeout = 5 * time.Minute
+
+func commandTimeout(action string) time.Duration {
+	switch action {
+	case "build":
+		// One request owns native + LPAC ACLs, then bindings/frontend/Go.
+		return buildCommandTimeout
+	case "status":
+		return 10 * time.Second
+	case "stop", "shutdown":
+		return 60 * time.Second
+	default:
+		return 90 * time.Second
+	}
+}
+
+func controllerTimeout(action string) time.Duration {
+	duration := commandTimeout(action)
+	if action == "build" {
+		// After the execution deadline, allow the existing independent owned
+		// Job cleanup (5+8+5+8s worst case) and status snapshot (8s) to reply.
+		duration += 35 * time.Second
+	}
+	return duration
+}
+
 type ProcessState struct {
 	PID             uint32 `json:"pid,omitempty"`
 	Started         uint64 `json:"started,omitempty"`
@@ -78,8 +105,12 @@ func validate(r Request, now time.Time) error {
 	default:
 		return errors.New("unknown fixed command")
 	}
-	if r.Deadline <= now.UnixMilli() || r.Deadline > now.Add(3*time.Minute).UnixMilli() {
-		return errors.New("request deadline is expired or exceeds three minutes")
+	limit := 3 * time.Minute
+	if r.Action == "build" {
+		limit = buildCommandTimeout
+	}
+	if r.Deadline <= now.UnixMilli() || r.Deadline > now.Add(limit).UnixMilli() {
+		return fmt.Errorf("request deadline is expired or exceeds %s", limit)
 	}
 	return nil
 }
