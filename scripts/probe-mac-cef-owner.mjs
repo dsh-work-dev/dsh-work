@@ -1,6 +1,6 @@
 // Actual fixed CEF bundle diagnostic, not a general Supervisor Adapter.
 import {execFileSync, spawn, spawnSync} from 'node:child_process';
-import {appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync} from 'node:fs';
+import {appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -10,6 +10,8 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64') throw Error('Requ
 const script = fileURLToPath(import.meta.url);
 if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
   const fd = openSync(process.argv[3], 'w'); writeFileSync(fd, 'R');
+  const stat = fstatSync(fd);
+  writeFileSync(`${process.argv[3]}-writer.json`, JSON.stringify({pid: process.pid, ppid: process.ppid, fd, device: stat.dev, inode: stat.ino, fifo: stat.isFIFO(), childrenSpawned: false}));
   const keepalive = setInterval(() => {}, 1000);
   setTimeout(() => { clearInterval(keepalive); closeSync(fd); }, 90000);
 } else {
@@ -75,7 +77,7 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
       ? members.length === 1 && members[0].pid === rootIdentity.pid && members[0].started === rootIdentity.started && members[0].state === 'live'
       : members.length === 0;
     const sample = {observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), stage: helpersOnly ? 'helpers-before-root-release' : 'all-instances-after-root-exit', instances, group: census, complete: targets.every(instance => ['gone', 'reused'].includes(instance.state)) && groupReady};
-    appendFileSync(join(dir, 'settlement-samples.jsonl'), `${JSON.stringify(sample)}\n`);
+    appendFileSync(join(dir, 'settlement-samples.log'), `${JSON.stringify(sample)}\n`);
     return sample;
   }
   async function waitFor(test, duration, message) {
@@ -86,7 +88,12 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
   try {
     for (const mode of ['normal-close', 'broker-crash', 'owner-death']) {
       const dir = mkdtempSync(join(output, `${mode}-`)), lease = join(dir, 'lease');
-      const phase = (stage, detail = {}) => appendFileSync(join(dir, 'phases.jsonl'), `${JSON.stringify({stage, observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), ...detail})}\n`);
+      const phase = (stage, detail = {}) => appendFileSync(join(dir, 'phases.log'), `${JSON.stringify({stage, observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), ...detail})}\n`);
+      const leaseHolders = stage => {
+        // Evidence only: never authorize cleanup from a numeric PID in lsof.
+        const result = spawnSync('/usr/sbin/lsof', ['-nP', '-Fpcfatn', lease], {encoding: 'utf8', timeout: 5000});
+        writeFileSync(join(dir, `lease-holders-${stage}.json`), JSON.stringify({observedAt: new Date().toISOString(), status: result.status, error: result.error?.message, stdout: result.stdout, stderr: result.stderr}, null, 2));
+      };
       execFileSync('mkfifo', ['-m', '600', lease]);
       const label = `dev.dsh.cefowner.${process.pid}.${randomBytes(6).toString('hex')}`, service = `${domain}/${label}`;
       const argv = [manifest.executable, `--probe-directory=${dir}`, `--probe-url=${pageURL}`];
@@ -121,17 +128,18 @@ if (process.argv[2] === '--lease-holder' && process.argv.length === 4) {
         for (const entry of entries(dir)) run(['procinfo', String(entry.identity.pid)], join(dir, `procinfo-${entry.identity.pid}.json`));
         if (mode === 'normal-close') writeFileSync(join(dir, 'close'), 'normal close\n');
         else if (mode === 'broker-crash') writeFileSync(join(dir, 'crash'), 'SIGKILL inside owned broker\n');
-        else { killedOwner = true; if (!owner.kill('SIGKILL')) throw Error('Could not kill the actual independent lease owner'); }
+        else { leaseHolders('before-kill'); killedOwner = true; if (!owner.kill('SIGKILL')) throw Error('Could not kill the actual independent lease owner'); }
         phase('transition-requested', {mode});
         if (killedOwner) {
           const exited = await ownerExit; phase('lease-owner-exited', exited);
           if (exited.signal !== 'SIGKILL') throw Error('Lease owner did not really die by SIGKILL');
+          leaseHolders('after-kill');
         }
         let helperBarrier, shutdown;
         if (mode !== 'broker-crash') {
           await waitFor(() => {
             const log = events(dir);
-            if (log.some(event => ['reap-error', 'root-release-timeout'].includes(event.event))) throw Error('Broker post-CEF reap/hold failed');
+            if (log.some(event => ['reap-error', 'root-release-timeout', 'lease-read-failed', 'lease-poll-failed'].includes(event.event))) throw Error('Broker lease/reap/hold failed');
             shutdown = log.find(event => event.event === 'shutdown-return');
             return Boolean(shutdown);
           }, 15000, 'CefShutdown did not return');

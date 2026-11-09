@@ -97,17 +97,33 @@ int main(int argc,char** argv) {
       int lease=open((directory+"/lease").c_str(),O_RDONLY|O_NONBLOCK|O_CLOEXEC);
       if(lease<0) { owner_probe::Emit("{\"event\":\"lease-open-failed\"}"); CefPostTask(TID_UI,base::BindOnce(CloseAll)); return; }
       bool armed=false;
+      const char* reason="pump-ended";
       while(reading) {
         if(access((directory+"/crash").c_str(),F_OK)==0) { owner_probe::Emit("{\"event\":\"broker-self-sigkill\"}"); raise(SIGKILL); }
-        if(access((directory+"/close").c_str(),F_OK)==0) break;
+        if(access((directory+"/close").c_str(),F_OK)==0) { reason="close-marker"; break; }
         pollfd p{lease,POLLIN|POLLHUP,0}; int result=poll(&p,1,50);
-        if(result>0) { char byte; auto size=read(lease,&byte,1); if(size>0 && byte=='R') { armed=true; owner_probe::Emit("{\"event\":\"lease-armed\"}"); } else if(size==0 && armed) { owner_probe::Emit("{\"event\":\"lease-eof\"}"); break; } }
+        if(result<0) {
+          if(errno==EINTR) continue;
+          owner_probe::Emit("{\"event\":\"lease-poll-failed\",\"error\":"+std::to_string(errno)+"}"); reason="poll-failed"; break;
+        }
+        // Read the nonblocking FIFO even if the readiness hint timed out. Only
+        // read(2)==0 proves EOF; readiness is not the lease's lifetime contract.
+        char byte; auto size=read(lease,&byte,1); const int error=size<0?errno:0;
+        if(size>0 && byte=='R') { armed=true; owner_probe::Emit("{\"event\":\"lease-armed\"}"); }
+        else if(size==0 && armed) {
+          owner_probe::Emit("{\"event\":\"lease-eof\",\"poll_result\":"+std::to_string(result)+",\"revents\":"+std::to_string(p.revents)+"}"); reason="lease-eof"; break;
+        } else if(size<0 && error!=EINTR && error!=EAGAIN && error!=EWOULDBLOCK) {
+          owner_probe::Emit("{\"event\":\"lease-read-failed\",\"error\":"+std::to_string(error)+"}"); reason="read-failed"; break;
+        }
         if(!armed) std::this_thread::sleep_for(std::chrono::milliseconds(25));
       }
       close(lease);
+      owner_probe::Emit("{\"event\":\"lease-monitor-ended\",\"reason\":"+owner_probe::Quote(reason)+"}");
       if(reading) CefPostTask(TID_UI,base::BindOnce(CloseAll));
     });
-    CefRunMessageLoop(); reading=false; monitor.join(); CefShutdown();
+    CefRunMessageLoop(); owner_probe::Emit("{\"event\":\"pump-return\"}"); reading=false;
+    monitor.join(); owner_probe::Emit("{\"event\":\"monitor-joined\"}");
+    owner_probe::Emit("{\"event\":\"shutdown-enter\"}"); CefShutdown();
     const auto shutdown_at=owner_probe::Now();
     owner_probe::Emit("{\"event\":\"shutdown-return\",\"returned_at_ms\":"+std::to_string(shutdown_at)+",\"group\":"+owner_probe::Census(getpgrp())+"}");
     // Keep the actual LaunchAgent root alive after CEF shutdown. Otherwise its
