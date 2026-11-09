@@ -129,6 +129,9 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 				text = strings.Replace(text, "<head>", `<head><script`+nonce+` src="/__work/embedded-browser.js"></script>`, 1)
 			} else {
 				text, err = projectEmbeddedBrowser(text)
+				if err == nil {
+					text, err = projectEmbeddedArtifact(text)
+				}
 				if err != nil {
 					http.Error(w, err.Error(), 503)
 					return

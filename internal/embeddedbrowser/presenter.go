@@ -48,6 +48,7 @@ type WebPopup struct {
 }
 
 type ViewState struct {
+	ArtifactName     string         `json:"artifactName,omitempty"`
 	Popup            *WebPopup      `json:"popup,omitempty"`
 	PopupVisible     bool           `json:"popupVisible,omitempty"`
 	Downloads        []DownloadView `json:"downloads,omitempty"`
@@ -205,6 +206,9 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 			return p.view, e
 		}
 		p.target = target
+	}
+	if address != "" && p.view.ArtifactName != "" {
+		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
 	}
 	if address != "" && address != p.view.URL {
 		if e := p.target.Navigate(ctx, address); e != nil {
@@ -385,6 +389,10 @@ func (r *PresenterRegistry) Recover(ctx context.Context, peer PresenterPeer, sur
 			return view, err
 		}
 	}
+	if p.view.ArtifactName != "" {
+		p.serial.Unlock()
+		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
+	}
 	p.owner = nil
 	p.view.Lease = rand.Text()
 	p.view.State = "empty"
@@ -515,6 +523,10 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 			p.view.State = "loading"
 			p.view.Frame = ""
 		}
+	}
+	if p.target.artifact != nil && p.view.State == "ready" && !p.target.broker.FrameGraph().ProcessJoinComplete {
+		p.view.State = "loading"
+		p.view.Frame = ""
 	}
 	return nil
 }

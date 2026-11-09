@@ -554,6 +554,7 @@ func runDaemon(identity string, resources Resources) {
 		defer store.Close()
 		registry, err := embeddedbrowser.NewInstancePresenterRegistry(embeddedbrowser.InstanceRegistryConfig{
 			Store: store, AcquireProfile: acquire,
+			ArtifactLocale: func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) },
 			DownloadDecision: func(ctx context.Context) (bool, error) {
 				return askDownloadShutdown(ctx, desktop, loadNativeLocale(&activeLocale))
 			},

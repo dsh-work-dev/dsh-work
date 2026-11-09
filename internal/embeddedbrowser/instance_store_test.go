@@ -53,3 +53,32 @@ func TestInstanceStorePersistentIDsAndSafeDescriptors(t *testing.T) {
 		t.Fatal("untrusted key accepted")
 	}
 }
+
+func TestArtifactDescriptorContainsNoRootOrLiveOrigin(t *testing.T) {
+	s, err := OpenInstanceStore(t.TempDir(), instanceStoreLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	config, err := s.Resolve("artifact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := TabDescriptor{Slot: "session/artifact/tab", ArtifactName: "index.html", Title: "Own local artifact"}
+	if err = s.Remember(config, d); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.Descriptors(config)
+	if err != nil || len(rows) != 1 || rows[0] != d {
+		t.Fatal(rows, err)
+	}
+	for _, bad := range []TabDescriptor{
+		{Slot: d.Slot, ArtifactName: "index.html", URL: "http://old.artifact.localhost/index.html"},
+		{Slot: d.Slot, ArtifactName: "../index.html"},
+		{Slot: d.Slot, ArtifactName: `C:\private\index.html`},
+	} {
+		if _, err = safeDescriptor(bad); err == nil {
+			t.Fatal("unsafe artifact descriptor", bad)
+		}
+	}
+}

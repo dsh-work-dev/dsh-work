@@ -1011,7 +1011,7 @@ void Command(Dict m) {
     for(const auto& [_,other]:artifacts)if(state->context->IsSharingWith(other->context)){FailArtifactOpen(state);return;}
     if(!state->context->RegisterSchemeHandlerFactory("http","",new ArtifactFactory(state))||
        !state->context->RegisterSchemeHandlerFactory("https","",new ArtifactFactory(state))){FailArtifactOpen(state);return;}
-    artifacts.emplace(state->lease,state);if(!Create(route,0,state->origin+m->GetString("entry").ToString(),state))FailArtifactOpen(state);return;
+    artifacts.emplace(state->lease,state);if(!Create(route,0,state->origin+m->GetString("entry").ToString(),state,m->GetBool("managed")))FailArtifactOpen(state);return;
   }
   if (kind == "open") {auto url=m->GetString("url").ToString();Create(route,0,url.empty()?"about:blank":url,nullptr,m->GetBool("managed"));return; }
   auto p = m->GetDictionary("payload"); if (!p) return;

@@ -195,3 +195,11 @@ func (s *embeddedBrowserService) Popup(ctx context.Context, slot string, popup e
 	}
 	return s.Registry.Popup(ctx, peer, surface, slot, popup, action)
 }
+
+func (s *embeddedBrowserService) OpenArtifact(ctx context.Context, parent uint64, windowLease, slot string) (embeddedbrowser.ViewState, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return embeddedbrowser.ViewState{}, err
+	}
+	return s.Registry.OpenArtifact(ctx, peer, surface, uintptr(parent), windowLease, slot)
+}

@@ -1,10 +1,15 @@
 import {EmbeddedBrowserService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
+import {t, subscribeLocale} from "./i18n";
 import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
 import type {SlotBounds, WebDialog, WebPopup} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
 
 /** DSH supplies CSS slot intent; this shell owns the iframe transform and clip. */
 export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (blocked:boolean)=>Promise<void>) {
  let enabled=false,candidate=false,documentToken="",accepting=false;
+ type ArtifactLabels = Record<"choose"|"reselect"|"select"|"scope"|"local"|"selected"|"waiting"|"canceled"|"failed"|"recover"|"paused",string>;
+ const artifactLabels=():ArtifactLabels=>({choose:t("browser.artifact.choose"),reselect:t("browser.artifact.reselect"),select:t("browser.artifact.select"),scope:t("browser.artifact.scope"),local:t("browser.artifact.local"),selected:t("browser.artifact.selected"),waiting:t("browser.artifact.waiting"),canceled:t("browser.artifact.canceled"),failed:t("browser.artifact.failed"),recover:t("browser.artifact.recover"),paused:t("browser.artifact.paused")});
+ subscribeLocale(()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-artifact-labels",document:documentToken,value:artifactLabels()},origin)});
+
  let nativeQueue=Promise.resolve();
  let overlayRevision=0;
  const native=<T>(task:()=>PromiseLike<T>):Promise<T>=>{const result=nativeQueue.then(task);nativeQueue=result.then(()=>{},()=>{});return result};
@@ -37,11 +42,13 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
    if(!accepting||m.document!==token)return true;
    const execute=async()=>{
     if(!accepting||documentToken!==token)throw Error("Browser document retired");
+    if(m.action==="artifact-labels")return artifactLabels();
     enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable");
     if(m.action==="modal-overlay") {if(typeof m.blocked!=="boolean")throw Error("Invalid modal intent");await modalIntent(m.blocked);return true}
     if(typeof slot!=="string"||slot.length>1024)throw Error("Invalid browser slot");
     switch(m.action){
      case "update":if(typeof m.address!=="string"||m.address.length>8192||typeof m.visible!=="boolean")throw Error("Invalid browser request");return EmbeddedBrowserService.Update(token,slot,m.address,clamp(m.rect),m.visible&&!frame.hidden);
+     case "artifact-open":return EmbeddedBrowserService.OpenArtifact(token,slot);
      case "state":return EmbeddedBrowserService.State(token,slot);
      case "select-control":if(typeof m.session!=="string"||m.session.length>1024||typeof m.lease!=="string")throw Error("Invalid browser selection");return EmbeddedBrowserService.SelectControl(token,new URL(frame.src).searchParams.get("generation")||"",m.session,slot,m.lease);
      case "recover":if(typeof m.address!=="string"||m.address.length>8192)throw Error("Invalid browser address");return EmbeddedBrowserService.Recover(token,slot,m.address);
@@ -63,7 +70,7 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
      default:throw Error("Unsupported browser request");
     }
    };
-   void (m.action==="modal-overlay"?execute():native(execute)).then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token)send(m.id as string,undefined,String(error))});
+   void ((m.action==="modal-overlay"||m.action==="artifact-open")?execute():native(execute)).then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token)send(m.id as string,undefined,String(error))});
    return true;
   }
  };

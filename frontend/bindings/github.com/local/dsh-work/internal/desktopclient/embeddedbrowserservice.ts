@@ -52,6 +52,14 @@ export function Hide(): $CancellablePromise<void> {
     return $Call.ByID(2487194256);
 }
 
+/**
+ * OpenArtifact carries user intent only. The daemon owns the native file picker
+ * and receives no page-selected path or root capability.
+ */
+export function OpenArtifact(document: string, slot: string): $CancellablePromise<embeddedbrowser$0.ViewState> {
+    return $Call.ByID(1079395994, document, slot);
+}
+
 export function Overlay(blocked: boolean): $CancellablePromise<void> {
     return $Call.ByID(1081105216, blocked);
 }

@@ -12,7 +12,10 @@ import (
 
 // Native presenter fields are read from the trusted Wails context, never from
 // JavaScript arguments. The daemon independently checks the pipe peer/HWND.
+type artifactRequest struct{ cancel context.CancelFunc }
+
 type embeddedGate struct {
+	artifacts map[string]*artifactRequest
 	sync.Mutex
 	blocked  bool
 	document string
@@ -104,6 +107,9 @@ func (s *EmbeddedBrowserService) Detach(ctx context.Context, document, slot stri
 		return gateErr
 	}
 	defer gate.Unlock()
+	if pending := gate.artifacts[slot]; pending != nil {
+		pending.cancel()
+	}
 	if !s.Enabled {
 		return nil
 	}
@@ -184,6 +190,11 @@ func (s *EmbeddedBrowserService) Overlay(ctx context.Context, blocked bool) erro
 	defer gate.Unlock()
 	gate.blocked = blocked
 	if blocked {
+		for _, pending := range gate.artifacts {
+			pending.cancel()
+		}
+	}
+	if blocked {
 		return call(ctx, s.Client, "EmbeddedBrowserService", "Hide", nil, nil)
 	}
 	return nil
@@ -236,6 +247,9 @@ func (s *EmbeddedBrowserService) BeginDocument(ctx context.Context, document str
 	gate := s.gate(window.Name())
 	gate.Lock()
 	defer gate.Unlock()
+	for _, pending := range gate.artifacts {
+		pending.cancel()
+	}
 	gate.document = ""
 	admission, err := s.RegisterWindow(ctx)
 	if err != nil {
@@ -343,4 +357,50 @@ func (s *EmbeddedBrowserService) Popup(ctx context.Context, document, slot strin
 	var url string
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "Popup", []any{slot, popup, action}, &url)
 	return url, err
+}
+
+// OpenArtifact carries user intent only. The daemon owns the native file picker
+// and receives no page-selected path or root capability.
+func (s *EmbeddedBrowserService) OpenArtifact(ctx context.Context, document, slot string) (embeddedbrowser.ViewState, error) {
+	gate, err := s.lockDocument(ctx, document)
+	if err != nil {
+		return embeddedbrowser.ViewState{}, err
+	}
+	if gate.blocked || len(slot) == 0 || len(slot) > 1024 {
+		gate.Unlock()
+		return embeddedbrowser.ViewState{}, errors.New("BROWSER_VIEW_HIDDEN")
+	}
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		gate.Unlock()
+		return embeddedbrowser.ViewState{}, err
+	}
+	admission, err := s.RegisterWindow(ctx)
+	if err != nil {
+		gate.Unlock()
+		return embeddedbrowser.ViewState{}, err
+	}
+	parent, _, err := presenterNativeWindow(window)
+	if err != nil {
+		gate.Unlock()
+		return embeddedbrowser.ViewState{}, err
+	}
+	if gate.artifacts == nil {
+		gate.artifacts = map[string]*artifactRequest{}
+	}
+	if len(gate.artifacts) != 0 {
+		gate.Unlock()
+		return embeddedbrowser.ViewState{}, errors.New("CEF_ARTIFACT_SELECTION_PENDING")
+	}
+	life, cancel := context.WithCancel(ctx)
+	pending := &artifactRequest{cancel: cancel}
+	gate.artifacts[slot] = pending
+	gate.Unlock()
+	defer cancel()
+	var result embeddedbrowser.ViewState
+	err = call(life, s.Client, "EmbeddedBrowserService", "OpenArtifact", []any{parent, admission.Lease, slot}, &result)
+	gate.Lock()
+	delete(gate.artifacts, slot)
+	gate.Unlock()
+	return result, err
 }

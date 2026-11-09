@@ -76,7 +76,7 @@ test('shell document revision rejects an old update delayed in Capability',async
  const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
  const capability=deferred();let updates=0;
  const bindings={BeginDocument:async()=>true,Capability:()=>capability.promise,Update:async()=>{updates++}};
- const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
  const frame={getAttribute:()=> 'http://dsh/#__dsh_work_doc=old',contentWindow:{postMessage(){}},getBoundingClientRect:()=>({left:0,top:0,right:300,bottom:300,width:300,height:300}),clientWidth:300,clientHeight:300};
  const bridge=exports.embeddedBrowserBridge(frame,async()=>{});
@@ -100,7 +100,7 @@ test('frame fallback/reload waits for native retirement ACK and drops superseded
 test('selection forwards current document and Worker generation as intent only',async()=>{
  const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
  const calls=[];const bindings={BeginDocument:async()=>true,Capability:async()=>true,SelectControl:async(...args)=>{calls.push(args);return{state:'waiting-for-turn'}}};
- const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
  const frame={src:'http://dsh/?generation=actual-worker',getAttribute:()=> 'http://dsh/?generation=actual-worker',contentWindow:{postMessage(){}}};
  const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('current-document');bridge.activateDocument('current-document');
@@ -114,7 +114,7 @@ test('shell preserves visible then hidden intent order across delayed Capability
  const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
  const capability=deferred(),calls=[];let checks=0;
  const bindings={BeginDocument:async()=>true,Capability:()=>++checks===1?capability.promise:Promise.resolve(true),Update:async(...args)=>{calls.push(args);return{visible:args[4]}}};
- const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
  const frame={getAttribute:()=> 'http://dsh/',contentWindow:{postMessage(){}},getBoundingClientRect:()=>({left:0,top:40,right:300,bottom:340,width:300,height:300}),clientWidth:300,clientHeight:300};
  const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('document');bridge.activateDocument('document');
@@ -129,7 +129,7 @@ test('menu close ACK cannot resume the document after Settings has blocked it',a
  const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
  const resumed=deferred(),messages=[],calls=[];
  const bindings={BeginDocument:async()=>true,Capability:async()=>true,State:async()=>({}),Overlay:blocked=>{calls.push(blocked);return blocked?Promise.resolve():resumed.promise}};
- const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
  const frame={getAttribute:()=> 'http://dsh/',contentWindow:{postMessage:m=>messages.push(m)}};
  const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('doc');bridge.activateDocument('doc');
@@ -143,4 +143,20 @@ test('menu close ACK cannot resume the document after Settings has blocked it',a
  assert.equal(messages.some(m=>m.type==='dsh-work/browser-blocked'&&!m.blocked),false,'an older resume ACK must not undo the latest block');
  await bridge.overlay(false);
  assert.equal(messages.at(-1).blocked,false,'closing Settings resumes the retained document');
+});
+
+test('artifact copy uses the trusted Host locale and updates existing documents',async()=>{
+ const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
+ let locale='en',changed;const messages=[];
+ const bindings={BeginDocument:async()=>true,Capability:async()=>{throw Error("CEF unavailable")}};
+ const exports={};const context=vm.createContext({exports,require:()=>({EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin,t:key=>locale+':'+key,subscribeLocale:fn=>{changed=fn;return()=>{}}}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+ const frame={getAttribute:()=> 'http://dsh/',contentWindow:{postMessage:m=>messages.push(m)}};
+ const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('doc');bridge.activateDocument('doc');
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'labels',action:'artifact-labels',document:'doc',slot:'artifact',locale:'zh-CN',title:'untrusted title'}});await tick();
+ assert.equal(messages.at(-1).value.choose,'en:browser.artifact.choose');
+ locale='ja-JP';changed();
+ assert.equal(messages.at(-1).type,'dsh-work/browser-artifact-labels');
+ assert.equal(messages.at(-1).document,'doc');
+ assert.equal(messages.at(-1).value.scope,'ja-JP:browser.artifact.scope');
 });

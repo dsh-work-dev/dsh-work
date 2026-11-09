@@ -8,6 +8,18 @@ export const defaultLocale: Locale = "zh-CN";
 
 const messages: Record<Locale, Record<string, string>> = {
   en: {
+    "browser.artifact.choose": "Choose HTML…",
+    "browser.artifact.reselect": "Choose HTML again…",
+    "browser.artifact.select": "Use for this conversation",
+    "browser.artifact.scope": "Opening a file allows resources in its folder.",
+    "browser.artifact.local": "Local artifact",
+    "browser.artifact.selected": "Page selected for this conversation.",
+    "browser.artifact.waiting": "Page selected. Send your next message to continue.",
+    "browser.artifact.canceled": "Selection cancelled.",
+    "browser.artifact.failed": "Could not open or select this page. Try again.",
+    "browser.artifact.recover": "Choose the file again to open it. Unsubmitted input may have been lost.",
+    "browser.artifact.paused": "Browser control is paused.",
+
 "automation.computerAccess.warning":"This application can run commands or change files and system settings.",
 
 "automation.computerAccess.stopping":"Stopping…",
@@ -945,6 +957,18 @@ const messages: Record<Locale, Record<string, string>> = {
     "shell.window.close": "Close",
   },
   "zh-CN": {
+    "browser.artifact.choose": "选择 HTML…",
+    "browser.artifact.reselect": "重新选择 HTML…",
+    "browser.artifact.select": "用于当前会话",
+    "browser.artifact.scope": "打开文件时，将读取其所在文件夹内的相对资源。",
+    "browser.artifact.local": "本地产物",
+    "browser.artifact.selected": "已为当前会话选定页面。",
+    "browser.artifact.waiting": "页面已选定，请发送下一条消息。",
+    "browser.artifact.canceled": "已取消选择。",
+    "browser.artifact.failed": "无法打开或选择此页面，请重试。",
+    "browser.artifact.recover": "请重新选择文件以打开页面。未提交的输入可能已丢失。",
+    "browser.artifact.paused": "浏览器控制已暂停。",
+
 "automation.computerAccess.warning":"此应用可运行命令，或更改文件和系统设置。",
 
 "automation.computerAccess.stopping":"正在停止…",
@@ -1882,6 +1906,18 @@ const messages: Record<Locale, Record<string, string>> = {
     "shell.window.close": "关闭",
   },
   "ja-JP": {
+    "browser.artifact.choose": "HTML を選択…",
+    "browser.artifact.reselect": "HTML を再選択…",
+    "browser.artifact.select": "この会話で使用",
+    "browser.artifact.scope": "ファイルを開くと、同じフォルダー内の相対リソースを読み取ります。",
+    "browser.artifact.local": "ローカル成果物",
+    "browser.artifact.selected": "この会話で使用するページを選択しました。",
+    "browser.artifact.waiting": "ページを選択しました。次のメッセージを送信してください。",
+    "browser.artifact.canceled": "選択をキャンセルしました。",
+    "browser.artifact.failed": "ページを開くか選択できませんでした。再試行してください。",
+    "browser.artifact.recover": "ファイルを再選択して開いてください。未送信の入力は失われた可能性があります。",
+    "browser.artifact.paused": "ブラウザーの操作を一時停止しています。",
+
 "automation.computerAccess.warning":"このアプリはコマンドの実行や、ファイル・システム設定の変更ができます。",
 
 "automation.computerAccess.stopping":"停止中…",

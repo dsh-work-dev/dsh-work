@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/local/dsh-work/internal/settings"
 	"io"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ type InstanceRegistryConfig struct {
 	StartBroker      func(context.Context, InstanceConfig) (*Broker, error)
 	OnFailure        func(string, error)
 	DownloadDecision DownloadDecision
+	ArtifactLocale   func() settings.Locale
 }
 
 type instancePresenter struct {
@@ -165,7 +167,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 			}
 		}
 		for _, d := range rows {
-			i.views.views[presentationKey(surface, d.Slot)] = &presentation{peer: peer, surface: surface, parent: parent, view: ViewState{Lease: rand.Text(), State: "NeedsReload", URL: d.URL, Title: d.Title}, cleaned: true}
+			i.views.views[presentationKey(surface, d.Slot)] = &presentation{peer: peer, surface: surface, parent: parent, view: ViewState{Lease: rand.Text(), State: "NeedsReload", URL: d.URL, Title: d.Title, ArtifactName: d.ArtifactName}, cleaned: true}
 		}
 		cancel := i.cancel
 		go func() {
@@ -309,8 +311,12 @@ func (r *InstancePresenterRegistry) rememberLocked(i *instancePresenter) error {
 	for key, p := range i.views.views {
 		p.serial.Lock()
 		slot := key[len(p.surface)+1:]
-		if p.view.URL != "" {
-			result = errors.Join(result, r.config.Store.Remember(i.config, TabDescriptor{Slot: slot, URL: p.view.URL, Title: p.view.Title}))
+		if p.view.URL != "" || p.view.ArtifactName != "" {
+			d := TabDescriptor{Slot: slot, URL: p.view.URL, Title: p.view.Title, ArtifactName: p.view.ArtifactName}
+			if d.ArtifactName != "" {
+				d.URL = ""
+			}
+			result = errors.Join(result, r.config.Store.Remember(i.config, d))
 		}
 		p.serial.Unlock()
 	}
@@ -592,7 +598,25 @@ func (r *InstancePresenterRegistry) Detach(ctx context.Context, p PresenterPeer,
 		return e
 	}
 	defer i.serial.Unlock()
-	return i.views.Detach(ctx, p, s, slot)
+	view := i.views.get(s, slot)
+	artifact := false
+	if view != nil {
+		view.serial.Lock()
+		artifact = view.view.ArtifactName != ""
+		view.serial.Unlock()
+	}
+	if err := i.views.Detach(ctx, p, s, slot); err != nil {
+		return err
+	}
+	if artifact {
+		if err := r.config.Store.Forget(i.config, slot); err != nil {
+			return err
+		}
+		i.views.mu.Lock()
+		delete(i.views.views, presentationKey(s, slot))
+		i.views.mu.Unlock()
+	}
+	return nil
 }
 func (r *InstancePresenterRegistry) Action(ctx context.Context, p PresenterPeer, s, slot, a string) error {
 	i, e := r.lockSurface(p, s)

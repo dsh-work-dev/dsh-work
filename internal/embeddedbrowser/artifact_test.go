@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -64,7 +65,11 @@ func TestCanceledArtifactInitializationConsumesLateACKAndClosesRoot(t *testing.T
 		}
 		peerErr <- err
 	}()
-	if _, err := b.OpenArtifact(ctx, t.TempDir(), "index.html"); !errors.Is(err, context.Canceled) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "index.html"), []byte("<!doctype html>"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.OpenArtifact(ctx, directory, "index.html"); !errors.Is(err, context.Canceled) {
 		t.Fatal("lost caller cancellation", err)
 	}
 	if b.ArtifactCount() != 0 {

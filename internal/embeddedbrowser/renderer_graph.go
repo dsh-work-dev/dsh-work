@@ -38,23 +38,24 @@ type rendererFault struct {
 }
 
 type rendererTracker struct {
-	broker          *Broker
-	inventory       supervisor.ProcessInventory
-	image           os.FileInfo
-	stop, joined    chan struct{}
-	update          chan struct{}
-	once            sync.Once
-	mu              sync.Mutex
-	revision, epoch uint64
-	complete        bool
-	established     bool
-	joinUncertain   bool
-	conflicted      map[uint32]bool
-	faults          map[uint64]*rendererFault
-	held            map[uint32]*rendererLease
-	frames          []FrameRecord
-	retired         []supervisor.ProcessLease
-	cleanupErr      error
+	broker           *Broker
+	inventory        supervisor.ProcessInventory
+	image            os.FileInfo
+	stop, joined     chan struct{}
+	update           chan struct{}
+	once             sync.Once
+	mu               sync.Mutex
+	revision, epoch  uint64
+	complete         bool
+	established      bool
+	artifactRetiring map[string]bool
+	joinUncertain    bool
+	conflicted       map[uint32]bool
+	faults           map[uint64]*rendererFault
+	held             map[uint32]*rendererLease
+	frames           []FrameRecord
+	retired          []supervisor.ProcessLease
+	cleanupErr       error
 }
 
 func newRendererTracker(b *Broker, executable string) *rendererTracker {
@@ -215,8 +216,23 @@ func (r *rendererTracker) refresh() {
 		wanted[frame.Child] = true
 	}
 	r.mu.Lock()
+	r.finishIdleArtifactRetirementsLocked(snapshot)
 	defer func() {
 		pause := r.established && uncertain
+		// Every sampled frame must belong to an explicitly revoked artifact.
+		// Those routes cannot dispatch. Keep teardown uncertainty pending until
+		// the native context/frame close ACK; an unrelated live owner still
+		// requires the normal permanent continuity fence.
+		retiringOnly := len(r.artifactRetiring) > 0
+		for _, frame := range snapshot.Frames {
+			if _, retiring := r.artifactRetiring[frame.Owner]; !retiring {
+				retiringOnly = false
+				break
+			}
+		}
+		if snapshot.UnknownReason == "" && retiringOnly {
+			pause = false
+		}
 		r.mu.Unlock()
 		if pause {
 			r.broker.pauseRendererGraph(errors.New(reason))
@@ -419,4 +435,43 @@ func (r *rendererTracker) arm() error {
 		return cause
 	}
 	return nil
+}
+
+// Only Artifact.Revoke calls this after its Go route/resources are invalidated.
+// This is a pending teardown fence, not permission to control an unknown graph.
+func (r *rendererTracker) beginArtifactRetirement(owner string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.artifactRetiring == nil {
+		r.artifactRetiring = map[string]bool{}
+	}
+	if _, exists := r.artifactRetiring[owner]; !exists {
+		r.artifactRetiring[owner] = false
+	}
+}
+
+// Called only after the authenticated native context/frame/resource drain ACK.
+// A prior fault is never cleared. A new document must establish a fresh census.
+func (r *rendererTracker) finishArtifactRetirement(owner string) {
+	graph := r.broker.frameGraphOnly()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.artifactRetiring[owner] = true
+	r.finishIdleArtifactRetirementsLocked(graph)
+}
+
+func (r *rendererTracker) finishIdleArtifactRetirementsLocked(graph FrameGraphSnapshot) {
+	if len(r.artifactRetiring) == 0 {
+		return
+	}
+	for _, complete := range r.artifactRetiring {
+		if !complete {
+			return
+		}
+	}
+	if graph.TopologyComplete && len(graph.Frames) == 0 && graph.FaultEpoch == 0 && graph.UnknownReason == "" && !r.broker.ControlPaused() {
+		clear(r.artifactRetiring)
+		r.established = false
+		r.complete = false
+	}
 }

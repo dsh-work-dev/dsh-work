@@ -93,17 +93,32 @@ func (a *Artifact) Select(_ context.Context, r automation.Request) (browserrunti
 }
 
 func (b *Broker) OpenArtifact(ctx context.Context, directory, entry string) (*Artifact, error) {
+	return b.openArtifact(ctx, directory, entry, false)
+}
+
+func (b *Broker) openArtifact(ctx context.Context, directory, entry string, managed bool) (*Artifact, error) {
 	ctx, stop := context.WithTimeout(ctx, 15*time.Second)
 	defer stop()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !filepath.IsAbs(directory) || entry == "" {
+	if !filepath.IsAbs(directory) || !filepath.IsLocal(entry) {
 		return nil, errors.New("CEF_ARTIFACT_ROOT_REQUIRED")
 	}
 	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, err
+	}
+	f, err := root.Open(entry)
+	if err != nil {
+		root.Close()
+		return nil, err
+	}
+	info, err := f.Stat()
+	f.Close()
+	if err != nil || !info.Mode().IsRegular() {
+		root.Close()
+		return nil, errors.New("CEF_ARTIFACT_NOT_FILE")
 	}
 	id := strings.ToLower(rand.Text())
 	part := rand.Text()
@@ -123,7 +138,7 @@ func (b *Broker) OpenArtifact(ctx context.Context, directory, entry string) (*Ar
 	b.routes[a.route.id] = a.route
 	b.mu.Unlock()
 	path := (&url.URL{Path: "/" + filepath.ToSlash(entry)}).EscapedPath()
-	if err = b.write(map[string]any{"kind": "artifact.open", "lease": id, "partition": part, "origin": a.origin, "route": a.route.id, "entry": path}); err != nil {
+	if err = b.write(map[string]any{"kind": "artifact.open", "lease": id, "partition": part, "origin": a.origin, "route": a.route.id, "entry": path, "managed": managed}); err != nil {
 		return nil, a.cleanupFailedOpen(err)
 	}
 	if b.observe != nil {
@@ -186,6 +201,9 @@ func (a *Artifact) Revoke(ctx context.Context) error {
 	a.cancel()
 	a.mu.Unlock()
 	a.route.finish(ErrArtifactRevoked)
+	if a.broker.renderers != nil {
+		a.broker.renderers.beginArtifactRetirement(a.route.id)
+	}
 	// Send the native dispatch/context invalidation immediately; waiting on a
 	// canceled filesystem operation must not postpone the native control barrier.
 	if !a.nativeClosed {
@@ -212,6 +230,9 @@ func (a *Artifact) Revoke(ctx context.Context) error {
 			return errors.Join(ErrClosed, a.broker.Close())
 		}
 		a.nativeClosed = true
+		if a.broker.renderers != nil {
+			a.broker.renderers.finishArtifactRetirement(a.route.id)
+		}
 	}
 	if err := a.closeRoot(); err != nil {
 		return err

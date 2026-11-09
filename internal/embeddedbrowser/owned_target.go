@@ -224,6 +224,9 @@ func (t *OwnedTarget) register() {
 	t.broker.targets[t.owner] = append(t.broker.targets[t.owner], t)
 }
 func (t *OwnedTarget) CloseNative(ctx context.Context) error {
+	if t.artifact != nil {
+		return t.artifact.Revoke(ctx)
+	}
 	select {
 	case <-t.nativeClosed:
 		return nil

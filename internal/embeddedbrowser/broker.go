@@ -495,6 +495,9 @@ func (b *Broker) Close() error {
 }
 func (b *Broker) close() error {
 	var result error
+	// Retire all Agent dispatch before shutdown, but keep the authenticated
+	// reader alive through native exit so final frame/context drains can finish.
+	b.invalidate(ErrClosed)
 	b.mu.Lock()
 	leases := make([]*Artifact, 0, len(b.artifacts))
 	for _, a := range b.artifacts {
@@ -511,11 +514,7 @@ func (b *Broker) close() error {
 		if err := b.write(map[string]any{"kind": "shutdown"}); err != nil {
 			result = errors.Join(result, fmt.Errorf("CEF shutdown dispatch: %w", err))
 		}
-		if err := b.conn.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("CEF pipe close: %w", err))
-		}
 	}
-	b.invalidate(ErrClosed)
 	if b.worker != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -529,6 +528,17 @@ func (b *Broker) close() error {
 		if exit := b.worker.ExitResult(); exit.Code != 0 || exit.Err != "" {
 			result = errors.Join(result, fmt.Errorf("CEF_SHUTDOWN_FAILED: exit=%d error=%s", exit.Code, exit.Err))
 		}
+	}
+	// Normal native exit (or the existing bounded forced-stop attempt) owns
+	// this boundary. Closing earlier can truncate an authenticated terminal
+	// frame and make the native fail-closed sender retire an otherwise normal
+	// shutdown. This does not promise delivery of every queued terminal.
+	if b.conn != nil {
+		if err := b.conn.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("CEF pipe close: %w", err))
+		}
+	}
+	if b.worker != nil {
 		b.treeNeedsJoin = true
 		b.workerNeedsClose = true
 		result = errors.Join(result, b.joinWorker())

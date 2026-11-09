@@ -29,6 +29,7 @@ export interface SlotBounds {
 }
 
 export interface ViewState {
+    "artifactName"?: string;
     "popup"?: WebPopup | null;
     "popupVisible"?: boolean;
     "downloads"?: DownloadView[] | null;

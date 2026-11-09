@@ -5,6 +5,7 @@ package downloads
 import (
 	"context"
 	"fmt"
+	"github.com/local/dsh-work/internal/nativeui"
 	"runtime"
 	"sync"
 	"syscall"
@@ -192,9 +193,23 @@ func dialogString(d *saveDialog, method uintptr, s string) error {
 	return comResult(hr)
 }
 func chooseNativePath(ctx context.Context, owner DialogOwner, p Pending) (string, error) {
+	return chooseNativeFileDialog(ctx, owner, false, "保存来自 "+p.SourceOrigin+" 的文件", SuggestedName(p.SuggestedName), "")
+}
+
+// ChooseHTMLArtifact uses the existing owned/cancellable system dialog. Its
+// selected file grants this invocation its containing bundle directory.
+func ChooseHTMLArtifact(ctx context.Context, owner DialogOwner, labels nativeui.ArtifactPickerLabels) (string, error) {
+	return chooseNativeFileDialog(ctx, owner, true, labels.Title, "", labels.Open)
+}
+
+func chooseNativeFileDialog(ctx context.Context, owner DialogOwner, open bool, title, filename, openLabel string) (string, error) {
 	return runOwnedModal(ctx, owner, func(m *saveModal) (string, error) {
 		clsid := ole.NewGUID("{C0B4E2F3-BA21-4773-8DBA-335EC946EB8B}")
 		iid := ole.NewGUID("{84BCCD23-5FDE-4CDB-AEA4-AF64B83D78AB}")
+		if open {
+			clsid = ole.NewGUID("{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}")
+			iid = ole.NewGUID("{D57C7288-D4AD-4768-BE02-9D969532D960}")
+		}
 		unknown, e := ole.CreateInstance(clsid, iid)
 		if e != nil {
 			return "", e
@@ -208,17 +223,35 @@ func chooseNativePath(ctx context.Context, owner DialogOwner, p Pending) (string
 			return "", e
 		}
 		flags = flags&^uint32(2) | 0x40 | 0x800 | 0x8 | 0x2000000 // no overwrite prompt; filesystem/path required.
+		if open {
+			flags |= 0x1000 // file must exist
+			type filterSpec struct{ name, pattern *uint16 }
+			name, _ := win.UTF16PtrFromString("HTML")
+			pattern, _ := win.UTF16PtrFromString("*.html;*.htm")
+			filter := filterSpec{name, pattern}
+			hr, _, _ = syscall.SyscallN(d.Vtable.SetFileTypes, uintptr(unsafe.Pointer(d)), 1, uintptr(unsafe.Pointer(&filter)))
+			runtime.KeepAlive(filter)
+			if e = comResult(hr); e != nil {
+				return "", e
+			}
+		}
 		hr, _, _ = syscall.SyscallN(d.Vtable.SetOptions, uintptr(unsafe.Pointer(d)), uintptr(flags))
 		if e = comResult(hr); e != nil {
 			return "", e
 		}
-		if e = dialogString(d, d.Vtable.SetFileName, SuggestedName(p.SuggestedName)); e != nil {
+		if filename != "" {
+			if e = dialogString(d, d.Vtable.SetFileName, filename); e != nil {
+				return "", e
+			}
+		}
+		if e = dialogString(d, d.Vtable.SetTitle, title); e != nil {
 			return "", e
 		}
-		if e = dialogString(d, d.Vtable.SetTitle, "保存来自 "+p.SourceOrigin+" 的文件"); e != nil {
-			return "", e
+		label := "选择位置"
+		if open {
+			label = openLabel
 		}
-		if e = dialogString(d, d.Vtable.SetOkButtonLabel, "选择位置"); e != nil {
+		if e = dialogString(d, d.Vtable.SetOkButtonLabel, label); e != nil {
 			return "", e
 		}
 		if !validOwner(owner, m.process) || ctx.Err() != nil {

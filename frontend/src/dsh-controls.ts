@@ -58,7 +58,7 @@ export function measureControls(doc: Document, read: (name: string) => string): 
   doc.body.append(still, host);
   const get = (name: string) => host.querySelector<HTMLElement>(`[data-sample="${name}"]`)!;
   const style = (element: Element) => getComputedStyle(element);
-  const tokens: Record<string, string> = {};
+  const tokens: Record<string, string> = {"--dsh-work-control-gap-size": read("--space-2")};
   try {
     for (const state of ["off", "on"] as const) {
       const sample = get(`switch-${state}`);

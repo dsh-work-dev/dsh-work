@@ -1,4 +1,4 @@
-﻿param([int]$FixturePid,[long]$Started,[long]$Owner,[string]$Action,[string]$OwnTempFile,[string]$ExpectedTitle)
+param([int]$FixturePid,[long]$Started,[long]$Owner,[string]$Action,[string]$OwnTempFile,[string]$ExpectedTitle,[string]$OwnTempRoot)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 Add-Type @"
@@ -11,12 +11,19 @@ public delegate bool Enumerate(IntPtr h,IntPtr p);
 [DllImport("user32.dll")]public static extern bool IsChild(IntPtr parent,IntPtr child);
 [DllImport("user32.dll")]public static extern bool EnumChildWindows(IntPtr parent,Enumerate callback,IntPtr p);
 [DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetClassName(IntPtr hwnd,System.Text.StringBuilder text,int count);
+[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetWindowText(IntPtr hwnd,System.Text.StringBuilder text,int count);
 [DllImport("user32.dll")]public static extern int GetDlgCtrlID(IntPtr hwnd);
 [DllImport("user32.dll")]public static extern IntPtr GetDlgItem(IntPtr dialog,int id);
 [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)]public static extern IntPtr SendMessageTimeout(IntPtr hwnd,uint message,UIntPtr w,IntPtr l,uint flags,uint timeout,out UIntPtr result);
 }
 "@
 function Assert-Fixture {if((Get-Process -Id $FixturePid).StartTime.ToUniversalTime().ToFileTimeUtc() -ne $Started){throw 'Fixture process identity changed'}}
+if($OwnTempRoot){
+ $resolvedRoot=[IO.Path]::GetFullPath($OwnTempRoot)
+ if(!(Split-Path $resolvedRoot -Leaf).StartsWith('dsh-e76-artifact-') -or [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($OwnTempFile)) -ne $resolvedRoot -or [IO.Path]::GetFileName($OwnTempFile) -ne 'index.html' -or $ExpectedTitle -ne '打开 HTML（允许读取所在文件夹内的资源）'){throw 'Not an artifact self-fixture'}
+ [uint32]$ownerPid=0;[FixtureWindows]::GetWindowThreadProcessId([IntPtr]$Owner,[ref]$ownerPid)|Out-Null
+ if($ownerPid -ne $FixturePid){throw 'Artifact fixture does not own parent'}
+}
 Assert-Fixture
 $script:dialog=[IntPtr]::Zero
 $deadline=[DateTime]::UtcNow.AddSeconds(12)
@@ -24,19 +31,40 @@ do {
  Assert-Fixture
  [FixtureWindows]::EnumWindows({param($h,$p);[uint32]$ownerPid=0;[FixtureWindows]::GetWindowThreadProcessId($h,[ref]$ownerPid)|Out-Null
  if($ownerPid -eq $FixturePid -and [FixtureWindows]::GetWindow($h,4).ToInt64() -eq $Owner -and [FixtureWindows]::IsWindowVisible($h)){
-  $element=[System.Windows.Automation.AutomationElement]::FromHandle($h)
-  if($element.Current.Name -eq $ExpectedTitle){$script:dialog=$h;return $false}
+  if($OwnTempRoot){$name=[Text.StringBuilder]::new(512);[FixtureWindows]::GetWindowText($h,$name,512)|Out-Null;$title=$name.ToString()}else{$element=[System.Windows.Automation.AutomationElement]::FromHandle($h);$title=$element.Current.Name}
+  if($title -eq $ExpectedTitle){$script:dialog=$h;return $false}
  };return $true},[IntPtr]::Zero)|Out-Null
  if($script:dialog -eq [IntPtr]::Zero){Start-Sleep -Milliseconds 40}
 }while($script:dialog -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
 if($script:dialog -eq [IntPtr]::Zero){throw 'Scoped fixture picker not found'}
 Assert-Fixture
+# Artifact IFileOpenDialog may outlive a prior STA's UIA provider. Its native
+# Edit/1148 and Button/1 identities are exact and every message is bounded.
+if($OwnTempRoot){
+ if($Action -eq 'observe'){Write-Output ('SCOPED_ARTIFACT_PICKER '+$script:dialog);exit 0}
+ if($Action -eq 'cancel'){$target=$script:dialog;$message=0x10;$pointer=[IntPtr]::Zero}else{
+  if($Action -ne 'select' -or !(Test-Path -LiteralPath $OwnTempFile -PathType Leaf)){throw 'Wrong artifact fixture action/file'}
+  $script:editHwnd=[IntPtr]::Zero;$script:editCount=0
+  [FixtureWindows]::EnumChildWindows($script:dialog,{param($h,$p);[uint32]$pidValue=0;[FixtureWindows]::GetWindowThreadProcessId($h,[ref]$pidValue)|Out-Null;$cls=[Text.StringBuilder]::new(128);[FixtureWindows]::GetClassName($h,$cls,128)|Out-Null
+   if($pidValue -eq $FixturePid -and $cls.ToString() -eq 'Edit' -and [FixtureWindows]::GetDlgCtrlID($h) -eq 1148 -and [FixtureWindows]::IsChild($script:dialog,$h)){$script:editHwnd=$h;$script:editCount++};return $true
+  },[IntPtr]::Zero)|Out-Null
+  if($script:editCount -ne 1){throw 'No unique artifact Edit/1148'}
+  Assert-Fixture;$text=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($OwnTempFile)
+  try{[UIntPtr]$result=[UIntPtr]::Zero;if([FixtureWindows]::SendMessageTimeout($script:editHwnd,0xC,[UIntPtr]::Zero,$text,0x22,2000,[ref]$result) -eq [IntPtr]::Zero -or $result -eq [UIntPtr]::Zero){throw 'Artifact filename message failed'}}finally{[Runtime.InteropServices.Marshal]::FreeHGlobal($text)}
+  $target=[FixtureWindows]::GetDlgItem($script:dialog,1);$message=0xF5;$pointer=[IntPtr]::Zero
+  [uint32]$pidValue=0;[FixtureWindows]::GetWindowThreadProcessId($target,[ref]$pidValue)|Out-Null;$cls=[Text.StringBuilder]::new(128);[FixtureWindows]::GetClassName($target,$cls,128)|Out-Null
+  if($pidValue -ne $FixturePid -or $cls.ToString() -ne 'Button' -or ![FixtureWindows]::IsChild($script:dialog,$target)){throw 'Wrong artifact Button/1'}
+ }
+ Assert-Fixture;[UIntPtr]$result=[UIntPtr]::Zero
+ if([FixtureWindows]::SendMessageTimeout($target,$message,[UIntPtr]::Zero,$pointer,0x22,2000,[ref]$result) -eq [IntPtr]::Zero){throw 'Artifact action message failed'}
+ Write-Output ('SCOPED_ARTIFACT_'+$Action+' '+$script:dialog+' owner='+$Owner+' pid='+$FixturePid);exit 0
+}
 $root=[System.Windows.Automation.AutomationElement]::FromHandle($script:dialog)
 if($root.Current.ProcessId -ne $FixturePid){throw 'Wrong fixture UIA process'}
 $title=$root.Current.Name
 $scope=[System.Windows.Automation.TreeScope]::Descendants
 if($Action -eq 'select' -or $Action -eq 'diagnose'){
- if(!(Test-Path -LiteralPath $OwnTempFile -PathType Leaf) -or !(Split-Path $OwnTempFile -Leaf).StartsWith('e71-own-')){throw 'Not a fixture file'}
+ if(!(Test-Path -LiteralPath $OwnTempFile -PathType Leaf) -or (!$OwnTempRoot -and !(Split-Path $OwnTempFile -Leaf).StartsWith('e71-own-'))){throw 'Not a fixture file'}
  $hostControl=$root.FindFirst($scope,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'1148'))
  if(!$hostControl){throw 'No scoped filename host'}
  $script:editHwnd=[IntPtr]::Zero
