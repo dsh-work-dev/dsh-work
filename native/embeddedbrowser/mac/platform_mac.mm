@@ -95,7 +95,7 @@ bool RegisterProcess(const char* kind,int argc,char** argv);
 namespace dsh_platform {
 void Lifecycle(const char* event) {
   // Fixed state markers only; never write a URL, page data, token or error body.
-  for (const char* allowed : {"shutdown-enter","before-close","loop-returned","owner-stop","owner-read-failed","monitor-join-start","monitor-joined","shutdown-request","shutdown-ack","shutdown-ack-failed","shutdown-returned","quiescent-sent","quiescent-failed","release-received","release-failed"}) {
+  for (const char* allowed : {"shutdown-enter","before-close","before-close-tab-erased","before-close-return","frame-destroyed-enter","frame-destroyed-return","loop-returned","owner-stop","owner-read-failed","monitor-join-start","monitor-joined","shutdown-request","shutdown-ack","shutdown-ack-failed","shutdown-returned","quiescent-sent","quiescent-failed","release-received","release-failed"}) {
     if(std::strcmp(event,allowed)!=0)continue;
     char line[128];const int n=std::snprintf(line,sizeof(line),"DSH_CEF_EVENT %s\n",allowed);
     if(n>0&&n<static_cast<int>(sizeof(line))) (void)write(STDERR_FILENO,line,n);

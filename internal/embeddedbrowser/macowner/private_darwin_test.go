@@ -303,6 +303,7 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 		QueryError string    `json:"queryError,omitempty"`
 	}
 	var proof struct {
+		SystemCrash                *safeCrash         `json:"systemCrash"`
 		ExitSignal                 int                `json:"brokerExitSignal"`
 		ExitCoreDump               bool               `json:"brokerCoreDump"`
 		NativeEvents               []nativeEvent      `json:"nativeEvents"`
@@ -333,6 +334,7 @@ func writeTerminalEvidence(t *testing.T, path string, w *Worker) error {
 	if err != nil {
 		proof.Errors = append(proof.Errors, "terminal-record-unavailable")
 	} else {
+		proof.SystemCrash = conditionalSystemCrash(state)
 		proof.ExitSignal = state.ExitSignal
 		proof.ExitCoreDump = state.ExitCoreDump
 		proof.NativeEvents = state.NativeEvents

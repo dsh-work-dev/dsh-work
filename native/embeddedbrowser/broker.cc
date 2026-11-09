@@ -271,6 +271,9 @@ bool RequiresGuard()const{return guard_required_;}
     if(artifact_)artifact_->live_frames.insert(frame->GetIdentifier().ToString());
   }
   void OnFrameDestroyed(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame)override {
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("frame-destroyed-enter");
+#endif
     engine_frames_.erase(frame->GetIdentifier().ToString());if(!frame->IsMain())scope_epoch_++;
     if(artifact_){artifact_->live_frames.erase(frame->GetIdentifier().ToString());artifact_->destroyed_frames++;
       if(artifact_->browser>0)ArtifactEvent(artifact_,"artifact.detached",browser->GetIdentifier(),frame->GetIdentifier().ToString());
@@ -278,6 +281,9 @@ bool RequiresGuard()const{return guard_required_;}
     }
     FlushRevocation();
     if(browser_closed_&&engine_frames_.empty()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();}
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("frame-destroyed-return");
+#endif
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
     tabs.emplace(tab_, Tab{route_, b, b->GetHost()->AddDevToolsMessageObserver(this),artifact_});
@@ -315,10 +321,16 @@ bool RequiresGuard()const{return guard_required_;}
 #endif
     browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
     tabs.erase(tab_);
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close-tab-erased");
+#endif
     if(artifact_){artifact_->closed_browsers++;FinishArtifact(artifact_);}
     auto args = CefListValue::Create(); args->SetInt(0, tab_); Event(route_, "tab.closed", args);
     FlushRevocation();
     if (stopping && tabs.empty()&&artifacts.empty()&&closing_clients.empty()) CefQuitMessageLoop();
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close-return");
+#endif
   }
   bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
       const CefString&, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
@@ -460,7 +472,11 @@ void Shutdown() {
   std::vector<std::shared_ptr<ArtifactState>> states;
   for(const auto& [_,state]:artifacts)states.push_back(state);
   for(auto& state:states)RevokeArtifact(state);
-  for (const auto& [_, tab] : tabs) if(!tab.artifact)tab.browser->GetHost()->CloseBrowser(true);
+  // Windowless CloseBrowser may synchronously call OnBeforeClose and erase
+  // tabs. Own the selected browser references before invoking any callback.
+  std::vector<CefRefPtr<CefBrowser>> browsers;
+  for (const auto& [_, tab] : tabs) if(!tab.artifact)browsers.push_back(tab.browser);
+  for (auto& browser : browsers) browser->GetHost()->CloseBrowser(true);
   if(tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
 }
 // This candidate admits only the real locked-MCP inventory exercised by the
@@ -548,7 +564,9 @@ void Command(Dict m) {
     return;
   }
   if (kind == "close") {
-    for (const auto& [_, t] : tabs) if (t.route == route) t.browser->GetHost()->CloseBrowser(true);
+    std::vector<CefRefPtr<CefBrowser>> browsers;
+    for (const auto& [_, t] : tabs) if (t.route == route) browsers.push_back(t.browser);
+    for (auto& browser : browsers) browser->GetHost()->CloseBrowser(true);
     return;
   }
   if (control_blocked) {auto payload=m->GetDictionary("payload");if(payload)Result(route,payload->GetInt("id"),nullptr,"CEF_BROKER_CONTROL_PAUSED");return;}

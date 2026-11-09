@@ -141,7 +141,7 @@ jobs:
           DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
         run: |
           set -o pipefail
-          go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^TestLiveMacPrivateCEF$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
+          go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^(TestCrashProjectionRequiresGeneration|TestLiveMacPrivateCEF)$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:

@@ -663,6 +663,14 @@ func (w *nativeEventWriter) record(line string) {
 		name = "shutdown-enter"
 	case "DSH_CEF_EVENT before-close":
 		name = "before-close"
+	case "DSH_CEF_EVENT before-close-tab-erased":
+		name = "before-close-tab-erased"
+	case "DSH_CEF_EVENT before-close-return":
+		name = "before-close-return"
+	case "DSH_CEF_EVENT frame-destroyed-enter":
+		name = "frame-destroyed-enter"
+	case "DSH_CEF_EVENT frame-destroyed-return":
+		name = "frame-destroyed-return"
 	case "DSH_CEF_EVENT loop-returned":
 		name = "loop-returned"
 	case "DSH_CEF_EVENT owner-stop":
