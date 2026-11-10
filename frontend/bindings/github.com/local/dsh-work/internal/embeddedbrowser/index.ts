@@ -4,6 +4,7 @@
 export type {
     DownloadView,
     PixelBounds,
+    Preview,
     SlotBounds,
     ViewState,
     WebDialog,

@@ -151,9 +151,12 @@ export function mountShell() {
       case "dsh": closeSettingsPanel(); sendCommand(action.id); break;
     }
   };
-  const menuBar = createMenuBar(t, run, id => {
+  const menuBar = createMenuBar(t, run, (id,bounds) => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
-    menuOccluded=true;if(embeddedBrowser.enabled)return syncGuestOverlay();return undefined;
+    const previous=menuOccluded;menuOccluded=embeddedBrowser.overlaps(bounds);
+    if(menuOccluded&&embeddedBrowser.enabled)return syncGuestOverlay();
+    if(previous&&!menuOccluded&&embeddedBrowser.enabled)return syncGuestOverlay();
+    return undefined;
   }, () => frame.contentWindow?.focus(),()=>{menuOccluded=false;void syncGuestOverlay().catch(report("resume browser"))});
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, modalMask, controls);

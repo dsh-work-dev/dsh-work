@@ -188,6 +188,8 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   }
   std::map<int, int> pending_;
   std::map<int, std::string> pending_methods_;
+  struct PreviewRequest { CefRefPtr<CefDictionaryValue> response; uint64_t document; std::string view, presentation, frame, url; };
+  std::map<int, PreviewRequest> previews_;
   int next_command_ = 0;
   std::set<std::string> child_sessions_;
   std::set<std::string> frames_;
@@ -526,6 +528,21 @@ closing_=true;RevokeGuard();view_visible_=false;close_waiters_.push_back(std::mo
     return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());
 #endif
   }
+  bool CapturePreview(CefRefPtr<CefDictionaryValue> response, Dict expected){
+    if(!managed_||control_blocked||closing_||!loaded_||!ViewVisible()||!expected||!tabs.contains(tab_))return false;
+    auto frame=tabs.at(tab_).browser->GetMainFrame();
+    if(!frame||!frame->IsValid()||expected->GetString("view")!=view_lease_||
+       expected->GetString("presentation")!=presentation_epoch_||
+       expected->GetString("document")!=std::to_string(document_epoch_)||
+       expected->GetString("frame").ToString()!=frame->GetIdentifier().ToString())return false;
+    auto command=CefDictionaryValue::Create();const int serial=++next_command_;
+    command->SetInt("id",serial);command->SetString("method","Page.captureScreenshot");
+    auto params=CefDictionaryValue::Create();params->SetString("format","png");params->SetBool("fromSurface",true);command->SetDictionary("params",params);
+    auto value=CefValue::Create();value->SetDictionary(command);auto json=CefWriteJSON(value,JSON_WRITER_DEFAULT).ToString();
+    previews_[serial]={response,document_epoch_,view_lease_,presentation_epoch_,frame->GetIdentifier().ToString(),frame->GetURL().ToString()};
+    if(!tabs.at(tab_).browser->GetHost()->SendDevToolsMessage(json.data(),json.size())){previews_.erase(serial);return false;}
+    return true;
+  }
   bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;CancelFilePicker();RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
   bool GuardValid(){
  if(control_blocked||closing_)return false;
@@ -766,6 +783,20 @@ bool RequiresGuard()const{return guard_required_;}
     if (!m) return true;
     if (m->HasKey("id")) {
 
+      auto preview=previews_.find(m->GetInt("id"));
+      if(preview!=previews_.end()){
+        auto held=std::move(preview->second);previews_.erase(preview);
+        auto frame=tabs.contains(tab_)?tabs.at(tab_).browser->GetMainFrame():nullptr;
+        auto result=m->GetDictionary("result");
+        auto encoded=result?result->GetString("data").ToString():std::string{};
+        if(control_blocked||closing_||!ViewVisible()||!frame||!frame->IsValid()||
+           held.document!=document_epoch_||held.view!=view_lease_||held.presentation!=presentation_epoch_||
+           held.frame!=frame->GetIdentifier().ToString()||held.url!=frame->GetURL().ToString()||
+           encoded.empty()||encoded.size()>6*1024*1024)held.response->SetString("error","CEF_PREVIEW_STALE");
+        else {auto output=CefDictionaryValue::Create();output->SetString("data",encoded);held.response->SetDictionary("result",output);}
+        Write(held.response);return true;
+      }
+
 #ifdef _WIN32
       if(DownloadResult(m->GetInt("id"),m))return true;
 #endif
@@ -999,6 +1030,12 @@ void Command(Dict m) {
     else if(kind=="target.state"){auto state=client->OwnedState();if(state)response->SetDictionary("result",state);else response->SetString("error",client->StateStatus());}
     else if(kind=="target.attach"){if(client->AttachRoute(m->GetDictionary("arguments")->GetString("route")))response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_OBSERVER_REATTACH_REJECTED");}
     else if(kind=="target.navigation"){auto state=client->NavigationState();if(state)response->SetDictionary("result",state);else response->SetString("error","CEF_TARGET_NOT_READY");}
+#ifdef _WIN32
+    else if(kind=="target.preview"){
+      if(!client->CapturePreview(response,m->GetDictionary("arguments"))){response->SetString("error","CEF_PREVIEW_UNAVAILABLE");Write(response);}
+      return;
+    }
+#endif
     else if(kind=="target.action"){if(client->NavigationAction(m->GetDictionary("arguments")->GetString("action")))response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error","CEF_NAVIGATION_ACTION_UNAVAILABLE");}
     else if(kind=="target.present"){auto error=client->Present(m->GetDictionary("arguments"));if(error.empty())response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error",error);}
     else if(kind=="target.hide"){auto error=client->Hide(m->GetDictionary("arguments"));if(error.empty())response->SetDictionary("result",CefDictionaryValue::Create());else response->SetString("error",error);}

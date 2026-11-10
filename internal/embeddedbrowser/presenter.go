@@ -17,6 +17,17 @@ type PresenterPeer struct {
 type SlotBounds struct{ X, Y, Width, Height float64 }
 type PixelBounds struct{ X, Y, Width, Height int }
 
+// Preview is an ephemeral, display-only image of an admitted visible view.
+// It is never an automation artifact or a file grant.
+type Preview struct {
+	Slot     string `json:"slot"`
+	Data     string `json:"data"`
+	Lease    string `json:"lease"`
+	Document string `json:"document"`
+	Frame    string `json:"frame"`
+	URL      string `json:"url"`
+}
+
 // WebDialog is authenticated engine metadata. Website message text is absent.
 type WebDialog struct {
 	Epoch         string `json:"epoch"`
@@ -323,6 +334,36 @@ func (r *PresenterRegistry) Hide(ctx context.Context, peer PresenterPeer, surfac
 		p.serial.Unlock()
 	}
 	return result
+}
+
+func (r *PresenterRegistry) Cover(ctx context.Context, peer PresenterPeer, surface string) ([]Preview, error) {
+	r.mu.Lock()
+	views := make(map[string]*presentation)
+	for key, p := range r.views {
+		if p.surface == surface {
+			views[key] = p
+		}
+	}
+	r.mu.Unlock()
+	previews := make([]Preview, 0, len(views))
+	for key, p := range views {
+		p.serial.Lock()
+		if p.peer == peer && p.target != nil && p.view.Visible && p.view.State == "ready" && p.view.Frame != "" {
+			shotCtx, cancel := context.WithTimeout(ctx, time.Second)
+			raw, err := p.target.broker.controlCall(shotCtx, "target.preview", p.target.owner, map[string]string{"view": p.view.Lease, "presentation": p.view.Epoch, "document": p.view.Document, "frame": p.view.Frame})
+			cancel()
+			if err == nil {
+				var shot struct {
+					Data string `json:"data"`
+				}
+				if json.Unmarshal(raw, &shot) == nil && len(shot.Data) > 0 && len(shot.Data) <= 6*1024*1024 {
+					previews = append(previews, Preview{Slot: key[len(surface)+1:], Data: shot.Data, Lease: p.view.Lease, Document: p.view.Document, Frame: p.view.Frame, URL: p.view.URL})
+				}
+			}
+		}
+		p.serial.Unlock()
+	}
+	return previews, r.Hide(ctx, peer, surface)
 }
 
 // loss invalidates the descriptor before awaiting native frame-close evidence.

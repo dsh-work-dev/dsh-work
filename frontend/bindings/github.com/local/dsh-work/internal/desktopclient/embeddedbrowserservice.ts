@@ -36,6 +36,10 @@ export function Capability(): $CancellablePromise<boolean> {
     return $Call.ByID(3254308590);
 }
 
+export function Cover(): $CancellablePromise<embeddedbrowser$0.Preview[] | null> {
+    return $Call.ByID(2111677083);
+}
+
 export function Detach(document: string, slot: string): $CancellablePromise<void> {
     return $Call.ByID(3944625447, document, slot);
 }

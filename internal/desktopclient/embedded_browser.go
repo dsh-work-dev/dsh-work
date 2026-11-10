@@ -6,6 +6,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -19,6 +20,11 @@ type embeddedGate struct {
 	sync.Mutex
 	blocked  bool
 	document string
+	// The document retirement barrier establishes this native window lease.
+	// Every Update still re-reads the trusted Wails window and the daemon's
+	// presenter registry validates the lease, peer, parent and surface.
+	admission embeddedbrowser.WindowAdmission
+	parent    uint64
 }
 type EmbeddedBrowserService struct {
 	Client      *daemon.Client
@@ -48,10 +54,6 @@ func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, add
 	if err != nil {
 		return embeddedbrowser.ViewState{}, err
 	}
-	admission, err := s.RegisterWindow(ctx)
-	if err != nil {
-		return embeddedbrowser.ViewState{}, err
-	}
 	gate := s.gate(window.Name())
 	gate.Lock()
 	defer gate.Unlock()
@@ -64,7 +66,10 @@ func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, add
 	if err != nil {
 		return state, err
 	}
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, admission.Lease, slot, address, bounds, zoom, visible}, &state)
+	if gate.parent != parent || gate.admission.Lease == "" {
+		return state, errors.New("CEF_PRESENTER_WINDOW_CHANGED")
+	}
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, gate.admission.Lease, slot, address, bounds, zoom, visible}, &state)
 	// Native Present can succeed while the document is still loading. Protect
 	// that guest now: later State polling alone does not issue another Update.
 	if err == nil && state.Visible {
@@ -139,6 +144,10 @@ func (s *EmbeddedBrowserService) Recover(ctx context.Context, document, slot, ad
 		return state, err
 	}
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "Recover", []any{parent, admission.Lease, slot, address}, &state)
+	if err == nil {
+		gate.admission = admission
+		gate.parent = parent
+	}
 	return state, err
 }
 
@@ -199,6 +208,31 @@ func (s *EmbeddedBrowserService) Overlay(ctx context.Context, blocked bool) erro
 	}
 	return nil
 }
+func (s *EmbeddedBrowserService) Cover(ctx context.Context) ([]embeddedbrowser.Preview, error) {
+	if !s.Enabled || runtime.GOOS != "windows" {
+		return nil, errors.New("CEF_PREVIEW_UNAVAILABLE")
+	}
+	window, err := trustedWindow(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gate := s.gate(window.Name())
+	gate.Lock()
+	defer gate.Unlock()
+	if gate.document == "" {
+		return nil, errors.New("CEF_PRESENTER_DOCUMENT_RETIRED")
+	}
+	gate.blocked = true
+	for _, pending := range gate.artifacts {
+		pending.cancel()
+	}
+	var previews []embeddedbrowser.Preview
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Cover", nil, &previews)
+	if err != nil {
+		return nil, err
+	}
+	return previews, nil
+}
 func (s *EmbeddedBrowserService) Action(ctx context.Context, document, slot, action string) error {
 	gate, gateErr := s.lockDocument(ctx, document)
 	if gateErr != nil {
@@ -251,6 +285,8 @@ func (s *EmbeddedBrowserService) BeginDocument(ctx context.Context, document str
 		pending.cancel()
 	}
 	gate.document = ""
+	gate.admission = embeddedbrowser.WindowAdmission{}
+	gate.parent = 0
 	admission, err := s.RegisterWindow(ctx)
 	if err != nil {
 		return true, err
@@ -262,6 +298,8 @@ func (s *EmbeddedBrowserService) BeginDocument(ctx context.Context, document str
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "RetireDocument", []any{parent, admission.Lease}, nil)
 	if err == nil {
 		gate.document = document
+		gate.admission = admission
+		gate.parent = parent
 	}
 	return true, err
 }

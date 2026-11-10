@@ -21,6 +21,19 @@ export interface PixelBounds {
     "Height": number;
 }
 
+/**
+ * Preview is an ephemeral, display-only image of an admitted visible view.
+ * It is never an automation artifact or a file grant.
+ */
+export interface Preview {
+    "slot": string;
+    "data": string;
+    "lease": string;
+    "document": string;
+    "frame": string;
+    "url": string;
+}
+
 export interface SlotBounds {
     "X": number;
     "Y": number;

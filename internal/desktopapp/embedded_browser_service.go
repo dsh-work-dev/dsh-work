@@ -50,6 +50,13 @@ func (s *embeddedBrowserService) Hide(ctx context.Context) error {
 	}
 	return s.Registry.Hide(ctx, peer, surface)
 }
+func (s *embeddedBrowserService) Cover(ctx context.Context) ([]embeddedbrowser.Preview, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Registry.Cover(ctx, peer, surface)
+}
 func (s *embeddedBrowserService) Detach(ctx context.Context, slot string) error {
 	peer, surface, err := s.peer(ctx)
 	if err != nil {

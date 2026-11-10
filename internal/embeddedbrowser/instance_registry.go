@@ -592,6 +592,14 @@ func (r *InstancePresenterRegistry) Hide(ctx context.Context, p PresenterPeer, s
 	defer i.serial.Unlock()
 	return i.views.Hide(ctx, p, s)
 }
+func (r *InstancePresenterRegistry) Cover(ctx context.Context, p PresenterPeer, s string) ([]Preview, error) {
+	i, e := r.lockSurface(p, s)
+	if e != nil {
+		return nil, e
+	}
+	defer i.serial.Unlock()
+	return i.views.Cover(ctx, p, s)
+}
 func (r *InstancePresenterRegistry) Detach(ctx context.Context, p PresenterPeer, s, slot string) error {
 	i, e := r.lockSurface(p, s)
 	if e != nil {

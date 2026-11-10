@@ -128,7 +128,7 @@ test('shell preserves visible then hidden intent order across delayed Capability
 test('menu close ACK cannot resume the document after Settings has blocked it',async()=>{
  const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
  const resumed=deferred(),messages=[],calls=[];
- const bindings={BeginDocument:async()=>true,Capability:async()=>true,State:async()=>({}),Overlay:blocked=>{calls.push(blocked);return blocked?Promise.resolve():resumed.promise}};
+ const bindings={BeginDocument:async()=>true,Capability:async()=>true,State:async()=>({}),Cover:async()=>{calls.push(true);return[]},Overlay:blocked=>{calls.push(blocked);return blocked?Promise.resolve():resumed.promise}};
  const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
  const frame={getAttribute:()=> 'http://dsh/',contentWindow:{postMessage:m=>messages.push(m)}};
@@ -137,12 +137,58 @@ test('menu close ACK cannot resume the document after Settings has blocked it',a
  await bridge.overlay(true);messages.length=0;
  const menuClosed=bridge.overlay(false);await tick();
  const settingsOpened=bridge.overlay(true);
- assert.equal(messages.at(-1).blocked,true,'Settings blocks the document before waiting for native Hide');
  resumed.resolve();await Promise.all([menuClosed,settingsOpened]);
+ assert.equal(messages.at(-1).blocked,true,'Settings publishes the blocked state after the native Hide barrier');
  assert.deepEqual(calls,[true,false,true],'native operations retain intent order');
  assert.equal(messages.some(m=>m.type==='dsh-work/browser-blocked'&&!m.blocked),false,'an older resume ACK must not undo the latest block');
  await bridge.overlay(false);
  assert.equal(messages.at(-1).blocked,false,'closing Settings resumes the retained document');
+});
+
+test('menu overlap follows the admitted slot and preview waits for native Cover',async()=>{
+ const source=readFileSync(new URL('../../frontend/src/embedded-browser.ts',import.meta.url),'utf8');
+ const covered=deferred(),calls=[],messages=[];
+ const bindings={BeginDocument:async()=>true,Capability:async()=>true,Update:async(...args)=>({state:'ready',visible:args[4]}),Cover:()=>{calls.push('cover');return covered.promise},Overlay:async blocked=>{calls.push(blocked)}};
+ const exports={};const context=vm.createContext({exports,require:()=>({t:key=>key,subscribeLocale:()=>()=>{},EmbeddedBrowserService:bindings,bridgeOrigin:globalThis.__DSH_WORK_ORIGINS__.origin}),URL,Promise,Error,Number,ResizeObserver:class{observe(){}}});
+ vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+ const frame={hidden:false,getAttribute:()=> 'http://dsh/',contentWindow:{postMessage:m=>messages.push(m)},getBoundingClientRect:()=>({left:100,top:40,right:500,bottom:340,width:400,height:300}),clientWidth:400,clientHeight:300};
+ const bridge=exports.embeddedBrowserBridge(frame,async()=>{});await bridge.retireDocument('doc');bridge.activateDocument('doc');
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'show',action:'update',document:'doc',slot:'session/tab',address:'',visible:true,rect:{x:50,y:10,width:100,height:80}}});await tick();
+ assert.equal(bridge.overlaps({left:0,right:100,top:50,bottom:120}),false);
+ assert.equal(bridge.overlaps({left:180,right:210,top:50,bottom:120}),true);
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'other',action:'update',document:'doc',slot:'session/other',address:'',visible:true,rect:{x:300,y:10,width:50,height:80}}});await tick();
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'other-hide',action:'update',document:'doc',slot:'session/other',address:'',visible:false,rect:{x:300,y:10,width:50,height:80}}});await tick();
+ assert.equal(bridge.overlaps({left:180,right:210,top:50,bottom:120}),true,'another slot cannot erase the first visible slot');
+ const hiding=bridge.overlay(true);await tick();assert.deepEqual(calls,['cover']);assert.equal(messages.some(m=>m.type==='dsh-work/browser-blocked'),false);
+ covered.resolve([{slot:'session/tab',data:'AAAA',lease:'v',document:'d',frame:'f',url:'https://example.test'}]);await hiding;
+ assert.deepEqual(messages.filter(m=>m.type.startsWith('dsh-work/browser-')).slice(-2).map(m=>m.type),['dsh-work/browser-previews','dsh-work/browser-blocked']);
+ bridge.handle({data:{version:1,type:'dsh-work/browser',id:'detach',action:'detach',document:'doc',slot:'session/tab'}});await tick();
+ assert.equal(bridge.overlaps({left:180,right:210,top:50,bottom:120}),false,'retired slot cannot occlude a later menu');
+ await bridge.retireDocument('next');assert.equal(bridge.overlaps({left:180,right:210,top:50,bottom:120}),false);
+ await bridge.overlay(false);assert.equal(calls.at(-1),false,'new document must release the retained native overlay gate');
+});
+
+test('a hidden page drops an old preview when its native document changes',async()=>{
+ const requests=[],listeners=new Map(),layers=[];let id=0;
+ let trayHeight=128;
+ const el=tag=>({style:{},get offsetHeight(){return tag==='section'?trayHeight:0},setAttribute(){},removeAttribute(){},remove(){this.removed=true},append(){}});
+ const container={isConnected:true,style:{},append(){},prepend:layer=>layers.push(layer),getBoundingClientRect:()=>({left:0,top:0,right:200,bottom:100}),getClientRects:()=>[1],closest:()=>null};
+ const parent={postMessage:m=>requests.push(m)};
+ const context=vm.createContext({console,URL,decodeURIComponent,location:{ancestorOrigins:['http://shell'],hash:'#__dsh_work_doc=doc'},parent,window:{},innerWidth:500,innerHeight:500,crypto:{randomUUID:()=>String(++id)},setTimeout:()=>++id,clearTimeout(){},setInterval:()=>++id,clearInterval(){},ResizeObserver:class{observe(){}disconnect(){}},IntersectionObserver:class{constructor(fn){this.fn=fn}observe(target){this.fn([{target,isIntersecting:true,intersectionRatio:1}])}disconnect(){}},MutationObserver:class{observe(){}},getComputedStyle:()=>({display:'block',visibility:'visible',position:'relative'}),document:{head:{append(){}},documentElement:{},createElement:el,querySelectorAll:()=>[],getElementById:()=>container},addEventListener:(type,fn)=>listeners.set(type,[...(listeners.get(type)||[]),fn]),removeEventListener(){}});
+ vm.runInContext(readFileSync(new URL('./embedded_browser.js',import.meta.url),'utf8'),context);
+ const emit=data=>{for(const fn of listeners.get('message')||[])fn({source:parent,origin:'http://shell',data:{version:1,...data}})};
+ const respond=value=>emit({type:'dsh-work/browser-result',id:requests.shift().id,value});
+ for(const fn of listeners.get('DOMContentLoaded')||[])fn();await tick();respond(true);await tick();
+ const page=context.__DSH_WORK_BROWSER_PROVIDER__.createPage('s',{key:'tab',persist(){}});page.presentation.mount('viewport');await tick();respond({state:'empty'});await tick();
+ page.frame.loadUrl({url:'https://example.test'});await tick();respond({state:'ready',url:'https://example.test',lease:'v',document:'1',frame:'f',visible:true});await tick();
+ emit({type:'dsh-work/browser-previews',document:'doc',value:[{slot:'s/tab',data:'AAAA',lease:'v',document:'1',frame:'f',url:'https://example.test'}]});
+ assert.match(layers.at(-1).style.backgroundImage,/data:image\/png;base64,AAAA/);
+ emit({type:'dsh-work/browser-blocked',blocked:true});await tick();respond({state:'ready',url:'https://example.test/next',lease:'v',document:'2',frame:'next',visible:false,downloads:[{id:'d',state:'complete',filename:'file',received:0,total:0}]});await tick();
+ assert.equal(layers.at(-2).removed,true);assert.equal(layers.at(-1).textContent,'页面暂时隐藏');assert.equal(layers.at(-1).style.bottom,'128px','preview stops above the actual download tray');
+ assert.equal(requests.at(0)?.action,'update');trayHeight=64;respond({state:'ready',url:'https://example.test/next',lease:'v',document:'2',frame:'next',visible:false,downloads:[{id:'d',state:'complete',filename:'file',received:0,total:0}]});await tick();
+ assert.equal(layers.at(-1).style.bottom,'64px','preview follows a resized download tray');
+ assert.equal(requests.at(0)?.action,'update');respond({state:'ready',url:'https://example.test/next',lease:'v',document:'2',frame:'next',visible:false,downloads:[]});await tick();
+ assert.equal(layers.at(-1).style.bottom,'0px','removing the download tray restores the full viewport');
 });
 
 test('artifact copy uses the trusted Host locale and updates existing documents',async()=>{
