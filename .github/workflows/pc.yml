@@ -142,10 +142,12 @@ jobs:
           & (Join-Path $nsisBin 'makensis.exe') /VERSION
 
       - name: Build application
-        run: wails3 build
+        run: |
+          node scripts/sync-version.mjs
+          ./scripts/build-windows.ps1 -Arch amd64
 
       - name: Build per-user Windows installer
-        run: wails3 package GOOS=windows ARCH=amd64
+        run: ./scripts/package-windows.ps1 -Arch amd64
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v6

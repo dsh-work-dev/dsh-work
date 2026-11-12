@@ -19,6 +19,11 @@ const messages: Record<Locale, Record<string, string>> = {
     "browser.artifact.failed": "Could not open or select this page. Try again.",
     "browser.artifact.recover": "Choose the file again to open it. Unsubmitted input may have been lost.",
     "browser.artifact.paused": "Browser control is paused.",
+    "browser.availability.install": "The browser component is missing or damaged. Reinstall DSH Work.",
+    "browser.availability.update": "The browser component version does not match. Update DSH Work.",
+    "browser.availability.runtime": "Use a supported Run context to open the browser.",
+    "browser.availability.platform": "The embedded browser is unavailable on this platform.",
+    "browser.availability.generic": "The embedded browser is unavailable.",
 
 "automation.computerAccess.warning":"This application can run commands or change files and system settings.",
 
@@ -968,6 +973,11 @@ const messages: Record<Locale, Record<string, string>> = {
     "browser.artifact.failed": "无法打开或选择此页面，请重试。",
     "browser.artifact.recover": "请重新选择文件以打开页面。未提交的输入可能已丢失。",
     "browser.artifact.paused": "浏览器控制已暂停。",
+    "browser.availability.install": "浏览器组件缺失或损坏，请重新安装 DSH Work。",
+    "browser.availability.update": "浏览器组件版本不匹配，请更新 DSH Work。",
+    "browser.availability.runtime": "请使用受支持的运行环境打开浏览器。",
+    "browser.availability.platform": "此平台无法使用内置浏览器。",
+    "browser.availability.generic": "内置浏览器暂不可用。",
 
 "automation.computerAccess.warning":"此应用可运行命令，或更改文件和系统设置。",
 
@@ -1917,6 +1927,11 @@ const messages: Record<Locale, Record<string, string>> = {
     "browser.artifact.failed": "ページを開くか選択できませんでした。再試行してください。",
     "browser.artifact.recover": "ファイルを再選択して開いてください。未送信の入力は失われた可能性があります。",
     "browser.artifact.paused": "ブラウザーの操作を一時停止しています。",
+    "browser.availability.install": "ブラウザーのコンポーネントが不足または破損しています。DSH Work を再インストールしてください。",
+    "browser.availability.update": "ブラウザーのコンポーネントのバージョンが一致しません。DSH Work を更新してください。",
+    "browser.availability.runtime": "対応する実行環境でブラウザーを開いてください。",
+    "browser.availability.platform": "このプラットフォームでは内蔵ブラウザーを使用できません。",
+    "browser.availability.generic": "内蔵ブラウザーを使用できません。",
 
 "automation.computerAccess.warning":"このアプリはコマンドの実行や、ファイル・システム設定の変更ができます。",
 

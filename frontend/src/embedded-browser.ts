@@ -4,8 +4,12 @@ import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
 import type {SlotBounds, WebDialog, WebPopup} from "../bindings/github.com/local/dsh-work/internal/embeddedbrowser/models";
 
 /** DSH supplies CSS slot intent; this shell owns the iframe transform and clip. */
-export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (blocked:boolean)=>Promise<void>) {
+export function embeddedBrowserBridge(frame: HTMLIFrameElement) {
  let enabled=false,candidate=false,documentToken="",accepting=false;
+ let announcedDocument="";
+ let availability:ReturnType<typeof EmbeddedBrowserService.Availability>|undefined;
+ const unavailableCopy:Record<string,string>={missing:"browser.availability.install",corrupt:"browser.availability.install",incompatible:"browser.availability.update","unsupported-runtime":"browser.availability.runtime","unsupported-platform":"browser.availability.platform"};
+ const ensureAvailability=async()=>{const result=await (availability??=EmbeddedBrowserService.Availability());if(result.state==="ready")return;const error=Error(t(unavailableCopy[result.state]??"browser.availability.generic")) as Error&{code:string};error.code=result.code;throw error};
  const visibleSlots=new Map<string,SlotBounds>();
  const coveredSlots=new Map<string,SlotBounds>();
  type ArtifactLabels = Record<"choose"|"reselect"|"select"|"scope"|"local"|"selected"|"waiting"|"canceled"|"failed"|"recover"|"paused",string>;
@@ -14,11 +18,25 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
 
  let nativeQueue=Promise.resolve();
  let overlayRevision=0;
- let overlayApplied=false;
+ // Cover can fail after Go has already blocked the window. Unknown must be
+ // explicitly cleared through Overlay(false), never treated as resumed.
+ let nativeOverlay:"clear"|"blocked"|"unknown"="clear";
+ type OcclusionSource = "shell-menu"|"settings"|"dsh-modal"|"provider-modal";
+ const occlusions=new Set<OcclusionSource>();
+ let overlayBarrier=Promise.resolve();
  let coveredPreviews:unknown[]=[];
  let previewAvailable=false;
  const native=<T>(task:()=>PromiseLike<T>):Promise<T>=>{const result=nativeQueue.then(task);nativeQueue=result.then(()=>{},()=>{});return result};
- const send=(id:string,value:unknown,error="")=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-result",id,value,error},origin)};
+ const applyNativeOverlay=async(blocked:boolean,token:string)=>{
+  if(blocked&&nativeOverlay!=="blocked"){
+   visibleSlots.forEach((rect,slot)=>coveredSlots.set(slot,rect));
+   nativeOverlay="unknown";
+   try {const previews=await EmbeddedBrowserService.Cover()??[];if(documentToken===token){coveredPreviews=previews;previewAvailable=true}}
+   catch(error){if(!String(error).includes("CEF_PREVIEW_UNAVAILABLE"))throw error;await EmbeddedBrowserService.Overlay(true);previewAvailable=false}
+   nativeOverlay="blocked";
+  } else if(!blocked&&nativeOverlay!=="clear"){await EmbeddedBrowserService.Overlay(false);nativeOverlay="clear";coveredPreviews=[];previewAvailable=false;coveredSlots.clear()}
+ };
+ const send=(id:string,value:unknown,error="",errorCode="")=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-result",id,value,error,errorCode},origin)};
  const clamp=(raw:unknown)=>{
   const value=raw as Record<string,unknown>;
   if(!value||![value.x,value.y,value.width,value.height].every(n=>typeof n==="number"&&Number.isFinite(n)&&Math.abs(n)<1e6))throw Error("Invalid browser bounds");
@@ -30,23 +48,18 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
  };
  const layoutChanged=()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-layout"},origin)};
  const frameObserver=new ResizeObserver(layoutChanged);frameObserver.observe(frame);
+ const applyOcclusion=async(blocked:boolean)=>{if(!enabled&&(blocked||nativeOverlay==="clear"))return;const revision=++overlayRevision,token=documentToken;const post=(type:string,value?:unknown)=>{if(!accepting||documentToken!==token)return;const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type,document:token,blocked,value},origin)};await native(()=>applyNativeOverlay(blocked,token));
+  // Only the latest source set can publish the visible state to this document.
+  if(revision===overlayRevision){if(blocked&&previewAvailable)post("dsh-work/browser-previews",coveredPreviews);post("dsh-work/browser-blocked")}
+ };
  return {
   get enabled(){return enabled},
   overlaps(bounds:DOMRect){let hit=false;for(const slots of [visibleSlots,coveredSlots])slots.forEach(slot=>{if(bounds.left<slot.X+slot.Width&&bounds.right>slot.X&&bounds.top<slot.Y+slot.Height&&bounds.bottom>slot.Y)hit=true});return hit},
-  async retireDocument(token:string){documentToken=token;accepting=false;visibleSlots.clear();coveredSlots.clear();coveredPreviews=[];previewAvailable=false;++overlayRevision;return native(async()=>{candidate=await EmbeddedBrowserService.BeginDocument(token);return candidate})},
+  async retireDocument(token:string){documentToken=token;accepting=false;announcedDocument="";availability=undefined;visibleSlots.clear();coveredSlots.clear();coveredPreviews=[];previewAvailable=false;++overlayRevision;return native(async()=>{try{candidate=await EmbeddedBrowserService.BeginDocument(token);return candidate}finally{enabled=false}})},
   acceptsDocument(token:unknown){return !candidate||(accepting&&token===documentToken)},
   activateDocument(token:string){if(documentToken===token)accepting=true},
-  async overlay(blocked:boolean){if(!enabled)return;const revision=++overlayRevision,token=documentToken;const post=(type:string,value?:unknown)=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type,document:token,blocked,value},origin)};await native(async()=>{
-   if(blocked&&!overlayApplied){
-    visibleSlots.forEach((rect,slot)=>coveredSlots.set(slot,rect));
-    try {coveredPreviews=await EmbeddedBrowserService.Cover()??[];previewAvailable=true}
-    catch(error){if(!String(error).includes("CEF_PREVIEW_UNAVAILABLE"))throw error;await EmbeddedBrowserService.Overlay(true);previewAvailable=false}
-    overlayApplied=true;
-   } else if(!blocked&&overlayApplied){await EmbeddedBrowserService.Overlay(false);overlayApplied=false;coveredPreviews=[];previewAvailable=false;coveredSlots.clear()}
-  });
-   // A menu-close ACK may arrive after Settings has already blocked the page.
-   // Only the current intent may resume its cached presentation geometry.
-   if(revision===overlayRevision){if(blocked&&previewAvailable)post("dsh-work/browser-previews",coveredPreviews);post("dsh-work/browser-blocked")}},
+  menuOverlaps(bounds:DOMRect){const blocked=this.overlaps(bounds);if(!blocked&&!occlusions.has("shell-menu"))return undefined;return this.setOcclusion("shell-menu",blocked)},
+  setOcclusion(source:OcclusionSource,blocked:boolean){const previous=occlusions.has(source);if(blocked)occlusions.add(source);else occlusions.delete(source);if(previous===blocked&&nativeOverlay!=="unknown")return overlayBarrier;overlayBarrier=applyOcclusion(occlusions.size>0);return overlayBarrier},
   handle(event:MessageEvent){
    const m=event.data as Record<string,unknown>;
    if(m?.version!==1||m.type!=="dsh-work/browser")return false;
@@ -56,11 +69,14 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
    const execute=async()=>{
     if(!accepting||documentToken!==token)throw Error("Browser document retired");
     if(m.action==="artifact-labels")return artifactLabels();
-    if(!enabled){enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable")}
-    if(m.action==="modal-overlay") {if(typeof m.blocked!=="boolean")throw Error("Invalid modal intent");await modalIntent(m.blocked);return true}
+    if(!enabled){await ensureAvailability();if(!accepting||documentToken!==token)throw Error("Browser document retired");enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable")}
+    if(nativeOverlay==="unknown" || (nativeOverlay==="clear")!== (occlusions.size===0))await applyNativeOverlay(occlusions.size>0,token);
+    if(!accepting||documentToken!==token)throw Error("Browser document retired");
+    if(announcedDocument!==token){announcedDocument=token;const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",document:token,blocked:occlusions.size>0},origin)}
+    if(m.action==="modal-overlay") {if(typeof m.blocked!=="boolean")throw Error("Invalid modal intent");await this.setOcclusion("provider-modal",m.blocked);return true}
     if(typeof slot!=="string"||slot.length>1024)throw Error("Invalid browser slot");
     switch(m.action){
-     case "update":if(typeof m.address!=="string"||m.address.length>8192||typeof m.visible!=="boolean")throw Error("Invalid browser request");{const rect=clamp(m.rect),visible=m.visible&&!frame.hidden;try{const result=await EmbeddedBrowserService.Update(token,slot,m.address,rect,visible);if(accepting&&documentToken===token){if(result.visible)visibleSlots.set(slot,rect);else visibleSlots.delete(slot);if(overlayApplied&&(visible||coveredSlots.has(slot))){if(rect.Width>0&&rect.Height>0)coveredSlots.set(slot,rect);else coveredSlots.delete(slot)}}return result}catch(error){visibleSlots.delete(slot);coveredSlots.delete(slot);throw error}}
+     case "update":if(typeof m.address!=="string"||m.address.length>8192||typeof m.visible!=="boolean")throw Error("Invalid browser request");{const rect=clamp(m.rect),visible=m.visible&&!frame.hidden;try{const result=await EmbeddedBrowserService.Update(token,slot,m.address,rect,visible);if(accepting&&documentToken===token){if(result.visible)visibleSlots.set(slot,rect);else visibleSlots.delete(slot);if(nativeOverlay!=="clear"&&(visible||coveredSlots.has(slot))){if(rect.Width>0&&rect.Height>0)coveredSlots.set(slot,rect);else coveredSlots.delete(slot)}}return result}catch(error){visibleSlots.delete(slot);coveredSlots.delete(slot);throw error}}
      case "artifact-open":return EmbeddedBrowserService.OpenArtifact(token,slot);
      case "state":return EmbeddedBrowserService.State(token,slot);
      case "select-control":if(typeof m.session!=="string"||m.session.length>1024||typeof m.lease!=="string")throw Error("Invalid browser selection");return EmbeddedBrowserService.SelectControl(token,new URL(frame.src).searchParams.get("generation")||"",m.session,slot,m.lease);
@@ -83,7 +99,7 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
      default:throw Error("Unsupported browser request");
     }
    };
-   void ((m.action==="modal-overlay"||m.action==="artifact-open")?execute():native(execute)).then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token)send(m.id as string,undefined,String(error))});
+   void ((m.action==="modal-overlay"||m.action==="artifact-open")?execute():native(execute)).then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token){const code=(error as {code?:unknown})?.code;send(m.id as string,undefined,typeof code==="string"?(error as Error).message:String(error),typeof code==="string"?code:"")}});
    return true;
   }
  };

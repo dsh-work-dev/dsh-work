@@ -11,6 +11,9 @@ import * as automation$0 from "../automation/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as embeddedbrowser$0 from "../embeddedbrowser/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as distribution$0 from "../embeddedbrowser/distribution/models.js";
 
 export function Action(document: string, slot: string, action: string): $CancellablePromise<void> {
     return $Call.ByID(1070156010, document, slot, action);
@@ -18,6 +21,10 @@ export function Action(document: string, slot: string, action: string): $Cancell
 
 export function AnswerDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, accept: boolean, text: string): $CancellablePromise<void> {
     return $Call.ByID(2939582890, document, slot, dialog, accept, text);
+}
+
+export function Availability(): $CancellablePromise<distribution$0.Availability> {
+    return $Call.ByID(3840925459);
 }
 
 /**
@@ -45,8 +52,8 @@ export function Detach(document: string, slot: string): $CancellablePromise<void
 }
 
 /**
- * ExitUI is present only as a disabled-by-default development lifetime action;
- * it quits this real UI process, not the daemon or another process.
+ * ExitUI closes the admitted instance before quitting this real UI process;
+ * it does not terminate the daemon or another UI process.
  */
 export function ExitUI(): $CancellablePromise<void> {
     return $Call.ByID(2323151634);

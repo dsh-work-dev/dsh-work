@@ -26,6 +26,9 @@ var BuildChannel = ""
 var (
 	DistributionFeed      = ""
 	DistributionPublisher = ""
+	// CEFPublicationSHA256 binds the exact signed CEF publication manifest to
+	// this build. The Windows packager also verifies the staged copy before commit.
+	CEFPublicationSHA256 = ""
 )
 
 // ReleaseVersion reports the semantic version this executable was built as, or

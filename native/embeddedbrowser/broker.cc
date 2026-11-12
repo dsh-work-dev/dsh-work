@@ -183,7 +183,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
     CancelDialog(true);
 #endif
     FeedbackCancel(true);
-    document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
+    document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,tab_,document_epoch_);
 
   }
   std::map<int, int> pending_;
@@ -618,7 +618,7 @@ bool RequiresGuard()const{return guard_required_;}
 #endif
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
-    graph_browser_=b->GetIdentifier();frame_graph.Bound(owner_route_,graph_browser_);
+    graph_browser_=b->GetIdentifier();frame_graph.Bound(owner_route_,tab_,graph_browser_);
     tabs.emplace(tab_, Tab{route_, b, b->GetHost()->AddDevToolsMessageObserver(this),artifact_});
 #ifdef _WIN32
     // Keep read-only engine dialog events available across Agent attachments.
@@ -1169,7 +1169,7 @@ int RunBroker(CefMainArgs args,void* sandbox){
 #ifdef _WIN32
   StartTransportWriter();
 #endif
-  CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
+  CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;CefString(&settings.log_file)=profile+"/cef.log";settings.remote_debugging_port=0;
 #ifdef __APPLE__
   settings.windowless_rendering_enabled=true;
   settings.log_severity=LOGSEVERITY_DISABLE;

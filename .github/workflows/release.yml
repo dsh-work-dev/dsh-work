@@ -428,7 +428,9 @@ jobs:
         run: |
           . ./scripts/windows-signing.ps1
           $installer = "bin/dsh-work-$env:RELEASE_VERSION-windows-amd64-installer.exe"
-          foreach ($file in @('bin/dsh-work.exe', 'bin/dsh-work-cli.exe', $installer)) {
+          $cefLock = Get-Content internal/embeddedbrowser/distribution/cef-lock.json -Raw | ConvertFrom-Json
+          $cefBinaries = @($cefLock.requiredFiles | Where-Object { $_ -match '\.(exe|dll)$' } | ForEach-Object { Join-Path 'bin/windows-cef-build/Release' $_ })
+          foreach ($file in (@('bin/dsh-work.exe', 'bin/dsh-work-cli.exe', $installer) + $cefBinaries)) {
             Assert-AuthenticodePublisher -Path $file -Publisher $env:RELEASE_PUBLISHER
             Write-Host "$file is signed by $env:RELEASE_PUBLISHER"
           }

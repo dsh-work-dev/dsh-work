@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "cefVersion": "156.0.15+gcf671c0+chromium-156.0.8078.80",
+  "sdkArchive": "cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_windows64.tar.bz2",
+  "sdkSHA256": "51fabb69de6bbb99b38704665e8bc67a511ec4a68f8cfa2465460c03ae7e8d75",
+  "requiredFiles": [
+    "dsh_cef_broker.exe", "dsh_cef_broker.dll",
+    "chrome_elf.dll", "d3dcompiler_47.dll", "libcef.dll",
+    "v8_context_snapshot.bin", "vk_swiftshader.dll",
+    "vk_swiftshader_icd.json", "vulkan-1.dll", "dxcompiler.dll",
+    "chrome_100_percent.pak", "chrome_200_percent.pak",
+    "resources.pak", "icudtl.dat", "locales/en-US.pak",
+    "LICENSE.txt", "CREDITS.html"
+  ]
+}

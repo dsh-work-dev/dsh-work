@@ -153,22 +153,17 @@ export function mountShell() {
   };
   const menuBar = createMenuBar(t, run, (id,bounds) => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
-    const previous=menuOccluded;menuOccluded=embeddedBrowser.overlaps(bounds);
-    if(menuOccluded&&embeddedBrowser.enabled)return syncGuestOverlay();
-    if(previous&&!menuOccluded&&embeddedBrowser.enabled)return syncGuestOverlay();
-    return undefined;
-  }, () => frame.contentWindow?.focus(),()=>{menuOccluded=false;void syncGuestOverlay().catch(report("resume browser"))});
+    return embeddedBrowser.menuOverlaps(bounds);
+  }, () => frame.contentWindow?.focus(),()=>{void embeddedBrowser.setOcclusion("shell-menu",false).catch(report("resume browser"))});
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, modalMask, controls);
   document.body.prepend(bar);
   document.body.append(toast.element);
   document.body.append(frame);
 
-  let embeddedModalIntent=false;
-  const embeddedBrowser=embeddedBrowserBridge(frame,async blocked=>{embeddedModalIntent=blocked;await syncGuestOverlay()});
+  const embeddedBrowser=embeddedBrowserBridge(frame);
   let settingsOpen = false;
-  let menuOccluded=false,settingsWaiting=false,settingsRound=0;
-  const syncGuestOverlay=()=>embeddedBrowser.overlay(menuOccluded||settingsOpen||settingsWaiting||dshModal.active||embeddedModalIntent);
+  let settingsRound=0;
   let dshModal = {active: false, background: "", blur: ""};
   const sendFrameMessage = (message: Record<string, unknown>) => {
     const src = frame.getAttribute("src");
@@ -239,7 +234,6 @@ export function mountShell() {
     }
   };
   const applySettingsPanel = () => {
-    settingsWaiting=false;
     settingsOpen = true;
     managerSurface?.removeAttribute("hidden");
     if (hostSurface) {
@@ -252,12 +246,12 @@ export function mountShell() {
     updateModalMask();
     requestAnimationFrame(() => document.getElementById("manager-title")?.focus({focusVisible: false} as FocusOptions));
   };
-  const openSettingsPanel=()=>{const round=++settingsRound;if(embeddedBrowser.enabled){settingsWaiting=true;void syncGuestOverlay().then(()=>{if(round===settingsRound)applySettingsPanel()},error=>{if(round===settingsRound){settingsWaiting=false;report("pause browser")(error)}})}else applySettingsPanel()};
+  const openSettingsPanel=()=>{const round=++settingsRound;void embeddedBrowser.setOcclusion("settings",true).then(()=>{if(round===settingsRound)applySettingsPanel()},error=>{if(round===settingsRound){void embeddedBrowser.setOcclusion("settings",false).catch(report("resume browser"));report("pause browser")(error)}})};
   const closeSettingsPanel = () => {
-    settingsRound++;settingsWaiting=false;
-    if (!settingsOpen) {void syncGuestOverlay().catch(report("resume browser"));return;}
+    settingsRound++;
+    if (!settingsOpen) {void embeddedBrowser.setOcclusion("settings",false).catch(report("resume browser"));return;}
     settingsOpen = false;
-    void syncGuestOverlay().catch(report("resume browser"));
+    void embeddedBrowser.setOcclusion("settings",false).catch(report("resume browser"));
     managerSurface?.setAttribute("hidden", "");
     if (hostSurface) {
       hostSurface.inert = false;
@@ -271,7 +265,8 @@ export function mountShell() {
   };
   const clearDshModal = () => {
     dshModal = {active: false, background: "", blur: ""};
-    embeddedModalIntent=false;
+    void embeddedBrowser.setOcclusion("dsh-modal",false).catch(report("resume browser"));
+    void embeddedBrowser.setOcclusion("provider-modal",false).catch(report("resume browser"));
     updateModalMask();
   };
   modalMask.addEventListener("click", () => {
@@ -309,8 +304,8 @@ export function mountShell() {
     const revision=++frameRevision, token=crypto.randomUUID();
     // Stop old document messages synchronously. Hide/close ACK precedes either
     // the fallback host or a new iframe document becoming visible.
-    const retired=embeddedBrowser.retireDocument(token);
     clearDshModal();
+    const retired=embeddedBrowser.retireDocument(token);
     void retired.then(async candidate=>{
       if(revision!==frameRevision)return;
       if(!url){
@@ -375,7 +370,7 @@ export function mountShell() {
     else if (message.type === "modal-mask") {
       if(!embeddedBrowser.acceptsDocument(event.data?.document))return;
       dshModal = {active: message.active, background: message.background, blur: message.blur};
-      void syncGuestOverlay().then(updateModalMask,report("pause browser"));
+      void embeddedBrowser.setOcclusion("dsh-modal",dshModal.active).then(updateModalMask,report("pause browser"));
       if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
     }
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));

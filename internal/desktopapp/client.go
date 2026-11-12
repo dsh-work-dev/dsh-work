@@ -97,6 +97,14 @@ func runDesktopClient(identity string, resources Resources) error {
 	if err != nil {
 		return fmt.Errorf("resolve dsh-work cache directory: %w", err)
 	}
+	embeddedUserData := embeddedExpectedUserData()
+	if embeddedUserData == "" {
+		locations, err := storagepaths.Open(paths.ConfigFile, paths.Root, paths.UserDataRoot)
+		if err != nil {
+			return fmt.Errorf("resolve embedded browser data directory: %w", err)
+		}
+		embeddedUserData = locations.Snapshot().Current.UserData
+	}
 	webviewRoot := paths.CacheRoot
 	if root := os.Getenv("DSH_WORK_DESKTOP_ROOT"); root != "" && os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
 		webviewRoot = filepath.Join(root, "cache")
@@ -140,7 +148,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			return nil
 		}
 		embeddedVersion := ""
-		if selection := snapshot.Status.LaunchSelection; embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(filepath.Join(embeddedDevelopmentRoot(), "data")) {
+		if selection := snapshot.Status.LaunchSelection; embeddedRuntimeReady() && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(embeddedUserData) {
 			embeddedVersion = selection.RuntimeVersion
 		}
 		return &desktopbridge.Bridge{EmbeddedBrowserVersion: embeddedVersion, Client: &http.Client{Transport: uiWorkerTransport{base: client.HTTP.Transport, generation: snapshot.Status.GenerationID}}, Origin: daemon.Origin, Generation: snapshot.Status.GenerationID, OpenExternal: func(value string) error { return desktop.Browser.OpenURL(value) },
@@ -214,7 +222,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		defer mu.Unlock()
 		return current.Update
 	}}
-	embeddedClient := &desktopclient.EmbeddedBrowserService{Client: client, Enabled: embeddedDevelopmentRoot() != "", InstanceKey: embeddedInstanceKey, QuitUI: func() { desktop.Quit() }}
+	embeddedClient := &desktopclient.EmbeddedBrowserService{Client: client, Enabled: embeddedRuntimeReady(), InstanceKey: embeddedInstanceKey, QuitUI: func() { desktop.Quit() }}
 	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
@@ -429,7 +437,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			window.Close()
 		}
 	}, func() {
-		if embeddedDevelopmentRoot() != "" {
+		if embeddedRuntimeReady() {
 			windowMu.Lock()
 			window := workspace
 			windowMu.Unlock()
@@ -448,7 +456,7 @@ func runDesktopClient(identity string, resources Resources) error {
 	defer stopStream()
 	desktop.OnShutdown(func() {
 		applicationShuttingDown.Store(true)
-		if embeddedDevelopmentRoot() != "" {
+		if embeddedRuntimeReady() {
 			windowMu.Lock()
 			names := make([]string, 0, len(windows))
 			for name := range windows {

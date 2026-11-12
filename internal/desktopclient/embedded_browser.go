@@ -6,6 +6,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 	"runtime"
 	"sync"
 	"time"
@@ -45,6 +46,17 @@ func (s *EmbeddedBrowserService) Capability(ctx context.Context) (bool, error) {
 		return presenterCapability(ctx, s)
 	}
 	return enabled, err
+}
+func (s *EmbeddedBrowserService) Availability(ctx context.Context) (distribution.Availability, error) {
+	var result distribution.Availability
+	if err := call(ctx, s.Client, "EmbeddedBrowserService", "Availability", nil, &result); err != nil {
+		return result, err
+	}
+	if result.State == distribution.Ready && !s.Enabled {
+		result.State = distribution.UnsupportedRuntime
+		result.Code = "CEF_DSH_RUNTIME_UNSUPPORTED"
+	}
+	return result, nil
 }
 func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, address string, bounds embeddedbrowser.SlotBounds, visible bool) (embeddedbrowser.ViewState, error) {
 	if !s.Enabled {
@@ -151,8 +163,8 @@ func (s *EmbeddedBrowserService) Recover(ctx context.Context, document, slot, ad
 	return state, err
 }
 
-// ExitUI is present only as a disabled-by-default development lifetime action;
-// it quits this real UI process, not the daemon or another process.
+// ExitUI closes the admitted instance before quitting this real UI process;
+// it does not terminate the daemon or another UI process.
 func (s *EmbeddedBrowserService) ExitUI(ctx context.Context) error {
 	if !s.Enabled || s.QuitUI == nil {
 		return errors.New("CEF_PRESENTER_UNAVAILABLE")

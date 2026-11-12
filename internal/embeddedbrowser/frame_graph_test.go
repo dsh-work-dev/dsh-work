@@ -49,3 +49,25 @@ func TestFrameGraphRetainsDetachedDocumentAndRejectsMissingEvents(t *testing.T) 
 		t.Fatal("final main lifetime not removed", e)
 	}
 }
+
+func TestFrameGraphTracksEachTabMainIndependently(t *testing.T) {
+	graph := &frameGraph{}
+	for tab := 1; tab <= 2; tab++ {
+		frame := fmt.Sprintf("%X-00112233445566778899AABBCCDDEEFF", tab)
+		created, _ := json.Marshal(frameEvent{Revision: fmt.Sprint(2*tab - 1), FaultEpoch: "0", Action: "created", FrameRecord: FrameRecord{Owner: "same-route", Tab: tab, Browser: tab, Frame: frame, Document: fmt.Sprint(tab), Main: true}})
+		if err := graph.apply(created); err != nil {
+			t.Fatal(err)
+		}
+		changed, _ := json.Marshal(frameEvent{Revision: fmt.Sprint(2 * tab), FaultEpoch: "0", Action: "main-changed", FrameRecord: FrameRecord{Owner: "same-route", Tab: tab, Browser: tab, Frame: frame, Main: true}})
+		if err := graph.apply(changed); err != nil {
+			t.Fatalf("tab %d initial main: %v", tab, err)
+		}
+	}
+	if len(graph.mains) != 2 || graph.mains[frameTab{"same-route", 1}] == graph.mains[frameTab{"same-route", 2}] {
+		t.Fatalf("two live tab mains missing: %+v", graph.mains)
+	}
+	wrongPrevious, _ := json.Marshal(frameEvent{Revision: "5", FaultEpoch: "0", Action: "main-changed", Previous: graph.mains[frameTab{"same-route", 1}], FrameRecord: FrameRecord{Owner: "same-route", Tab: 2, Browser: 2, Main: true}})
+	if err := graph.apply(wrongPrevious); err == nil || err.Error() != "CEF_GRAPH_PREVIOUS_MAIN_REJECTED" || graph.revision != 4 {
+		t.Fatalf("cross-tab previous main accepted: %v", err)
+	}
+}

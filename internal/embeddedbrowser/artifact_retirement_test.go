@@ -17,7 +17,7 @@ func (retiredArtifactCensus) OwnedProcesses(context.Context) ([]supervisor.Proce
 // Deterministic ACK/last-main-event ordering; real chooser/engine evidence is
 // TestLiveArtifactProductSelection, not this scheduling contract.
 func TestArtifactRetirementRequiresACKAndFinalEmptyGraph(t *testing.T) {
-	b := &Broker{done: make(chan struct{}), closed: make(chan struct{}), frames: &frameGraph{revision: 8, frames: map[string]FrameRecord{}, mains: map[string]string{"artifact": "old-frame"}}}
+	b := &Broker{done: make(chan struct{}), closed: make(chan struct{}), frames: &frameGraph{revision: 8, frames: map[string]FrameRecord{}, mains: map[frameTab]string{{owner: "artifact", tab: 1}: "old-frame"}}}
 	r := &rendererTracker{broker: b, inventory: retiredArtifactCensus{}, held: map[uint32]*rendererLease{}, established: true}
 	b.renderers = r
 	r.beginArtifactRetirement("artifact")
@@ -29,7 +29,7 @@ func TestArtifactRetirementRequiresACKAndFinalEmptyGraph(t *testing.T) {
 	if !r.established || len(r.artifactRetiring) != 1 {
 		t.Fatal("context ACK without final main-frame event reset continuity")
 	}
-	b.frames.mains = map[string]string{}
+	b.frames.mains = map[frameTab]string{}
 	b.frames.revision++
 	r.refresh()
 	if b.ControlPaused() || r.established || r.complete || !r.joinUncertain || len(r.artifactRetiring) != 0 {

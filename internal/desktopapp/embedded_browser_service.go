@@ -6,6 +6,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 )
 
 // embeddedBrowserService is a presenter-only bridge. No Agent identity or
@@ -18,10 +19,42 @@ type embeddedBrowserService struct {
 }
 
 func (s *embeddedBrowserService) Capability(ctx context.Context) (bool, error) {
-	return s != nil && s.Registry != nil && s.Compatible != nil && s.Compatible(ctx), nil
+	state, err := s.Availability(ctx)
+	return state.State == distribution.Ready, err
+}
+func (s *embeddedBrowserService) Availability(ctx context.Context) (distribution.Availability, error) {
+	if embeddedDevelopmentRoot() == "" {
+		publication := embeddedPublication()
+		if publication.State != distribution.Ready {
+			return distribution.Availability{State: publication.State, Code: availabilityCode(publication.State)}, nil
+		}
+	} else if embeddedExecutable() == "" {
+		return distribution.Availability{State: distribution.Missing, Code: availabilityCode(distribution.Missing)}, nil
+	}
+	if s == nil || s.Registry == nil || s.Compatible == nil || !s.Compatible(ctx) {
+		return distribution.Availability{State: distribution.UnsupportedRuntime, Code: availabilityCode(distribution.UnsupportedRuntime)}, nil
+	}
+	return distribution.Availability{State: distribution.Ready, Code: availabilityCode(distribution.Ready)}, nil
+}
+
+func availabilityCode(state distribution.State) string {
+	switch state {
+	case distribution.Missing:
+		return "CEF_INSTALL_MISSING"
+	case distribution.Corrupt:
+		return "CEF_INSTALL_CORRUPT"
+	case distribution.Incompatible:
+		return "CEF_INSTALL_INCOMPATIBLE"
+	case distribution.UnsupportedRuntime:
+		return "CEF_DSH_RUNTIME_UNSUPPORTED"
+	case distribution.UnsupportedPlatform:
+		return "CEF_PLATFORM_UNSUPPORTED"
+	default:
+		return "CEF_READY"
+	}
 }
 func (s *embeddedBrowserService) nativePeer(ctx context.Context) (embeddedbrowser.PresenterPeer, string, error) {
-	enabled := s != nil && s.Registry != nil && embeddedDevelopmentRoot() != ""
+	enabled := s != nil && s.Registry != nil && embeddedRuntimeReady()
 	p, ok := daemon.ProcessPeerFrom(ctx)
 	surface := daemon.SurfaceFrom(ctx)
 	if !enabled || !ok || !embeddedWorkspaceSurface(surface) {

@@ -32,6 +32,11 @@ $release = Resolve-ReleaseVersion -ReleaseVersion $ReleaseVersion
 $version = $release.Version
 if (-not (Test-Path -LiteralPath $appPath)) { throw "missing application binary: $appPath" }
 if (-not (Test-Path -LiteralPath $cliPath)) { throw "missing CLI binary: $cliPath" }
+if ($Arch -eq 'amd64') {
+    $cefLock = Get-Content -LiteralPath (Join-Path $root 'internal/embeddedbrowser/distribution/cef-lock.json') -Raw | ConvertFrom-Json
+    $cefPublication = Join-Path $root 'bin/embedded-cef'
+    if (-not (Test-Path -LiteralPath (Join-Path $cefPublication 'publication.json') -PathType Leaf)) { throw 'Bound CEF publication is missing; run scripts/build-windows.ps1 first' }
+}
 
 $identity = Resolve-ReleaseIdentity -ReleaseVersion $ReleaseVersion -Prerelease $release.Prerelease -Channel $Channel -FeedRoot $FeedRoot -Publisher $Publisher
 if ($Sign -and -not $identity.Publisher) {
@@ -52,6 +57,17 @@ if ($Sign) {
     foreach ($binary in @($appPath, $cliPath)) {
         Assert-AuthenticodePublisher -Path $binary -Publisher $identity.Publisher
     }
+    if ($Arch -eq 'amd64') {
+        foreach ($name in @($cefLock.requiredFiles | Where-Object { $_ -match '\.(exe|dll)$' })) {
+            Assert-AuthenticodePublisher -Path (Join-Path $cefPublication $name) -Publisher $identity.Publisher
+        }
+    }
+}
+if ($Arch -eq 'amd64') {
+    & $appPath cef-package-verify
+    if ($LASTEXITCODE -ne 0) { throw 'Application rejected the bound CEF publication; rebuild application and component together' }
+    & $cliPath cef-package-verify
+    if ($LASTEXITCODE -ne 0) { throw 'CLI rejected the bound CEF publication; rebuild application and component together' }
 }
 $toolchain = Get-Content -LiteralPath (Join-Path $root 'toolchain.lock.json') -Raw | ConvertFrom-Json
 $expectedNsis = [string]$toolchain.nsis.version
@@ -93,6 +109,11 @@ try {
     & wails3 generate webview2bootstrapper -dir $nsisDir
     if ($LASTEXITCODE -ne 0) { throw "WebView2 bootstrapper generation failed with exit code $LASTEXITCODE" }
 
+    $cefDefine = @()
+    if ($Arch -eq 'amd64') {
+        $cefDefine = @("-DARG_DSH_WORK_CEF_DIR=$cefPublication")
+    }
+
     $mainDefine = if ($Arch -eq 'amd64') { 'ARG_WAILS_AMD64_BINARY' } else { 'ARG_WAILS_ARM64_BINARY' }
     $cliDefine = if ($Arch -eq 'amd64') { 'ARG_DSH_WORK_CLI_AMD64_BINARY' } else { 'ARG_DSH_WORK_CLI_ARM64_BINARY' }
     # NSIS needs four numeric components for the PE version resource, so the
@@ -105,6 +126,7 @@ try {
         "-DINFO_RELEASE_VERSION=$version",
         "-D$mainDefine=$appPath",
         "-D$cliDefine=$cliPath",
+        $cefDefine,
         'project.nsi'
     )
     Push-Location $nsisDir

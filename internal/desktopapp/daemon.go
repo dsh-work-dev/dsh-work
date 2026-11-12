@@ -33,6 +33,7 @@ import (
 	"github.com/local/dsh-work/internal/dshinteraction"
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 	"github.com/local/dsh-work/internal/hostevents"
 	"github.com/local/dsh-work/internal/hostplugins"
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -541,9 +542,9 @@ func runDaemon(identity string, resources Resources) {
 	embeddedService := &embeddedBrowserService{Automation: automationState, Compatible: func(context.Context) bool {
 		status := host.Status()
 		selection := status.LaunchSelection
-		return embeddedAvailable && embeddedDevelopmentRoot() != "" && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(config.DSHDataDirectory)
+		return embeddedAvailable && embeddedRuntimeReady() && selection != nil && selection.RuntimeVersion == desktopbridge.EmbeddedBrowserRuntime && selection.ProfileName == dshmanager.AppProfileName && filepath.Clean(selection.DataDirectoryPath) == filepath.Clean(config.DSHDataDirectory)
 	}}
-	if embeddedDevelopmentRoot() != "" {
+	if embeddedRuntimeReady() {
 		acquire := func(directory string) (io.Closer, error) {
 			return dshworkapp.AcquireManagerProcessLock(filepath.Join(directory, "instance.json"))
 		}
@@ -559,7 +560,12 @@ func runDaemon(identity string, resources Resources) {
 				return askDownloadShutdown(ctx, desktop, loadNativeLocale(&activeLocale))
 			},
 			StartBroker: func(ctx context.Context, instance embeddedbrowser.InstanceConfig) (*embeddedbrowser.Broker, error) {
-				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: os.Getenv("DSH_WORK_CEF_EXECUTABLE"), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
+				if embeddedDevelopmentRoot() == "" {
+					if err := distribution.AdmitProfile(instance.Profile); err != nil {
+						return nil, err
+					}
+				}
+				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: embeddedExecutable(), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
 			},
 			OnFailure: func(instance string, err error) {
 				logging.Module(logging.ModRuntime).Warn("embedded instance cleanup failed", "instance", instance, "error", err)

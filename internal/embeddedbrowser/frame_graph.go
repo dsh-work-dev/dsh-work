@@ -26,10 +26,11 @@ type FrameRecord struct {
 }
 
 type FrameGraphSnapshot struct {
-	Generation string            `json:"generation"`
-	Revision   uint64            `json:"revision"`
-	FaultEpoch uint64            `json:"faultEpoch"`
-	Frames     []FrameRecord     `json:"frames"`
+	Generation string        `json:"generation"`
+	Revision   uint64        `json:"revision"`
+	FaultEpoch uint64        `json:"faultEpoch"`
+	Frames     []FrameRecord `json:"frames"`
+	// MainFrames keys are owner/tab pairs ("<owner>/<tab>").
 	MainFrames map[string]string `json:"mainFrames"`
 	// This first layer records CEF events only. Kernel instance joins are an
 	// independent prerequisite; a complete-looking frame set is not a full map.
@@ -53,8 +54,15 @@ type frameGraph struct {
 	invalidReason   string
 	revision, fault uint64
 	frames          map[string]FrameRecord
-	mains           map[string]string
+	mains           map[frameTab]string
 }
+
+type frameTab struct {
+	owner string
+	tab   int
+}
+
+func (key frameTab) snapshotKey() string { return key.owner + "/" + strconv.Itoa(key.tab) }
 
 func graphSequence(raw string) (uint64, error) {
 	value, e := strconv.ParseUint(raw, 10, 64)
@@ -95,7 +103,7 @@ func (g *frameGraph) apply(raw json.RawMessage) error {
 	}
 	if g.frames == nil {
 		g.frames = map[string]FrameRecord{}
-		g.mains = map[string]string{}
+		g.mains = map[frameTab]string{}
 	}
 	if event.Action == "main-changed" {
 		if event.Frame != "" {
@@ -107,13 +115,14 @@ func (g *frameGraph) apply(raw json.RawMessage) error {
 				return errors.New("CEF_GRAPH_MAIN_REJECTED")
 			}
 		}
-		if previous := g.mains[event.Owner]; previous != event.Previous {
+		key := frameTab{event.Owner, event.Tab}
+		if previous := g.mains[key]; previous != event.Previous {
 			return errors.New("CEF_GRAPH_PREVIOUS_MAIN_REJECTED")
 		}
 		if event.Frame == "" {
-			delete(g.mains, event.Owner)
+			delete(g.mains, key)
 		} else {
-			g.mains[event.Owner] = event.Frame
+			g.mains[key] = event.Frame
 		}
 		g.revision = revision
 		return nil
@@ -195,8 +204,8 @@ func (b *Broker) frameGraphOnly() FrameGraphSnapshot {
 		snapshot.Frames = append(snapshot.Frames, frame)
 	}
 	sort.Slice(snapshot.Frames, func(i, j int) bool { return snapshot.Frames[i].Frame < snapshot.Frames[j].Frame })
-	for owner, frame := range b.frames.mains {
-		snapshot.MainFrames[owner] = frame
+	for key, frame := range b.frames.mains {
+		snapshot.MainFrames[key.snapshotKey()] = frame
 	}
 	snapshot.TopologyComplete = b.frames.invalidReason == "" && b.frames.coherent()
 	snapshot.UnknownReason = b.frames.invalidReason
@@ -220,9 +229,9 @@ func (b *Broker) FrameGraph() FrameGraphSnapshot {
 }
 
 func (g *frameGraph) coherent() bool {
-	for owner, main := range g.mains {
+	for key, main := range g.mains {
 		frame, ok := g.frames[main]
-		if !ok || !frame.Main || frame.Owner != owner {
+		if !ok || !frame.Main || frame.Owner != key.owner || frame.Tab != key.tab {
 			return false
 		}
 	}
