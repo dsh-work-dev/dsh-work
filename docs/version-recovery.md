@@ -122,14 +122,14 @@ any DSH release at or above `MinimumVersion` in `internal/dshadapter`. Newer
 releases are not guaranteed to work unchanged.
 
 Version recovery restores the recorded runtime and plugin inputs; it does not
-convert conversation data. An older runtime can list a session written by a
-newer one, but refuses to load it when the session contains an event type it
-does not know. From 0.2.1-alpha.1 to 0.2.1-rc.2, every shell tool call and
-working-directory change records such events, so most sessions created after an
-upgrade cannot be opened or continued after recovering to the older runtime. The
-session data is not modified and opens again once a runtime at least as new as
-the one that wrote it is restored. Profile bundles that the older runtime does
-not ship are skipped at startup.
+restore or convert conversation data. An older runtime refuses to load a
+session with an unknown event it cannot ignore. For example, DSH 0.2.2-rc.1
+can reopen ordinary sessions continued by 0.2.2-rc.5, but cannot open a session
+after RC5 records a change to its AgentTeam mode. Reopen that session with
+RC5; the failed read did not remove its data. If you need to return the
+data directory itself to its pre-upgrade state, keep a separate copy before
+switching runtimes. Profile bundles that the older runtime does not ship are
+skipped at startup.
 Registry dependencies with usable lock inputs are supported. Local or
 Git sources, advanced manifest dependency configuration (such as overrides or
 peer configuration), and auxiliary dependency files are not promised historical

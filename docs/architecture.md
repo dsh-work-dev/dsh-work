@@ -556,6 +556,12 @@ DSH Work's managed DSH data directory runs the profile `dsh-work`, which the UI 
 
 Revisit the bundle list when the pinned DSH changes `PROFILE_TEMPLATES.web`.
 
+The managed profile defaults to DeepSeek Search API and HTTP fetch. It keeps
+an explicit search provider choice. This preserves the search route when
+upgrading to DSH releases that otherwise select a search provider from the
+model route; the search endpoint does not necessarily follow the model's
+custom gateway.
+
 ## Launch adapter and byte semantics
 
 The desktop carrier preserves upstream opaque resource queries, including DSH
@@ -624,9 +630,9 @@ default, the next observation removes that entry from the modified view.
 
 For the managed app profile, the adapter's optional `AppProfileDefaultPatch`
 supplies the same template used to initialize its patch. The manager excludes
-matching default `disabled` values while retaining other explicit fields on
-the entry as modifications. Keeping defaults with their writer avoids a
-second ID/value catalog in the manager. The view uses explicit profile edits
+matching default `disabled` values and matching literal default configuration;
+other explicit fields remain modifications. Keeping defaults with their writer
+avoids a second ID/value catalog in the manager. The view uses explicit profile edits
 instead of a full official-configuration diff because its purpose is to find
 local customizations. Revisit this attribution if DSH supplies writer metadata
 or Work moves its automatic defaults out of the profile patch. Live switch
@@ -930,11 +936,15 @@ notifications.
    server on receipt; the CLI `stop` command and the installer use it.
    `HostService.RequestQuit` is the workbench menu's entry and, with the tray
    item, goes through a confirmation: the daemon asks `@dsh-work/pet` for
-   `/__dshwork/quit-inspection` (running agents, queued messages or live jobs;
-   armed `schedule` session activity), the same check as the official desktop
-   app. Nothing to interrupt quits at once; otherwise a native Yes/No question
-   names what would be lost, and the drain starts only after Yes. An inspection
-   that fails or takes over 2 seconds counts as running work. Wails' Windows
+   `/__dshwork/quit-inspection`. It checks running agents, queued messages,
+   live jobs and the Host-wide Schedule catalog. Armed schedules count even
+   when their target session is not loaded. A Schedule execution marker also
+   counts as running work; paused or ended tasks in manual target resolution
+   do not yet expose that marker. A confirmed stopped Host, or a successful
+   check with nothing to interrupt, quits at once. Otherwise a native Yes/No
+   question appears, and the drain starts only after Yes. A failed query, a
+   Worker connection or generation change, or a query that takes over two
+   seconds also requires confirmation. Wails' Windows
    dialogs are the system message box, so the buttons follow the Windows
    display language; a custom task dialog was not worth its native code.
 10. Pet size and position changes are applied through the Host. A failed native
