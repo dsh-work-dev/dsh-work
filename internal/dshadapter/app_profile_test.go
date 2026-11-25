@@ -201,6 +201,46 @@ func TestInitializeAppProfilePreservesExplicitBrowserAndObservationDisable(t *te
 	assertAppProfilePatchDisabled(t, actual, "plugin-package-inventory-deepseek", true)
 }
 
+func TestInitializeAppProfileDoesNotChangeSharedWebConfig(t *testing.T) {
+	for _, webDefinesAnchor := range []bool{false, true} {
+		profile := t.TempDir()
+		path := filepath.Join(profile, "cordis.patch.yml")
+		patch := "- id: custom\n  config: &common {fetchProvider: http}\n- id: web\n  config: *common\n"
+		if webDefinesAnchor {
+			patch = "- id: web\n  config: &common {fetchProvider: http}\n- id: custom\n  config: *common\n"
+		}
+		if err := os.WriteFile(path, []byte(patch), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&Adapter{}).InitializeAppProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []struct {
+			ID     string
+			Config map[string]string
+		}
+		if err := yaml.Unmarshal(data, &rows); err != nil {
+			t.Fatal(err)
+		}
+		var web map[string]string
+		for _, row := range rows {
+			if row.ID == "custom" && !reflect.DeepEqual(row.Config, map[string]string{"fetchProvider": "http"}) {
+				t.Fatalf("shared custom config changed: %v", row.Config)
+			}
+			if row.ID == "web" {
+				web = row.Config
+			}
+		}
+		if !reflect.DeepEqual(web, map[string]string{"fetchProvider": "http", "searchProvider": "deepseek-search-api"}) {
+			t.Fatalf("effective web config: %v", web)
+		}
+	}
+}
+
 func TestInitializeAppProfileLeavesMalformedPatchForRepair(t *testing.T) {
 	profile := t.TempDir()
 	patch := "invalid: [yaml\n"

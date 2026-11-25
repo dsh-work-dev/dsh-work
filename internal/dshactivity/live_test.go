@@ -172,6 +172,10 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	b.mu.Lock()
 	client, origin, token := b.client, b.origin, b.token
 	b.mu.Unlock()
+	quitState, err := b.InspectQuit(ctx, "live-test")
+	if err != nil || quitState != (QuitInspection{}) {
+		t.Fatalf("idle real Schedule service: quit inspection = %+v, %v", quitState, err)
+	}
 	remote := func(method string, args map[string]any) json.RawMessage {
 		t.Helper()
 		id := "dsh-work-rc1-" + strings.ReplaceAll(method, "/", "-")

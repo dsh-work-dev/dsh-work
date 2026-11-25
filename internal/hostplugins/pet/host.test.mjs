@@ -137,6 +137,15 @@ test('quit inspection waits for initialization and rejects a removed or replaced
   }
 });
 
+test('quit inspection rejects a provider before its injection becomes ready', async () => {
+  const {routes, ctx, detachSchedule} = setup();
+  detachSchedule();
+  ctx.get = () => ({catalog: () => assert.fail('used an unready provider')});
+  const res = new Response();
+  await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+  assert.equal(res.status, 503);
+});
+
 test('quit inspection preserves the authenticated route boundary', async () => {
   const {routes, ctx} = setup();
   const handler = routes.get('/__dshwork/quit-inspection');

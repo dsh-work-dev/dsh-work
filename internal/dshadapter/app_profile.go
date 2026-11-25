@@ -122,11 +122,34 @@ func ensureAppProfilePatch(path string) error {
 		}
 		sequence.Content = append(sequence.Content, defaults.Content[0].Content...)
 		changed = true
-	} else if webConfig.Kind == yaml.MappingNode && appProfilePatchValue(webConfig, "searchProvider") == nil {
-		webConfig.Content = append(webConfig.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "searchProvider"},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "deepseek-search-api"})
-		changed = true
+	} else {
+		resolved := webConfig
+		if webConfig.Kind == yaml.AliasNode {
+			resolved = webConfig.Alias
+		}
+		if resolved != nil && resolved.Kind == yaml.MappingNode && appProfilePatchValue(resolved, "searchProvider") == nil {
+			config := webConfig
+			if webConfig.Kind == yaml.AliasNode || webConfig.Anchor != "" {
+				config = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+				for _, field := range resolved.Content {
+					config.Content = append(config.Content, copyProfileConfigField(field))
+				}
+			}
+			config.Content = append(config.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "searchProvider"},
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "deepseek-search-api"})
+			if webConfig.Anchor != "" {
+				// Keep the original anchor for subsequent aliases.
+				sequence.Content = append(sequence.Content, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Value: "id"}, {Kind: yaml.ScalarNode, Value: "web"},
+					{Kind: yaml.ScalarNode, Value: "config"}, config,
+				}})
+			} else if config != webConfig {
+				webConfig.Kind, webConfig.Tag, webConfig.Value, webConfig.Alias = config.Kind, config.Tag, "", nil
+				webConfig.Content = config.Content
+			}
+			changed = true
+		}
 	}
 	for _, id := range []string{"ui-sidebar-browser", "fs-observation-policy", "web-fetch-http"} {
 		if appProfilePatchDisabledOverride(sequence, id) == nil {
@@ -161,6 +184,21 @@ func ensureAppProfilePatch(path string) error {
 		return err
 	}
 	return replaceAppProfilePatch(path, encoded.Bytes())
+}
+
+func copyProfileConfigField(node *yaml.Node) *yaml.Node {
+	if node.Anchor != "" {
+		return &yaml.Node{Kind: yaml.AliasNode, Value: node.Anchor, Alias: node}
+	}
+	if len(node.Content) == 0 {
+		return node
+	}
+	copy := *node
+	copy.Content = make([]*yaml.Node, len(node.Content))
+	for i, child := range node.Content {
+		copy.Content[i] = copyProfileConfigField(child)
+	}
+	return &copy
 }
 
 func appProfilePatchEntry(id string, disabled bool) *yaml.Node {
