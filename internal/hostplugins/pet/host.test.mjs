@@ -42,6 +42,7 @@ class Response extends EventEmitter {
 
 function setup(inspectedEvents = [], sessionQuery) {
   const routes = new Map(), listeners = new Map(), cleanups = [];
+  let scheduleCleanup, attachSchedule;
   const clock = new FakeClock();
   const ctx = {
     webServer: {register(route) { routes.set(route.path, route.handler); return () => routes.delete(route.path); }},
@@ -54,13 +55,19 @@ function setup(inspectedEvents = [], sessionQuery) {
     get: name => name === 'sessionQuery' ? sessionQuery : name === 'schedule' ? schedule : undefined,
     on(name, listener) { listeners.set(name, listener); },
     effect(effect) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); },
-    inject(_dependencies, callback) {
+    inject(dependencies, callback) {
+      if (dependencies.includes('schedule')) {
+        attachSchedule = () => callback({effect: effect => { scheduleCleanup = effect(); }});
+        attachSchedule();
+        return;
+      }
       callback({jobs: {onJobsChanged: () => () => {}, list: () => []}, effect: effect => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }});
     },
   };
   const schedule = {catalog: async () => []};
   apply(ctx, {generation: 'generation-1', token: 't'.repeat(64)}, clock);
-  return {routes, listeners, cleanups, clock, ctx};
+  const detachSchedule = () => { scheduleCleanup?.(); scheduleCleanup = undefined; };
+  return {routes, listeners, cleanups, clock, ctx, attachSchedule, detachSchedule};
 }
 
 function request(method, accept) {
@@ -109,20 +116,24 @@ test('quit inspection returns unavailable for missing, failed or invalid schedul
   }
 });
 
-test('quit inspection waits for initialization and rejects a removed provider', async () => {
-  for (const removed of [false, true]) {
-    const {routes, ctx} = setup();
+test('quit inspection waits for initialization and rejects a removed or replaced provider', async () => {
+  for (const change of ['none', 'remove', 'replace']) {
+    const {routes, ctx, attachSchedule, detachSchedule} = setup();
     let resolve;
     const schedule = {catalog: () => new Promise(done => { resolve = done; })};
     ctx.get = name => name === 'schedule' ? schedule : undefined;
     const res = new Response();
     const pending = routes.get('/__dshwork/quit-inspection')(request('GET'), res);
     assert.equal(res.writableEnded, false);
-    if (removed) ctx.get = () => undefined;
+    if (change !== 'none') {
+      detachSchedule();
+      ctx.get = () => change === 'replace' ? {catalog: async () => [{status: 'active'}]} : undefined;
+      if (change === 'replace') attachSchedule();
+    }
     resolve([{status: 'active', target: {kind: 'new'}}]);
     await pending;
-    assert.equal(res.status, removed ? 503 : 200);
-    if (!removed) assert.equal(JSON.parse(res.body()).scheduledTasks, true);
+    assert.equal(res.status, change === 'none' ? 200 : 503);
+    if (change === 'none') assert.equal(JSON.parse(res.body()).scheduledTasks, true);
   }
 });
 

@@ -145,6 +145,13 @@ export function apply(ctx, config, timers = globalThis) {
   ctx.on('api-session/added', s => { const r = row(s.sessionId); if (r) { r.parentSessionId = text(s.parentSessionId, 256); r.running = s.running; changed(); } });
   ctx.on('api-session/error', (id, message) => { const r = row(id); if (r) { r.outcome = 'error'; r.summary = text(message); r.running = false; r.updatedAt = Date.now(); changed(); } });
   ctx.on('api-session/removed', id => { rows.delete(id); changed(); });
+  // Cordis can return a different proxy for the same provider. Observe the
+  // optional service's lifecycle instead of comparing those proxy objects.
+  let scheduleEpoch = 0;
+  ctx.inject(['schedule'], scheduleCtx => {
+    scheduleEpoch++;
+    scheduleCtx.effect(() => () => { scheduleEpoch++; });
+  });
   // DSH exposes no paginated job query. Cache its authorized list on change so
   // SSE snapshots do not repeatedly materialize a session's retained history.
   ctx.inject(['jobs'], jobsCtx => {
@@ -218,8 +225,9 @@ export function apply(ctx, config, timers = globalThis) {
       // missing provider or failed read cannot establish that no task is armed.
       const schedule = ctx.get('schedule');
       if (typeof schedule?.catalog !== 'function') throw new Error('Schedule inspection unavailable');
+      const epoch = scheduleEpoch;
       const tasks = await schedule.catalog();
-      if (typeof ctx.get('schedule')?.catalog !== 'function' || !Array.isArray(tasks) || tasks.some(task =>
+      if (epoch !== scheduleEpoch || typeof ctx.get('schedule')?.catalog !== 'function' || !Array.isArray(tasks) || tasks.some(task =>
         !task || !['active', 'paused', 'ended', 'inactive'].includes(task.status)
         || (task.executionActive !== undefined && typeof task.executionActive !== 'boolean'))) {
         throw new Error('Invalid schedule inspection');
