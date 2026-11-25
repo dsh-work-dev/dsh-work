@@ -13,17 +13,19 @@ type QuitInspection struct {
 	ScheduledTasks bool `json:"scheduledTasks"`
 }
 
-// InspectQuit uses the current Worker's authenticated activity connection.
-func (b *Bridge) InspectQuit(ctx context.Context) (QuitInspection, error) {
+// InspectQuit checks only the requested Worker's authenticated connection.
+// The caller owns deciding whether there is no Worker to inspect.
+func (b *Bridge) InspectQuit(ctx context.Context, generation string) (QuitInspection, error) {
 	b.mu.Lock()
 	client, origin, token, done := b.client, b.origin, b.token, b.done
+	currentGeneration := b.generation
 	b.mu.Unlock()
-	if client == nil || done == nil {
-		return QuitInspection{}, nil
+	if generation == "" || currentGeneration != generation || client == nil || done == nil {
+		return QuitInspection{}, fmt.Errorf("quit inspection unavailable for generation %q", generation)
 	}
 	select {
 	case <-done:
-		return QuitInspection{}, nil
+		return QuitInspection{}, fmt.Errorf("quit inspection connection closed")
 	default:
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -42,7 +44,26 @@ func (b *Bridge) InspectQuit(ctx context.Context) (QuitInspection, error) {
 	if resp.StatusCode != http.StatusOK {
 		return QuitInspection{}, fmt.Errorf("quit inspection status %d", resp.StatusCode)
 	}
-	var inspection QuitInspection
-	err = json.NewDecoder(resp.Body).Decode(&inspection)
-	return inspection, err
+	var payload struct {
+		ActiveTasks    *bool `json:"activeTasks"`
+		ScheduledTasks *bool `json:"scheduledTasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return QuitInspection{}, err
+	}
+	if payload.ActiveTasks == nil || payload.ScheduledTasks == nil {
+		return QuitInspection{}, fmt.Errorf("quit inspection missing task state")
+	}
+	b.mu.Lock()
+	current := b.generation == generation && b.done == done && b.client == client
+	b.mu.Unlock()
+	select {
+	case <-done:
+		current = false
+	default:
+	}
+	if !current {
+		return QuitInspection{}, fmt.Errorf("quit inspection connection changed")
+	}
+	return QuitInspection{ActiveTasks: *payload.ActiveTasks, ScheduledTasks: *payload.ScheduledTasks}, nil
 }

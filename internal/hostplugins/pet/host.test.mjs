@@ -51,13 +51,14 @@ function setup(inspectedEvents = [], sessionQuery) {
     sessionProjections: {snapshot: () => ({values: {}})},
     agents: {get: () => null, list: () => []},
     waterfall: async (_name, _input, fallback) => fallback(),
-    get: name => name === 'sessionQuery' ? sessionQuery : undefined,
+    get: name => name === 'sessionQuery' ? sessionQuery : name === 'schedule' ? schedule : undefined,
     on(name, listener) { listeners.set(name, listener); },
     effect(effect) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); },
     inject(_dependencies, callback) {
       callback({jobs: {onJobsChanged: () => () => {}, list: () => []}, effect: effect => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }});
     },
   };
+  const schedule = {catalog: async () => []};
   apply(ctx, {generation: 'generation-1', token: 't'.repeat(64)}, clock);
   return {routes, listeners, cleanups, clock, ctx};
 }
@@ -79,21 +80,49 @@ test('quit inspection checks agents, inboxes, global and agent jobs, and schedul
     {agents: [], jobs: [{status: 'running'}], active: true},
     {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'stopping'}], active: true},
     {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'completed'}], active: false},
-    {agents: [{id: 'a'}], schedule: true, active: false, scheduled: true},
+    ...['session', 'new_once', 'new'].map(kind => ({agents: [], tasks: [{status: 'active', target: {kind, sessionId: 'cold'}}], active: false, scheduled: true})),
+    {agents: [], tasks: [{status: 'paused'}, {status: 'ended'}, {status: 'inactive'}], active: false},
+    {agents: [], tasks: [{status: 'ended', executionActive: true}], active: true},
   ];
   for (const item of cases) {
     const {routes, ctx} = setup();
     ctx.agents.list = () => item.agents;
-    ctx.get = () => item.jobs ? {list: owner => owner === item.owner ? item.jobs : []} : undefined;
-    ctx.waterfall = async (name, input) => {
-      assert.equal(name, 'workspace/session-activity');
-      assert.equal(input.sessionId, 'a');
-      return item.schedule ? [{kind: 'schedule'}] : [];
-    };
+    const schedule = {catalog: async () => item.tasks ?? []};
+    ctx.get = name => name === 'schedule' ? schedule : item.jobs ? {list: owner => owner === item.owner ? item.jobs : []} : undefined;
+    ctx.waterfall = () => assert.fail('quit inspection must not enumerate Session activity');
     const res = new Response();
     await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
     assert.equal(res.status, 200);
     assert.deepEqual(JSON.parse(res.body()), {activeTasks: item.active, scheduledTasks: item.scheduled ?? false});
+  }
+});
+
+test('quit inspection returns unavailable for missing, failed or invalid schedule queries', async () => {
+  for (const schedule of [undefined, {}, {catalog: async () => { throw new Error('open failed'); }},
+    ...[undefined, {}, [null], [{status: 'unknown'}], [{status: 'active', executionActive: 'yes'}]].map(tasks => ({catalog: async () => tasks}))]) {
+    const {routes, ctx} = setup();
+    ctx.get = () => schedule;
+    const res = new Response();
+    await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+    assert.equal(res.status, 503);
+    assert.deepEqual(JSON.parse(res.body()), {});
+  }
+});
+
+test('quit inspection waits for initialization and rejects a removed provider', async () => {
+  for (const removed of [false, true]) {
+    const {routes, ctx} = setup();
+    let resolve;
+    const schedule = {catalog: () => new Promise(done => { resolve = done; })};
+    ctx.get = name => name === 'schedule' ? schedule : undefined;
+    const res = new Response();
+    const pending = routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+    assert.equal(res.writableEnded, false);
+    if (removed) ctx.get = () => undefined;
+    resolve([{status: 'active', target: {kind: 'new'}}]);
+    await pending;
+    assert.equal(res.status, removed ? 503 : 200);
+    if (!removed) assert.equal(JSON.parse(res.body()).scheduledTasks, true);
   }
 });
 

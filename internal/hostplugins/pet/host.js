@@ -212,17 +212,31 @@ export function apply(ctx, config, timers = globalThis) {
       res.setHeader?.('Allow', 'GET');
       return reply(res, 405, {});
     }
-    const agents = ctx.agents.list();
-    const jobs = ctx.get('jobs');
-    const activeJob = owner => jobs?.list(owner).some(job => job.status === 'running' || job.status === 'stopping') ?? false;
-    const activeTasks = agents.some(agent => agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length)
-      || activeJob(undefined) || agents.some(agent => activeJob(agent.id));
-    let scheduledTasks = false;
-    for (const agent of agents) {
-      const activity = await ctx.waterfall('workspace/session-activity', {sessionId: agent.id}, () => Promise.resolve([]));
-      if (activity.some(item => item.kind === 'schedule')) scheduledTasks = true;
+    let inspection;
+    try {
+      // catalog is Host-wide on both RC1 and older supported runtimes. A
+      // missing provider or failed read cannot establish that no task is armed.
+      const schedule = ctx.get('schedule');
+      if (typeof schedule?.catalog !== 'function') throw new Error('Schedule inspection unavailable');
+      const tasks = await schedule.catalog();
+      if (typeof ctx.get('schedule')?.catalog !== 'function' || !Array.isArray(tasks) || tasks.some(task =>
+        !task || !['active', 'paused', 'ended', 'inactive'].includes(task.status)
+        || (task.executionActive !== undefined && typeof task.executionActive !== 'boolean'))) {
+        throw new Error('Invalid schedule inspection');
+      }
+      const agents = ctx.agents.list();
+      const jobs = ctx.get('jobs');
+      const activeJob = owner => jobs?.list(owner).some(job => job.status === 'running' || job.status === 'stopping') ?? false;
+      inspection = {
+        activeTasks: agents.some(agent => agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length)
+          || activeJob(undefined) || agents.some(agent => activeJob(agent.id)) || tasks.some(task => task.executionActive === true),
+        scheduledTasks: tasks.some(task => task.status === 'active'),
+      };
+    } catch {
+      if (!res.destroyed && !res.writableEnded) reply(res, 503, {});
+      return;
     }
-    reply(res, 200, {activeTasks, scheduledTasks});
+    if (!res.destroyed && !res.writableEnded) reply(res, 200, inspection);
   }}));
   function closeStream(stream) {
     if (stream.closed) return;
