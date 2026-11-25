@@ -175,6 +175,30 @@ func TestOfficialLoaderEntriesIdentifyOnlyProfileOverrides(t *testing.T) {
 	}
 }
 
+func TestProfileEntryOverrideDistinguishesManagedSearchDefaults(t *testing.T) {
+	defaults, err := parsePatchSequence([]byte("- id: web\n  config: {searchProvider: deepseek-search-api, fetchProvider: http}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		config   string
+		modified bool
+	}{
+		{"{fetchProvider: http, searchProvider: deepseek-search-api}", false},
+		{"{fetchProvider: http, searchProvider: deepseek-official}", true},
+		{"{fetchProvider: http, searchProvider: !!js deepseek-search-api}", true},
+		{"{searchProvider: deepseek-search-api}", true},
+	} {
+		patch, err := parsePatchSequence([]byte("- id: web\n  config: " + tc.config + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, modified := profileEntryOverride(patch, defaults, "web", "@deepseek-ai/dsh-web"); modified != tc.modified {
+			t.Errorf("config %s: modified = %v, want %v", tc.config, modified, tc.modified)
+		}
+	}
+}
+
 func TestProfileEntryOverrideUsesLastValueAndModuleQualifier(t *testing.T) {
 	patch, err := parsePatchSequence([]byte(`- id: x
   disabled: true

@@ -5,6 +5,7 @@
 
 # Local browser verification artifacts.
 .playwright-cli/
+.playwright-mcp/
 output/playwright/
 
 # Generated application and dependency artifacts.

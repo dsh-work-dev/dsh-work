@@ -89,9 +89,21 @@ export function apply(ctx, config, timers = globalThis) {
     if (!r || seeding.has(sessionId)) return seeding.get(sessionId);
     r.seeding = true;
     r.seedEvents = [];
-    const work = ctx.sessionController.inspect(sessionId, AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)]))
-      .then(inspection => {
-        for (const event of inspection.events.slice(-512)) onEvent({id: sessionId}, event, true);
+    const work = Promise.resolve().then(async () => {
+        const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(2000)]);
+        let observation;
+        try {
+          // RC1 moved raw cold history to a caller-owned query observation.
+          // The Remote events API returns message records, not the domain log
+          // needed for activity. Earlier runtimes retain Controller.inspect.
+          const inspection = typeof ctx.sessionController.inspect === 'function'
+            ? await ctx.sessionController.inspect(sessionId, signal)
+            : observation = await ctx.get('sessionQuery').observeSession(sessionId, {signal, projectionMode: 'none'});
+          signal.throwIfAborted();
+          for (const event of inspection.events.slice(-512)) onEvent({id: sessionId}, event, true);
+        } finally {
+          observation?.[Symbol.dispose]();
+        }
       })
       .catch(() => { /* Live events remain available if persisted history cannot be read. */ })
       .finally(() => {
@@ -133,6 +145,17 @@ export function apply(ctx, config, timers = globalThis) {
   ctx.on('api-session/added', s => { const r = row(s.sessionId); if (r) { r.parentSessionId = text(s.parentSessionId, 256); r.running = s.running; changed(); } });
   ctx.on('api-session/error', (id, message) => { const r = row(id); if (r) { r.outcome = 'error'; r.summary = text(message); r.running = false; r.updatedAt = Date.now(); changed(); } });
   ctx.on('api-session/removed', id => { rows.delete(id); changed(); });
+  // Cordis can return a different proxy for the same provider. Observe the
+  // optional service's lifecycle instead of comparing those proxy objects.
+  let scheduleEpoch = 0, scheduleReady = false;
+  ctx.inject(['schedule'], scheduleCtx => {
+    scheduleReady = true;
+    scheduleEpoch++;
+    scheduleCtx.effect(() => () => {
+      scheduleReady = false;
+      scheduleEpoch++;
+    });
+  });
   // DSH exposes no paginated job query. Cache its authorized list on change so
   // SSE snapshots do not repeatedly materialize a session's retained history.
   ctx.inject(['jobs'], jobsCtx => {
@@ -200,17 +223,32 @@ export function apply(ctx, config, timers = globalThis) {
       res.setHeader?.('Allow', 'GET');
       return reply(res, 405, {});
     }
-    const agents = ctx.agents.list();
-    const jobs = ctx.get('jobs');
-    const activeJob = owner => jobs?.list(owner).some(job => job.status === 'running' || job.status === 'stopping') ?? false;
-    const activeTasks = agents.some(agent => agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length)
-      || activeJob(undefined) || agents.some(agent => activeJob(agent.id));
-    let scheduledTasks = false;
-    for (const agent of agents) {
-      const activity = await ctx.waterfall('workspace/session-activity', {sessionId: agent.id}, () => Promise.resolve([]));
-      if (activity.some(item => item.kind === 'schedule')) scheduledTasks = true;
+    let inspection;
+    try {
+      // catalog is Host-wide on both RC1 and older supported runtimes. A
+      // missing provider or failed read cannot establish that no task is armed.
+      const schedule = ctx.get('schedule');
+      if (!scheduleReady || typeof schedule?.catalog !== 'function') throw new Error('Schedule inspection unavailable');
+      const epoch = scheduleEpoch;
+      const tasks = await schedule.catalog();
+      if (epoch !== scheduleEpoch || typeof ctx.get('schedule')?.catalog !== 'function' || !Array.isArray(tasks) || tasks.some(task =>
+        !task || !['active', 'paused', 'ended', 'inactive'].includes(task.status)
+        || (task.executionActive !== undefined && typeof task.executionActive !== 'boolean'))) {
+        throw new Error('Invalid schedule inspection');
+      }
+      const agents = ctx.agents.list();
+      const jobs = ctx.get('jobs');
+      const activeJob = owner => jobs?.list(owner).some(job => job.status === 'running' || job.status === 'stopping') ?? false;
+      inspection = {
+        activeTasks: agents.some(agent => agent.status === 'running' || agent.inbox?.nextTurn?.length || agent.inbox?.nextStep?.length)
+          || activeJob(undefined) || agents.some(agent => activeJob(agent.id)) || tasks.some(task => task.executionActive === true),
+        scheduledTasks: tasks.some(task => task.status === 'active'),
+      };
+    } catch {
+      if (!res.destroyed && !res.writableEnded) reply(res, 503, {});
+      return;
     }
-    reply(res, 200, {activeTasks, scheduledTasks});
+    if (!res.destroyed && !res.writableEnded) reply(res, 200, inspection);
   }}));
   function closeStream(stream) {
     if (stream.closed) return;

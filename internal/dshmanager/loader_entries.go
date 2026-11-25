@@ -241,22 +241,44 @@ func profileEntryOverride(patch, defaults *yaml.Node, id, name string) (disabled
 	for _, row := range patch.Content {
 		collect(row)
 	}
+	var defaultRow *yaml.Node
+	for _, row := range defaults.Content {
+		if scalarValue(mappingValue(row, "id")) == id {
+			defaultRow = row
+		}
+	}
 	for key, value := range fields {
+		shellDefault := mappingValue(defaultRow, key)
 		if key == "disabled" {
 			disabled = disabledState(value) == loaderDisabled
-			var shellDefault *yaml.Node
-			for _, row := range defaults.Content {
-				if scalarValue(mappingValue(row, "id")) == id {
-					shellDefault = mappingValue(row, "disabled")
-				}
-			}
 			if shellDefault != nil && value.ShortTag() == "!!bool" && disabledState(value) == disabledState(shellDefault) {
 				continue
 			}
 		}
+		if key == "config" && matchesShellConfigDefault(value, shellDefault) {
+			continue
+		}
 		modified = true
 	}
 	return disabled, modified
+}
+
+// Shell defaults are literal fields. Keep expressions, additional fields and
+// partial replacements visible as explicit profile edits.
+func matchesShellConfigDefault(value, defaults *yaml.Node) bool {
+	if defaults == nil || value.Kind != yaml.MappingNode || defaults.Kind != yaml.MappingNode ||
+		len(value.Content) != len(defaults.Content) {
+		return false
+	}
+	for i := 0; i < len(defaults.Content); i += 2 {
+		key, expected := defaults.Content[i], defaults.Content[i+1]
+		actual := mappingValue(value, key.Value)
+		if actual == nil || actual.Kind != yaml.ScalarNode || expected.Kind != yaml.ScalarNode ||
+			actual.ShortTag() != expected.ShortTag() || actual.Value != expected.Value {
+			return false
+		}
+	}
+	return true
 }
 
 func disabledState(value *yaml.Node) loaderDisabledState {

@@ -23,7 +23,7 @@ func TestInitializeAppProfileCreatesTemplateFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantPatch := "# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n# dsh-work enables browser-facing capabilities, keeps file-write observation,\n# and prevents optional diagnostics or Session history from leaving the machine.\n- id: ui-sidebar-browser\n  disabled: false\n- id: fs-observation-policy\n  disabled: false\n- id: web-fetch-http\n  disabled: false\n- id: desktop-product-telemetry\n  disabled: true\n- id: product-analytics\n  disabled: true\n- id: session-telemetry-otel\n  disabled: true\n- id: session-log-deepseek\n  disabled: true\n- id: plugin-package-inventory-deepseek\n  disabled: true\n"
+	wantPatch := "# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n# dsh-work enables browser-facing capabilities, keeps file-write observation,\n# and prevents optional diagnostics or Session history from leaving the machine.\n- id: ui-sidebar-browser\n  disabled: false\n- id: fs-observation-policy\n  disabled: false\n- id: web-fetch-http\n  disabled: false\n- id: web\n  config:\n    searchProvider: deepseek-search-api\n    fetchProvider: http\n- id: desktop-product-telemetry\n  disabled: true\n- id: product-analytics\n  disabled: true\n- id: session-telemetry-otel\n  disabled: true\n- id: session-log-deepseek\n  disabled: true\n- id: plugin-package-inventory-deepseek\n  disabled: true\n"
 	if string(patch) != wantPatch {
 		t.Fatalf("patch = %q, want %q", patch, wantPatch)
 	}
@@ -69,7 +69,7 @@ func TestInitializeAppProfilePreservesExistingFilesAndMigratesPatch(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	patch := "# keep this custom entry\n- id: custom-entry\n  config:\n    value: !!js \"ctx.get('value')\"\n- id: product-analytics\n  disabled: false\n- id: desktop-product-telemetry\n  disabled: false\n"
+	patch := "# keep this custom entry\n- id: custom-entry\n  config:\n    value: !!js \"ctx.get('value')\"\n- id: web\n  config:\n    fetchProvider: http\n- id: product-analytics\n  disabled: false\n- id: web\n  config:\n    searchProvider: deepseek-search-api\n    fetchProvider: http\n- id: desktop-product-telemetry\n  disabled: false\n"
 	if err := os.WriteFile(filepath.Join(profile, "cordis.patch.yml"), []byte(patch), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +92,9 @@ func TestInitializeAppProfilePreservesExistingFilesAndMigratesPatch(t *testing.T
 	assertAppProfilePatchDisabled(t, actualPatch, "ui-sidebar-browser", false)
 	assertAppProfilePatchDisabled(t, actualPatch, "fs-observation-policy", false)
 	assertAppProfilePatchDisabled(t, actualPatch, "web-fetch-http", false)
+	if !strings.Contains(string(actualPatch), "searchProvider: deepseek-search-api") {
+		t.Fatalf("legacy search default was not preserved:\n%s", actualPatch)
+	}
 	assertAppProfilePatchDisabled(t, actualPatch, "desktop-product-telemetry", true)
 	assertAppProfilePatchDisabled(t, actualPatch, "product-analytics", true)
 	assertAppProfilePatchDisabled(t, actualPatch, "session-telemetry-otel", true)
@@ -174,7 +177,7 @@ func TestInitializeAppProfileFillsOnlyMissingManifest(t *testing.T) {
 
 func TestInitializeAppProfilePreservesExplicitBrowserAndObservationDisable(t *testing.T) {
 	profile := t.TempDir()
-	patch := "# user's explicit choices\n- id: ui-sidebar-browser\n  disabled: true\n- id: fs-observation-policy\n  disabled: true\n- id: web-fetch-http\n  disabled: true\n"
+	patch := "# user's explicit choices\n- id: ui-sidebar-browser\n  disabled: true\n- id: fs-observation-policy\n  disabled: true\n- id: web-fetch-http\n  disabled: true\n- id: web\n  config:\n    searchProvider: deepseek-official\n"
 	if err := os.WriteFile(filepath.Join(profile, "cordis.patch.yml"), []byte(patch), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +191,54 @@ func TestInitializeAppProfilePreservesExplicitBrowserAndObservationDisable(t *te
 	assertAppProfilePatchDisabled(t, actual, "ui-sidebar-browser", true)
 	assertAppProfilePatchDisabled(t, actual, "fs-observation-policy", true)
 	assertAppProfilePatchDisabled(t, actual, "web-fetch-http", true)
+	if !strings.Contains(string(actual), "searchProvider: deepseek-official") || strings.Contains(string(actual), "searchProvider: deepseek-search-api") {
+		t.Fatalf("explicit search provider was not preserved:\n%s", actual)
+	}
 	assertAppProfilePatchDisabled(t, actual, "desktop-product-telemetry", true)
 	assertAppProfilePatchDisabled(t, actual, "product-analytics", true)
 	assertAppProfilePatchDisabled(t, actual, "session-telemetry-otel", true)
 	assertAppProfilePatchDisabled(t, actual, "session-log-deepseek", true)
 	assertAppProfilePatchDisabled(t, actual, "plugin-package-inventory-deepseek", true)
+}
+
+func TestInitializeAppProfileDoesNotChangeSharedWebConfig(t *testing.T) {
+	for _, webDefinesAnchor := range []bool{false, true} {
+		profile := t.TempDir()
+		path := filepath.Join(profile, "cordis.patch.yml")
+		patch := "- id: custom\n  config: &common {fetchProvider: http}\n- id: web\n  config: *common\n"
+		if webDefinesAnchor {
+			patch = "- id: web\n  config: &common {fetchProvider: http}\n- id: custom\n  config: *common\n"
+		}
+		if err := os.WriteFile(path, []byte(patch), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := (&Adapter{}).InitializeAppProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rows []struct {
+			ID     string
+			Config map[string]string
+		}
+		if err := yaml.Unmarshal(data, &rows); err != nil {
+			t.Fatal(err)
+		}
+		var web map[string]string
+		for _, row := range rows {
+			if row.ID == "custom" && !reflect.DeepEqual(row.Config, map[string]string{"fetchProvider": "http"}) {
+				t.Fatalf("shared custom config changed: %v", row.Config)
+			}
+			if row.ID == "web" {
+				web = row.Config
+			}
+		}
+		if !reflect.DeepEqual(web, map[string]string{"fetchProvider": "http", "searchProvider": "deepseek-search-api"}) {
+			t.Fatalf("effective web config: %v", web)
+		}
+	}
 }
 
 func TestInitializeAppProfileLeavesMalformedPatchForRepair(t *testing.T) {

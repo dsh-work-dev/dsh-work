@@ -23,6 +23,10 @@ const appProfilePatchTemplate = `# Your patch layer for this dsh profile, applie
   disabled: false
 - id: web-fetch-http
   disabled: false
+- id: web
+  config:
+    searchProvider: deepseek-search-api
+    fetchProvider: http
 - id: desktop-product-telemetry
   disabled: true
 - id: product-analytics
@@ -106,6 +110,47 @@ func ensureAppProfilePatch(path string) error {
 		return errors.New("dsh-work profile patch must be a YAML list")
 	}
 	changed := false
+	// Keep the managed profile's existing search route. RC5's implicit
+	// model-based route can send a gateway credential to another endpoint.
+	webConfig := appProfilePatchOverride(sequence, "web", func(row *yaml.Node) *yaml.Node {
+		return appProfilePatchValue(row, "config")
+	})
+	if webConfig == nil {
+		var defaults yaml.Node
+		if err := yaml.Unmarshal([]byte("- id: web\n  config:\n    searchProvider: deepseek-search-api\n    fetchProvider: http\n"), &defaults); err != nil {
+			return err
+		}
+		sequence.Content = append(sequence.Content, defaults.Content[0].Content...)
+		changed = true
+	} else {
+		resolved := webConfig
+		if webConfig.Kind == yaml.AliasNode {
+			resolved = webConfig.Alias
+		}
+		if resolved != nil && resolved.Kind == yaml.MappingNode && appProfilePatchValue(resolved, "searchProvider") == nil {
+			config := webConfig
+			if webConfig.Kind == yaml.AliasNode || webConfig.Anchor != "" {
+				config = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+				for _, field := range resolved.Content {
+					config.Content = append(config.Content, copyProfileConfigField(field))
+				}
+			}
+			config.Content = append(config.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "searchProvider"},
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "deepseek-search-api"})
+			if webConfig.Anchor != "" {
+				// Keep the original anchor for subsequent aliases.
+				sequence.Content = append(sequence.Content, &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Value: "id"}, {Kind: yaml.ScalarNode, Value: "web"},
+					{Kind: yaml.ScalarNode, Value: "config"}, config,
+				}})
+			} else if config != webConfig {
+				webConfig.Kind, webConfig.Tag, webConfig.Value, webConfig.Alias = config.Kind, config.Tag, "", nil
+				webConfig.Content = config.Content
+			}
+			changed = true
+		}
+	}
 	for _, id := range []string{"ui-sidebar-browser", "fs-observation-policy", "web-fetch-http"} {
 		if appProfilePatchDisabledOverride(sequence, id) == nil {
 			sequence.Content = append(sequence.Content, appProfilePatchEntry(id, false))
@@ -141,6 +186,21 @@ func ensureAppProfilePatch(path string) error {
 	return replaceAppProfilePatch(path, encoded.Bytes())
 }
 
+func copyProfileConfigField(node *yaml.Node) *yaml.Node {
+	if node.Anchor != "" {
+		return &yaml.Node{Kind: yaml.AliasNode, Value: node.Anchor, Alias: node}
+	}
+	if len(node.Content) == 0 {
+		return node
+	}
+	copy := *node
+	copy.Content = make([]*yaml.Node, len(node.Content))
+	for i, child := range node.Content {
+		copy.Content[i] = copyProfileConfigField(child)
+	}
+	return &copy
+}
+
 func appProfilePatchEntry(id string, disabled bool) *yaml.Node {
 	value := "false"
 	if disabled {
@@ -159,11 +219,17 @@ func appProfilePatchEntry(id string, disabled bool) *yaml.Node {
 }
 
 func appProfilePatchDisabledOverride(sequence *yaml.Node, id string) *yaml.Node {
+	return appProfilePatchOverride(sequence, id, func(row *yaml.Node) *yaml.Node {
+		return appProfilePatchValue(row, "disabled")
+	})
+}
+
+func appProfilePatchOverride(sequence *yaml.Node, id string, read func(*yaml.Node) *yaml.Node) *yaml.Node {
 	var override *yaml.Node
 	for _, item := range sequence.Content {
 		if appProfilePatchID(item) == id {
-			if disabled := appProfilePatchValue(item, "disabled"); disabled != nil {
-				override = disabled
+			if value := read(item); value != nil {
+				override = value
 			}
 		}
 		inserted := appProfilePatchValue(item, "insert")
@@ -172,8 +238,8 @@ func appProfilePatchDisabledOverride(sequence *yaml.Node, id string) *yaml.Node 
 		}
 		for _, row := range inserted.Content {
 			if appProfilePatchID(row) == id {
-				if disabled := appProfilePatchValue(row, "disabled"); disabled != nil {
-					override = disabled
+				if value := read(row); value != nil {
+					override = value
 				}
 			}
 		}

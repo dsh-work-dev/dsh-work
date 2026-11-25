@@ -3,9 +3,22 @@ import {createRequire} from 'node:module';
 export const name = 'dsh-work-automation';
 export const inject = ['webServer', 'connection', 'agents', 'sessions', 'tools', 'sessionProjections'];
 
-// Identity comes only from actual rc.5 registries, never tool parameters.
-export function identity(exec, agents, sessions) {
+// Resolve the live automation owner, never from tool parameters. On runtimes
+// with a subagent tree, a regular Session fork is its own root.
+export function identity(exec, agents, sessions, subagents) {
  if (!exec.agent || agents.get(exec.agent.id) !== exec.agent) throw Error('AUTOMATION_UNTRUSTED_AGENT');
+ if (typeof subagents?.rootOf === 'function') {
+  const top=subagents.rootOf(exec.agent);
+  if(!top || agents.get(top.id)!==top || top.session?.id!==top.id) throw Error('AUTOMATION_TOP_SESSION_INACTIVE');
+  return top;
+ }
+ // Older registries owned the tree themselves. A missing modern provider
+ // must not make a fork inherit grants through its creation history.
+ if (typeof agents.isOwnedBy !== 'function') {
+  const header=exec.agent.session?.header;
+  if(!header || header.parentSession || header.origin==='subagent') throw Error('AUTOMATION_OWNER_UNAVAILABLE');
+  return exec.agent;
+ }
  let session=exec.agent.session; const seen=new Set();
  while(session) {
   if(seen.has(session.id)||seen.size>=64) throw Error('AUTOMATION_INVALID_PARENT_CHAIN');
@@ -31,6 +44,10 @@ export function projectComputerTool(ctx, schema, execute, factory) {
  return {...create(ctx,{name:'my_'+schema.name,rawName:schema.name,description:schema.description,inputSchema:schema.inputSchema,call:execute}),timeoutMs:90000};
 }
 export function apply(ctx,config) {
+ const owner = exec => identity(exec,ctx.agents,ctx.sessions,ctx.get?.('subagents'));
+ const isRoot = agent => {
+  try { return !!agent && owner({agent}) === agent; } catch { return false; }
+ };
  let state,stream,closed=false,disposers=[],registeredEpoch,computerEpoch,computerDisposers=[];
  const computerLifetimes=new WeakMap(),computerRoundSync=new WeakMap();
  const pending=new Map(), lifetimes=new WeakMap(), rounds=new WeakMap(), roundSync=new WeakMap(), approved=new WeakMap(), activityWatches=new Map();
@@ -78,7 +95,7 @@ export function apply(ctx,config) {
   if(exec.name.startsWith('my_computer_')){
    const schema=state?.computerTools?.find(item=>'my_'+item.name===exec.name);
    if(!schema)return {kind:'deny',reason:'This computer tool is not available.'};
-   const top=identity(exec,ctx.agents,ctx.sessions);await syncComputerRound(top);
+   const top=owner(exec);await syncComputerRound(top);
    const request={...browserRequest(top,exec.arguments,schema.name,state.computer.epoch),capability:'computer',operation:'computer',lifetime:computerLifetimes.get(top),turn:round(top).turn};
    const decision=await call({...request,operation:'computer-authorize'},exec.signal,exec.agent===top);
    request.epoch=decision.epoch;request.permit=decision.permit;approved.set(exec,{request});
@@ -90,7 +107,7 @@ export function apply(ctx,config) {
   if(!state?.browserAccess||!exec.name.startsWith('my_browser_'))return next();
   const schema=state.browserTools?.find(item=>'my_'+item.name===exec.name);
   if(!schema)return {kind:'deny',reason:'This browser tool is not available.'};
-  const top=identity(exec,ctx.agents,ctx.sessions);await syncRound(top);
+  const top=owner(exec);await syncRound(top);
   const request=browserRequest(top,exec.arguments,schema.name,state.browser.epoch);
   const decision=await call({...request,operation:'authorize'},exec.signal,exec.agent===top);
   request.epoch=decision.epoch;request.permit=decision.permit;
@@ -113,7 +130,7 @@ export function apply(ctx,config) {
   for(const schema of state.computerTools??[]){
    computerDisposers.push(ctx.tools.register(projectComputerTool(ctx,schema,async(args,exec)=>{
     if(closed||!stream||computerEpoch!==key||state?.computer.availability!=='available')throw Error('AUTOMATION_REVOKED');
-    const top=identity(exec,ctx.agents,ctx.sessions),entry=approved.get(exec);if(!entry||entry.request.capability!=='computer')throw Error('COMPUTER_AUTHORIZATION_REQUIRED');
+    const top=owner(exec),entry=approved.get(exec);if(!entry||entry.request.capability!=='computer')throw Error('COMPUTER_AUTHORIZATION_REQUIRED');
     const request=entry.request;if(request.session!==top.session.id||request.lifetime!==computerLifetimes.get(top)||request.turn!==round(top).turn)throw Error('AUTOMATION_REVOKED');
     const result=await call(request,exec.signal,exec.agent===top);exec.signal.throwIfAborted();
     if(computerEpoch!==key)throw Error('AUTOMATION_REVOKED');if(result?.isError)throw Error(result.content?.filter(x=>x.type==='text').map(x=>x.text).join('\n')||'Computer tool failed');return result;
@@ -133,7 +150,7 @@ export function apply(ctx,config) {
   const definition=projectTool(schema,async(args,exec)=>{
    if(closed || !stream || !state?.browserAccess&&state?.browser.epoch!==epoch || !state?.browser.enabled || !state.gatewayConnected || !state.defaultBrowserEnabled || !state.canChange)throw Error('AUTOMATION_REVOKED');
    if(!args||typeof args!=='object'||Array.isArray(args)||validation&&Object.keys(args).length)throw Error('AUTOMATION_INVALID_ARGUMENT');
-   const top=identity(exec,ctx.agents,ctx.sessions);
+   const top=owner(exec);
    let request;
    if(state?.browserAccess){
     const entry=approved.get(exec);if(!entry)throw Error('BROWSER_AUTHORIZATION_REQUIRED');
@@ -150,13 +167,15 @@ export function apply(ctx,config) {
   disposers.push(ctx.tools.register(definition));
   }
  }
- const stop=agent=>{if(!agent || agent.session.header.parentSession)return;const computerId=computerLifetimes.get(agent);if(computerId)try{send({kind:'stop',request:{generation:config.generation,capability:'computer',session:agent.session.id,lifetime:computerId}})}catch{};const id=lifetimes.get(agent);if(!id)return;try{send({kind:'stop',request:{generation:config.generation,session:agent.session.id,lifetime:id}})}catch{}};
- const releaseComputer=agent=>{if(!agent||agent.session.header.parentSession)return;const id=computerLifetimes.get(agent);if(!id)return;try{send({kind:'release',request:{generation:config.generation,capability:'computer',session:agent.session.id,lifetime:id}})}catch{}};
+ // Only resolved roots own lifetimes. Their cleanup still works after the
+ // runtime removes them from the live subagent tree.
+ const stop=agent=>{if(!agent)return;const computerId=computerLifetimes.get(agent);if(computerId)try{send({kind:'stop',request:{generation:config.generation,capability:'computer',session:agent.session.id,lifetime:computerId}})}catch{};const id=lifetimes.get(agent);if(!id)return;try{send({kind:'stop',request:{generation:config.generation,session:agent.session.id,lifetime:id}})}catch{}};
+ const releaseComputer=agent=>{if(!agent)return;const id=computerLifetimes.get(agent);if(!id)return;try{send({kind:'release',request:{generation:config.generation,capability:'computer',session:agent.session.id,lifetime:id}})}catch{}};
  function clearActivity(agent){const watch=activityWatches.get(agent);if(watch){watch.signal.removeEventListener('abort',watch.abort);activityWatches.delete(agent)}}
  // The actual top turn signal stops owned browser work even while only a child
  // is executing a browser tool. Waiting for turn/end would wait for that tool.
  ctx.on('agent/pre-step',({agent,signal},next)=>{
-  if(!agent.session.header.parentSession&&ctx.agents.get(agent.id)===agent&&activityWatches.get(agent)?.signal!==signal){
+  if(isRoot(agent)&&activityWatches.get(agent)?.signal!==signal){
    clearActivity(agent);const abort=()=>{if(['user','disposed'].includes(signal.reason?.kind))stop(agent)};
    activityWatches.set(agent,{signal,abort});signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
   }
@@ -167,8 +186,8 @@ export function apply(ctx,config) {
   const agent=ctx.agents.get(session.id);
   // rc.5 also logs synthetic runtime context as user/message on each step.
   // Only an actual user source is a new authorization round.
-  if(event.type==='user/message'&&event.data?.source?.kind==='user'&&agent&&agent.session===session&&!session.header.parentSession){clearActivity(agent);rounds.set(agent,{turn:randomUUID(),synced:false,user:true});void syncRound(agent).catch(()=>{});}
-  if(event.type==='turn/end'){if(agent&&!session.header.parentSession){if(event.data?.reason?.kind==='aborted'&&['user','disposed'].includes(event.data.reason.reason?.kind))stop(agent);else releaseComputer(agent)}clearActivity(agent);if(!state?.browserAccess&&event.data?.reason?.kind==='aborted'&&event.data.reason.reason?.kind==='user')stop(agent)}
+  if(event.type==='user/message'&&event.data?.source?.kind==='user'&&agent?.session===session&&isRoot(agent)){clearActivity(agent);rounds.set(agent,{turn:randomUUID(),synced:false,user:true});void syncRound(agent).catch(()=>{});}
+  if(event.type==='turn/end'){if(event.data?.reason?.kind==='aborted'&&['user','disposed'].includes(event.data.reason.reason?.kind))stop(agent);else releaseComputer(agent);clearActivity(agent)}
  });
  function authorized(req){const actual=Buffer.from(req.headers['x-dsh-work-token']??''),expected=Buffer.from(config.token??'');return expected.length>=32 && actual.length===expected.length && timingSafeEqual(actual,expected)}
  const reply=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value))};

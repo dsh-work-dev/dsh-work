@@ -40,26 +40,34 @@ class Response extends EventEmitter {
   body() { return this.chunks.join(''); }
 }
 
-function setup(inspectedEvents = []) {
+function setup(inspectedEvents = [], sessionQuery) {
   const routes = new Map(), listeners = new Map(), cleanups = [];
+  let scheduleCleanup, attachSchedule;
   const clock = new FakeClock();
   const ctx = {
     webServer: {register(route) { routes.set(route.path, route.handler); return () => routes.delete(route.path); }},
     connection: {requestRejection: () => undefined},
     sessions: {list: () => [], get: () => null},
-    sessionController: {inspect: async () => ({events: inspectedEvents}), list: async () => ({items: []})},
+    sessionController: {list: async () => ({items: []}), ...(sessionQuery ? {} : {inspect: async () => ({events: inspectedEvents})})},
     sessionProjections: {snapshot: () => ({values: {}})},
     agents: {get: () => null, list: () => []},
     waterfall: async (_name, _input, fallback) => fallback(),
-    get: () => undefined,
+    get: name => name === 'sessionQuery' ? sessionQuery : name === 'schedule' ? schedule : undefined,
     on(name, listener) { listeners.set(name, listener); },
     effect(effect) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); },
-    inject(_dependencies, callback) {
+    inject(dependencies, callback) {
+      if (dependencies.includes('schedule')) {
+        attachSchedule = () => callback({effect: effect => { scheduleCleanup = effect(); }});
+        attachSchedule();
+        return;
+      }
       callback({jobs: {onJobsChanged: () => () => {}, list: () => []}, effect: effect => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }});
     },
   };
+  const schedule = {catalog: async () => []};
   apply(ctx, {generation: 'generation-1', token: 't'.repeat(64)}, clock);
-  return {routes, listeners, cleanups, clock, ctx};
+  const detachSchedule = () => { scheduleCleanup?.(); scheduleCleanup = undefined; };
+  return {routes, listeners, cleanups, clock, ctx, attachSchedule, detachSchedule};
 }
 
 function request(method, accept) {
@@ -79,22 +87,63 @@ test('quit inspection checks agents, inboxes, global and agent jobs, and schedul
     {agents: [], jobs: [{status: 'running'}], active: true},
     {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'stopping'}], active: true},
     {agents: [{id: 'a'}], owner: 'a', jobs: [{status: 'completed'}], active: false},
-    {agents: [{id: 'a'}], schedule: true, active: false, scheduled: true},
+    ...['session', 'new_once', 'new'].map(kind => ({agents: [], tasks: [{status: 'active', target: {kind, sessionId: 'cold'}}], active: false, scheduled: true})),
+    {agents: [], tasks: [{status: 'paused'}, {status: 'ended'}, {status: 'inactive'}], active: false},
+    {agents: [], tasks: [{status: 'ended', executionActive: true}], active: true},
   ];
   for (const item of cases) {
     const {routes, ctx} = setup();
     ctx.agents.list = () => item.agents;
-    ctx.get = () => item.jobs ? {list: owner => owner === item.owner ? item.jobs : []} : undefined;
-    ctx.waterfall = async (name, input) => {
-      assert.equal(name, 'workspace/session-activity');
-      assert.equal(input.sessionId, 'a');
-      return item.schedule ? [{kind: 'schedule'}] : [];
-    };
+    const schedule = {catalog: async () => item.tasks ?? []};
+    ctx.get = name => name === 'schedule' ? schedule : item.jobs ? {list: owner => owner === item.owner ? item.jobs : []} : undefined;
+    ctx.waterfall = () => assert.fail('quit inspection must not enumerate Session activity');
     const res = new Response();
     await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
     assert.equal(res.status, 200);
     assert.deepEqual(JSON.parse(res.body()), {activeTasks: item.active, scheduledTasks: item.scheduled ?? false});
   }
+});
+
+test('quit inspection returns unavailable for missing, failed or invalid schedule queries', async () => {
+  for (const schedule of [undefined, {}, {catalog: async () => { throw new Error('open failed'); }},
+    ...[undefined, {}, [null], [{status: 'unknown'}], [{status: 'active', executionActive: 'yes'}]].map(tasks => ({catalog: async () => tasks}))]) {
+    const {routes, ctx} = setup();
+    ctx.get = () => schedule;
+    const res = new Response();
+    await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+    assert.equal(res.status, 503);
+    assert.deepEqual(JSON.parse(res.body()), {});
+  }
+});
+
+test('quit inspection waits for initialization and rejects a removed or replaced provider', async () => {
+  for (const change of ['none', 'remove', 'replace']) {
+    const {routes, ctx, attachSchedule, detachSchedule} = setup();
+    let resolve;
+    const schedule = {catalog: () => new Promise(done => { resolve = done; })};
+    ctx.get = name => name === 'schedule' ? schedule : undefined;
+    const res = new Response();
+    const pending = routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+    assert.equal(res.writableEnded, false);
+    if (change !== 'none') {
+      detachSchedule();
+      ctx.get = () => change === 'replace' ? {catalog: async () => [{status: 'active'}]} : undefined;
+      if (change === 'replace') attachSchedule();
+    }
+    resolve([{status: 'active', target: {kind: 'new'}}]);
+    await pending;
+    assert.equal(res.status, change === 'none' ? 200 : 503);
+    if (change === 'none') assert.equal(JSON.parse(res.body()).scheduledTasks, true);
+  }
+});
+
+test('quit inspection rejects a provider before its injection becomes ready', async () => {
+  const {routes, ctx, detachSchedule} = setup();
+  detachSchedule();
+  ctx.get = () => ({catalog: () => assert.fail('used an unready provider')});
+  const res = new Response();
+  await routes.get('/__dshwork/quit-inspection')(request('GET'), res);
+  assert.equal(res.status, 503);
 });
 
 test('quit inspection preserves the authenticated route boundary', async () => {
@@ -212,4 +261,50 @@ test('pet celebrates only live completion events and resets at the next turn', a
   await clock.tick(100);
   snapshots = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1]));
   assert.equal(snapshots.at(-1).sessions[0].liveCompletion, false);
+});
+
+test('RC1 cold history replays raw query events and releases the observation lease', async () => {
+  let disposed = 0;
+  const {routes, listeners, clock} = setup([], {
+    async observeSession(id, {signal, projectionMode}) {
+      assert.equal(id, 'cold');
+      assert.equal(projectionMode, 'none');
+      assert.equal(signal.aborted, false);
+      return {
+        events: [
+          {seq: 1, type: 'turn/start', time: 1, data: {turn: 1}},
+          {seq: 2, type: 'turn/end', time: 2, data: {reason: {kind: 'completed'}}},
+        ],
+        [Symbol.dispose]() {disposed++;},
+      };
+    },
+  });
+  const stream = new Response();
+  await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
+  await listeners.get('session/created')('cold');
+  await clock.tick(100);
+  const snapshot = [...stream.body().matchAll(/event: snapshot\ndata: (.*?)\n\n/g)].map(match => JSON.parse(match[1])).at(-1);
+  assert.equal(snapshot.sessions[0].outcome, 'completed');
+  assert.equal(snapshot.sessions[0].liveCompletion, false);
+  assert.equal(disposed, 1);
+});
+
+test('late query observations are released after plugin cancellation without replay', async () => {
+  let resolve, signal, disposed = 0;
+  const {routes, listeners, clock, cleanups} = setup([], {
+    observeSession(_id, options) {signal = options.signal; return new Promise(done => {resolve = done;});},
+  });
+  const stream = new Response();
+  await routes.get('/__dshwork/pet-activity')(request('GET', 'text/event-stream'), stream);
+  const seeded = listeners.get('session/created')('cold');
+  await Promise.resolve();
+  for (const cleanup of cleanups) cleanup();
+  assert.equal(signal.aborted, true);
+  resolve({
+    get events() {throw new Error('canceled observation must not replay');},
+    [Symbol.dispose]() {disposed++;},
+  });
+  await seeded;
+  await clock.tick(100);
+  assert.equal(disposed, 1);
 });

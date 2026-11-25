@@ -965,7 +965,9 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	quitConfirmation := &quitConfirmation{
-		inspect: petActivity.InspectQuit,
+		inspect: func(ctx context.Context) (dshactivity.QuitInspection, error) {
+			return inspectQuitForHost(ctx, host.Status, petActivity.InspectQuit)
+		},
 		ask: func(inspection dshactivity.QuitInspection, complete func(bool)) {
 			message := nativeui.QuitConfirmationMessage(loadNativeLocale(&activeLocale), inspection.ActiveTasks, inspection.ScheduledTasks)
 			showQuitQuestion(desktop.Dialog.Question().SetTitle("DSH Work").SetMessage(message), complete)

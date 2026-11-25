@@ -58,7 +58,8 @@ function openAccountSignIn(ctx) {
     const seen = new Set();
     (async () => {
       for await (const frame of stream) {
-        const attempt = frame.value?.attempt;
+        const value = frame.value;
+        const attempt = value?.state?.attempt ?? value?.attempt;
         frame.accept?.();
         const first = !connected;
         connected = true;

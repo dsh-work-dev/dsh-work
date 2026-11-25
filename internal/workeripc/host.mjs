@@ -21,11 +21,22 @@ export default class PipeWebServer extends WebServer {
     let stopped = false;
     const server = createServer(async (req, res) => {
       try {
-        const route = this.match(new URL(req.url, 'http://127.0.0.1:1').pathname);
-        const handler = route?.handler ?? this.fallback;
-        if (!handler) { res.writeHead(404).end(); return; }
-        await handler(req, res);
-      } catch {
+        const target = new URL(req.url ?? '/', 'http://x');
+        // Upstream keeps HTTP dispatch inside Service.init, with no standalone
+        // listener to reuse. Keep only its responder dispatch here; matching and
+        // Fetch/Node streaming (including HEAD and cancellation) stay upstream.
+        // Keep the established match/fallback seam for pre-resource runtimes;
+        // RC1's responderFor() is the same expression, but older releases lack it.
+        const responder = this.match(target.pathname) ?? this.fallback;
+        if (responder === undefined) { res.writeHead(404).end(); return; }
+        if (typeof responder === 'function') await responder(req, res);
+        else if ('resource' in responder) await this.serveResource(req, res, target, responder.resource);
+        else await responder.handler(req, res);
+      } catch (error) {
+        // A responder can throw a URL or credentials. Report the failure class,
+        // not its message, request target, headers or response body.
+        const kind = error instanceof TypeError ? 'TypeError' : error instanceof RangeError ? 'RangeError' : 'Error';
+        this.ctx.logger.warn(new Error(`dsh-work pipe HTTP responder failed (${kind})`));
         if (res.headersSent) res.destroy();
         else res.writeHead(500).end();
       }

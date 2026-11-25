@@ -7,7 +7,53 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/dshactivity"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
+
+func TestHostQuitInspectionKeepsUnavailableWorkersBehindConfirmation(t *testing.T) {
+	for _, state := range []lifecycle.State{lifecycle.StateStopped, lifecycle.StateStarting, lifecycle.StateReady, lifecycle.StateStopping, lifecycle.StateFailed} {
+		t.Run(string(state), func(t *testing.T) {
+			bridge := dshactivity.New()
+			asked, proceeded := false, false
+			finished := make(chan struct{})
+			q := quitConfirmation{
+				inspect: func(ctx context.Context) (dshactivity.QuitInspection, error) {
+					return inspectQuitForHost(ctx, func() lifecycle.Status {
+						return lifecycle.Status{State: state, GenerationID: "current"}
+					}, bridge.InspectQuit)
+				},
+				ask: func(_ dshactivity.QuitInspection, done func(bool)) {
+					asked = true
+					done(false)
+					close(finished)
+				},
+			}
+			q.confirm(func() { proceeded = true; close(finished) })
+			select {
+			case <-finished:
+			case <-time.After(time.Second):
+				t.Fatal("inspection did not finish")
+			}
+			if asked != (state != lifecycle.StateStopped) || proceeded != (state == lifecycle.StateStopped) {
+				t.Fatalf("asked=%v proceeded=%v", asked, proceeded)
+			}
+		})
+	}
+}
+
+func TestHostQuitInspectionRejectsLifecycleChange(t *testing.T) {
+	state := lifecycle.Status{State: lifecycle.StateReady, GenerationID: "before"}
+	_, err := inspectQuitForHost(context.Background(), func() lifecycle.Status { return state }, func(_ context.Context, generation string) (dshactivity.QuitInspection, error) {
+		if generation != "before" {
+			t.Fatalf("generation=%s", generation)
+		}
+		state.GenerationID = "after"
+		return dshactivity.QuitInspection{}, nil
+	})
+	if err == nil {
+		t.Fatal("obsolete empty inspection was accepted")
+	}
+}
 
 func TestQuitConfirmationDecisions(t *testing.T) {
 	for _, tc := range []struct {
