@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {resolve} from 'node:path';
 import test from 'node:test';
 import {collectOverview, foldSession, gitStatus, periodWindow, privacyHealth, apply} from './host.js';
 
@@ -64,6 +65,15 @@ test('tools pair by call id, pending calls do not become false failures, waiting
   assert.equal(fold.calls[1].settled, undefined);
 });
 
+test('reused provider tool IDs retain both calls and settle only the cited call', () => {
+  const events = [event('tool/call', 1, {turn: 1, step: 1, callId: 'x', name: 'read'}),
+    event('tool/result', 2, {turn: 1, step: 1, message: {source: {callId: 'x'}, isError: true}}),
+    event('tool/call', 3, {turn: 1, step: 2, callId: 'x', name: 'write'}),
+    {...event('tool/result', 4, {turn: 1, step: 2, message: {source: {callId: 'x'}}}), sourceEventSeqs: [3]}];
+  const fold = foldSession(row, {events}, window);
+  assert.deepEqual(fold.calls.map(({name, settled, failed}) => [name, settled, failed]), [['read', true, true], ['write', true, false]]);
+});
+
 test('cross-midnight work clips duration but retains pre-window tool correlation', () => {
   const events = [event('turn/start', 0, {turn: 1}, day - 10000), event('tool/call', 1, {callId: 'x', name: 'bash'}, day - 5000),
     event('tool/result', 2, {message: {toolCallId: 'x'}}, day + 1000), event('turn/end', 3, {turn: 1, reason: {kind: 'completed'}}, day + 3000)];
@@ -97,6 +107,66 @@ test('actual services aggregate complete history and isolate corrupt sessions, m
   assert.equal(result.data.sessions.items.at(-1).state, 'scheduled');
 });
 
+test('workspace changes deduplicate absolute and cwd-relative paths without losing turn line counts', async () => {
+  const events = [event('workspace/changes', 1, {turn: 1}), event('workspace/changes', 2, {turn: 2}), event('workspace/changes', 3, {turn: 3})];
+  const base = context([row], {s: {events}});
+  const root = resolve('project');
+  const locations = [[root, 'src/file.js'], [resolve(root, 'src'), 'file.js'], [resolve('other-project'), resolve(root, 'src/file.js')]];
+  const ctx = {...base, get: key => key === 'workspaceChanges' ? {summary: (_, seq) => ({
+    cwd: locations[seq - 1][0], files: [{path: locations[seq - 1][1]}], total: 1, added: seq, deleted: 1,
+  })} : base.get(key)};
+  const result = await collectOverview(ctx, {now, gitStatus: async () => ({})});
+  assert.equal(result.data.output.changedFiles, 1);
+  assert.equal(result.data.output.addedLines, 6);
+  assert.equal(result.data.output.removedLines, 3);
+});
+
+test('cold fold cache follows durable revision and waits for events beyond the first cut', async () => {
+  const observations = {};
+  const ctx = context([row], observations);
+  const options = {now, foldCache: new Map(), gitStatus: async () => ({})};
+  const observation = (revision, at, input) => ({source: 'prepared', revision, cursor: 1,
+    events: [event('assistant/message', 1, message(1, 1, input), at)]});
+  observations.s = observation('r1', now + 100, 10);
+  assert.equal((await collectOverview(ctx, options)).data.cost.tokens, 0);
+  options.now += 1000;
+  assert.equal((await collectOverview(ctx, options)).data.cost.tokens, 35);
+  observations.s = observation('r2', now + 100, 100);
+  assert.equal((await collectOverview(ctx, options)).data.cost.tokens, 125);
+});
+
+test('partial usage on either side withholds the comparison, not measured token totals', async () => {
+  const history = [event('assistant/message', 0, message(1, 1, 20), day - 2000),
+    event('assistant/message', 2, message(3, 1, 60), day + 2000)];
+  const options = {now, gitStatus: async () => ({})};
+  const complete = await collectOverview(context([row], {s: {events: history}}), options);
+  assert.equal(complete.data.cacheDelta, -0.25);
+  for (const at of [day - 1000, day + 1000]) {
+    const missing = event('assistant/attempt', 1, {turn: 2, step: 1}, at);
+    const partial = await collectOverview(context([row], {s: {events: [history[0], missing, history[1]]}}), options);
+    assert.equal(partial.data.cacheDelta, undefined);
+    assert.equal(partial.data.cost.tokens, 85);
+  }
+});
+
+test('scheduled nodes and timeline use the selected calendar horizon even when sessions fail', async () => {
+  const base = context([row], {s: Error('bad history')});
+  const localMonday = Date.parse('2026-11-08T16:00:00Z');
+  const schedules = [[1, 'today'], [86400000, 'tomorrow'], [7 * 86400000, 'next-week']].map(([ms, title]) => ({
+    id: title, title, status: 'active', scheduledAt: new Date(localMonday + ms).toISOString(),
+  }));
+  const ctx = {...base, get: key => key === 'schedule' ? {catalog: async () => schedules} : base.get(key)};
+  for (const [period, count] of [['today', 1], ['week', 2], ['month', 3]]) {
+    const result = await collectOverview(ctx, {now: localMonday + 500, period, timezoneOffsetSeconds: 28800, gitStatus: async () => ({})});
+    assert.equal(result.availability.sessions.state, 'unavailable');
+    assert.equal(result.availability.schedules.state, 'ready');
+    assert.deepEqual(result.data.sessions.items.map(s => s.title), schedules.slice(0, count).map(s => s.title));
+    assert.equal(result.data.events.length, count);
+    assert.equal(result.data.runtime.scheduled, 3);
+    assert.equal(result.data.runtime.nextScheduledAt, schedules[0].scheduledAt);
+  }
+});
+
 test('missing usage stays unavailable instead of inventing zero; subagent inherits no duplicated usage', async () => {
   const events = [event('turn/start', 0, {turn: 1}), event('assistant/message', 1, {turn: 1, step: 1, message: {content: []}})];
   const result = await collectOverview(context([{...row, origin: 'subagent'}], {s: {events}}), {now, gitStatus: async () => ({})});
@@ -115,7 +185,8 @@ test('subagent approvals surface on their top-level conversation without merging
 
 test('git uses a fixed argument vector and counts rename pairs as one change', async () => {
   const result = await gitStatus('C:/project', undefined, async (cmd, args, options) => {
-    assert.equal(cmd, 'git'); assert.deepEqual(args.slice(0, 6), ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', 'C:/project', 'status']);
+    assert.equal(cmd, 'git'); assert.deepEqual(args, ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', 'C:/project',
+      'status', '--porcelain=v1', '--branch', '--untracked-files=all', '-z']);
     assert.equal(options.windowsHide, true); assert.equal(options.shell, undefined);
     return {stdout: '## main...origin/main\0R  new.txt\0old.txt\0 M other.txt\0'};
   });
@@ -132,4 +203,22 @@ test('generation route refuses rejected trust, unsupported methods and malformed
   assert.equal(await call({method: 'POST', url: '/__dshwork/overview'}), 405);
   assert.equal(await call({method: 'GET', url: '/__dshwork/overview?period=no'}), 400);
   for (const dispose of disposers) dispose?.();
+});
+
+test('route does not coalesce the old and new day across local midnight', async () => {
+  const routes = [], base = context([row], {s: {events: [event('assistant/message', 1, message(1, 1), day - 28800000 - 10000)]}});
+  const config = {now: day - 28800000 - 1, gitStatus: async () => ({})};
+  const ctx = {...base, on() {}, effect: fn => fn(), connection: {requestRejection() {}},
+    webServer: {register: route => { routes.push(route); }}};
+  apply(ctx, config);
+  const call = async () => {
+    let status, body;
+    await routes[0].handler({method: 'GET', url: '/__dshwork/overview?timezoneOffsetSeconds=28800'},
+      {writeHead(code) {status = code;}, end(json) {body = JSON.parse(json);}});
+    assert.equal(status, 200);
+    return body.data.cost.tokens;
+  };
+  assert.equal(await call(), 35);
+  config.now += 2;
+  assert.equal(await call(), 0);
 });

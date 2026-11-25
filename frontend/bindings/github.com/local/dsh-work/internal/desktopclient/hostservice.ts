@@ -29,6 +29,10 @@ export function DisableFaultPlugin(packageName: string): $CancellablePromise<lif
     return $Call.ByID(598114413, packageName);
 }
 
+export function DisableFaultPluginAndRetry(generation: string, packageName: string): $CancellablePromise<lifecycle$0.Status> {
+    return $Call.ByID(3332657460, generation, packageName);
+}
+
 export function DisableFaultPlugins(): $CancellablePromise<lifecycle$0.Status> {
     return $Call.ByID(1025224506);
 }

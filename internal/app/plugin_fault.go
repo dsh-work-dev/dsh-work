@@ -96,7 +96,11 @@ func (h *Host) RemoveFaultPlugin(ctx context.Context, packageName string) (lifec
 // DisableFaultPlugin disables one plugin of the failed profile while the
 // failed Worker has no live PluginManager connection.
 func (h *Host) DisableFaultPlugin(ctx context.Context, packageName string) (lifecycle.Status, error) {
-	return h.actOnFaultPlugins(func(manager PluginFaultManager, record *failedPluginStart) ([]lifecycle.FaultPlugin, error) {
+	return h.actOnFaultPlugins(disableFaultPlugin(ctx, packageName))
+}
+
+func disableFaultPlugin(ctx context.Context, packageName string) func(PluginFaultManager, *failedPluginStart) ([]lifecycle.FaultPlugin, error) {
+	return func(manager PluginFaultManager, record *failedPluginStart) ([]lifecycle.FaultPlugin, error) {
 		plugins := slices.Clone(record.plugins)
 		index := slices.IndexFunc(plugins, func(plugin lifecycle.FaultPlugin) bool { return plugin.Package == packageName })
 		if index < 0 || !plugins[index].Enabled {
@@ -107,7 +111,35 @@ func (h *Host) DisableFaultPlugin(ctx context.Context, packageName string) (life
 		}
 		plugins[index].Enabled = false
 		return plugins, nil
+	}
+}
+
+// DisableFaultPluginAndRetry changes only the observed failed generation and
+// retries its exact selection under the same Host operation lock.
+func (h *Host) DisableFaultPluginAndRetry(ctx context.Context, generation, packageName string) (lifecycle.Status, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
+	if generation == "" || h.Status().GenerationID != generation {
+		return h.Status(), h.failureFor(errFaultPluginGone, lifecycle.ErrorPluginSpecInvalid, "This plugin is no longer part of the startup failure.", false)
+	}
+	var target dshmanager.RunContext
+	disable := disableFaultPlugin(ctx, packageName)
+	status, err := h.actOnFaultPluginsLocked(func(manager PluginFaultManager, record *failedPluginStart) ([]lifecycle.FaultPlugin, error) {
+		target = record.launch.Target
+		snapshot, err := h.deps.Manager.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot.Configured == nil || *snapshot.Configured != target {
+			return nil, errFaultPluginGone
+		}
+		return disable(manager, record)
 	})
+	if err != nil {
+		return status, err
+	}
+	_, err = h.applyRunContextLocked(ctx, target, nil, nil, false)
+	return h.Status(), err
 }
 
 // DisableFaultPlugins disables every enabled plugin of the failed profile, so
@@ -137,6 +169,10 @@ var errFaultPluginGone = errors.New("the plugin is not an enabled plugin of the 
 func (h *Host) actOnFaultPlugins(act func(PluginFaultManager, *failedPluginStart) ([]lifecycle.FaultPlugin, error)) (lifecycle.Status, error) {
 	h.switchMu.Lock()
 	defer h.switchMu.Unlock()
+	return h.actOnFaultPluginsLocked(act)
+}
+
+func (h *Host) actOnFaultPluginsLocked(act func(PluginFaultManager, *failedPluginStart) ([]lifecycle.FaultPlugin, error)) (lifecycle.Status, error) {
 	if h.isShutdownRequested() || h.isSwitching() {
 		return h.Status(), h.failureFor(errors.New("dsh-work is changing its Run context"), lifecycle.ErrorManagerOperationBusy, "DSH Work is finishing the current Run context.", true)
 	}

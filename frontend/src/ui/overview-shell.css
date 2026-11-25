@@ -3,7 +3,10 @@
 .shell-overview-toggle{display:grid;place-items:center;width:34px;height:30px;border:0;border-radius:var(--radius-control);background:transparent;color:inherit;position:relative}
 .shell-overview-toggle svg{width:17px;height:17px}
 .shell-overview-toggle:hover,.shell-overview-toggle[aria-pressed=true]{background:var(--bar-hover)}
-.shell-overview-toggle[data-attention=offline]:after,.shell-overview-toggle[data-attention=pending]:after{content:'';position:absolute;right:3px;top:4px;width:5px;height:5px;border-radius:50%;background:var(--failed)}
+.shell-overview-toggle[data-attention=offline]:after,.shell-overview-toggle[data-attention=pending]:after{content:attr(data-badge);position:absolute;right:0;top:0;min-width:12px;padding:0 2px;border-radius:8px;background:var(--text);color:var(--canvas);font:600 10px/13px system-ui;text-align:center}
+.shell-overview-toggle[data-attention=offline]:after{background:var(--failed);color:white}
+.shell-overview-toggle[data-attention=running]:after{content:"";position:absolute;right:3px;top:4px;width:6px;height:6px;border-radius:50%;background:currentColor}
+@media(prefers-reduced-motion:no-preference){.shell-overview-toggle[data-attention=running]:after{animation:overview-activity 1.4s ease-in-out infinite}@keyframes overview-activity{50%{opacity:.35}}}
 .overview-environment-dialog{width:min(780px,calc(100vw - 48px));max-height:calc(100vh - 64px);overflow:auto;padding:24px;border:var(--dialog-border);border-radius:var(--radius-group);background:var(--canvas);color:var(--text)}
 .overview-environment-dialog .dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
 .overview-environment-dialog .section{margin-bottom:24px}

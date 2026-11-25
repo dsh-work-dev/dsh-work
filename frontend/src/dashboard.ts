@@ -68,12 +68,15 @@ const known = (value: unknown): value is number => typeof value === "number" && 
 const clamp = (value: number) => Math.max(0, Math.min(100, value));
 const svgIcon = (name: Parameters<typeof icon>[0]) => icon(name).outerHTML;
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const periods: DashboardPeriod[] = ["today", "week", "month"];
 
 export function mountDashboard(container: HTMLElement, callbacks: DashboardCallbacks = {}): DashboardHandle {
   let data: DashboardData = {};
   let layout: DashboardLayout = defaultDashboardLayout();
   let editing = false;
   let pending = false;
+  let wantedPeriod: DashboardPeriod | undefined;
+  let periodRevision = 0;
   let dragging = false;
   let destroyed = false;
   let error = "";
@@ -115,33 +118,59 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
   /** One number for narrow stat columns: minutes below an hour, then hours with one decimal. */
   const shortDuration = (seconds: number | null | undefined) => {
     if (!known(seconds)) return "—";
-    if (seconds < 60) return t("overview.duration.seconds", {n: Math.round(seconds)});
-    if (seconds < 3600) return t("overview.duration.minutes", {n: Math.floor(seconds / 60)});
-    return t("overview.duration.decimalHours", {n: num(seconds / 3600)});
+    const unit = seconds < 60 ? "second" : seconds < 3600 ? "minute" : "hour";
+    const value = unit === "second" ? Math.round(seconds) : unit === "minute" ? Math.floor(seconds / 60) : seconds / 3600;
+    return new Intl.NumberFormat(locale(), {style: "unit", unit, unitDisplay: "short", maximumFractionDigits: 1})
+      .formatToParts(value)
+      .map((part) => part.type === "unit" ? `<small>${esc(part.value)}</small>` : esc(part.value))
+      .join("");
   };
   const money = (value: number | null | undefined, currency = "CNY") =>
     known(value) ? new Intl.NumberFormat(locale(), {style: "currency", currency, maximumFractionDigits: 2}).format(value) : "—";
-  const periodLabel = () => t(`overview.period.${data.period || "today"}`);
+  const shownPeriod = () => data.period ?? "today";
+  const periodLabel = () => t(`overview.period.${shownPeriod()}`);
 
   // ---------- small parts ----------
   const empty = (message = t("overview.noData")) => `<div class="dash-empty">${esc(message)}</div>`;
   const dot = (state: string) => `<span class="dash-dot dash-${esc(state)}" aria-hidden="true"></span>`;
-  const button = (label: string, action: string, enabled = true, extra = "") =>
-    `<button class="button button-compact ${extra}" data-action="${esc(action)}" ${!enabled || pending ? "disabled" : ""}>${esc(label)}</button>`;
+  const actionState = (enabled: boolean, busy = pending) => !enabled ? "disabled" : busy ? 'aria-disabled="true"' : "";
+  const button = (label: string, action: string, {enabled = true, primary = false, focusKey, busy = pending}: {enabled?: boolean; primary?: boolean; focusKey?: string; busy?: boolean} = {}) =>
+    `<button type="button" class="button button-compact ${primary ? "button-primary" : ""}" data-action="${esc(action)}" ${focusKey ? `data-focus-key="${esc(focusKey)}"` : ""} ${actionState(enabled, busy)}>${esc(label)}</button>`;
   const keyValues = (pairs: [string, string][]) =>
     `<dl class="dash-kv">${pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd>`).join("")}</dl>`;
-  const sessionAction = (s: DashboardSession) => (callbacks.onOpenSession ? `data-action="session:${esc(s.id)}"` : "");
+  const sessionsKnown = () => !!data.sessions && (data.sessions.listCoverage ?? data.availability?.sessions?.state) !== "unavailable";
+  const canOpenSession = (id: string | undefined) =>
+    !!id && !id.startsWith("schedule:") && !!callbacks.onOpenSession &&
+    data.host?.state === "running" && sessionsKnown() && !data.dshStaleAt;
+  const sessionAction = (id: string) => `data-action="session:${esc(id)}"`;
+  const hostActions = () => {
+    const host = data.host;
+    const available = !!host && !host.environmentBusy;
+    const running = available && host.state === "running";
+    const down = available && (host.state === "failed" || host.state === "stopped");
+    const point = host?.restorePoint;
+    const plugin = host?.suspectPluginId;
+    return {
+      switch: running ? callbacks.onSwitchEnvironment : undefined,
+      save: running && host.canSaveRestorePoint ? callbacks.onSaveRestorePoint : undefined,
+      restore: down && point && !point.unavailable && callbacks.onRestore ? () => callbacks.onRestore!(point.id) : undefined,
+      retry: down && plugin && callbacks.onDisablePluginAndRetry ? () => callbacks.onDisablePluginAndRetry!(plugin) : undefined,
+      upgrade: running && known(data.runtime?.pluginUpdates) && data.runtime.pluginUpdates > 0 ? callbacks.onUpgradePlugins : undefined,
+    };
+  };
 
   function availabilityBadge(tile: DashboardTile) {
     const key = tileSource[tile];
-    const state = data.availability?.[key]?.state;
+    const state = (tile === "orbit" ? data.availability?.orbit?.state : undefined) ?? data.availability?.[key]?.state;
     if (state === "partial") return `<span class="dash-availability" title="${esc(t("overview.partialHint"))}">${esc(t("overview.partial"))}</span>`;
     if (state === "unavailable" || data[key] === undefined) return `<span class="dash-availability">${esc(t("overview.unavailable"))}</span>`;
     return "";
   }
 
   function tileTitle(tile: DashboardTile) {
-    return tile === "orbit" ? t(`overview.tile.orbit.${data.period || "today"}`) : t(`overview.tile.${tile}`);
+    if (tile === "orbit") return t(`overview.tile.orbit.${data.period || "today"}`);
+    if (tile === "tokens" && (data.period === "week" || data.period === "month")) return t("overview.tile.tokensDaily");
+    return t(`overview.tile.${tile}`);
   }
 
   // ---------- tiles ----------
@@ -155,8 +184,8 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     const count = (state: DashboardState) =>
       state === "completed" && known(data.output?.completed)
         ? num(data.output!.completed)
-        : sessions
-          ? num(sessions.filter((s) => s.state === state).length)
+        : sessionsKnown()
+          ? num(sessions!.filter((s) => s.state === state).length)
           : "—";
 
     const node = (s: DashboardSession, ring: number, index: number, total: number) => {
@@ -171,7 +200,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       const anchor = right ? "start" : "end";
       const sub = s.state === "scheduled" ? t("overview.runtime.next", {time: when(s.nextRunAt)}) : `${t(`overview.state.${s.state}`)} · ${when(s.updatedAt)}`;
       const title = s.title.length > 18 ? `${s.title.slice(0, 17)}…` : s.title;
-      const focusable = callbacks.onOpenSession ? `role="button" tabindex="0" ${sessionAction(s)}` : "";
+      const focusable = s.state !== "scheduled" && canOpenSession(s.id) ? `role="button" tabindex="0" ${sessionAction(s.id)} ${actionState(true)}` : "";
       return `<g class="dash-node dash-${s.state}" ${focusable} aria-label="${esc(s.title)} · ${esc(sub)}">
         <title>${esc(s.title)} · ${esc(sub)}</title>
         <circle class="dash-halo" cx="${x}" cy="${y}" r="${ring === 0 ? 17 : 13}"/>
@@ -198,10 +227,14 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       ? t("overview.core.stopped")
       : !running
         ? t("overview.core.unknown")
-        : live.length
-          ? t("overview.core.active", {count: live.length})
-          : t("overview.core.idle");
-    const subline = sessions && !sessions.length ? t("overview.core.emptyPeriod") : t("overview.core.done", {count: count("completed")});
+        : !sessionsKnown()
+          ? t("overview.unavailable")
+          : live.length
+            ? t("overview.core.active", {count: live.length})
+            : t("overview.core.idle");
+    const subline = !sessionsKnown()
+      ? ""
+      : !live.length && !results.length ? t("overview.core.emptyPeriod") : t("overview.core.done", {count: count("completed")});
     const orbClass = down ? "dash-down" : animated ? "dash-orb-active" : "dash-orb-idle";
     const counts = (["running", "waiting", "completed", "interrupted"] as DashboardState[])
       .map((s) => `<span>${dot(s)}${esc(t(`overview.state.${s}`))} <b>${count(s)}</b></span>`)
@@ -209,7 +242,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
 
     return `<div class="dash-orbit-heading"><h2>${esc(tileTitle("orbit"))}</h2>${availabilityBadge("orbit")}<div class="dash-counts">${counts}</div></div>
       <svg class="dash-orbit" viewBox="0 0 800 500" role="img" aria-label="${esc(tileTitle("orbit"))}">${rings}${comet}${nodes}</svg>
-      <div class="dash-core-wrap"><div class="dash-orb ${orbClass}"></div><strong>${esc(headline)}</strong><span>${esc(subline)}</span></div>`;
+      <div class="dash-core-wrap"><div class="dash-orb ${orbClass}"></div><strong>${esc(headline)}</strong>${subline ? `<span>${esc(subline)}</span>` : ""}</div>`;
   }
 
   function output() {
@@ -221,7 +254,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
         : "—";
     const stats = `<div class="dash-stats4">
       <div><b>${num(o.completed)}</b><span>${esc(t("overview.output.completed"))}</span></div>
-      <div><b>${esc(shortDuration(o.agentSeconds))}</b><span>${esc(t("overview.output.agentWork"))}</span></div>
+      <div><b class="dash-duration">${shortDuration(o.agentSeconds)}</b><span>${esc(t("overview.output.agentWork"))}</span></div>
       <div><b>${num(o.changedFiles)}</b><span>${esc(t("overview.output.files"))}</span></div>
       <div><b class="dash-lines">${lines}</b><span>${esc(t("overview.output.lines"))}</span></div>
     </div>`;
@@ -249,15 +282,15 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
   }
 
   function results() {
-    if (!data.sessions) return empty();
-    const items = data.sessions.items.filter((s) => s.state === "completed" || s.state === "interrupted").slice(0, 3);
+    if (!sessionsKnown()) return empty();
+    const items = data.sessions!.items.filter((s) => s.state === "completed" || s.state === "interrupted").slice(0, 3);
     if (!items.length) return empty(t("overview.noResults"));
     return `<div class="dash-results">${items
       .map(
         (s) => `<div class="dash-result">${dot(s.state)}
-          <div class="dash-result-text"><button class="dash-text-button" ${sessionAction(s)} ${callbacks.onOpenSession ? "" : "disabled"}>${esc(s.title)}</button>
+          <div class="dash-result-text"><button class="dash-text-button" ${canOpenSession(s.id) ? sessionAction(s.id) : ""} ${actionState(canOpenSession(s.id))}>${esc(s.title)}</button>
           <p>${esc(s.summary || t(`overview.state.${s.state}`))}</p></div>
-          ${s.state === "interrupted" ? button(t("overview.continue"), `session:${s.id}`, !!callbacks.onOpenSession) : `<time>${esc(when(s.updatedAt))}</time>`}
+          ${s.state === "interrupted" && canOpenSession(s.id) ? button(t("overview.continue"), `session:${s.id}`, {focusKey: `continue:${s.id}`}) : `<time>${esc(when(s.updatedAt))}</time>`}
         </div>`,
       )
       .join("")}</div>`;
@@ -287,8 +320,10 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       .map((e) => {
         const at = Date.parse(e.at);
         const text = `${wide ? day(at) + " " : ""}${clock(e.at)} · ${e.source} · ${e.title}${e.description ? ` · ${e.description}` : ""}`;
-        const action = e.sessionId && callbacks.onOpenSession ? `data-action="session:${esc(e.sessionId)}"` : "tabindex=\"-1\"";
-        return `<button class="dash-event dash-${e.state || "info"}" style="left:${x(at)}%" title="${esc(text)}" aria-label="${esc(text)}" ${action}></button>`;
+        const attrs = `class="dash-event dash-${e.state || "info"}" style="left:${x(at)}%" title="${esc(text)}" aria-label="${esc(text)}"`;
+        return e.sessionId && canOpenSession(e.sessionId)
+          ? `<button ${attrs} ${sessionAction(e.sessionId)} data-focus-key="event:${esc(e.id)}" ${actionState(true)}></button>`
+          : `<span role="img" ${attrs}></span>`;
       })
       .join("");
     return `<div class="dash-timeline"><div class="dash-timeline-line"></div><div class="dash-timeline-past" style="width:${x(now)}%"></div>${marks}
@@ -314,21 +349,48 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
   function tokens() {
     const buckets = data.hourlyTokens;
     if (!buckets?.length) return empty();
-    const max = Math.max(...buckets.map((b) => b.cacheHit + b.cacheMiss + b.output), 1);
     const now = Date.parse(data.now || new Date().toISOString());
-    const wide = buckets.some((b) => !sameDay(b.at));
-    const at = (iso: string) => (wide ? `${day(Date.parse(iso))} ${clock(iso)}` : clock(iso));
-    const bars = buckets
-      .map((b) => {
-        const tip = `${at(b.at)} · ${t("overview.tokens.hit")} ${num(b.cacheHit, true)} · ${t("overview.tokens.miss")} ${num(b.cacheMiss, true)} · ${t("overview.tokens.output")} ${num(b.output, true)}`;
-        const h = (v: number) => `${(v / max) * 100}%`;
-        return `<div class="${Date.parse(b.at) > now ? "dash-future" : ""}" title="${esc(tip)}"><i class="dash-hit" style="height:${h(b.cacheHit)}"></i><i class="dash-miss" style="height:${h(b.cacheMiss)}"></i><i class="dash-output" style="height:${h(b.output)}"></i></div>`;
+    // Use the collector's fixed offset for the whole period. Missing buckets leave empty slots.
+    const shift = -new Date(now).getTimezoneOffset() * 60000;
+    const start = new Date(now + shift);
+    start.setUTCHours(0, 0, 0, 0);
+    const daily = data.period === "week" || data.period === "month";
+    if (data.period === "week") start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+    if (data.period === "month") start.setUTCDate(1);
+    const end = new Date(start);
+    if (data.period === "month") end.setUTCMonth(end.getUTCMonth() + 1);
+    else end.setUTCDate(end.getUTCDate() + (data.period === "week" ? 7 : 1));
+    const step = daily ? 86400000 : 3600000;
+    const slots = (end.getTime() - start.getTime()) / step;
+    const label = new Intl.DateTimeFormat(locale(), {
+      timeZone: "UTC",
+      ...(daily ? {month: "short", day: "numeric"} : {hour: "2-digit", minute: "2-digit"}),
+    });
+    const at = (index: number) => label.format(start.getTime() + index * step);
+    const counts = new Map<number, {cacheHit: number; cacheMiss: number; output: number}>();
+    for (const b of buckets) {
+      const time = Date.parse(b.at);
+      const index = Math.floor((time + shift - start.getTime()) / step);
+      if (!known(index) || index < 0 || index >= slots || time > now) continue;
+      const totals = counts.get(index) ?? {cacheHit: 0, cacheMiss: 0, output: 0};
+      totals.cacheHit += b.cacheHit;
+      totals.cacheMiss += b.cacheMiss;
+      totals.output += b.output;
+      counts.set(index, totals);
+    }
+    if (!counts.size) return empty();
+    const max = Math.max(...Array.from(counts.values(), (b) => b.cacheHit + b.cacheMiss + b.output));
+    const bars = Array.from(counts)
+      .map(([index, b]) => {
+        const tip = `${at(index)} · ${t("overview.tokens.hit")} ${num(b.cacheHit, true)} · ${t("overview.tokens.miss")} ${num(b.cacheMiss, true)} · ${t("overview.tokens.output")} ${num(b.output, true)}`;
+        const h = (v: number) => `${(v / (max || 1)) * 100}%`;
+        return `<div style="grid-column:${index + 1}" title="${esc(tip)}"><i class="dash-hit" style="height:${h(b.cacheHit)}"></i><i class="dash-miss" style="height:${h(b.cacheMiss)}"></i><i class="dash-output" style="height:${h(b.output)}"></i></div>`;
       })
       .join("");
     return `<div class="dash-token-head"><div class="dash-token-legend"><span class="hit">${esc(t("overview.tokens.hit"))}</span><span class="miss">${esc(t("overview.tokens.miss"))}</span><span class="out">${esc(t("overview.tokens.output"))}</span></div>
-      <span class="dash-label">${esc(t("overview.tokens.peak", {value: num(max, true)}))}</span></div>
-      <div class="dash-token-bars" role="img" aria-label="${esc(tileTitle("tokens"))}">${bars}</div>
-      <div class="dash-time-axis"><span>${esc(at(buckets[0].at))}</span><span>${esc(at(buckets[buckets.length - 1].at))}</span></div>`;
+      <span class="dash-label">${esc(t(daily ? "overview.tokens.peakDay" : "overview.tokens.peak", {value: num(max, true)}))}</span></div>
+      <div class="dash-token-bars ${daily ? "dash-token-daily" : ""}" style="--dash-token-slots:${slots}" role="img" aria-label="${esc(tileTitle("tokens"))}">${bars}</div>
+      <div class="dash-time-axis"><span>${esc(at(0))}</span><span>${esc(at(slots - 1))}</span></div>`;
   }
 
   function models() {
@@ -361,16 +423,17 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     const status = `<span class="dash-status dash-${h.state}">${dot(h.state)}${esc(t(`overview.host.${h.state}`))}</span>`;
     const uptime = h.state === "running" ? `<strong>${esc(duration(h.uptimeSeconds))}</strong>` : "";
     const recovered = known(h.recoveredCount) && h.recoveredCount > 0 ? `<span class="dash-label">${esc(t("overview.host.recovered", {count: h.recoveredCount}))}</span>` : "";
+    const allowed = hostActions();
     const actions = down
-      ? button(t("overview.host.retry"), "retry", !!callbacks.onDisablePluginAndRetry && !!h.suspectPluginId, "button-primary") +
-        button(t("overview.host.restore"), "restore", !!callbacks.onRestore && !!h.restorePoint)
-      : button(t("overview.host.switch"), "switch", !!callbacks.onSwitchEnvironment) + button(t("overview.host.save"), "save", !!callbacks.onSaveRestorePoint);
+      ? button(t("overview.host.retry"), "retry", {enabled: !!allowed.retry, primary: true}) +
+        button(t("overview.host.restore"), "restore", {enabled: !!allowed.restore})
+      : button(t("overview.host.switch"), "switch", {enabled: !!allowed.switch}) + button(t("overview.host.save"), "save", {enabled: !!allowed.save});
     const capabilities = (["browser", "computer", "pet", "notification"] as const)
       .map((id) => {
         const c = h.capabilities?.find((item) => item.id === id);
         const state = c?.state ?? "unknown";
         const section = id === "pet" ? "pets" : id === "notification" ? "notifications" : id;
-        return `<button class="dash-capability dash-capability-${state}" data-action="settings:${section}" ${callbacks.onSettings ? "" : "disabled"} title="${esc(c?.detail || "")}">
+        return `<button class="dash-capability dash-capability-${state}" data-action="settings:${section}" ${actionState(!!callbacks.onSettings)} title="${esc(c?.detail || "")}">
           ${dot(state === "ready" ? "ok" : state === "error" ? "error" : "unknown")}<span>${esc(t(`overview.cap.${id}`))}</span><small>${esc(c?.detail || t(`overview.cap.${state}`))}</small></button>`;
       })
       .join("");
@@ -394,7 +457,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       ? `<div class="dash-workspaces">${r.workspaces
           .slice(0, 4)
           .map((w) => {
-            const status = !known(w.changedFiles) ? t("overview.runtime.notGit") : w.changedFiles ? t("overview.runtime.changed", {count: w.changedFiles}) : t("overview.runtime.clean");
+            const status = !known(w.changedFiles) ? t("overview.runtime.gitUnavailable") : w.changedFiles ? t("overview.runtime.changed", {count: w.changedFiles}) : t("overview.runtime.clean");
             return `<div><span class="dash-workspace-name" title="${esc(w.name)}">${esc(w.name)}${w.branch ? `<small>${esc(w.branch)}</small>` : ""}</span><span class="${w.changedFiles ? "dash-warning-text" : ""}">${esc(status)}</span></div>`;
           })
           .join("")}</div>`
@@ -405,17 +468,18 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
         <div><strong>${num(r.scheduled)}</strong><span>${esc(t("overview.runtime.scheduled"))}</span>${r.nextScheduledAt ? `<em>${esc(t("overview.runtime.next", {time: when(r.nextScheduledAt)}))}</em>` : ""}</div>
       </div>
       <div class="dash-label dash-subhead">${esc(t("overview.runtime.workspaces"))}</div>${workspaces}
-      <div class="dash-actions dash-push-bottom">${button(t("overview.runtime.upgrade"), "upgrade", !!callbacks.onUpgradePlugins && known(r.pluginUpdates) && r.pluginUpdates > 0, "button-primary")}${button(t("overview.runtime.manage"), "settings:plugins", !!callbacks.onSettings)}</div>`;
+      <div class="dash-actions dash-push-bottom">${button(t("overview.runtime.upgrade"), "upgrade", {enabled: !!hostActions().upgrade, primary: true})}${button(t("overview.runtime.manage"), "settings:plugins", {enabled: !!callbacks.onSettings})}</div>`;
   }
 
   function gauge(value: number | null | undefined, agent: number | null | undefined, label: string, caption: string, id: string) {
     const arc = "M15 61 A35 35 0 1 1 75 61";
-    const agentArc = known(agent) && agent > 0 ? `<path class="dash-gauge-agent" d="${arc}" pathLength="100" stroke="url(#${id})" stroke-dasharray="${clamp(agent)} 100"/>` : "";
-    return `<div class="dash-gauge"><svg viewBox="0 0 90 70" role="img" aria-label="${esc(label)} ${known(value) ? num(value) + "%" : t("overview.unavailable")}">
+    const total = known(value) ? Math.round(clamp(value)) : null;
+    const totalArc = total ? `<path class="dash-gauge-value" d="${arc}" pathLength="100" stroke-dasharray="${total} 200"/>` : "";
+    const agentArc = known(agent) && agent > 0 ? `<path class="dash-gauge-agent" d="${arc}" pathLength="100" stroke="url(#${id})" stroke-dasharray="${clamp(agent)} 200"/>` : "";
+    return `<div class="dash-gauge"><svg viewBox="0 0 90 70" role="img" aria-label="${esc(label)} ${total === null ? t("overview.unavailable") : total + "%"}">
         <defs><linearGradient id="${id}"><stop stop-color="var(--dash-agent-a)"/><stop offset="1" stop-color="var(--dash-agent-b)"/></linearGradient></defs>
-        <path class="dash-gauge-track" d="${arc}" pathLength="100"/>
-        <path class="dash-gauge-value" d="${arc}" pathLength="100" stroke-dasharray="${known(value) ? clamp(value) : 0} 100"/>${agentArc}
-        <text x="45" y="50" text-anchor="middle">${known(value) ? `${Math.round(value)}%` : "—"}</text></svg>
+        <path class="dash-gauge-track" d="${arc}" pathLength="100"/>${totalArc}${agentArc}
+        <text x="45" y="50" text-anchor="middle">${total === null ? "—" : `${total}%`}</text></svg>
       <strong>${esc(label)}</strong><span>${esc(caption)}</span></div>`;
   }
 
@@ -427,9 +491,14 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     const agentMemoryShare = share(pc.agentMemoryBytes, pc.memoryTotalBytes);
     const diskShare = share(pc.diskUsedBytes, pc.diskTotalBytes);
     const free = known(pc.diskTotalBytes) && known(pc.diskUsedBytes) ? gigabytes(pc.diskTotalBytes - pc.diskUsedBytes) : "—";
-    const history = pc.cpuHistory;
-    const spark = history && history.length > 1
-      ? `<svg class="dash-spark" viewBox="0 0 300 36" preserveAspectRatio="none" role="img" aria-label="${esc(t("overview.pc.trend"))}"><polyline points="${history.map((p, i) => `${(i * 300) / (history.length - 1)},${36 - clamp(p.percent) * 0.34}`).join(" ")}"/></svg>`
+    const end = Date.parse(pc.sampledAt || data.now || new Date().toISOString());
+    const start = end - 3600000;
+    const history = (pc.cpuHistory ?? [])
+      .map((p) => ({at: Date.parse(p.at), percent: p.percent}))
+      .filter((p) => p.at >= start && p.at <= end && known(p.percent))
+      .sort((a, b) => a.at - b.at);
+    const spark = history.length > 1
+      ? `<svg class="dash-spark" viewBox="0 0 300 36" preserveAspectRatio="none" role="img" aria-label="${esc(t("overview.pc.trend"))}"><line x1="0" y1="35" x2="300" y2="35"/><polyline points="${history.map((p) => `${(p.at - start) / 12000},${35 - clamp(p.percent) * 0.34}`).join(" ")}"/></svg>`
       : "";
     // Console hosts belong to the shell that opened them; listing them separately is noise.
     const processes = pc.processes?.filter((p) => !/^conhost(\.exe)?$/i.test(p.name)).sort((a, b) => (b.memoryBytes ?? 0) - (a.memoryBytes ?? 0)).slice(0, 4);
@@ -454,7 +523,10 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       .map((id) => {
         const h = data.health?.find((item) => item.id === id);
         const state = h?.state || "unknown";
-        return `<button class="dash-health-item dash-health-${state}" data-action="settings:${id}" ${callbacks.onSettings ? "" : "disabled"}>${dot(state)}<strong>${esc(t(`overview.health.${id}`))}</strong><span>${esc(h?.summary || t("overview.unavailable"))}</span></button>`;
+        const content = `${dot(state)}<strong>${esc(t(`overview.health.${id}`))}</strong><span>${esc(h?.summary || t("overview.unavailable"))}</span>`;
+        return id === "privacy"
+          ? `<div class="dash-health-item dash-health-readonly dash-health-${state}">${content}</div>`
+          : `<button class="dash-health-item dash-health-${state}" data-action="settings:${id}" ${actionState(!!callbacks.onSettings)}>${content}</button>`;
       })
       .join("");
     return `<div class="dash-health">${items}</div>`;
@@ -462,21 +534,21 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
 
   const bodies: Record<DashboardTile, () => string> = {orbit, output, results, timeline, cost, tokens, models, host, runtime, computer, health};
 
-  function tile(id: DashboardTile) {
+  function tile(id: DashboardTile, index: number, list: DashboardTile[]) {
     const [cols, rows] = tileSize[id];
     const heading = id === "orbit" ? "" : `<h2>${esc(tileTitle(id))}${availabilityBadge(id)}</h2>`;
     const tools = editing
       ? `<div class="dash-tile-edit">
-          <button class="dash-drag-handle" aria-label="${esc(t("overview.drag"))}">${svgIcon("sliders-horizontal")}</button>
-          <button data-action="tile-up:${id}" aria-label="${esc(t("overview.moveEarlier"))}">${svgIcon("chevron-left")}</button>
-          <button data-action="tile-down:${id}" aria-label="${esc(t("overview.moveLater"))}">${svgIcon("chevron-right")}</button></div>`
+          <span class="dash-drag-handle" aria-hidden="true" title="${esc(t("overview.drag"))}">${svgIcon("sliders-horizontal")}</span>
+          <button data-action="tile-up:${id}" aria-label="${esc(t("overview.moveEarlier"))}" ${index === 0 ? "disabled" : ""}>${svgIcon("chevron-left")}</button>
+          <button data-action="tile-down:${id}" aria-label="${esc(t("overview.moveLater"))}" ${index === list.length - 1 ? "disabled" : ""}>${svgIcon("chevron-right")}</button></div>`
       : "";
-    return `<section class="dashboard-tile group dash-cols-${cols} dash-rows-${rows} dash-tile-${id} ${id === "orbit" ? "dash-hero" : ""}" data-tile="${id}" aria-label="${esc(tileTitle(id))}">${heading}${tools}<div class="dash-tile-body">${bodies[id]()}</div></section>`;
+    return `<section class="dashboard-tile group dash-cols-${cols} dash-rows-${rows} dash-tile-${id} ${id === "orbit" ? "dash-hero" : ""}" data-tile="${id}" aria-label="${esc(tileTitle(id))}">${heading}${tools}<div class="dash-tile-body" ${editing ? "inert" : ""}>${bodies[id]()}</div></section>`;
   }
 
   function group(id: DashboardGroup, index: number) {
     const move = editing
-      ? `<div class="dash-group-move">${button(t("overview.moveUp"), `group-up:${id}`, index > 0)}${button(t("overview.moveDown"), `group-down:${id}`, index < layout.groups.length - 1)}</div>`
+      ? `<div class="dash-group-move">${button(t("overview.moveUp"), `group-up:${id}`, {enabled: index > 0, busy: false})}${button(t("overview.moveDown"), `group-down:${id}`, {enabled: index < layout.groups.length - 1, busy: false})}</div>`
       : "";
     return `<section class="dashboard-module-group" data-group="${id}">
       <header class="dashboard-group-label"><h2>${esc(t(`overview.group.${id}`))}</h2><span></span>${move}</header>
@@ -485,19 +557,20 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
 
   function header() {
     const now = new Intl.DateTimeFormat(locale(), {month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit"}).format(new Date(data.now || Date.now()));
-    const periods = (["today", "week", "month"] as DashboardPeriod[])
-      .map((p) => `<button data-action="period:${p}" aria-pressed="${(data.period || "today") === p}" ${!callbacks.onPeriodChange || pending ? "disabled" : ""}>${esc(t(`overview.period.${p}`))}</button>`)
+    const periodLoading = wantedPeriod !== undefined && wantedPeriod !== shownPeriod();
+    const periodButtons = periods
+      .map((p) => `<button data-action="period:${p}" aria-pressed="${shownPeriod() === p}" ${!callbacks.onPeriodChange ? "disabled" : ""} ${periodLoading && wantedPeriod === p ? "data-loading" : ""}>${esc(t(`overview.period.${p}`))}</button>`)
       .join("");
-    const stale = data.sessions?.staleAt
-      ? t("overview.lastKnown", {time: new Intl.DateTimeFormat(locale(), {dateStyle: "short", timeStyle: "short"}).format(new Date(data.sessions.staleAt))})
+    const stale = data.dshStaleAt
+      ? t("overview.lastKnown", {time: new Intl.DateTimeFormat(locale(), {dateStyle: "short", timeStyle: "short"}).format(new Date(data.dshStaleAt))})
       : "";
     const notice = [stale, data.sourceError].filter(Boolean).join(" · ");
     return `<header class="dashboard-head"><h1>${esc(t("overview.title"))}</h1><time>${esc(now)}</time><span class="dash-head-spacer"></span>
-        ${button(t(editing ? "overview.done" : "overview.edit"), "edit", true, editing ? "button-primary" : "")}${editing ? button(t("overview.reset"), "reset") : ""}
-        <div class="dash-period">${periods}</div></header>
+        ${button(t(editing ? "overview.done" : "overview.edit"), "edit", {primary: editing, busy: false})}${editing ? button(t("overview.reset"), "reset", {busy: false}) : ""}
+        <div class="dash-period">${periodButtons}</div></header>
       ${notice ? `<div class="dash-stale">${esc(notice)}</div>` : ""}
       ${error ? `<div class="dash-error" role="alert">${esc(error)}</div>` : ""}
-      ${pending ? `<span class="sr-only" role="status">${esc(t("overview.busy"))}</span>` : ""}`;
+      ${pending || periodLoading ? `<span class="sr-only" role="status">${esc(t("overview.busy"))}</span>` : ""}`;
   }
 
   // ---------- rendering ----------
@@ -516,19 +589,29 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
         new Sortable(grid, {
           handle: ".dash-drag-handle",
           draggable: ".dashboard-tile",
+          dataIdAttr: "data-tile",
           forceFallback: true,
           fallbackOnBody: true,
+          fallbackTolerance: 4,
           animation: 150,
           group: {name: groupId, pull: false, put: false},
           ghostClass: "dash-drag-ghost",
-          onStart: () => {
+          onChoose: () => {
             dragging = true;
           },
-          onEnd: () => {
-            dragging = false;
-            layout.tiles[groupId] = Array.from(grid.querySelectorAll<HTMLElement>(".dashboard-tile")).map((el) => el.dataset.tile as DashboardTile);
-            save();
-            render();
+          onUnchoose: () => {
+            // Even a press that never becomes a drag must release the redraw hold.
+            queueMicrotask(() => {
+              dragging = false;
+              render();
+            });
+          },
+          onEnd: ({oldIndex, newIndex}) => {
+            const order = Sortable.get(grid)?.toArray();
+            if (order && oldIndex !== newIndex) {
+              layout.tiles[groupId] = order as DashboardTile[];
+              save();
+            }
           },
         }),
       );
@@ -540,17 +623,30 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     sortables.forEach((s) => s.destroy());
     sortables = [];
     const scroll = container.scrollTop;
-    const focused = (document.activeElement as HTMLElement | null)?.dataset.action;
+    const active = document.activeElement as HTMLElement | SVGElement | null;
+    const focused = active && container.contains(active) ? active : null;
+    const tileId = focused?.closest<HTMLElement>("[data-tile]")?.dataset.tile;
+    const groupId = !tileId ? focused?.closest<HTMLElement>("[data-group]")?.dataset.group : undefined;
+    const actionKey = focused?.dataset.focusKey ?? focused?.dataset.action;
     // Keep the orbit's DOM when nothing it shows has changed, so the comet animation does not restart on every poll.
     const previousOrbit = container.querySelector<HTMLElement>(".dash-hero .dash-tile-body");
-    const nextSignature = JSON.stringify([data.host?.state, data.sessions, data.output?.completed, data.locale, data.period, data.availability?.sessions]);
+    const nextSignature = JSON.stringify([data.host?.state, data.sessions, data.output?.completed, data.locale, data.period, data.availability?.sessions, data.availability?.orbit, data.dshStaleAt, pending]);
 
     container.classList.add("dashboard-host");
     container.innerHTML = `<div class="dashboard-page ${editing ? "dash-editing" : ""}"><div class="dashboard-glow" aria-hidden="true"></div>${header()}${layout.groups.map(group).join("")}</div>`;
-    container.scrollTop = scroll;
-    if (previousOrbit && orbitSignature === nextSignature) container.querySelector(".dash-hero .dash-tile-body")?.replaceWith(previousOrbit);
+    if (previousOrbit && orbitSignature === nextSignature) {
+      previousOrbit.inert = editing;
+      container.querySelector(".dash-hero .dash-tile-body")?.replaceWith(previousOrbit);
+    }
     orbitSignature = nextSignature;
-    if (focused) container.querySelector<HTMLElement>(`[data-action="${CSS.escape(focused)}"]`)?.focus({preventScroll: true});
+    container.scrollTop = scroll;
+    if (actionKey) {
+      const scope = tileId
+        ? container.querySelector(`[data-tile="${CSS.escape(tileId)}"]`)
+        : groupId ? container.querySelector(`[data-group="${CSS.escape(groupId)}"]`) : container;
+      const key = focused?.dataset.focusKey ? "data-focus-key" : "data-action";
+      scope?.querySelector<HTMLElement | SVGElement>(`[${key}="${CSS.escape(actionKey)}"]:not(:disabled)`)?.focus({preventScroll: true});
+    }
     if (editing) attachSortables();
   }
 
@@ -560,10 +656,45 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     return true;
   }
 
+  function focusMove(action: string, inverse: string) {
+    for (const candidate of [action, inverse]) {
+      const button = container.querySelector<HTMLButtonElement>(`[data-action="${CSS.escape(candidate)}"]:enabled`);
+      if (button) {
+        button.focus();
+        button.scrollIntoView({block: "nearest", inline: "nearest"});
+        break;
+      }
+    }
+  }
+
+  const actionFailed = (e: unknown) => t("overview.actionFailed", {message: e instanceof Error ? e.message : String(e)});
+
+  async function choosePeriod(period: DashboardPeriod) {
+    if (!callbacks.onPeriodChange || period === (wantedPeriod ?? shownPeriod())) return;
+    const revision = ++periodRevision;
+    wantedPeriod = period;
+    error = "";
+    render();
+    try {
+      await callbacks.onPeriodChange(period);
+    } catch (e) {
+      if (revision !== periodRevision) return;
+      wantedPeriod = shownPeriod();
+      error = actionFailed(e);
+      render();
+    }
+  }
+
   async function run(action: string) {
-    if (pending) return;
+    if (dragging) return;
     const [kind, ...rest] = action.split(":");
     const id = rest.join(":");
+
+    if (kind === "period") {
+      const period = periods.find((p) => p === id);
+      if (period) await choosePeriod(period);
+      return;
+    }
 
     if (kind === "edit") {
       editing = !editing;
@@ -572,6 +703,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     }
     if (kind === "reset") {
       layout = defaultDashboardLayout();
+      error = "";
       try {
         localStorage.removeItem(dashboardLayoutKey);
       } catch {
@@ -585,6 +717,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       if (swap(layout.groups, index, index + (kind === "group-up" ? -1 : 1))) {
         save();
         render();
+        focusMove(action, `group-${kind === "group-up" ? "down" : "up"}:${id}`);
       }
       return;
     }
@@ -596,21 +729,16 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
       if (swap(tiles, index, index + (kind === "tile-up" ? -1 : 1))) {
         save();
         render();
-        container.querySelector<HTMLButtonElement>(`[data-tile="${CSS.escape(id)}"] [data-action="${CSS.escape(action)}"]`)?.focus();
+        focusMove(action, `tile-${kind === "tile-up" ? "down" : "up"}:${id}`);
       }
       return;
     }
 
-    const host = data.host;
+    if (pending || editing) return;
     const calls: Record<string, (() => void | Promise<void>) | undefined> = {
-      switch: callbacks.onSwitchEnvironment,
-      save: callbacks.onSaveRestorePoint,
-      restore: host?.restorePoint ? () => callbacks.onRestore?.(host.restorePoint!.id) : undefined,
-      retry: host?.suspectPluginId ? () => callbacks.onDisablePluginAndRetry?.(host.suspectPluginId!) : undefined,
-      upgrade: callbacks.onUpgradePlugins,
-      session: () => callbacks.onOpenSession?.(id),
+      ...hostActions(),
+      session: canOpenSession(id) ? () => callbacks.onOpenSession?.(id) : undefined,
       settings: () => callbacks.onSettings?.(id as DashboardSettingsSection),
-      period: () => callbacks.onPeriodChange?.(id as DashboardPeriod),
     };
     const call = calls[kind];
     if (!call) return;
@@ -620,7 +748,7 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
     try {
       await call();
     } catch (e) {
-      error = t("overview.actionFailed", {message: e instanceof Error ? e.message : String(e)});
+      error = actionFailed(e);
     } finally {
       pending = false;
       render();
@@ -629,12 +757,14 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
 
   const onClick = (event: Event) => {
     const target = (event.target as Element).closest<HTMLElement>("[data-action]");
-    if (target && container.contains(target) && !target.matches(":disabled")) void run(target.dataset.action!);
+    if (target && container.contains(target) && !target.matches(':disabled,[aria-disabled="true"]') && !target.closest("[inert]")) {
+      void run(target.dataset.action!);
+    }
   };
   const onKey = (event: KeyboardEvent) => {
     if ((event.key === "Enter" || event.key === " ") && (event.target as Element).matches("g[data-action]")) {
       event.preventDefault();
-      onClick(event);
+      if (!event.repeat) onClick(event);
     }
   };
   container.addEventListener("click", onClick);
@@ -643,6 +773,8 @@ export function mountDashboard(container: HTMLElement, callbacks: DashboardCallb
 
   return {
     update(next) {
+      // A previous choice can finish after the currently requested period.
+      if (wantedPeriod && (next.period ?? "today") !== wantedPeriod) return;
       data = next;
       render();
     },

@@ -89,6 +89,9 @@ type Dependencies struct {
 	Channel                  WorkerChannel
 	PlatformError            error
 	AutomaticRuntimeRollback func() bool
+	// SwitchAttemptRecorded receives the persisted terminal result before a later
+	// switch can clear or replace it.
+	SwitchAttemptRecorded func(*dshmanager.SwitchAttempt)
 	// WorkerOutput receives every redacted output line of every Worker generation.
 	WorkerOutput func(generation string, event supervisor.OutputEvent)
 }
@@ -306,14 +309,15 @@ func (h *Host) OwnedProcesses(ctx context.Context) (generation string, pids []in
 		return "", nil, err
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.current == nil {
+	current := h.current
+	h.mu.Unlock()
+	if current == nil {
 		return "", []int32{}, nil
 	}
-	h.current.mu.RLock()
-	worker := h.current.worker
-	generation = h.current.generation
-	h.current.mu.RUnlock()
+	current.mu.RLock()
+	worker := current.worker
+	generation = current.generation
+	current.mu.RUnlock()
 	if worker == nil {
 		return generation, []int32{}, nil
 	}
@@ -680,7 +684,7 @@ func (h *Host) UpgradePlugins(ctx context.Context, request dshmanager.PluginUpgr
 	if !ok {
 		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
 	}
-	return h.mutateProfilePlugins(ctx, request.Target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+	return h.mutateProfilePlugins(ctx, request.Target, request.ExpectedGeneration, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
 		var result dshmanager.PluginResult
 		for index, packageName := range packages {
 			dshadapter.ReportCommandOutput(ctx, fmt.Sprintf("Upgrading %s (%d/%d)…", packageName, index+1, len(packages)))
@@ -838,14 +842,19 @@ func (h *Host) applyPlugin(ctx context.Context, target dshmanager.PluginTarget, 
 	if !ok {
 		return dshmanager.PluginResult{}, errors.New("transactional plugin manager is unavailable")
 	}
-	return h.mutateProfilePlugins(ctx, target, func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
+	return h.mutateProfilePlugins(ctx, target, "", func(ctx context.Context, launch dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error) {
 		return manager.ApplyPlugin(ctx, launch, spec, operation)
 	})
 }
 
-func (h *Host) mutateProfilePlugins(ctx context.Context, target dshmanager.PluginTarget, apply func(context.Context, dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error)) (dshmanager.PluginResult, error) {
+func (h *Host) mutateProfilePlugins(ctx context.Context, target dshmanager.PluginTarget, expectedGeneration string, apply func(context.Context, dshmanager.ResolvedLaunch) (dshmanager.PluginResult, error)) (dshmanager.PluginResult, error) {
+	h.switchMu.Lock()
+	defer h.switchMu.Unlock()
 	if failure := h.readyWorkerForPluginMutation(); failure != nil {
 		return dshmanager.PluginResult{}, failure
+	}
+	if expectedGeneration != "" && h.Status().GenerationID != expectedGeneration {
+		return dshmanager.PluginResult{}, h.failureFor(errors.New("the observed Worker generation has changed"), lifecycle.ErrorManagerOperationBusy, "The current DSH run changed. Refresh the plugin list and try again.", true)
 	}
 	snapshot, err := h.deps.Manager.Snapshot(ctx)
 	if err != nil {
@@ -855,7 +864,7 @@ func (h *Host) mutateProfilePlugins(ctx context.Context, target dshmanager.Plugi
 		return dshmanager.PluginResult{}, h.failureFor(errors.New("switch to this profile before changing plugins"), lifecycle.ErrorManagerOperationBusy, "The current profile is unavailable for plugin changes.", true)
 	}
 	var result dshmanager.PluginResult
-	_, err = h.applyRunContext(ctx, *snapshot.Current, func(ctx context.Context, launch dshmanager.ResolvedLaunch) error {
+	_, err = h.applyRunContextLocked(ctx, *snapshot.Current, func(ctx context.Context, launch dshmanager.ResolvedLaunch) error {
 		var err error
 		result, err = apply(ctx, launch)
 		return err
@@ -1190,7 +1199,7 @@ func (h *Host) recordSwitchAttempt(manager RunContextManager, target dshmanager.
 	attempt := dshmanager.SwitchAttempt{
 		Target: target, Stage: stage, Failure: *failure,
 		AutomaticRollback: automaticRollback, Rollback: rollback,
-		CompletedAt: time.Now().UTC().Format(time.RFC3339),
+		CompletedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if rollbackFailure != nil {
 		projected := h.failureFor(rollbackFailure, lifecycle.ErrorProcessStartFailed, "DSH Work could not restore the known-good Run context.", true)
@@ -1199,6 +1208,9 @@ func (h *Host) recordSwitchAttempt(manager RunContextManager, target dshmanager.
 	snapshot, err := manager.RecordSwitchAttempt(context.Background(), attempt, configureTarget)
 	if err != nil {
 		return snapshot, errors.Join(failure, err)
+	}
+	if h.deps.SwitchAttemptRecorded != nil {
+		h.deps.SwitchAttemptRecorded(&attempt)
 	}
 	return snapshot, failure
 }
@@ -2522,6 +2534,13 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the DSH Work window.")
 	}
 	return s.host.DisableFaultPlugin(ctx, packageName)
+}
+
+func (s *HostService) DisableFaultPluginAndRetry(ctx context.Context, generation, packageName string) (lifecycle.Status, error) {
+	if !s.authorized(ctx) {
+		return trustedSurfaceStatus(), trustedSurfaceRequired("Plugins can be changed only from the DSH Work window.")
+	}
+	return s.host.DisableFaultPluginAndRetry(ctx, generation, packageName)
 }
 
 // DisableFaultPlugins disables every enabled plugin of the profile that failed

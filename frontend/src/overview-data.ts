@@ -41,6 +41,23 @@ export function targetOf(manager: ManagerSnapshot | undefined): RunContext | und
   return manager?.current ?? manager?.configured ?? undefined;
 }
 
+export function availablePluginUpgrades(plugins: PluginInfo[] | undefined): string[] {
+  // Incompatible describes the installed version. The Host verifies the new
+  // candidate version when applying the transaction.
+  return Array.from(new Set((plugins ?? []).filter(p => p.updateCheck === "available").map(p => p.package || p.name).filter(Boolean)));
+}
+
+function failedProfilePlugin(s: OverviewSources, selected: RunContext | undefined): string | undefined {
+  const host = s.host;
+  if (host?.state !== "Failed" || !host.generationId || !host.launchSelection || !selected) return undefined;
+  const launch = host.launchSelection;
+  const directory = s.manager?.dataDirectories?.find(dir => dir.id === selected.profile.dataDirectoryId);
+  const node = selected.node.kind === "system" ? "system" : selected.node.installationId;
+  if (!directory || launch.dataDirectoryPath !== directory.path || launch.runtimeId !== selected.runtimeId ||
+      launch.profileName !== selected.profile.name || launch.nodeId !== node) return undefined;
+  return host.pluginFault?.plugins?.find(p => p.enabled && p.suspected)?.package;
+}
+
 /** Enabled and prepared counts as on; whether a browser or the DSH gateway is connected right now is a detail, not an outage. */
 export function capability(
   id: "browser" | "computer",
@@ -136,10 +153,17 @@ export function buildDashboardData(s: OverviewSources): DashboardData {
 
   const pointLabel = (at: string) =>
     new Intl.DateTimeFormat(s.locale, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}).format(new Date(at));
-  const point = s.manager?.restorePoints?.points?.filter((p) => samePlace(p, target)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  const restorePoints = s.manager?.restorePoints;
+  const environmentBusy = !s.manager || restorePoints?.operation?.status === "running";
+  const points = restorePoints?.points?.filter((p) => samePlace(p, target)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) ?? [];
+  // Keep the latest record when showing environment details. In recovery mode
+  // the button and label should name the latest point the user can restore.
+  const recovering = s.host?.state === "Failed" || s.host?.state === "Stopped";
+  const point = (recovering ? points.find(p => !p.unavailable) : undefined) ?? points[0];
   const profile = s.manager?.profiles?.find((p) => samePlace({target: {profile: p.ref}}, target));
   const pc = source?.computer;
   const plugins = s.plugins;
+  const availableUpdates = availablePluginUpgrades(plugins).length;
   const checked = plugins?.every((p) => p.updateCheck === "current" || p.updateCheck === "available");
 
   return {
@@ -156,9 +180,11 @@ export function buildDashboardData(s: OverviewSources): DashboardData {
       dshVersion: s.manager?.runtimes?.find((r) => r.id === target?.runtimeId)?.version,
       profile: target?.profile.name,
       nodeVersion: s.host?.launchSelection?.nodeVersion,
-      restorePoint: point ? {id: point.id, label: point.label || pointLabel(point.createdAt), at: point.createdAt} : undefined,
+      restorePoint: point ? {id: point.id, label: point.label || pointLabel(point.createdAt), at: point.createdAt, unavailable: point.unavailable} : undefined,
+      canSaveRestorePoint: !environmentBusy && restorePoints?.canSave === true,
+      environmentBusy,
       failure: s.host?.error?.summary,
-      suspectPluginId: s.host?.pluginFault?.plugins?.find((p) => p.enabled && p.suspected)?.package,
+      suspectPluginId: failedProfilePlugin(s, target),
       capabilities: [
         capability("browser", s.automation?.browser),
         capability("computer", s.automation?.computer),
@@ -170,7 +196,7 @@ export function buildDashboardData(s: OverviewSources): DashboardData {
       ...dsh.runtime,
       plugins: plugins?.length ?? profile?.pluginCount,
       disabledPlugins: plugins?.filter((p) => p.disabled).length,
-      pluginUpdates: checked ? plugins!.filter((p) => p.updateCheck === "available").length : undefined,
+      pluginUpdates: availableUpdates > 0 || checked ? availableUpdates : undefined,
     },
     events: [...(dsh.events ?? []), ...hostEvents(s, target, pointLabel)],
     health: health(s, dsh.health?.find((h) => h.id === "privacy")),

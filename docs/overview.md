@@ -29,8 +29,8 @@ groups, each a heading over a 12-column grid with 116 px rows:
 | 对话 | 最近结果 | The latest three results with a one-line summary; interrupted ones offer 继续 | List | 5×2 |
 | 对话 | 时间线 | Conversation events and DSH Work/DSH lifecycle events (start, restart, plugin updates, restores, restore points) | Time axis with a "now" mark | 12×1 |
 | 用量 | 花费与余额 | Spending when known, otherwise the account balance; tokens; runway when known | Large number and a usage bar | 3×2 |
-| 用量 | 按小时 tokens | Cache hit, cache miss and output per hour | Stacked bars with the peak labelled | 5×2 |
-| 用量 | 模型与缓存 | Cache hit rate, change from yesterday, tokens per model | Ring and per-model bars | 4×2 |
+| 用量 | Token usage | Cache hit, cache miss and output by hour for today, by day for week and month | Stacked bars with the peak labelled | 5×2 |
+| 用量 | 模型与缓存 | Cache hit rate, tokens per model, and (in the daily view) change from yesterday | Ring and per-model bars | 4×2 |
 | 环境 | DSH Work | Run state and uptime, automatic recoveries, DSH, profile, Node, latest restore point; browser, computer use, pet and notifications | Status, key–value rows, capability cells; 切换环境 and 保存恢复点, or 停用插件并重试 and 恢复环境 after a failed start | 4×3 |
 | 环境 | DSH | Plugins (disabled, updatable), skills, scheduled tasks, workspaces with branch and change count | Three numbers and a workspace list; 全部升级 and 管理插件 | 4×3 |
 | 环境 | 此电脑 | CPU, memory and disk, the last hour of CPU, processes the agents started with their role | Half-ring gauges with the agent share overlaid, a trend line, a process list | 4×3 |
@@ -45,12 +45,24 @@ quantities use the accent gradient so they stand apart from the rest of the
 machine. Tiles never scroll inside themselves.
 
 Missing data is shown as missing, never as zero. A tile whose source is
-partial or unavailable says so in its heading. When DSH stops, its tiles keep
-the last collected values with a "最后同步于" notice.
+partial or unavailable says so in its heading. When DSH stops, cached readings
+show “最后同步于” if they match the current Run context, local date, timezone
+offset, period and language.
 
 Settings has no overview page. Its former content, the current, configured
 and last-working environments with environment switching and version records,
 is the environment dialog that the DSH Work tile opens.
+
+When DSH is stopped or failed, the tile prefers the latest restorable record.
+The restore action previews the specific record named on the tile. Cancelling
+a switch, save or restore opened from the overview returns directly to that
+tile. Settings shortcuts return to the control that opened them; the privacy
+chip reports status only.
+
+Disabling a suspect plugin and retrying requires confirmation and targets the
+same failed Worker generation and environment. **Upgrade all** confirms the
+number of known upgrades and the restart before submitting the batch. If the
+Worker has changed since the overview was collected, the request is rejected.
 
 ## Layout editing
 

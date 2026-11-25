@@ -75,8 +75,22 @@ test('public sidebar seat opens Host surface without selecting main and validate
   receive({source: parent, origin: 'http://shell.local', data: opened});
   render.props.ref({closest: () => button});
   assert.equal(attributes.get('aria-current'), 'page');
+  // The default conversation may restore after an overview deep link. Its
+  // first main-view retention initializes the baseline, not dismissal.
+  const countBeforeRestore = sent.length;
   sessionSnapshot = {byId: {s: {id: 's', retainedBy: {mainView: 1}}}};
   sessionsChanged();
+  assert.equal(attributes.get('aria-current'), 'page');
+  assert.equal(sent.length, countBeforeRestore);
+  // Selecting the same conversation again may not change either store;
+  // actual session rows are DSH tree items, not native buttons.
+  columnEvents.get('click')({target: {closest: selector => selector.includes('[role="treeitem"][aria-selected]') ? {} : null}});
+  assert.equal(sent.at(-1).message.type, 'dsh-work/close-overview');
+  receive({source: parent, origin: 'http://shell.local', data: opened});
+  const countBeforeSwitch = sent.length;
+  sessionSnapshot = {byId: {t: {id: 't', retainedBy: {mainView: 1}}}};
+  sessionsChanged();
+  assert.equal(sent.length, countBeforeSwitch + 1);
   assert.equal(sent.at(-1).message.type, 'dsh-work/close-overview');
   receive({source: parent, origin: 'http://shell.local', data: opened});
   receive({source: parent, origin: 'http://shell.local', data: {version: 1, type: 'dsh-work/overview-closed'}});

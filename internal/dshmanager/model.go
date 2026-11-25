@@ -323,6 +323,7 @@ type PluginUpgradeAllRequest struct {
 	Target             PluginTarget `json:"target"`
 	Packages           []string     `json:"packages"`
 	AcceptIncompatible bool         `json:"acceptIncompatible,omitempty"`
+	ExpectedGeneration string       `json:"expectedGeneration,omitempty"`
 }
 
 type PluginExemptionRequest struct {

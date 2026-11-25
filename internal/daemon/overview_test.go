@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +41,11 @@ func overviewCaller() context.Context {
 	return app.LocalClientContext(context.Background(), "workspace")
 }
 
+func startReadyOverview(s *OverviewService, ctx context.Context, transport http.RoundTripper) {
+	SetOverviewWorker(s, ctx, "ready-worker", "http://127.0.0.1:4321/auth", transport)
+	s.Observe(lifecycle.Status{State: lifecycle.StateReady, GenerationID: "ready-worker"})
+}
+
 func overviewStaticTransport(payload string) overviewTransport {
 	return func(r *http.Request) (*http.Response, error) {
 		body := ""
@@ -58,7 +64,7 @@ func TestOverviewOfflineCacheIsStaleAndProfileIsolated(t *testing.T) {
 	run, stop := context.WithCancel(context.Background())
 	defer stop()
 	const payload = `{"identity":"profile-one","sessions":[]}`
-	s.Start(run, "http://127.0.0.1:4321/auth", overviewStaticTransport(payload))
+	startReadyOverview(s, run, overviewStaticTransport(payload))
 	live, err := s.GetSnapshot(overviewCaller(), "today", "zh-CN", 28800)
 	if err != nil || live.DSHPayload != payload || live.StaleAt != "" || live.DSHError != "" {
 		t.Fatalf("live snapshot = %+v, %v", live, err)
@@ -81,12 +87,74 @@ func TestOverviewOfflineCacheIsStaleAndProfileIsolated(t *testing.T) {
 	}
 }
 
+func TestOverviewOnlyCollectsFromMatchingReadyGeneration(t *testing.T) {
+	profile := "previous"
+	s := &OverviewService{ProfileKey: func(context.Context) (string, error) { return profile, nil }}
+	startReadyOverview(s, context.Background(), overviewStaticTransport(`{"identity":"previous"}`))
+	if _, err := s.GetSnapshot(overviewCaller(), "today", "en", 0); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	const candidate = `{"identity":"candidate"}`
+	SetOverviewWorker(s, context.Background(), "candidate", "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return overviewStaticTransport(candidate)(r)
+	}))
+	// The new channel is available during Web Boot, before the manager
+	// commits the candidate and Host publishes Ready for its generation.
+	for _, state := range []lifecycle.State{lifecycle.StateReady, lifecycle.StateStarting} {
+		if state == lifecycle.StateStarting {
+			s.Observe(lifecycle.Status{State: state, GenerationID: "candidate"})
+		}
+		got, err := s.GetSnapshot(overviewCaller(), "today", "en", 0)
+		if err != nil || got.DSHPayload != `{"identity":"previous"}` || got.StaleAt == "" || calls != 0 {
+			t.Fatalf("candidate collected before commit: %+v, %v (%d worker calls)", got, err, calls)
+		}
+	}
+	profile = "candidate"
+	s.Observe(lifecycle.Status{State: lifecycle.StateReady, GenerationID: "candidate"})
+	got, err := s.GetSnapshot(overviewCaller(), "today", "en", 0)
+	if err != nil || got.DSHPayload != candidate || got.StaleAt != "" || calls != 2 {
+		t.Fatalf("committed generation not collected: %+v, %v (%d worker calls)", got, err, calls)
+	}
+}
+
+func TestOverviewRPCReadCancelsOnDisconnect(t *testing.T) {
+	requestStarted := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &OverviewService{ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
+	startReadyOverview(s, context.Background(), overviewTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/__dshwork/overview" {
+			return overviewStaticTransport("")(r)
+		}
+		close(requestStarted)
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	}))
+	server := &Server{Services: map[string]any{"OverviewService": s}}
+	read := Call{Service: "OverviewService", Method: "GetSnapshot", Surface: "workspace", Args: []json.RawMessage{[]byte(`"today"`), []byte(`"en"`), []byte(`0`)}}
+	done := make(chan struct{})
+	go func() { _, _ = server.invoke(ctx, read); close(done) }()
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("overview request did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("disconnect did not cancel overview collection")
+	}
+}
+
 func TestOverviewCancelsInFlightGenerationRequest(t *testing.T) {
 	requestStarted := make(chan struct{})
 	run, stop := context.WithCancel(context.Background())
 	defer stop()
 	s := &OverviewService{Root: t.TempDir(), ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
-	s.Start(run, "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+	startReadyOverview(s, run, overviewTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/__dshwork/overview" {
 			return overviewResponse(r, io.NopCloser(strings.NewReader(""))), nil
 		}
@@ -129,7 +197,7 @@ func TestOverviewCancelledResponseCannotBecomeLiveOrCached(t *testing.T) {
 	run, stop := context.WithCancel(context.Background())
 	defer stop()
 	s := &OverviewService{Root: t.TempDir(), ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
-	s.Start(run, "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+	startReadyOverview(s, run, overviewTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/__dshwork/overview" {
 			return overviewResponse(r, io.NopCloser(strings.NewReader(""))), nil
 		}
@@ -148,7 +216,7 @@ func TestOverviewCancelledResponseCannotBecomeLiveOrCached(t *testing.T) {
 func TestOverviewProfileSwitchDuringResponseRejectsPayload(t *testing.T) {
 	profile := "profile-A"
 	s := &OverviewService{Root: t.TempDir(), ProfileKey: func(context.Context) (string, error) { return profile, nil }}
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+	startReadyOverview(s, context.Background(), overviewTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/__dshwork/overview" {
 			return overviewResponse(r, io.NopCloser(strings.NewReader(""))), nil
 		}
@@ -184,7 +252,7 @@ func TestOverviewCacheIsBoundedAndRewrittenOnlyOnChange(t *testing.T) {
 	replacer := &overviewCountingReplacer{}
 	payload := `{"sessions":[]}`
 	s := &OverviewService{Root: root, Replacer: replacer, ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+	startReadyOverview(s, context.Background(), overviewTransport(func(r *http.Request) (*http.Response, error) {
 		return overviewStaticTransport(payload)(r)
 	}))
 	for i := 0; i < 3; i++ {
@@ -211,11 +279,78 @@ func TestOverviewCacheIsBoundedAndRewrittenOnlyOnChange(t *testing.T) {
 	}
 }
 
+func TestOverviewCacheCanReloadFourLargeEscapablePayloads(t *testing.T) {
+	root := t.TempDir()
+	s := &OverviewService{Root: root, Replacer: overviewTestReplacer{}, ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
+	payload := `{"name":"` + strings.Repeat("<", overviewPayloadLimit-32) + `"}`
+	startReadyOverview(s, context.Background(), overviewStaticTransport(payload))
+	for offset := 0; offset < overviewCacheEntries; offset++ {
+		got, err := s.GetSnapshot(overviewCaller(), "today", "en", offset*3600)
+		if err != nil || got.DSHPayload != payload {
+			t.Fatalf("failed to collect large payload: %v (%s)", err, got.DSHError)
+		}
+	}
+	restarted := &OverviewService{Root: root, Replacer: s.Replacer, ProfileKey: s.ProfileKey}
+	for offset := 0; offset < overviewCacheEntries; offset++ {
+		got, err := restarted.GetSnapshot(overviewCaller(), "today", "en", offset*3600)
+		if err != nil || got.DSHPayload != payload || got.StaleAt == "" || len(got.PersistenceErrors) != 0 {
+			t.Fatalf("cache could not reload large payload: %v (%v)", err, got.PersistenceErrors)
+		}
+	}
+}
+
+func TestOverviewCacheUsesWorkerLocalDayAndIgnoresTimestampOnlyChanges(t *testing.T) {
+	root := t.TempDir()
+	replacer := &overviewCountingReplacer{}
+	s := &OverviewService{Root: root, Replacer: replacer, ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
+	const offset = 28800
+	zone := time.FixedZone("local", offset)
+	now := time.Now().In(zone)
+	nextDay := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, zone)
+	collectedAt := nextDay
+	completed := 0
+	startReadyOverview(s, context.Background(), overviewTransport(func(r *http.Request) (*http.Response, error) {
+		at := collectedAt.UTC().Format(time.RFC3339)
+		data := fmt.Sprintf(`{"schemaVersion":1,"collectedAt":%q,"availability":{},"data":{"now":%q,"output":{"completed":%d}}}`, at, at, completed)
+		return overviewStaticTransport(data)(r)
+	}))
+	for i := 0; i < 2; i++ {
+		if got, err := s.GetSnapshot(overviewCaller(), "today", "en", offset); err != nil || got.DSHPayload == "" || got.StaleAt != "" {
+			t.Fatalf("did not return Worker data: %+v, %v", got, err)
+		}
+		collectedAt = collectedAt.Add(time.Second)
+	}
+	cache, err := readOverviewCache(filepath.Join(root, "overview-cache.json"))
+	saved := cache[overviewCacheKey("profile", "today", "en", offset, nextDay)]
+	if err != nil || replacer.writes != 1 || len(cache) != 1 || !saved.At.Equal(nextDay) {
+		t.Fatalf("cache used the request day or rewrote identical data: %+v, %v (%d writes)", cache, err, replacer.writes)
+	}
+	completed = 1
+	if _, err := s.GetSnapshot(overviewCaller(), "today", "en", offset); err != nil {
+		t.Fatal(err)
+	}
+	if replacer.writes != 2 {
+		t.Fatalf("did not persist an actual metric change (%d writes)", replacer.writes)
+	}
+}
+
+func TestOverviewCacheReadsPreviouslyStoredStringPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "overview-cache.json")
+	legacy := []byte(`{"key":{"at":"2026-11-25T10:44:55.001+08:00","payload":"{\"sessions\":[]}"}}`)
+	if err := os.WriteFile(path, legacy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := readOverviewCache(path)
+	if err != nil || string(cache["key"].Payload) != `{"sessions":[]}` {
+		t.Fatalf("could not read existing cache: %+v, %v", cache, err)
+	}
+}
+
 func TestOverviewProfileSwitchDuringFailureRejectsOldCache(t *testing.T) {
 	profile := "profile-A"
 	requests := 0
 	s := &OverviewService{Root: t.TempDir(), ProfileKey: func(context.Context) (string, error) { return profile, nil }}
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewTransport(func(r *http.Request) (*http.Response, error) {
+	startReadyOverview(s, context.Background(), overviewTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/__dshwork/overview" {
 			return overviewResponse(r, io.NopCloser(strings.NewReader(""))), nil
 		}
@@ -241,7 +376,7 @@ func TestOverviewNullDiskCacheDoesNotCrashLiveCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &OverviewService{Root: root, ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewStaticTransport(`{"sessions":[]}`))
+	startReadyOverview(s, context.Background(), overviewStaticTransport(`{"sessions":[]}`))
 	snapshot, err := s.GetSnapshot(overviewCaller(), "today", "en", 0)
 	if err != nil || snapshot.DSHPayload == "" || snapshot.StaleAt != "" {
 		t.Fatalf("live recovery from invalid cache = %+v, %v", snapshot, err)
@@ -312,7 +447,7 @@ func TestOverviewPersistenceFailureKeepsLiveDataAndPreviousJournal(t *testing.T)
 	}
 	s.Replacer = overviewFailedReplacer{}
 	s.Observe(lifecycle.Status{State: lifecycle.StateStopped, GenerationID: "g"})
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewStaticTransport(`{"sessions":[]}`))
+	startReadyOverview(s, context.Background(), overviewStaticTransport(`{"sessions":[]}`))
 	got, err := s.GetSnapshot(overviewCaller(), "today", "en", 0)
 	if err != nil || got.DSHPayload == "" || got.StaleAt != "" || got.PersistenceErrors["journalSave"] == "" || got.PersistenceErrors["cacheSave"] == "" {
 		t.Fatalf("persistence failure blocked live result or was hidden: %+v, %v", got, err)
@@ -329,7 +464,7 @@ func TestOverviewPersistenceFailureKeepsLiveDataAndPreviousJournal(t *testing.T)
 		t.Fatalf("temporary files leaked: %v", leftovers)
 	}
 	s.Replacer = overviewTestReplacer{}
-	s.Observe(lifecycle.Status{State: lifecycle.StateStopped, GenerationID: "g"})
+	s.Observe(lifecycle.Status{State: lifecycle.StateReady, GenerationID: "ready-worker"})
 	got, err = s.GetSnapshot(overviewCaller(), "today", "en", 0)
 	if err != nil || len(got.PersistenceErrors) != 0 {
 		t.Fatalf("successful retry kept persistence error: %+v, %v", got, err)
@@ -340,7 +475,7 @@ func TestOverviewEmptyRootIsMemoryOnly(t *testing.T) {
 	s := &OverviewService{Replacer: overviewFailedReplacer{}, ProfileKey: func(context.Context) (string, error) { return "profile", nil }}
 	s.Initialize()
 	s.Observe(lifecycle.Status{State: lifecycle.StateReady, GenerationID: "g"})
-	s.Start(context.Background(), "http://127.0.0.1:4321/auth", overviewStaticTransport(`{"sessions":[]}`))
+	startReadyOverview(s, context.Background(), overviewStaticTransport(`{"sessions":[]}`))
 	got, err := s.GetSnapshot(overviewCaller(), "today", "en", 0)
 	if err != nil || got.DSHPayload == "" || len(got.PersistenceErrors) != 0 {
 		t.Fatalf("memory-only service attempted persistence: %+v, %v", got, err)

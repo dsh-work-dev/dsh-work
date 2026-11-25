@@ -12,7 +12,8 @@ import type {Snapshot as ManagerSnapshot, PluginInfo} from "../bindings/github.c
 import {mountDashboard} from "./dashboard";
 import type {DashboardPeriod, DashboardSettingsSection} from "./dashboard-model";
 import {currentLocale, subscribeLocale, t} from "./i18n";
-import {buildDashboardData, targetOf} from "./overview-data";
+import {buildDashboardData, contextKey, availablePluginUpgrades} from "./overview-data";
+import type {OverviewSources} from "./overview-data";
 
 const REFRESH_MS = 15_000;
 const PLUGIN_TTL_MS = 60_000;
@@ -27,11 +28,11 @@ const settingsSection: Record<DashboardSettingsSection, string> = {
   updates: "about",
   storage: "data-directories",
   browser: "browser",
-  privacy: "profiles",
 };
 
-const environment = (action: "switch" | "save" | "restore") => {
-  window.dispatchEvent(new CustomEvent("dsh-work:environment", {detail: action}));
+export type EnvironmentAction = {action: "switch"} | {action: "save"} | {action: "restore"; pointId: string};
+const environment = (detail: EnvironmentAction) => {
+  window.dispatchEvent(new CustomEvent("dsh-work:environment", {detail}));
 };
 const settled = <T>(result: PromiseSettledResult<T>) => (result.status === "fulfilled" ? result.value : undefined);
 
@@ -43,103 +44,129 @@ export interface OverviewController {
 }
 
 /** Host-owned overview. It reads Host services directly, so it works whether or not DSH is running. */
-export function mountOverview(container: HTMLElement, navigation: {openSession(id: string): void}): OverviewController {
+export function mountOverview(container: HTMLElement, navigation: {openSession(id: string): Promise<void>}): OverviewController {
   let period: DashboardPeriod = "today";
   let visible = false;
   let disposed = false;
-  let busy = false;
+  let active: ReturnType<typeof OverviewService.GetSnapshot> | undefined;
   let queued = false;
   let timer: number | undefined;
   let manager: ManagerSnapshot | undefined;
+  let host: OverviewSources["host"];
   // ListPlugins takes the manager's exclusive operation gate, so it runs at most once a minute,
   // only for a Ready current context, and backs off after a failure.
   let plugins: {key: string; at: number; items: PluginInfo[]} | undefined;
-  let pluginsLoading = false;
-  let pluginsRetryAt = 0;
+  let pluginsLoading: string | undefined;
+  let pluginsRetry: {key: string; at: number} | undefined;
 
   const dashboard = mountDashboard(container, {
-    onSwitchEnvironment: () => environment("switch"),
-    onSaveRestorePoint: () => environment("save"),
-    onRestore: () => environment("restore"),
+    onSwitchEnvironment: () => environment({action: "switch"}),
+    onSaveRestorePoint: () => environment({action: "save"}),
+    onRestore: (pointId) => environment({action: "restore", pointId}),
     onDisablePluginAndRetry: async (id) => {
+      const generation = host?.state === "Failed" ? host.generationId : undefined;
+      if (!generation) throw new Error(t("overview.plugins.changed"));
       if (!window.confirm(t("fault.confirmDisable", {plugin: id}))) return;
-      await HostService.DisableFaultPlugin(id);
-      await HostService.Start();
-      await refresh();
+      try {
+        await HostService.DisableFaultPluginAndRetry(generation, id);
+      } finally {
+        await refresh();
+      }
     },
     onUpgradePlugins: async () => {
-      const target = targetOf(manager);
-      if (!target) return;
-      const list = await ManagerService.ListPlugins({target: {profile: target.profile}});
-      const packages = (list ?? []).filter((p) => p.updateCheck === "available" && !p.incompatible).map((p) => p.package);
-      if (packages.length) await ManagerService.UpgradePlugins({target: {profile: target.profile}, packages});
-      else await ShellService.OpenSettings("plugins");
-      plugins = undefined;
-      await refresh();
+      const target = manager?.current;
+      const generation = host?.generationId;
+      const packages = availablePluginUpgrades(currentPlugins());
+      if (!target || !generation || !packages.length) {
+        await refresh();
+        throw new Error(t("overview.plugins.changed"));
+      }
+      if (!window.confirm(t("overview.plugins.confirmUpgrade", {count: packages.length}))) return;
+      try {
+        await ManagerService.UpgradePlugins({target: {profile: target.profile}, packages, expectedGeneration: generation});
+      } finally {
+        plugins = undefined;
+        await refresh();
+      }
     },
     onOpenSession: (id) => navigation.openSession(id),
     onSettings: (section) => ShellService.OpenSettings(settingsSection[section]),
     onPeriodChange: async (next) => {
       period = next;
+      cancelRefresh();
       await refresh();
     },
   });
 
-  const profileKey = () => {
-    const target = targetOf(manager);
-    return target ? `${target.profile.dataDirectoryId}/${target.profile.name}` : "";
+  const pluginKey = () => {
+    const selection = contextKey(manager?.current);
+    return host?.state === "Ready" && host.generationId && selection
+      ? JSON.stringify([host.generationId, selection])
+      : "";
   };
 
-  function loadPlugins(ready: boolean) {
-    const target = targetOf(manager);
-    if (!target || !ready || !manager?.current || pluginsLoading || Date.now() < pluginsRetryAt) return;
-    const key = profileKey();
-    if (plugins?.key === key && Date.now() - plugins.at < PLUGIN_TTL_MS) return;
-    pluginsLoading = true;
+  function currentPlugins() {
+    return plugins?.key === pluginKey() && Date.now() - plugins.at < PLUGIN_TTL_MS ? plugins.items : undefined;
+  }
+
+  function loadPlugins() {
+    const target = manager?.current;
+    const key = pluginKey();
+    if (!target || !key || pluginsLoading || currentPlugins() || (pluginsRetry?.key === key && Date.now() < pluginsRetry.at)) return;
+    pluginsLoading = key;
     ManagerService.ListPlugins({target: {profile: target.profile}})
       .then((items) => {
+        if (disposed || pluginKey() !== key) return;
         plugins = {key, at: Date.now(), items: items ?? []};
-        if (!disposed && visible) void refresh();
       })
       .catch(() => {
-        pluginsRetryAt = Date.now() + PLUGIN_TTL_MS;
+        pluginsRetry = {key, at: Date.now() + PLUGIN_TTL_MS};
       })
       .finally(() => {
-        pluginsLoading = false;
+        pluginsLoading = undefined;
+        if (visible && !disposed && (plugins?.key === key || pluginKey() !== key)) void refresh();
       });
+  }
+
+  function cancelRefresh() {
+    const previous = active;
+    active = undefined;
+    queued = false;
+    // Superseded reads no longer own the view, even if native cleanup is still running.
+    void previous?.cancel();
   }
 
   async function refresh() {
     if (disposed || !visible) return;
-    if (busy) {
+    if (active) {
       queued = true;
       return;
     }
-    busy = true;
     const selected = period;
     const locale = currentLocale();
+    const read = OverviewService.GetSnapshot(selected, locale, -new Date().getTimezoneOffset() * 60);
+    active = read;
     try {
-      const [host, managerResult, source, automation, preferences, update, problems, pet] = await Promise.allSettled([
+      const [hostResult, managerResult, source, automation, preferences, update, problems, pet] = await Promise.allSettled([
         HostService.GetWorkspaceStatus(),
         ManagerService.GetSnapshot(),
-        OverviewService.GetSnapshot(selected, locale, -new Date().getTimezoneOffset() * 60),
+        read,
         AutomationService.GetAutomation(),
         SettingsService.GetSettings(),
         HostService.GetUpdateState(),
         DiagnosticsService.GetProblems(),
         ShellService.GetPet(),
-      ]);
-      // A period or language change while collecting starts a fresh collection instead.
-      if (disposed || selected !== period || locale !== currentLocale()) return;
+      ] as const);
+      if (active !== read) return;
       manager = settled(managerResult);
-      loadPlugins(settled(host)?.state === "Ready");
-      const key = profileKey();
+      host = settled(hostResult);
+      loadPlugins();
       dashboard.update(
         buildDashboardData({
           period: selected,
           locale,
           now: new Date(),
-          host: settled(host),
+          host,
           manager,
           source: settled(source),
           automation: settled(automation),
@@ -147,29 +174,40 @@ export function mountOverview(container: HTMLElement, navigation: {openSession(i
           update: settled(update),
           problems: settled(problems),
           pet: settled(pet),
-          plugins: plugins?.key === key ? plugins.items : undefined,
+          plugins: currentPlugins(),
         }),
       );
     } finally {
-      busy = false;
-      if (queued) {
-        queued = false;
-        void refresh();
+      if (active === read) {
+        active = undefined;
+        if (queued) {
+          queued = false;
+          void refresh();
+        }
       }
     }
   }
 
   const unsubscribe = [
+    (() => {
+      const changed = () => void refresh();
+      window.addEventListener("dsh-work:environment-changed", changed);
+      return () => window.removeEventListener("dsh-work:environment-changed", changed);
+    })(),
     Events.On("lifecycle", () => void refresh()),
     Events.On("automation", () => void refresh()),
     Events.On("settings", () => void refresh()),
-    subscribeLocale(() => void refresh()),
+    subscribeLocale(() => {
+      cancelRefresh();
+      void refresh();
+    }),
   ];
 
   return {
     setVisible(next) {
       if (next === visible || disposed) return;
       visible = next;
+      cancelRefresh();
       window.clearInterval(timer);
       timer = undefined;
       if (visible) {
@@ -180,6 +218,7 @@ export function mountOverview(container: HTMLElement, navigation: {openSession(i
     refresh,
     destroy() {
       disposed = true;
+      cancelRefresh();
       window.clearInterval(timer);
       unsubscribe.forEach((off) => off());
       dashboard.destroy();

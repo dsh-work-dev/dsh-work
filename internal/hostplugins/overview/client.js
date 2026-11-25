@@ -30,7 +30,9 @@ window.__ModuleLoader__.load({id: '@dsh-work/overview', factory: require => {
     };
     // Public stores cover navigation changes. The local column capture also
     // handles reselecting an already-current session, which changes no store.
-    const columnClick = event => { if (!button?.contains(event.target) && event.target.closest?.('button,a,[role="button"]')) close(); };
+    const columnClick = event => {
+      if (!button?.contains(event.target) && event.target.closest?.('button,a,[role="button"],[role="treeitem"][aria-selected]')) close();
+    };
     const detach = () => {
       button?.removeEventListener('click', activate, true);
       column?.removeEventListener('click', columnClick, true);
@@ -98,8 +100,18 @@ window.__ModuleLoader__.load({id: '@dsh-work/overview', factory: require => {
       if (next !== currentPanel) { currentPanel = next; close(); }
     });
     let currentSession = selectedSession();
+    let hasMainSession = currentSession !== undefined;
     function selectedSession() { return Object.values(ctx.sessions.list.getSnapshot().byId ?? {}).find(s => (s.retainedBy?.mainView ?? 0) > 0)?.id; }
-    const unsubSessions = ctx.sessions.list.subscribe(() => { const next = selectedSession(); if (next !== currentSession) { currentSession = next; close(); } });
+    const unsubSessions = ctx.sessions.list.subscribe(() => {
+      const next = selectedSession();
+      if (next === currentSession) return;
+      currentSession = next;
+      // DSH asynchronously restores the first mainView selection after its
+      // workspace and session catalogs load. That does not navigate away from
+      // a Host overview opened before the Worker finished starting.
+      if (hasMainSession) close();
+      else if (next !== undefined) hasMainSession = true;
+    });
     const css = document.createElement('style');
     css.textContent = '@keyframes dsh-work-overview-pulse{50%{opacity:.35;transform:scale(.75)}}.dsh-work-overview-pulse{animation:dsh-work-overview-pulse 1.4s ease-in-out infinite}@media(prefers-reduced-motion:reduce){.dsh-work-overview-pulse{animation:none}}';
     document.head.append(css);

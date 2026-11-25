@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -71,8 +72,37 @@ type OverviewSnapshot struct {
 	PersistenceErrors     map[string]string    `json:"persistenceErrors,omitempty"`
 }
 type overviewCache struct {
-	At      string `json:"at"`
-	Payload string `json:"payload"`
+	At      time.Time       `json:"at"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+func readOverviewCache(path string) (map[string]overviewCache, error) {
+	data, err := readOverviewFile(path, overviewCacheReadLimit)
+	if err != nil {
+		return nil, err
+	}
+	var cache map[string]overviewCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		return nil, err
+	}
+	if cache == nil || len(cache) > overviewCacheEntries {
+		return nil, errors.New("invalid overview cache")
+	}
+	for key, entry := range cache {
+		// Earlier builds stored the payload as a JSON-encoded string.
+		if len(entry.Payload) > 0 && entry.Payload[0] == '"' {
+			var payload string
+			if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+				return nil, err
+			}
+			entry.Payload = json.RawMessage(payload)
+			cache[key] = entry
+		}
+		if entry.At.IsZero() || len(entry.Payload) > overviewPayloadLimit || !json.Valid(entry.Payload) {
+			return nil, errors.New("invalid overview cache entry")
+		}
+	}
+	return cache, nil
 }
 
 // OverviewService exposes bounded, read-only module data to trusted workbench windows.
@@ -83,10 +113,11 @@ type OverviewService struct {
 	Root           string
 	Replacer       settings.FileReplacer
 	RecoverySource func(context.Context) (*dshmanager.SwitchAttempt, error)
-	// mu guards in-memory state; it is never held during file or network I/O.
+	// mu guards lifecycle and journal state. It is released before disk writes and network I/O.
 	mu sync.Mutex
-	// fetchMu serializes Worker collection and the response cache.
-	fetchMu sync.Mutex
+	// fetchGate serializes Worker collection and the response cache, with cancellation while waiting.
+	fetchOnce sync.Once
+	fetchGate chan struct{}
 	// writeMu serializes journal files; journalSeq orders snapshots so an older one never overwrites a newer one.
 	writeMu               sync.Mutex
 	journalSeq            uint64
@@ -101,12 +132,13 @@ type OverviewService struct {
 	persistenceErrors     map[string]string
 }
 
-// overviewWorker is one Worker generation's authenticated channel. Start replaces it without
+// overviewWorker is one Worker generation's authenticated channel. Composition replaces it without
 // waiting for a collection in flight; that collection keeps its own pointer and is cancelled with run.
 type overviewWorker struct {
 	run           context.Context
 	client        *http.Client
 	auth, origin  string
+	generation    string
 	authenticated bool
 }
 
@@ -256,11 +288,7 @@ func (s *OverviewService) atomicWrite(name string, value any) error {
 	if s.Replacer == nil {
 		return errors.New("overview atomic file replacement unavailable")
 	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(s.Root, 0700); err != nil {
+	if err := os.MkdirAll(s.Root, 0700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(s.Root, ".overview-*.tmp")
@@ -268,7 +296,9 @@ func (s *OverviewService) atomicWrite(name string, value any) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if _, err = f.Write(encoded); err != nil {
+	encoder := json.NewEncoder(f)
+	encoder.SetEscapeHTML(false)
+	if err = encoder.Encode(value); err != nil {
 		f.Close()
 		return err
 	}
@@ -314,9 +344,11 @@ func (s *OverviewService) persistJournal(p journalPending) {
 	s.mu.Unlock()
 }
 
-func (s *OverviewService) Start(ctx context.Context, auth string, transport http.RoundTripper) {
+// SetOverviewWorker is called only by the trusted Worker channel composition.
+// It lives outside the RPC service method set.
+func SetOverviewWorker(s *OverviewService, ctx context.Context, generation, auth string, transport http.RoundTripper) {
 	u, err := url.Parse(auth)
-	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil {
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil || transport == nil || ctx.Err() != nil {
 		return
 	}
 	jar, _ := cookiejar.New(nil)
@@ -327,8 +359,18 @@ func (s *OverviewService) Start(ctx context.Context, auth string, transport http
 		return nil
 	}}
 	s.mu.Lock()
-	s.worker = &overviewWorker{run: ctx, client: client, auth: auth, origin: u.Scheme + "://" + u.Host}
+	s.worker = &overviewWorker{run: ctx, client: client, auth: auth, origin: u.Scheme + "://" + u.Host, generation: generation}
 	s.mu.Unlock()
+}
+
+func (s *OverviewService) workerReadyLocked(worker *overviewWorker) bool {
+	return worker != nil && worker == s.worker && worker.run.Err() == nil &&
+		s.lastState == string(lifecycle.StateReady) && s.generation == worker.generation
+}
+
+func overviewCacheKey(key, period, locale string, offset int, at time.Time) string {
+	local := at.In(time.FixedZone("local", offset))
+	return key + "|" + period + "|" + locale + "|" + local.Format("2006-01-02") + fmt.Sprint(offset)
 }
 
 func (s *OverviewService) Observe(status lifecycle.Status) {
@@ -348,7 +390,7 @@ func (s *OverviewService) Observe(status lifecycle.Status) {
 		return
 	}
 	s.lastState, s.generation = state, status.GenerationID
-	if state == "Ready" {
+	if status.State == lifecycle.StateReady {
 		s.readyAt = time.Now()
 	} else {
 		s.readyAt = time.Time{}
@@ -377,12 +419,21 @@ func (s *OverviewService) GetSnapshot(ctx context.Context, period, locale string
 	if keyErr != nil {
 		key = ""
 	}
+	var liveWorker *overviewWorker
+	var stale overviewCache
 	defer func() {
 		// A switch while collecting must not attach one Profile's DSH data to another.
 		if current, err := s.ProfileKey(ctx); keyErr == nil && (err != nil || current != key) {
 			out.DSHPayload, out.StaleAt, out.DSHError = "", "", "Run context changed"
+			liveWorker = nil
 		}
 		s.mu.Lock()
+		if liveWorker != nil && !s.workerReadyLocked(liveWorker) {
+			out.DSHPayload, out.StaleAt, out.DSHError = "", "", "DSH generation ended"
+			if len(stale.Payload) > 0 {
+				out.DSHPayload, out.StaleAt = string(stale.Payload), stale.At.Format(time.RFC3339Nano)
+			}
+		}
 		out.AutomaticRecoveries = s.journal.AutomaticRecoveries
 		out.RecoveryTrackingSince = s.journal.TrackingSince
 		out.PersistenceErrors = make(map[string]string, len(s.persistenceErrors))
@@ -410,20 +461,22 @@ func (s *OverviewService) GetSnapshot(ctx context.Context, period, locale string
 		result.DSHError = "No run context"
 		return result, nil
 	}
-	s.fetchMu.Lock()
-	defer s.fetchMu.Unlock()
+	s.fetchOnce.Do(func() { s.fetchGate = make(chan struct{}, 1) })
+	select {
+	case <-ctx.Done():
+		return result, ctx.Err()
+	case s.fetchGate <- struct{}{}:
+		defer func() { <-s.fetchGate }()
+	}
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if s.cache == nil {
 		s.cache = map[string]overviewCache{}
 		if s.Root != "" {
-			data, e := readOverviewFile(filepath.Join(s.Root, "overview-cache.json"), overviewCacheReadLimit)
+			loaded, e := readOverviewCache(filepath.Join(s.Root, "overview-cache.json"))
 			if e == nil {
-				var loaded map[string]overviewCache
-				e = json.Unmarshal(data, &loaded)
-				if e == nil && loaded != nil {
-					s.cache = loaded
-				} else if e == nil {
-					e = errors.New("overview cache is empty")
-				}
+				s.cache = loaded
 			}
 			if errors.Is(e, os.ErrNotExist) {
 				e = nil
@@ -433,16 +486,17 @@ func (s *OverviewService) GetSnapshot(ctx context.Context, period, locale string
 			s.mu.Unlock()
 		}
 	}
-	local := time.Now().In(time.FixedZone("local", offset))
-	cacheKey := key + "|" + period + "|" + locale + "|" + local.Format("2006-01-02") + fmt.Sprint(offset)
+	cacheKey := overviewCacheKey(key, period, locale, offset, time.Now())
 	if cached, ok := s.cache[cacheKey]; ok {
-		result.DSHPayload, result.StaleAt = cached.Payload, cached.At
+		stale = cached
+		result.DSHPayload, result.StaleAt = string(cached.Payload), cached.At.Format(time.RFC3339Nano)
 	}
 	s.mu.Lock()
 	worker := s.worker
+	ready := s.workerReadyLocked(worker)
 	s.mu.Unlock()
-	if worker == nil || worker.run.Err() != nil {
-		result.DSHError = "DSH is not running"
+	if !ready {
+		result.DSHError = "DSH is not ready"
 		return result, nil
 	}
 	// Tie requests to both the caller and the Worker generation.
@@ -481,32 +535,51 @@ func (s *OverviewService) GetSnapshot(ctx context.Context, period, locale string
 		return result, nil
 	}
 	data, e := io.ReadAll(io.LimitReader(response.Body, overviewPayloadLimit+1))
-	if e != nil || len(data) > overviewPayloadLimit || !json.Valid(data) {
+	var metadata struct {
+		CollectedAt string `json:"collectedAt"`
+	}
+	if e != nil || len(data) > overviewPayloadLimit || json.Unmarshal(data, &metadata) != nil {
 		result.DSHError = "Invalid DSH response"
 		return result, nil
+	}
+	collectedAt := time.Now().UTC()
+	if metadata.CollectedAt != "" {
+		collectedAt, e = time.Parse(time.RFC3339Nano, metadata.CollectedAt)
+		if e != nil {
+			result.DSHError = "Invalid DSH response"
+			return result, nil
+		}
 	}
 	if current, e := s.ProfileKey(ctx); e != nil || current != key {
 		result.DSHError = "Run context changed"
 		return result, nil
 	}
-	if requestCtx.Err() != nil || worker.run.Err() != nil {
+	s.mu.Lock()
+	ready = s.workerReadyLocked(worker)
+	s.mu.Unlock()
+	if requestCtx.Err() != nil || !ready {
 		result.DSHError = "DSH generation ended"
 		return result, nil
 	}
 	result.DSHPayload, result.StaleAt = string(data), ""
-	s.storeCache(cacheKey, string(data))
+	liveWorker = worker
+	// The Worker may have started collecting after midnight even when the
+	// workbench requested the snapshot before it.
+	s.storeCache(overviewCacheKey(key, period, locale, offset, collectedAt), data, collectedAt)
 	return result, nil
 }
 
 // storeCache keeps the newest payload per key and rewrites the file only when a payload changed
-// or the previous write failed. Callers hold fetchMu.
-func (s *OverviewService) storeCache(key, payload string) {
+// or the previous write failed. Callers hold fetchGate.
+func (s *OverviewService) storeCache(key string, data []byte, collectedAt time.Time) {
+	var payload bytes.Buffer
+	_ = json.Compact(&payload, data) // The response has already been decoded.
 	previous, known := s.cache[key]
-	s.cache[key] = overviewCache{At: time.Now().Format(time.RFC3339Nano), Payload: payload}
+	s.cache[key] = overviewCache{At: collectedAt.UTC(), Payload: payload.Bytes()}
 	for len(s.cache) > overviewCacheEntries {
 		oldest := ""
 		for k, v := range s.cache {
-			if k != key && (oldest == "" || v.At < s.cache[oldest].At) {
+			if k != key && (oldest == "" || v.At.Before(s.cache[oldest].At)) {
 				oldest = k
 			}
 		}
@@ -515,7 +588,7 @@ func (s *OverviewService) storeCache(key, payload string) {
 	s.mu.Lock()
 	retry := s.persistenceErrors["cacheSave"] != "" || s.persistenceErrors["cacheLoad"] != ""
 	s.mu.Unlock()
-	if known && previous.Payload == payload && !retry {
+	if known && !retry && sameOverviewPayload(previous.Payload, payload.Bytes()) {
 		return
 	}
 	err := s.atomicWrite("overview-cache.json", s.cache)
@@ -526,4 +599,43 @@ func (s *OverviewService) storeCache(key, payload string) {
 		s.persistenceErrorLocked("cacheLoad", nil)
 	}
 	s.mu.Unlock()
+}
+
+func sameOverviewPayload(a, b json.RawMessage) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	// Collection time is provenance, not a change to the dashboard data.
+	var left, right map[string]json.RawMessage
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return false
+	}
+	delete(left, "collectedAt")
+	delete(right, "collectedAt")
+	if !bytes.Equal(left["data"], right["data"]) {
+		var leftData, rightData map[string]json.RawMessage
+		if json.Unmarshal(left["data"], &leftData) != nil || json.Unmarshal(right["data"], &rightData) != nil || leftData == nil || rightData == nil {
+			return false
+		}
+		delete(leftData, "now")
+		delete(rightData, "now")
+		if !sameOverviewFields(leftData, rightData) {
+			return false
+		}
+		delete(left, "data")
+		delete(right, "data")
+	}
+	return sameOverviewFields(left, right)
+}
+
+func sameOverviewFields(left, right map[string]json.RawMessage) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if !bytes.Equal(value, right[key]) {
+			return false
+		}
+	}
+	return true
 }

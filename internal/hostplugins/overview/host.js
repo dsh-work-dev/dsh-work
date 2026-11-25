@@ -1,4 +1,5 @@
 import {execFile} from 'node:child_process';
+import {resolve} from 'node:path';
 import {promisify} from 'node:util';
 
 export const name = 'dsh-work-overview';
@@ -7,6 +8,7 @@ const exec = promisify(execFile);
 const text = (value, limit = 240) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, limit) : '';
 const number = value => Number.isFinite(value) && value >= 0 ? value : 0;
 const iso = time => new Date(time).toISOString();
+const dayMs = 86400000;
 const buckets = () => ({cacheHit: 0, cacheMiss: 0, output: 0});
 const sum = value => value.cacheHit + value.cacheMiss + value.output;
 const service = (ctx, key) => typeof ctx.get === 'function' ? ctx.get(key) : ctx[key];
@@ -41,7 +43,10 @@ export function periodWindow(period, now, offset = 0) {
   date.setUTCHours(0, 0, 0, 0);
   if (period === 'week') date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
   if (period === 'month') date.setUTCDate(1);
-  return {start: date.getTime() - shift, end: now, offset};
+  const start = date.getTime() - shift;
+  if (period === 'month') date.setUTCMonth(date.getUTCMonth() + 1);
+  else date.setUTCDate(date.getUTCDate() + (period === 'week' ? 7 : 1));
+  return {start, end: now, calendarEnd: date.getTime() - shift, offset};
 }
 
 function usageOf(event) {
@@ -53,7 +58,7 @@ function usageOf(event) {
 export function foldSession(row, observation, window, pending = false, changes) {
   const all = observation.events ?? [];
   const own = all.slice(observation.inheritedEventCount ?? observation.header?.inheritedEventCount ?? 0);
-  const calls = new Map(), attempts = new Map(), turns = new Map(), changesByTurn = new Map();
+  const calls = new Map(), callsByStep = new Map(), attempts = new Map(), turns = new Map(), changesByTurn = new Map();
   const top = row.origin !== 'subagent' && !(observation.header?.delegationDepth > 0) && !(observation.meta?.delegationDepth > 0);
   let route = {}, title = text(row.projections?.values?.title?.title ?? row.projections?.values?.title), summary = '', outcome;
   let lastTime = 0, latestEnd = 0, agentMs = 0, missingUsage = false;
@@ -72,9 +77,15 @@ export function foldSession(row, observation, window, pending = false, changes) 
       if (inside(e.time) && top) events.push({id: `${row.sessionId}:${e.seq}`, at: iso(e.time), title: title || row.sessionId,
         source: 'DSH', state: outcome === 'completed' ? 'completed' : 'interrupted', sessionId: row.sessionId});
     }
-    if (e.type === 'tool/call') calls.set(d.callId, {name: text(d.name, 120), at: e.time});
+    if (e.type === 'tool/call') {
+      const call = {name: text(d.name, 120), at: e.time};
+      calls.set(e.seq, call);
+      callsByStep.set(JSON.stringify([d.turn, d.step, d.callId]), call);
+    }
     if (e.type === 'tool/result') {
-      const call = calls.get(d.message?.source?.callId ?? d.message?.toolCallId);
+      const id = d.message?.source?.callId ?? d.message?.toolCallId;
+      const call = e.sourceEventSeqs?.length ? e.sourceEventSeqs.map(seq => calls.get(seq)).find(Boolean)
+        : callsByStep.get(JSON.stringify([d.turn, d.step, id]));
       if (call) { call.failed = d.message?.isError === true; call.settled = true; }
     }
     if (e.type === 'llm/retry-started') {
@@ -114,7 +125,7 @@ export function foldSession(row, observation, window, pending = false, changes) 
 
 /** Read-only Git inspection; roots originate solely in the composed Workspace registry. */
 export async function gitStatus(cwd, signal, run = exec) {
-  const {stdout} = await run('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, 'status', '--porcelain=v1', '--branch', '-z'],
+  const {stdout} = await run('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, 'status', '--porcelain=v1', '--branch', '--untracked-files=all', '-z'],
     {encoding: 'utf8', timeout: 3000, maxBuffer: 1024 * 1024, windowsHide: true, signal});
   const records = stdout.split('\0').filter(Boolean);
   const heading = records.shift() ?? '';
@@ -175,13 +186,20 @@ export async function collectOverview(ctx, options = {}) {
         observation = query?.observeSession ? await query.observeSession(row.sessionId, {signal, projectionMode: 'none'})
           : await ctx.sessionController.inspect(row.sessionId, signal);
         const cacheKey = `${period}:${window.start}:${offset}:${row.sessionId}`;
-        const cached = options.foldCache?.get(cacheKey);
-        if (!row.running && !waiting.has(row.sessionId) && observation.cursor !== undefined && cached?.cursor === observation.cursor) return cached.fold;
+        // A cursor identifies a position, not a durable revision. Live cuts also
+        // depend on the transient workspace summary service and running state.
+        const cacheable = observation.source === 'prepared' && observation.revision !== undefined
+          && observation.cursor !== undefined && !row.running && !waiting.has(row.sessionId);
+        const cached = cacheable ? options.foldCache?.get(cacheKey) : undefined;
+        if (cached && cached.revision === observation.revision && cached.cursor === observation.cursor) return cached.fold;
         const fold = foldSession(row, observation, window, waiting.has(row.sessionId), changes);
-        if (period === 'today') fold.previous = foldSession(row, observation, {start: window.start - 86400000, end: window.start - 1}, false).attempts;
-        if (options.foldCache && !row.running && !waiting.has(row.sessionId)) {
+        if (period === 'today') {
+          const previous = foldSession(row, observation, {start: window.start - dayMs, end: window.start - 1});
+          fold.previous = {attempts: previous.attempts, missingUsage: previous.missingUsage};
+        }
+        if (options.foldCache && cacheable && Date.parse(fold.session.updatedAt) <= window.end) {
           if (options.foldCache.size >= 2048) options.foldCache.delete(options.foldCache.keys().next().value);
-          options.foldCache.set(cacheKey, {cursor: observation.cursor, fold});
+          options.foldCache.set(cacheKey, {cursor: observation.cursor, revision: observation.revision, fold});
         }
         return fold;
       } catch { failures++; return undefined; }
@@ -202,7 +220,7 @@ export async function collectOverview(ctx, options = {}) {
         toolFailureRate: settled.length ? settled.filter(c => c.failed).length / settled.length : null};
       const recorded = folds.flatMap(f => f.changes);
       if (recorded.length) {
-        data.output.changedFiles = new Set(recorded.flatMap(c => c.files.map(f => `${c.cwd}/${f.path}`))).size;
+        data.output.changedFiles = new Set(recorded.flatMap(c => c.files.map(f => resolve(c.cwd, f.path)))).size;
         data.output.addedLines = recorded.reduce((n, c) => n + c.added, 0);
         data.output.removedLines = recorded.reduce((n, c) => n + c.deleted, 0);
       }
@@ -217,8 +235,8 @@ export async function collectOverview(ctx, options = {}) {
       data.hourlyTokens = [...hourly.values()].sort((a, b) => a.at.localeCompare(b.at));
       data.models = [...models].map(([name, tokens]) => ({name, tokens})).sort((a, b) => b.tokens - a.tokens);
       data.cacheHitRate = totals.cacheHit + totals.cacheMiss ? totals.cacheHit / (totals.cacheHit + totals.cacheMiss) : null;
-      if (period === 'today' && data.cacheHitRate !== null && !failures) {
-        const previous = folds.flatMap(f => f.previous ?? []).reduce((total, a) => ({hit: total.hit + a.cacheHit, input: total.input + a.cacheHit + a.cacheMiss}), {hit: 0, input: 0});
+      if (period === 'today' && data.cacheHitRate !== null && !failures && !folds.some(f => f.missingUsage || f.previous?.missingUsage)) {
+        const previous = folds.flatMap(f => f.previous?.attempts ?? []).reduce((total, a) => ({hit: total.hit + a.cacheHit, input: total.input + a.cacheHit + a.cacheMiss}), {hit: 0, input: 0});
         if (previous.input) data.cacheDelta = data.cacheHitRate - previous.hit / previous.input;
       }
       data.cost = {currency: 'CNY', tokens: sum(totals)};
@@ -247,9 +265,14 @@ export async function collectOverview(ctx, options = {}) {
     const active = schedules.filter(s => s.status === 'active');
     runtime.scheduled = active.length;
     runtime.nextScheduledAt = active.map(s => s.scheduledAt).sort()[0];
-    if (data.sessions) for (const s of active) data.sessions.items.push({id: `schedule:${s.id}`, title: text(s.title, 120), state: 'scheduled', nextRunAt: s.scheduledAt});
-    data.events ??= [];
-    for (const s of active) data.events.push({id: `schedule:${s.id}`, at: s.scheduledAt, title: text(s.title, 120), source: 'DSH', state: 'scheduled', sessionId: s.sessionId});
+    for (const s of active) {
+      const at = Date.parse(s.scheduledAt);
+      if (!(at >= window.start && at < window.calendarEnd)) continue;
+      data.sessions ??= {items: []};
+      data.sessions.items.push({id: `schedule:${s.id}`, title: text(s.title, 120), state: 'scheduled', nextRunAt: s.scheduledAt});
+      data.events ??= [];
+      data.events.push({id: `schedule:${s.id}`, at: s.scheduledAt, title: text(s.title, 120), source: 'DSH', state: 'scheduled', sessionId: s.sessionId});
+    }
   }
   const skills = service(ctx, 'skills');
   const catalog = await read('skills', () => { if (!skills?.list) throw Error(); return skills.list({signal}); });
@@ -296,11 +319,13 @@ export function apply(ctx, config = {}) {
     const url = new URL(req.url, 'http://localhost'), period = url.searchParams.get('period') ?? 'today';
     const offset = Number(url.searchParams.get('timezoneOffsetSeconds') ?? 0), locale = url.searchParams.get('locale') ?? 'zh-CN';
     if (!['today', 'week', 'month'].includes(period) || !Number.isInteger(offset) || Math.abs(offset) > 50400 || !['zh-CN', 'en', 'ja-JP'].includes(locale)) return reply(400, {});
-    const key = `${period}:${offset}:${locale}`;
+    const now = config.now ?? Date.now();
+    const localDay = Math.floor((now + offset * 1000) / dayMs);
+    const key = `${period}:${offset}:${locale}:${localDay}`;
     try {
       const cached = recent.get(key);
       if (cached && Date.now() - cached.at < 5000) return reply(200, cached.snapshot);
-      if (!inflight.has(key)) inflight.set(key, collectOverview(ctx, {...config, period, timezoneOffsetSeconds: offset, locale, waiting,
+      if (!inflight.has(key)) inflight.set(key, collectOverview(ctx, {...config, now, period, timezoneOffsetSeconds: offset, locale, waiting,
         foldCache, signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30000)])}).then(snapshot => {
           if (recent.size >= 16) recent.delete(recent.keys().next().value);
           recent.set(key, {at: Date.now(), snapshot}); return snapshot;

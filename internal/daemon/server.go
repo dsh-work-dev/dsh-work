@@ -311,7 +311,12 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 	// Accepted manager operations belong to the daemon, not to the lifetime of
 	// the HTTP connection. Keep that property while retaining a daemon-level
 	// cancellation path for the installer stop handshake.
-	base := app.LocalClientContext(context.WithoutCancel(ctx), call.Surface)
+	base := context.WithoutCancel(ctx)
+	if call.Service == "OverviewService" && call.Method == "GetSnapshot" {
+		// Overview collection is read-only and belongs to its workbench request.
+		base = ctx
+	}
+	base = app.LocalClientContext(base, call.Surface)
 	operationCtx, cancel := context.WithCancel(base)
 	defer cancel()
 	stopTracking := s.trackCall(cancel)

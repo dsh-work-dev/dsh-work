@@ -194,19 +194,15 @@ func runDaemon(identity string, resources Resources) {
 		if manager == nil {
 			return nil, nil
 		}
-		state, err := manager.Snapshot(ctx)
-		return state.LastSwitchAttempt, err
+		_, attempt, err := manager.RunContextState(ctx)
+		return attempt, err
 	}, ProfileKey: func(ctx context.Context) (string, error) {
 		if manager == nil {
 			return "", nil
 		}
-		state, err := manager.Snapshot(ctx)
+		target, _, err := manager.RunContextState(ctx)
 		if err != nil {
 			return "", err
-		}
-		target := state.Current
-		if target == nil {
-			target = state.Configured
 		}
 		if target == nil {
 			return "", nil
@@ -216,9 +212,9 @@ func runDaemon(identity string, resources Resources) {
 	}}
 	overview.Initialize()
 	channel := workerchannel.New()
-	channel.SetWorkerObserver(func(ctx context.Context, auth string, transport http.RoundTripper) {
+	channel.SetWorkerObserver(func(ctx context.Context, generation, auth string, transport http.RoundTripper) {
 		petActivity.Start(ctx, auth, transport)
-		overview.Start(ctx, auth, transport)
+		daemon.SetOverviewWorker(overview, ctx, generation, auth, transport)
 		automationBridge.Start(ctx, auth, transport)
 	})
 	var automaticRuntimeRollback atomic.Bool
@@ -231,6 +227,7 @@ func runDaemon(identity string, resources Resources) {
 		Channel:                  channel,
 		PlatformError:            dependencies.Err,
 		AutomaticRuntimeRollback: automaticRuntimeRollback.Load,
+		SwitchAttemptRecorded:    overview.ObserveRecovery,
 		WorkerOutput: func(generation string, event supervisor.OutputEvent) {
 			logging.WorkerOutput(generation, string(event.Stream), event.Text)
 		},
@@ -1262,12 +1259,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 		profile := false
 		if manager != nil {
-			if snapshot, err := manager.Snapshot(context.Background()); err == nil {
-				overview.ObserveRecovery(snapshot.LastSwitchAttempt)
-				selection := snapshot.Current
-				if selection == nil {
-					selection = snapshot.Configured
-				}
+			if selection, _, err := manager.RunContextState(context.Background()); err == nil {
 				profile = selection != nil && selection.Profile.DataDirectoryID == "dsh-work" && selection.Profile.Name == dshmanager.AppProfileName
 			}
 		}

@@ -36,8 +36,9 @@ over the current generation's authenticated Worker channel. DSH's
   the period, including currently running turns. Concurrent Agents therefore
   contribute concurrent seconds. It is not elapsed wall time for the whole app.
 - Tool-call counts use the tool's declared name and call-start time. Results
-  pair by `callId`; failure rate is failed results / settled calls in that
-  call-start cohort. Unfinished calls are excluded from that denominator.
+  pair by the source call event, or by turn, step and `callId` in logs
+  without a source link. Failure rate is failed results / settled calls in
+  that call-start cohort; unfinished calls are excluded.
 - Usage reads provider counters from `assistant/message` or the last embedded
   `usage` chunk in an `assistant/attempt`. Replacement settlements for one
   turn/step replace the same sample; `llm/retry-started` closes that slot, so a
@@ -47,26 +48,30 @@ over the current generation's authenticated Worker channel. DSH's
   uncached input and cache writes. Model identity includes provider + model.
   Hour buckets use settlement time and only contain observed usage; missing
   hours are not fabricated observations. Today's cache-rate change compares
-  the previous calendar day when it contains measured input tokens.
+  the previous calendar day when both days have measured input tokens and
+  neither has missing usage.
 - `workspaceChanges.summary(sessionId, seq)` provides real per-turn totals.
   Latest summary wins for a turn. Added/deleted lines sum those turn summaries;
-  changed files deduplicate known paths across turns. This is turn activity,
-  not the current Git diff. Summaries are retained only while the recording
+  changed files deduplicate known paths across turns after resolving them
+  against each Session's working directory. This is turn activity, not the
+  current Git diff. Summaries are retained only while the recording
   Worker owns the live Session: a durable `workspace/changes` event does **not**
   contain the old summary. Missing/truncated summaries produce `partial`, not
   invented historical zeros. Older persisted change totals cannot be rebuilt
   after Worker loss through this service.
 - Workspace identities/paths come only from `workspaceRegistry.list()`. Git
   inspection uses the fixed argument vector `git --no-optional-locks -c
-  core.fsmonitor=false -C <path> status --porcelain=v1 --branch -z`, so a
+  core.fsmonitor=false -C <path> status --porcelain=v1 --branch --untracked-files=all -z`, so a
   repository's own fsmonitor command never runs, with a 3-second deadline, a
   1 MiB output bound and no shell. The result is the branch and a changed-file
-  count; the UI words it. Renames/copies count once. Non-repositories, missing Git and
-  unavailable directories leave that Workspace's Git fields absent.
+  count; each untracked file is counted separately, and renames/copies count
+  once. Non-repositories, missing Git and unavailable directories leave that
+  Workspace's Git fields absent.
 - `schedule.catalog()` supplies persisted active reminders without resuming
-  Sessions; `skills.list({signal})` supplies the global/root skill catalog.
-  Project-scoped skills belonging to a particular selected Agent are not
-  represented by this global count.
+  Sessions. The orbit and timeline include reminders due in the selected
+  calendar period; the DSH runtime tile shows the overall count and next
+  reminder. `skills.list({signal})` supplies the global/root skill catalog,
+  excluding project-scoped skills of a particular Agent.
 - `accountController.getBalance({version, locale, timezoneOffsetSeconds})`
   queries DSH's display-safe account service. No credential files or tokens are
   read by this plugin. Recharge and bonus wallets are summed **within one
@@ -98,16 +103,17 @@ over the current generation's authenticated Worker channel. DSH's
 ## Performance and offline behavior
 
 Each generation coalesces identical in-flight reads and caches responses for
-5 seconds. Non-running Session folds are cached by exact query cursor, calendar
-window and offset (up to 2,048 folds); unchanged cold observations use DSH's own
-revision-aware preparation cache without materializing logs again. Running
-Sessions are refolded so duration continues to advance. Corrupt/unreadable
-Sessions produce partial aggregate status without deleting valid peers.
+5 seconds within the same local day. Prepared Session folds are cached by
+durable revision, query cursor, calendar window and offset (up to 2,048
+folds); unchanged cold observations use DSH's own revision-aware preparation
+cache without materializing logs again. Live Sessions are refolded for current
+turn duration and workspace summaries. Corrupt/unreadable Sessions produce
+partial aggregate status without deleting valid peers.
 
 The trusted Go overview service owns durable snapshots and their full RunContext
 identity, local date, period, locale and timezone isolation. `dashboard-dsh.ts`
 only validates/projects JSON: it writes no duplicate browser cache. Offline
-data retains collection time, receives `sessions.staleAt`, and marks module
+data retains collection time, receives `dshStaleAt` even without a session list, and marks module
 availability unavailable. Layout persistence is a separate UI responsibility.
 
 ## Sidebar integration

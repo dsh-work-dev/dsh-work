@@ -95,6 +95,8 @@ type RestorePointsView struct {
 	CanSave       bool               `json:"canSave"`
 }
 
+const restorePointLimit = 128
+
 type RuntimeForceInstaller interface {
 	ForceInstall(context.Context, string, ResolvedNode) (RuntimeInfo, error)
 }
@@ -126,7 +128,9 @@ func (s *VersionRecoveryState) point(id string) *storedRestorePoint {
 }
 func (m *Manager) versionViewLocked() *RestorePointsView {
 	s := cloneVersionRecovery(m.versionRecovery)
-	v := &RestorePointsView{Points: []RestorePoint{}, LastByProfile: s.LastByProfile, LastRunning: s.LastRunning, SaveError: m.restoreSaveError, Operation: s.Pending, CanSave: m.current != nil && m.verifiedPoint != nil && !m.switching}
+	canSave := m.current != nil && m.verifiedPoint != nil && *m.current == m.verifiedPoint.Target &&
+		!m.switching && len(s.Points) < restorePointLimit && (s.Pending == nil || s.Pending.Status != "running")
+	v := &RestorePointsView{Points: []RestorePoint{}, LastByProfile: s.LastByProfile, LastRunning: s.LastRunning, SaveError: m.restoreSaveError, Operation: s.Pending, CanSave: canSave}
 	for _, p := range s.Points {
 		v.Points = append(v.Points, p.RestorePoint)
 	}
@@ -338,7 +342,7 @@ func (m *Manager) SaveRestorePoint(ctx context.Context, label string) (Snapshot,
 	if actual.Digest != p.Digest {
 		return Snapshot{}, errors.New("apply changes and restart before saving a snapshot")
 	}
-	if len(s.Points) >= 128 {
+	if len(s.Points) >= restorePointLimit {
 		return Snapshot{}, errors.New("delete an older manual snapshot first")
 	}
 	actual.ID = lifecycle.NewCorrelationID()

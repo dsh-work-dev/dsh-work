@@ -21,7 +21,7 @@ const list = (validate: Validator, required: string[] = []): Validator => value 
   const row = object(v); return row && required.every(key => row[key] !== undefined && row[key] !== null);
 }) : undefined;
 const state = enumeration("running", "waiting", "completed", "interrupted", "scheduled");
-const sessionsShape = shape({staleAt: date, items: list(shape({id: string, title: string, state, summary: string, workspace: string, updatedAt: date, nextRunAt: date, turns: positive, tokens: positive}), ["id", "title", "state"])});
+const sessionsShape = shape({items: list(shape({id: string, title: string, state, summary: string, workspace: string, updatedAt: date, nextRunAt: date, turns: positive, tokens: positive}), ["id", "title", "state"])});
 const validateData = shape({
   now: date, period: enumeration("today", "week", "month"), locale: enumeration("zh-CN", "en", "ja-JP"),
   sessions: value => Array.isArray(object(value)?.items) ? sessionsShape(value) : undefined,
@@ -57,17 +57,19 @@ export function parseDashboardDSH(payload: string, staleAt?: string): Partial<Da
   const snapshot = parseDashboardDSHSnapshot(payload);
   if (!snapshot) return {};
   const data = snapshot.data;
-  if (staleAt && data.sessions) data.sessions = {...data.sessions, staleAt: date(staleAt) as string | undefined};
   const source = snapshot.availability;
   const map = (...keys: string[]): DashboardAvailability => {
     const values = keys.map(key => source[key]).filter(Boolean);
     const state = !values.length || values.every(v => v.state === "unavailable") ? "unavailable" : values.some(v => v.state !== "ready") ? "partial" : "ready";
     return {state};
   };
-  data.availability = {sessions: map("sessions"), output: map("sessions", "changes"), events: map("sessions", "schedules"),
+  const sessions = map("sessions");
+  if (data.sessions) data.sessions.listCoverage = sessions.state;
+  data.dshStaleAt = date(staleAt) as string | undefined;
+  data.availability = {orbit: map("sessions", "schedules"), sessions, output: map("sessions", "changes"), events: map("sessions", "schedules"),
     cost: map("usage", "balance", "billing"), hourlyTokens: map("usage"), models: map("usage"), runtime: map("workspaces", "git", "skills", "schedules")};
-  if (staleAt) for (const module of Object.values(data.availability)) module.state = "unavailable";
-  if (staleAt && data.health) data.health = data.health.map(item => ({...item, state: "unknown", summary: {
+  if (data.dshStaleAt) for (const module of Object.values(data.availability)) module.state = "unavailable";
+  if (data.dshStaleAt && data.health) data.health = data.health.map(item => ({...item, state: "unknown", summary: {
     "zh-CN": "遥测与上报状态暂不可用", en: "Reporting status unavailable", "ja-JP": "テレメトリーと送信の状態を確認できません",
   }[data.locale ?? "zh-CN"]}));
   data.dshSampledAt = snapshot.collectedAt;

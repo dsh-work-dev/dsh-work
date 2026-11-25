@@ -1,5 +1,6 @@
 import {transientStatus} from "./ui/transient-status";
 import {mountRestorePoints} from "./restore-points";
+import type {EnvironmentAction} from "./overview-controller";
 import {runtimePreparationText, acquisitionPreparation, formatRuntimeBytes} from "./acquisition-view";
 import {Events} from "@wailsio/runtime";
 
@@ -408,7 +409,11 @@ export function mountManager() {
   const setFeedback = feedbackFor("environment", document.getElementById("overview-environment-controls")!);
   const settingsFeedback = feedbackFor("settings");
   const profilesFeedback = feedbackFor("profiles");
-  const versionPoints = mountRestorePoints(document.getElementById("version-restore-points")!, next => {snapshot=next;renderSelection();renderOverview();renderProfiles();renderRuntimes();});
+  const notifyEnvironmentChanged = () => window.dispatchEvent(new Event("dsh-work:environment-changed"));
+  function adoptEnvironment(next: ManagerSnapshot) {
+    snapshot = next; renderSelection(); renderOverview(); renderProfiles(); renderRuntimes();
+  }
+  const versionPoints = mountRestorePoints(document.getElementById("version-restore-points")!, next => {adoptEnvironment(next); notifyEnvironmentChanged();}, false, renderEnvironmentControls);
   const recovery = mountRecovery((next, restored) => {
     snapshot = next;
     if (restored) { managedProfile = {...restored}; profileView = "detail"; renameControls.hidden = true; }
@@ -446,15 +451,33 @@ export function mountManager() {
     }
   });
   const environmentDialog = document.getElementById("overview-environment-dialog") as HTMLDialogElement;
+  let environmentReturnAction: EnvironmentAction["action"] | undefined;
   document.getElementById("overview-environment-close")!.onclick = () => environmentDialog.close();
-  function showEnvironment() { if (!environmentDialog.open) environmentDialog.showModal(); }
-  window.addEventListener("dsh-work:environment", event => {
+  function showEnvironment() {
+    if (!environmentDialog.open) {
+      environmentReturnAction = undefined;
+      environmentDialog.showModal();
+    }
+  }
+  window.addEventListener("dsh-work:environment", event => void launchEnvironment((event as CustomEvent<EnvironmentAction>).detail));
+  async function launchEnvironment(request: EnvironmentAction) {
     showEnvironment();
-    const action = (event as CustomEvent<string>).detail;
-    if (action === "switch") editEnvironment();
-    if (action === "save") versionPoints.save();
-    if (action === "restore") versionPoints.browse();
-  });
+    environmentReturnAction = request.action;
+    if (!snapshot || (request.action === "restore" && !snapshot.restorePoints?.points?.some(point => point.id === request.pointId))) {
+      setFeedback(t("view.loading"), "neutral", true);
+      try { adoptEnvironment(await getSnapshot()); setFeedback(""); }
+      catch { setFeedback(t("view.unavailable"), "error"); return; }
+    }
+    if (!environmentDialog.open) return;
+    if (request.action === "switch") {
+      if (environmentMutationBlocked()) setFeedback(t("view.unavailable"), "error");
+      else editEnvironment(undefined, true);
+    } else if (request.action === "save") {
+      if (!versionPoints.save(() => environmentDialog.close())) setFeedback(t("points.saveFailed"), "error");
+    } else if (!versionPoints.preview(request.pointId, () => environmentDialog.close())) {
+      setFeedback(t("view.unavailable"), "error");
+    }
+  }
   function showSection(next: ManagerSection) {
     if (next === "environment") { showEnvironment(); return; }
     const changed = next !== currentSection;
@@ -615,9 +638,13 @@ export function mountManager() {
 
   const environmentEditor = document.getElementById("environment-editor")!;
   const environmentApply = document.getElementById("environment-apply") as HTMLButtonElement;
+  const environmentEdit = document.getElementById("environment-edit") as HTMLButtonElement;
+  const environmentCancel = document.getElementById("environment-cancel") as HTMLButtonElement;
+  const knownGoodReturn = document.getElementById("known-good-return") as HTMLButtonElement;
   let editingEnvironment = false;
-  function editEnvironment(target?: ManagerRunContext) {
-    if (!snapshot || mutationBlocked()) return;
+  let directEnvironmentEdit = false;
+  function editEnvironment(target?: ManagerRunContext, fromOverview = false) {
+    if (environmentMutationBlocked()) return;
     editingEnvironment = false;
     renderSelection();
     if (target) {
@@ -627,17 +654,36 @@ export function mountManager() {
       fillProfiles(target.profile);
     }
     editingEnvironment = true;
+    directEnvironmentEdit = fromOverview;
     environmentEditor.hidden = false;
     showSection("environment");
+    renderEnvironmentControls();
     runtime.focus();
   }
-  document.getElementById("environment-edit")!.addEventListener("click", () => editEnvironment());
-  document.getElementById("environment-cancel")!.addEventListener("click", () => {
-    editingEnvironment = false; environmentEditor.hidden = true; renderSelection();
-    document.getElementById("environment-edit")!.focus();
+  function cancelEnvironmentEdit() {
+    editingEnvironment = directEnvironmentEdit = false; environmentEditor.hidden = true; renderSelection();
+  }
+  environmentEdit.addEventListener("click", () => editEnvironment());
+  environmentCancel.addEventListener("click", () => {
+    const closeDialog = directEnvironmentEdit;
+    cancelEnvironmentEdit();
+    if (closeDialog) environmentDialog.close();
+    else environmentEdit.focus();
+  });
+  environmentDialog.addEventListener("close", () => {
+    if (environmentDialog.open) return;
+    if (editingEnvironment && !contextSwitchInFlight) cancelEnvironmentEdit();
+    const action = environmentReturnAction;
+    environmentReturnAction = undefined;
+    if (!action) return;
+    // Overview refreshes after mutations, so the button that opened the
+    // dialog may no longer be the one currently in the document.
+    const overview = document.querySelector<HTMLElement>(".overview-shell:not([hidden])");
+    const trigger = overview?.querySelector<HTMLButtonElement>(`button[data-action="${action}"]:enabled:not([aria-disabled="true"])`);
+    (trigger ?? overview)?.focus({preventScroll: true});
   });
   environmentApply.addEventListener("click", () => void switchRunContext());
-  document.getElementById("known-good-return")!.addEventListener("click", () => { if (snapshot?.knownGood) editEnvironment(snapshot.knownGood); });
+  knownGoodReturn.addEventListener("click", () => { if (snapshot?.knownGood) editEnvironment(snapshot.knownGood); });
   document.getElementById("plugins-restart")!.addEventListener("click", () => { if (snapshot?.current) editEnvironment(snapshot.current); });
   const renameStart = document.getElementById("profile-rename-start") as HTMLButtonElement;
   const renameRow = document.getElementById("profile-rename-row")!;
@@ -701,6 +747,10 @@ export function mountManager() {
 
   function mutationBlocked(): boolean {
     return contextSwitchInFlight || runtimeInstallInFlight || runtimeRemovalInFlight;
+  }
+
+  function environmentMutationBlocked(): boolean {
+    return !snapshot || mutationBlocked() || versionPoints.busy() || snapshot.restorePoints?.operation?.status === "running";
   }
 
   function currentIsAppProfile(): boolean {
@@ -884,6 +934,7 @@ export function mountManager() {
   function renderOverview() {
     recovery.render(snapshot, mutationBlocked());
     versionPoints.render(snapshot, mutationBlocked());
+    renderEnvironmentControls();
     if (!snapshot) {
       return;
     }
@@ -920,9 +971,7 @@ export function mountManager() {
       });
     }
     knownGoodContext.hidden = !model.knownGood || sameRunContext(model.current.target, model.knownGood.target);
-    const knownReturn = document.getElementById("known-good-return") as HTMLButtonElement;
-    knownReturn.hidden = !model.knownGood || sameRunContext(model.current.target, model.knownGood.target);
-    knownReturn.disabled = mutationBlocked();
+    knownGoodReturn.hidden = knownGoodContext.hidden;
     if (model.knownGood) {
       renderOverviewLane(model.knownGood, {
         runtime: knownGoodRuntime,
@@ -942,9 +991,6 @@ export function mountManager() {
       diagnostic.textContent = report;
       switchRetry.hidden = !attempt.failure.retryable || targetProfile?.launchable === false;
       switchRestore.hidden = !!snapshot.current || !snapshot.knownGood || attempt.rollback === "restored";
-    }
-    if (hostStatus?.state === "Failed" && hostStatus.error) {
-      setFeedback(t("status.failureFallback"), "error");
     }
   }
 
@@ -1356,7 +1402,7 @@ export function mountManager() {
   }
 
   function selectedRunContext(): ManagerRunContext | undefined {
-    if (!runtime.value || !dataDirectory.value || !profile.value) {
+    if (!runtime.value || !node.value || !dataDirectory.value || !profile.value || profile.selectedOptions[0]?.disabled) {
       return undefined;
     }
     if (node.value === "system" && !snapshot?.systemNode) {
@@ -1371,12 +1417,7 @@ export function mountManager() {
 
   function setContextControlsDisabled(disabled: boolean) {
     disabled = disabled || !snapshot || runtimeInstallInFlight || runtimeRemovalInFlight;
-    environmentApply.disabled = disabled;
-    (document.getElementById("environment-edit") as HTMLButtonElement).disabled = disabled;
-    runtime.disabled = disabled;
-    node.disabled = disabled;
-    dataDirectory.disabled = disabled;
-    profile.disabled = disabled;
+    renderEnvironmentControls();
     runtimeVersion.disabled = disabled || runtimeInstallInFlight || releasesLoading || !snapshot?.dshReleases?.length;
     installRuntimeButton.disabled = disabled || runtimeInstallInFlight || releasesLoading || !runtimeVersion.value || !!snapshot?.runtimes?.some(item => item.version === runtimeVersion.value && item.installed);
     refreshDSHButton.disabled = disabled || runtimeInstallInFlight || releasesLoading;
@@ -1393,24 +1434,32 @@ export function mountManager() {
     }
   }
 
+  function renderEnvironmentControls() {
+    const disabled = environmentMutationBlocked();
+    environmentApply.disabled = disabled || !selectedRunContext();
+    environmentEdit.disabled = knownGoodReturn.disabled = switchRetry.disabled = switchRestore.disabled = disabled;
+    environmentCancel.disabled = contextSwitchInFlight;
+    runtime.disabled = node.disabled = dataDirectory.disabled = profile.disabled = disabled;
+  }
+
   async function switchRunContext(target?: ManagerRunContext) {
-    if (contextSwitchInFlight) {
+    if (environmentMutationBlocked()) {
       return;
     }
-    const operationFeedback = currentSection === "profiles" ? profilesFeedback : currentSection === "runtimes" ? runtimesFeedback : setFeedback;
     const next = target ?? selectedRunContext();
     if (!next) {
-      operationFeedback(t("error.selectRunContext"), "error");
+      setFeedback(t("error.selectRunContext"), "error");
       return;
     }
     contextSwitchInFlight = true;
     setContextControlsDisabled(true);
-    operationFeedback(t("feedback.switchingRunContext"), "neutral", true);
+    renderOverview();
+    setFeedback(t("feedback.switchingRunContext"), "neutral", true);
     try {
       snapshot = await setRunContext(next);
-      editingEnvironment = false; environmentEditor.hidden = true;
+      editingEnvironment = directEnvironmentEdit = false; environmentEditor.hidden = true;
       await refreshCurrentPluginObservation();
-      operationFeedback("");
+      setFeedback("");
       renderSelection();
       renderOverview();
       renderProfiles();
@@ -1418,14 +1467,15 @@ export function mountManager() {
     } catch (error) {
       await refresh(next.profile).catch(() => undefined);
       const failure = snapshot?.lastSwitchAttempt;
-      operationFeedback(failure ? `${t("switch.failedTarget", {profile: failure.target.profile.name})} ${switchReason(failure.failure.code)}` : managerErrorMessage(error, "error.switchRunContext"), "error");
+      setFeedback(failure ? `${t("switch.failedTarget", {profile: failure.target.profile.name})} ${switchReason(failure.failure.code)}` : managerErrorMessage(error, "error.switchRunContext"), "error");
       console.error("Could not switch DSH Run context", error);
     } finally {
       contextSwitchInFlight = false;
       setContextControlsDisabled(false);
       renderOverview();
       renderProfileDetail();
-      if (environmentEditor.hidden) document.getElementById("environment-edit")!.focus();
+      notifyEnvironmentChanged();
+      if (environmentDialog.open && environmentEditor.hidden) environmentEdit.focus();
     }
   }
 
@@ -1857,6 +1907,7 @@ export function mountManager() {
   });
 
   dataDirectory.addEventListener("change", () => fillProfiles());
+  for (const control of [runtime, node, dataDirectory, profile]) control.addEventListener("change", renderEnvironmentControls);
   window.addEventListener("focus", () => {
     void refresh();
   });

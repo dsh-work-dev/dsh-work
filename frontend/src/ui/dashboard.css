@@ -82,6 +82,10 @@
   color: var(--text);
   font-weight: 600;
 }
+.dash-period button[data-loading] {
+  box-shadow: inset 0 -2px var(--accent);
+  color: var(--text);
+}
 .dash-period button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -117,9 +121,14 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   grid-auto-rows: 116px;
-  grid-auto-flow: row dense;
+  /* Dense packing can backfill a later tile ahead of a full-width tile. */
+  grid-auto-flow: row;
   gap: 14px;
   min-width: 0;
+}
+.dashboard-module-group[data-group="environment"] .dashboard-grid {
+  /* The full-width health tile can wrap; its row grows with its chips. */
+  grid-auto-rows: minmax(116px, max-content);
 }
 .dashboard-tile.group {
   position: relative;
@@ -433,6 +442,13 @@
   font-size: 12px;
   color: var(--muted);
 }
+.dash-stats4 .dash-duration {
+  white-space: normal;
+}
+.dash-duration small {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .dash-stats4 .dash-lines {
   font-size: 14px;
   line-height: 31px;
@@ -639,17 +655,18 @@
   background: var(--dash-agent-b);
 }
 .dash-token-bars {
-  display: flex;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: repeat(var(--dash-token-slots), minmax(0, 1fr));
   gap: 4px;
   flex: 1;
   min-height: 40px;
   margin-top: 10px;
   border-bottom: 1px solid var(--line);
 }
+.dash-token-daily {
+  gap: 2px;
+}
 .dash-token-bars > div {
-  height: 100%;
-  flex: 1;
   display: flex;
   flex-direction: column-reverse;
   gap: 1px;
@@ -668,9 +685,6 @@
 }
 .dash-output {
   background: var(--dash-agent-b);
-}
-.dash-future {
-  opacity: 0.25;
 }
 .dash-donut-models {
   display: flex;
@@ -903,6 +917,9 @@
 .dash-gauge-value {
   stroke: var(--muted);
 }
+.dash-gauge path.dash-gauge-agent {
+  stroke-linecap: butt;
+}
 .dash-gauge text {
   fill: var(--text);
   font: 600 14px var(--font-body);
@@ -927,6 +944,10 @@
   stroke-width: 1.8;
   vector-effect: non-scaling-stroke;
 }
+.dash-spark line {
+  stroke: var(--line);
+  vector-effect: non-scaling-stroke;
+}
 .dash-processes {
   overflow: hidden;
   min-height: 0;
@@ -935,17 +956,18 @@
 .dash-health {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 8px 6px;
   flex-wrap: wrap;
-  height: 100%;
+  align-content: center;
+  flex: 1;
   margin-top: 5px;
-  overflow: auto;
 }
 .dash-health-item {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 10px;
+  max-width: 100%;
+  padding: 7px 8px;
   background: var(--wash);
   color: var(--text);
   border: 0;
@@ -953,12 +975,20 @@
   font-size: 12px;
   text-align: left;
 }
+.dash-health-item .dash-dot {
+  flex: none;
+}
+.dash-health-readonly {
+  background: transparent;
+}
 .dash-health-item strong {
   font-weight: 500;
+  white-space: nowrap;
 }
 .dash-health-item > span:last-child {
   color: var(--muted);
   font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 
@@ -979,7 +1009,8 @@
   background: var(--group-bg);
   padding: 3px;
 }
-.dash-tile-edit button {
+.dash-tile-edit button,
+.dash-drag-handle {
   width: 25px;
   height: 24px;
   border: 1px solid var(--line);
@@ -989,8 +1020,14 @@
   place-items: center;
   border-radius: var(--radius-control);
 }
+.dash-tile-edit button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .dash-drag-handle {
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 .dash-editing .dashboard-tile {
   outline: 1.5px dashed var(--accent);
@@ -999,8 +1036,8 @@
 .dash-editing .dash-counts {
   visibility: hidden;
 }
-.dash-editing .dash-tile-body {
-  pointer-events: none;
+.dash-editing .dash-tile-body [data-action] {
+  opacity: 0.6;
 }
 .dash-drag-ghost {
   opacity: 0.35;
@@ -1009,6 +1046,17 @@
 .dashboard-host [role="button"]:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 3px;
+}
+.dashboard-host [data-action][aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (pointer: coarse) {
+  .dash-tile-edit button,
+  .dash-drag-handle {
+    width: 36px;
+    height: 36px;
+  }
 }
 @container dashboard (max-width:799px) {
   .dashboard-grid {
@@ -1081,12 +1129,6 @@
   }
   .dash-health-item {
     padding: 5px 7px;
-  }
-  .dash-health-item > span:last-child {
-    max-width: 200px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    overflow: hidden;
   }
   .dash-stats4 b {
     font-size: 22px;
