@@ -156,7 +156,7 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 	}
 	call("create", "a", "")
 	call("create", "b", "")
-	call("create", "child", "&parent=a")
+	call("create", "fork", "&parent=a")
 	if got := call("schemas", "a", ""); got != "[]" {
 		t.Fatal("disabled capability registered tools", got)
 	}
@@ -177,21 +177,21 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 	if got := call("call", "a", ""); !strings.Contains(got, "host-routed:a") {
 		t.Fatal("Go route failed", got)
 	}
-	if got := call("call", "child", ""); !strings.Contains(got, "host-routed:a") {
-		t.Fatal("child route did not inherit", got)
+	if got := call("call", "fork", ""); !strings.Contains(got, "host-routed:fork") {
+		t.Fatal("ordinary fork inherited its source's automation owner", got)
 	}
 	if got := call("call", "b", ""); !strings.Contains(got, "host-routed:b") {
 		t.Fatal("b route failed", got)
 	}
-	if creates.Load() != 2 {
-		t.Fatal("top-level ownership did not merge child", creates.Load())
+	if creates.Load() != 3 {
+		t.Fatal("independent sessions did not get independent resources", creates.Load())
 	}
 	if got := call("bad", "a", ""); !strings.Contains(got, "AUTOMATION_INVALID_ARGUMENT") {
 		t.Fatal("routing argument accepted", got)
 	}
-	call("dispose", "child", "")
+	call("dispose", "fork", "")
 	if got := call("call", "a", ""); !strings.Contains(got, "host-routed:a") {
-		t.Fatal("child disposal released top", got)
+		t.Fatal("fork disposal released its source session", got)
 	}
 	call("stop", "a", "")
 	if got := call("call", "a", ""); !strings.Contains(got, "AUTOMATION_REVOKED") {
@@ -248,7 +248,7 @@ func liveDSHAutomationHost(t *testing.T, product bool) {
 		t.Fatal(err)
 	}
 	awaitState(t, s, func(v Snapshot) bool { return !v.GatewayConnected })
-	t.Log("real rc.5: dynamic assembled schemas, top/child Go routing, argument rejection, disable/reenable, missing backend, host disconnect and Worker hard exit passed; model calls=0")
+	t.Log("real DSH: dynamic assembled schemas, independent fork Go routing, argument rejection, disable/reenable, missing backend, host disconnect and Worker hard exit passed; model calls=0")
 }
 
 type routedResource struct{ session string }
@@ -333,5 +333,5 @@ waiting:
 	if got := call("call", "a", args("my_browser_navigate", map[string]any{"url": "http://localhost/fixture"})); !strings.Contains(got, "BROWSER_STOPPED") || resource.calls.Load() != 2 {
 		t.Fatal("stopped context revived", got)
 	}
-	t.Log("real rc.5 ToolExecution -> authenticated Go access consent -> DSH ask reject/allow -> one-use Go permit -> owned backend; password and stop refusal passed; model calls=0; browser backend=fake")
+	t.Log("real DSH ToolExecution -> authenticated Go access consent -> DSH ask reject/allow -> one-use Go permit -> owned backend; password and stop refusal passed; model calls=0; browser backend=fake")
 }

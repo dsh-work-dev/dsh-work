@@ -11,14 +11,28 @@ test('MCP projection preserves the actual description and JSON schema',()=>{
 test('trusted parent resolution rejects missing, broken and cyclic identities',()=>{
  const a={id:'a',session:{id:'a',header:{}}},child={id:'child',session:{id:'child',header:{parentSession:'a'}}};
  const agents=new Map([['a',a],['child',child]]),sessions=new Map([['a',a.session],['child',child.session]]);
+ agents.isOwnedBy=()=>true;
  assert.equal(identity({agent:child},agents,sessions),a);assert.throws(()=>identity({},agents,sessions),/UNTRUSTED/);assert.throws(()=>identity({agent:{...a}},agents,sessions),/UNTRUSTED/);
  child.session.header.parentSession='missing';assert.throws(()=>identity({agent:child},agents,sessions),/PARENT_NOT_FOUND/);
  child.session.header.parentSession='child';assert.throws(()=>identity({agent:child},agents,sessions),/INVALID_PARENT_CHAIN/);
+});
+test('runtime ownership isolates regular forks and groups delegated agents',()=>{
+ const lead={id:'lead',session:{id:'lead',header:{}}};
+ const fork={id:'fork',session:{id:'fork',header:{parentSession:'lead'}}};
+ const child={id:'child',session:{id:'child',header:{parentSession:'fork'}}};
+ const agents=new Map([lead,fork,child].map(agent=>[agent.id,agent]));
+ const subagents={rootOf:agent=>agent===child?fork:agent};
+ assert.equal(identity({agent:fork},agents,new Map(),subagents),fork);
+ assert.equal(identity({agent:child},agents,new Map(),subagents),fork);
+ assert.throws(()=>identity({agent:fork},agents,new Map()),/OWNER_UNAVAILABLE/);
+ agents.delete(fork.id);
+ assert.throws(()=>identity({agent:child},agents,new Map(),subagents),/TOP_SESSION_INACTIVE/);
 });
 function harness(validation){
  const routes=new Map(),definitions=new Map(),effects=[],events=new Map();
  const a={id:'a',session:{id:'a',header:{}}};
  const ctx={webServer:{register:route=>{routes.set(route.path,route.handler);return ()=>routes.delete(route.path)}},connection:{requestRejection:()=>undefined},agents:new Map([['a',a]]),sessions:new Map([['a',a.session]]),tools:{register:definition=>{definitions.set(definition.name,definition);return ()=>definitions.delete(definition.name)}},effect:fn=>{const dispose=fn();if(dispose)effects.push(dispose)},on:(name,fn)=>events.set(name,fn)};
+ ctx.agents.isOwnedBy=()=>true;
  const token='a'.repeat(64);apply(ctx,{generation:'worker',token,validation});
  async function request(route,value,auth=token){const req=Readable.from(value===undefined?[]:[Buffer.from(JSON.stringify(value))]);req.headers={'x-dsh-work-token':auth};req.method=route==='events'?'GET':'POST';const res=new EventEmitter();Object.assign(res,{status:0,chunks:[],writeHead(status){this.status=status},write(chunk){this.chunks.push(chunk)},end(value){this.value=value;this.emit('close')},destroy(){this.emit('close')},flushHeaders(){}});await routes.get('/__dshwork/automation/'+route)(req,res);return res}
  return {ctx,events,a,definitions,request,close:()=>effects.reverse().forEach(fn=>fn())};

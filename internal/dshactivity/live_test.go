@@ -62,13 +62,13 @@ let session=ctx.sessions.get('pet-live-fixture');if(!session)session=ctx.session
 if(action==='prepare-cold') {let cold=ctx.sessions.get('pet-cold-fixture');if(!cold){await ctx.sessionController.create({sessionId:'pet-cold-fixture',cwd:config.cwd});cold=ctx.sessions.get('pet-cold-fixture');}cold.append('turn/start',{turn:1});cold.append('turn/end',{turn:1,reason:{kind:'completed'}});}
 else if(action==='phase-thinking') {session.append('turn/start',{turn:2});session.append('step/start',{turn:2,step:1});}
 else if(action==='phase-tools') {session.append('tool/call',{turn:2,step:1,callId:'a',name:'read_file',arguments:'{}'});session.append('tool/call',{turn:2,step:1,callId:'b',name:'apply_patch',arguments:'{}'});}
-else if(action==='phase-one-result') {session.append('tool/result',{turn:2,step:1,message:{id:'result-a',role:'tool',toolCallId:'a',source:{kind:'tool',callId:'a'},isError:true,content:[]},error:{code:'RECOVERABLE',message:'retry'}},{surfaceOp:'append'});}
+else if(action==='phase-one-result') {session.append('tool/result',{turn:2,step:1,message:{id:'result-a',role:'tool',toolCallId:'a',source:{kind:'tool',callId:'a'},isError:true,content:[]},error:{name:'FixtureError',code:'RECOVERABLE',reason:'retry'}},{surfaceOp:'append'});}
 else if(action==='phase-last-result') {session.append('tool/result',{turn:2,step:1,message:{id:'result-b',role:'tool',toolCallId:'b',source:{kind:'tool',callId:'b'},content:[]}},{surfaceOp:'append'});}
 else if(action==='answer') {resolve?.({answers:[]});pending?.abort();}
 else if(action==='question'||action==='approval'||action==='plan-review') {
 pending=new AbortController();const request={agent:{id:session.id},signal:pending.signal,toolName:'fixture',reason:'Allow fixture?',questions:[{id:'q',question:'Choose a format',...(action==='plan-review'?{intent:{kind:'plan-review'}}:{})}]};
 void ctx.waterfall(action==='approval'?'approval/request':'user-questions/request',request,()=>new Promise(r=>{resolve=r;})).then(value=>{answered=value;});
-} else {session.append('turn/start',{turn:1});session.append('turn/end',{turn:1,reason:{kind:action||'completed'}});}
+} else {session.append('turn/start',{turn:1});const reason=action==='error'?{kind:'error',error:{code:'UNKNOWN',message:'fixture failure'}}:{kind:action||'completed'};session.append('turn/end',{turn:1,reason});}
 await ctx.sessionPersistence.flush();
 res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHead(500);res.end([String(error),...(error?.errors??[]).map(String)].join(': '));}}}));}`
 	if err = os.WriteFile(fixture, []byte(source), 0600); err != nil {
@@ -259,7 +259,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	remote("pluginManager/setPluginEnabled", map[string]any{"id": voiceEntry, "enabled": false})
 	remote("pluginManager/setPluginEnabled", map[string]any{"id": voiceEntry, "enabled": true})
 	remote("pluginManager/setBundleEnabled", map[string]any{"name": voiceBundle, "enabled": false})
-	t.Logf("RC1 account/getState and official plugin lifecycle are available (account status: %s)", accountState.Status)
+	t.Logf("DSH account/getState and official plugin lifecycle are available (account status: %s)", accountState.Status)
 	req, _ := http.NewRequestWithContext(ctx, "GET", origin+"/__dshwork/test", nil)
 	req.Header.Set("X-DSH-Work-Token", token)
 	req.Header.Set("Origin", origin)
@@ -283,7 +283,9 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	if len(b.Snapshot().Sessions) == 0 || b.Snapshot().Sessions[0].State != "idle" || b.Snapshot().Sessions[0].Outcome != "completed" {
 		t.Fatal("completion did not reach pet")
 	}
+	var fixtureAction string
 	request := func(action string) {
+		fixtureAction = action
 		req, _ := http.NewRequestWithContext(ctx, "GET", origin+"/__dshwork/test?action="+action, nil)
 		req.Header.Set("X-DSH-Work-Token", token)
 		resp, err := client.Do(req)
@@ -305,7 +307,12 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatalf("expected activity not received: %+v", b.Snapshot())
+		select {
+		case <-done:
+			t.Fatalf("Worker exited after %s: %s", fixtureAction, <-logs)
+		default:
+			t.Fatalf("expected activity not received after %s: %+v", fixtureAction, b.Snapshot())
+		}
 	}
 	request("phase-thinking")
 	waitFor(func(a Activity) bool { return a.WorkPhase == "thinking" && a.Running })
@@ -495,7 +502,7 @@ res.writeHead(200);res.end(JSON.stringify({answered}));}catch(error){res.writeHe
 	for time.Now().Before(deadline) {
 		for _, session := range b.Snapshot().Sessions {
 			if session.SessionID == "pet-cold-fixture" && session.Outcome == "completed" && session.State == "idle" && session.Seq >= 0 {
-				t.Log("RC1 cold Session history was restored through sessionQuery.observeSession")
+				t.Log("Cold Session history was restored through sessionQuery.observeSession")
 				return
 			}
 		}

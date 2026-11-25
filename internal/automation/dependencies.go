@@ -8,7 +8,7 @@ import (
 
 const AUVVersion = "0.0.43"
 
-const DSHVersion = "0.2.2-rc.1"
+const DSHVersion = "0.2.2-rc.5"
 const MCPVersion = "0.0.83"
 const SDKVersion = "1.32.2"
 const DriverVersion = "0.28.1"

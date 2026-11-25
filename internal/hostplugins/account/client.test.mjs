@@ -82,17 +82,18 @@ test('reports the account component handshake to the framed shell', async () => 
   } finally { dispose(); }
 });
 
-test('opens the DSH account authorization URL once when sign-in waits for the browser', async () => {
+for (const format of ['legacy', 'account-update']) test(`opens the DSH account authorization URL once (${format})`, async () => {
   const {plugin, opened} = await loadPlugin();
   const stream = accountStream();
   const {ctx, dispose} = context(stream);
   plugin.apply(ctx);
   try {
-    stream.push({status: 'signed-out'});
-    stream.push({status: 'signed-out', attempt: {id: 'a1', phase: 'initializing'}});
+    const push = state => stream.push(format === 'legacy' ? state : {type: 'snapshot', state});
+    push({status: 'signed-out'});
+    push({status: 'signed-out', attempt: {id: 'a1', phase: 'initializing'}});
     const authorizeUrl = 'https://platform.deepseek.com/dsh/authorize?authorize_id=1';
-    stream.push({status: 'signed-out', attempt: {id: 'a1', phase: 'waiting-browser', authorizeUrl}});
-    stream.push({status: 'signed-out', attempt: {id: 'a1', phase: 'waiting-browser', authorizeUrl}});
+    push({status: 'signed-out', attempt: {id: 'a1', phase: 'waiting-browser', authorizeUrl}});
+    push({status: 'signed-out', attempt: {id: 'a1', phase: 'waiting-browser', authorizeUrl}});
     await tick();
     assert.deepEqual(opened.map(item => item.url), [authorizeUrl]);
   } finally {
