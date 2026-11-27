@@ -20,8 +20,9 @@ test('parser rejects wrong schema and validates numeric/display boundaries rathe
 });
 
 test('offline projection retains dated facts but marks them unavailable; malformed sessions do not break renderer', () => {
-  const data = parseDashboardDSH(encode({sessions: {items: []}, output: {completed: 3}}), at);
-  assert.equal(data.sessions.staleAt, at); assert.equal(data.output.completed, 3);
+  const staleAt = "2026-11-08T12:05:00.000Z";
+  const data = parseDashboardDSH(encode({sessions: {items: []}, output: {completed: 3}}), staleAt);
+  assert.equal(data.dshStaleAt, staleAt); assert.equal(data.output.completed, 3);
   assert.equal(data.dshSampledAt, at); assert.equal(data.availability.sessions.state, 'unavailable');
   assert.equal(parseDashboardDSH(encode({sessions: {items: 'bad'}})).sessions, undefined);
 });
