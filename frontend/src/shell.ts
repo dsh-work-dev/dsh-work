@@ -1,4 +1,5 @@
 import {Browser, Events, Window} from "@wailsio/runtime";
+import {bridgeOrigin} from "../../internal/desktopbridge/origin-policy";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
 import {copyReport, latestProblem} from "./diagnostics";
@@ -7,6 +8,7 @@ import {dshDecorTokens, dshThemeTokens, dshTokenProperty, pageFrame, windowFrame
 import {currentLocale,subscribeLocale, t} from "./i18n";
 import {parseAnswerApprovalCommand, parseFrameMessage} from "./shell-frame";
 import {createMenuBar} from "./shell-menu";
+import {embeddedBrowserBridge} from "./embedded-browser";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
 import {icon, type IconName} from "./ui/icons";
@@ -151,19 +153,25 @@ export function mountShell() {
   };
   const menuBar = createMenuBar(t, run, id => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
-  }, () => frame.contentWindow?.focus());
+    menuOccluded=true;if(embeddedBrowser.enabled)return syncGuestOverlay();return undefined;
+  }, () => frame.contentWindow?.focus(),()=>{menuOccluded=false;void syncGuestOverlay().catch(report("resume browser"))});
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, modalMask, controls);
   document.body.prepend(bar);
   document.body.append(toast.element);
   document.body.append(frame);
 
+  let embeddedModalIntent=false;
+  const embeddedBrowser=embeddedBrowserBridge(frame,async blocked=>{embeddedModalIntent=blocked;await syncGuestOverlay()});
   let settingsOpen = false;
+  let menuOccluded=false,settingsWaiting=false,settingsRound=0;
+  const syncGuestOverlay=()=>embeddedBrowser.overlay(menuOccluded||settingsOpen||settingsWaiting||dshModal.active||embeddedModalIntent);
   let dshModal = {active: false, background: "", blur: ""};
   const sendFrameMessage = (message: Record<string, unknown>) => {
     const src = frame.getAttribute("src");
     if (!src) return;
-    frame.contentWindow?.postMessage({version: 1, ...message}, new URL(src).origin);
+    const origin=bridgeOrigin(src);if(!origin)return;
+    frame.contentWindow?.postMessage({version: 1, ...message}, origin);
   };
   // Any CSS colour (color-mix, transparent, nested var()) resolved to RGBA by painting one pixel.
   const pixel = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
@@ -227,7 +235,8 @@ export function mountShell() {
       modalMask.style.removeProperty("--shell-modal-blur");
     }
   };
-  const openSettingsPanel = () => {
+  const applySettingsPanel = () => {
+    settingsWaiting=false;
     settingsOpen = true;
     managerSurface?.removeAttribute("hidden");
     if (hostSurface) {
@@ -240,9 +249,12 @@ export function mountShell() {
     updateModalMask();
     requestAnimationFrame(() => document.getElementById("manager-title")?.focus({focusVisible: false} as FocusOptions));
   };
+  const openSettingsPanel=()=>{const round=++settingsRound;if(embeddedBrowser.enabled){settingsWaiting=true;void syncGuestOverlay().then(()=>{if(round===settingsRound)applySettingsPanel()},error=>{if(round===settingsRound){settingsWaiting=false;report("pause browser")(error)}})}else applySettingsPanel()};
   const closeSettingsPanel = () => {
-    if (!settingsOpen) return;
+    settingsRound++;settingsWaiting=false;
+    if (!settingsOpen) {void syncGuestOverlay().catch(report("resume browser"));return;}
     settingsOpen = false;
+    void syncGuestOverlay().catch(report("resume browser"));
     managerSurface?.setAttribute("hidden", "");
     if (hostSurface) {
       hostSurface.inert = false;
@@ -256,6 +268,7 @@ export function mountShell() {
   };
   const clearDshModal = () => {
     dshModal = {active: false, background: "", blur: ""};
+    embeddedModalIntent=false;
     updateModalMask();
   };
   modalMask.addEventListener("click", () => {
@@ -286,43 +299,32 @@ export function mountShell() {
 
   let frameRevision = 0;
   let eventSeen = false;
-  const show = (url: string) => {
-    if (!url) {
-      frameRevision++;
-      clearDshModal();
-      void ShellService.ResetBuiltinComponents().catch(report("reset built-in components"));
-      setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
-      document.documentElement.removeAttribute("data-shell-framed");
-      frame.hidden = true;
-      frame.removeAttribute("src");
-      hostSurface?.removeAttribute("hidden");
-      return;
-    }
-    if (frame.getAttribute("src") !== url) {
-      // Begin the status snapshot before the new DSH Clients can report their handshakes.
-      clearDshModal();
-      const revision = ++frameRevision;
-      setMenu({dsh: null, sidebarLeftOpen: undefined});
-      void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
-        if (revision === frameRevision) frame.src = url;
-      });
-    }
-    setMenu({framed: true});
-    document.documentElement.setAttribute("data-shell-framed", "");
-    frame.hidden = false;
-    hostSurface?.setAttribute("hidden", "true");
-  };
-  // Reloads the DSH document only; the Worker keeps running.
-  const reloadFrame = () => {
-    const src = frame.getAttribute("src");
-    if (!src) return;
+  let desiredWorkerURL="";
+  const replaceFrame=(url:string,force=false)=>{
+    if(!force&&desiredWorkerURL===url)return;
+    desiredWorkerURL=url;
+    const revision=++frameRevision, token=crypto.randomUUID();
+    // Stop old document messages synchronously. Hide/close ACK precedes either
+    // the fallback host or a new iframe document becoming visible.
+    const retired=embeddedBrowser.retireDocument(token);
     clearDshModal();
-    const revision = ++frameRevision;
-    setMenu({dsh: null, sidebarLeftOpen: undefined});
-    void ShellService.BeginBuiltinComponents().catch(report("begin built-in components")).then(() => {
-      if (revision === frameRevision) frame.setAttribute("src", src);
-    });
+    void retired.then(async candidate=>{
+      if(revision!==frameRevision)return;
+      if(!url){
+        await ShellService.ResetBuiltinComponents();if(revision!==frameRevision)return;
+        setMenu({dsh:null,framed:false,sidebarLeftOpen:undefined});
+        document.documentElement.removeAttribute("data-shell-framed");frame.hidden=true;frame.removeAttribute("src");hostSurface?.removeAttribute("hidden");return;
+      }
+      setMenu({dsh:null,sidebarLeftOpen:undefined});
+      await ShellService.BeginBuiltinComponents();if(revision!==frameRevision)return;
+      const next=new URL(url,location.href);if(candidate)next.hash=(next.hash?next.hash.slice(1)+"&":"")+"__dsh_work_doc="+encodeURIComponent(token);
+      frame.src=next.href;embeddedBrowser.activateDocument(token);
+      setMenu({framed:true});document.documentElement.setAttribute("data-shell-framed","");frame.hidden=false;hostSurface?.setAttribute("hidden","true");
+    }).catch(report("replace DSH page"));
   };
+  const show=(url:string)=>replaceFrame(url);
+  // Reloads the DSH document only; the Worker keeps running.
+  const reloadFrame=()=>{if(desiredWorkerURL)replaceFrame(desiredWorkerURL,true)};
   Events.On("worker-url", event => {
     eventSeen = true;
     show(String(event.data ?? ""));
@@ -331,14 +333,14 @@ export function mountShell() {
     const command = event.data as {id?: unknown; sessionId?: unknown; parentSessionId?: unknown} | undefined;
     const src = frame.getAttribute("src");
     if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
-    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
-      sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/open-session", id: command.id,
+      sessionId: command.sessionId, parentSessionId: command.parentSessionId});
   });
   Events.On("dsh-answer-approval", event => {
     const command = parseAnswerApprovalCommand(event.data);
     const src = frame.getAttribute("src");
     if (!src || !command) return;
-    frame.contentWindow?.postMessage({version: 1, type: "dsh-work/answer-approval", ...command}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/answer-approval", ...command});
   });
   void fetch("/__shell/worker").then(response => response.json()).then((value: {url: string}) => {
     if (!eventSeen) show(value.url);
@@ -347,7 +349,9 @@ export function mountShell() {
   // Only the framed DSH document talks to the shell: colours, its command catalog and menu keys.
   window.addEventListener("message", event => {
     const src = frame.getAttribute("src");
-    if (!src || event.source !== frame.contentWindow || event.origin !== new URL(src).origin) return;
+    const origin=src?bridgeOrigin(src):undefined;
+    if (!origin || event.source !== frame.contentWindow || event.origin !== origin) return;
+    if(embeddedBrowser.handle(event))return;
     const message = parseFrameMessage(event.data,currentLocale());
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
@@ -366,8 +370,9 @@ export function mountShell() {
     }
     else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
     else if (message.type === "modal-mask") {
+      if(!embeddedBrowser.acceptsDocument(event.data?.document))return;
       dshModal = {active: message.active, background: message.background, blur: message.blur};
-      updateModalMask();
+      void syncGuestOverlay().then(updateModalMask,report("pause browser"));
       if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
     }
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
@@ -384,8 +389,7 @@ export function mountShell() {
     else if (message.type === "menu-key") menuBar.focus();
   });
   sendCommand = id => {
-    const src = frame.getAttribute("src");
-    if (src) frame.contentWindow?.postMessage({version: 1, type: "dsh-work/command", id}, new URL(src).origin);
+    sendFrameMessage({type: "dsh-work/command", id});
   };
 
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.

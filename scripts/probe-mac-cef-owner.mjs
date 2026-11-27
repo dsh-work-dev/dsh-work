@@ -1,0 +1,372 @@
+// Actual fixed CEF bundle diagnostic, not a general Supervisor Adapter.
+import {execFileSync, spawn, spawnSync} from 'node:child_process';
+import {appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, statSync, writeFileSync} from 'node:fs';
+import {createServer} from 'node:http';
+import {join, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {randomBytes} from 'node:crypto';
+
+if (process.platform !== 'darwin' || process.arch !== 'arm64') throw Error('Requires native macOS arm64');
+const script = fileURLToPath(import.meta.url);
+if (process.argv[2] === '--lease-holder' && [4, 5].includes(process.argv.length)) {
+  const fd = openSync(process.argv[3], 'w');
+  const stat = fstatSync(fd);
+  writeFileSync(`${process.argv[3]}-writer.json`, JSON.stringify({pid: process.pid, ppid: process.ppid, fd, device: stat.dev, inode: stat.ino, fifo: stat.isFIFO(), childrenSpawned: false}));
+  if (process.argv[4] !== '--hold-arm') writeFileSync(fd, 'R');
+  const keepalive = setInterval(() => {}, 1000);
+  setTimeout(() => { clearInterval(keepalive); closeSync(fd); }, 90000);
+} else {
+  const options = new Map();
+  for (let i = 2; i < process.argv.length; i += 2) {
+    if (!['--manifest', '--output-dir', '--case'].includes(process.argv[i]) || !process.argv[i + 1]) throw Error('Expected --manifest FILE --output-dir DIR [--case MODE]');
+    options.set(process.argv[i], process.argv[i] === '--case' ? process.argv[i + 1] : resolve(process.argv[i + 1]));
+  }
+  if (!options.has('--manifest') || !options.has('--output-dir')) throw Error('Expected --manifest FILE --output-dir DIR');
+  const manifest = JSON.parse(readFileSync(options.get('--manifest'), 'utf8'));
+  if (manifest.kind !== 'cef-specific-owner-diagnostic' || manifest.version !== '156.0.15+gcf671c0+chromium-156.0.8078.80' || manifest.sandbox !== true || manifest.crashConfigs.length) throw Error('Unexpected diagnostic bundle identity');
+  const output = options.get('--output-dir'); mkdirSync(output, {recursive: true});
+  const modes = ['normal-close', 'broker-crash', 'owner-death', 'owner-death-unarmed', 'owner-death-first-launch', 'profile-reopen'];
+  const selectedCase = options.get('--case');
+  if (selectedCase && (!modes.includes(selectedCase) || selectedCase === 'profile-reopen')) throw Error('Unknown or dependent standalone case');
+  const domain = `gui/${process.getuid()}`;
+  execFileSync('launchctl', ['print', domain], {stdio: 'ignore'});
+  const pause = ms => new Promise(done => setTimeout(done, ms));
+  const xml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  const page = `<!doctype html><meta charset="utf-8"><title>Owned CEF diagnostic</title><canvas id="surface"></canvas><script>
+    const canvas=document.getElementById('surface'); const gl=canvas.getContext('webgl'); if(gl){gl.clearColor(.1,.4,.7,1);gl.clear(gl.COLOR_BUFFER_BIT);}
+    fetch('/ping').then(()=>document.title='network-ready');
+    const worker=new Worker(URL.createObjectURL(new Blob(['onmessage=()=>postMessage("ready")'],{type:'text/javascript'})));worker.postMessage('start');
+  </script>`;
+  const server = createServer((req, res) => { res.writeHead(200, {'content-type': req.url.startsWith('/page') ? 'text/html' : 'text/plain'}); res.end(req.url.startsWith('/page') ? page : 'ok'); });
+  await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
+  const pageURL = `http://127.0.0.1:${server.address().port}/page`;
+  const summary = [];
+  const run = (args, file) => {
+    const result = spawnSync('launchctl', args, {encoding: 'utf8', timeout: 10000});
+    writeFileSync(file, JSON.stringify({args, status: result.status, error: result.error?.message, stdout: result.stdout, stderr: result.stderr}, null, 2));
+    return result;
+  };
+  function events(dir) {
+    const file = join(dir, 'stdout.log'); if (!existsSync(file)) return [];
+    if (statSync(file).size > 8 * 1024 * 1024) throw Error('Diagnostic stdout exceeded bound');
+    const records = readFileSync(file, 'utf8').split('\n').filter(line => line.startsWith('{')).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const directory = join(dir, 'entries');
+    const files = existsSync(directory) ? readdirSync(directory).filter(name => name.endsWith('.json')) : [];
+    if (files.length > 4096) throw Error('Independent entry record count exceeded bound');
+    let entryBytes = 0;
+    for (const name of files) {
+      const path = join(directory, name);
+      const size = statSync(path).size; entryBytes += size;
+      if (size > 65536 || entryBytes > 8 * 1024 * 1024) throw Error('Independent entry records exceeded byte bound');
+      records.push({...JSON.parse(readFileSync(path, 'utf8')), independentEntryFile: name});
+    }
+    const seen = new Set();
+    return records.filter(event => {
+      if (!['broker-entry', 'helper-entry'].includes(event.event)) return true;
+      const key = `${event.event}:${event.identity.pid}:${event.identity.started}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).sort((a, b) => a.source_timestamp_ms - b.source_timestamp_ms);
+  }
+  const group = pgid => JSON.parse(execFileSync(manifest.inspector, ['--group', String(pgid)], {encoding: 'utf8'}));
+  const inspect = identity => JSON.parse(execFileSync(manifest.inspector, ['--identity', String(identity.pid), String(identity.started)], {encoding: 'utf8'}));
+  const entries = dir => events(dir).filter(event => ['broker-entry', 'helper-entry'].includes(event.event));
+  const kernelOwned = new Map();
+  const shutdownChildren = new Map();
+  const key = identity => `${identity.pid}:${identity.started}`;
+  const ownedEntries = dir => {
+    const all = new Map((kernelOwned.get(dir) || []).map(entry => [key(entry.identity), entry]));
+    for (const entry of entries(dir)) all.set(key(entry.identity), entry);
+    return [...all.values()];
+  };
+  const instanceStates = dir => ownedEntries(dir).map(entry => ({original: entry.identity, ...inspect(entry.identity)}));
+  function admitKernelCensus(dir, census, root, children = false) {
+    const members = censusMembers(census);
+    const rootState = inspect(root);
+    if (rootState.state !== 'live') throw Error('Kernel admission requires the original live broker');
+    if (children) shutdownChildren.set(dir, members);
+    const all = new Map((kernelOwned.get(dir) || []).map(entry => [key(entry.identity), entry]));
+    const seen = new Set(entries(dir).map(entry => key(entry.identity)));
+    for (const identity of members) {
+      if (!identity.started || identity.error) throw Error('Kernel child identity is incomplete');
+      if (key(identity) === key(root) || seen.has(key(identity)) || all.has(key(identity))) continue;
+      if (identity.ppid !== root.pid || (!children && identity.pgid !== root.pgid)) throw Error('Kernel member has no proven direct-child relationship to this live generation');
+      all.set(key(identity), {event: 'kernel-discovered', identity, source: children ? 'post-shutdown-direct-child-census' : 'live-broker-group-census'});
+    }
+    kernelOwned.set(dir, [...all.values()]);
+    writeFileSync(join(dir, 'kernel-owned.json'), JSON.stringify({observedAt: new Date().toISOString(), entries: [...all.values()]}, null, 2));
+  }
+  function postRootCleanup(dir, root) {
+    const deferred = [];
+    let ready = true;
+    for (const record of ownedEntries(dir).filter(entry => entry.identity.pgid !== root.pgid)) {
+      const current = inspect(record.identity);
+      if (current.state === 'unknown') throw Error('Post-root child identity observation is unknown');
+      if (record.event === 'kernel-discovered') {
+        if (!['gone', 'reused'].includes(current.state)) ready = false; // Await its real helper entry, never guess its role.
+        continue;
+      }
+      const helperPaths = manifest.helpers.map(path => join(manifest.app, path));
+      const kernelChild = (shutdownChildren.get(dir) || []).find(identity => key(identity) === key(record.identity) && identity.ppid === root.pid);
+      if (record.event !== 'helper-entry' || record.type !== 'code-sign-clone-cleanup' || record.identity.ppid !== root.pid || !kernelChild || !helperPaths.includes(record.identity.path) || !Array.isArray(record.audit) || record.audit.length !== 8) throw Error('Unrecognized cross-group helper; cannot release broker');
+      deferred.push(record);
+    }
+    return {ready, entries: deferred};
+  }
+  function assertEntryRecorder(dir) {
+    const failures = events(dir).filter(event => event.event === 'entry-record-failed');
+    if (!failures.length) return;
+    writeFileSync(join(dir, 'entry-record-failure.json'), JSON.stringify({observedAt: new Date().toISOString(), failures}, null, 2));
+    throw Error('Independent entry recorder failed; see entry-record-failure.json');
+  }
+  function censusMembers(census) {
+    if (census.error || census.truncated || !Array.isArray(census.members) || census.members.some(member => !['live', 'zombie', 'gone'].includes(member.state))) throw Error('Kernel group census is unavailable/unknown');
+    // Preserve the raw snapshot. ESRCH after the PID enumeration confirms that
+    // the sampled slot no longer names a member; it is not a live renderer.
+    return census.members.filter(member => member.state !== 'gone');
+  }
+  function measureBarrier(dir, rootIdentity, helpersOnly) {
+    assertEntryRecorder(dir);
+    const instances = instanceStates(dir);
+    if (instances.some(instance => instance.state === 'unknown')) {
+      writeFileSync(join(dir, 'measurement-error.json'), JSON.stringify({error: 'process identity observation unavailable', instances}, null, 2));
+      throw Error('Process identity observation failed; unknown is not gone');
+    }
+    const census = group(rootIdentity.pgid);
+    let members;
+    try { members = censusMembers(census); }
+    catch (error) {
+      writeFileSync(join(dir, 'measurement-error.json'), JSON.stringify({observedAt: new Date().toISOString(), error: error.message, instances, group: census}, null, 2));
+      throw error;
+    }
+    const originalRoot = instances.find(instance => instance.original.pid === rootIdentity.pid && instance.original.started === rootIdentity.started);
+    if (helpersOnly && originalRoot?.state !== 'live') throw Error('Broker exited before the helper/reap barrier; launchd fallback must not complete normal shutdown');
+    const postRoot = helpersOnly ? postRootCleanup(dir, rootIdentity) : {ready: true, entries: []};
+    const deferredKeys = new Set(postRoot.entries.map(entry => key(entry.identity)));
+    const targets = helpersOnly ? instances.filter(instance => instance !== originalRoot && !deferredKeys.has(key(instance.original))) : instances;
+    const otherGroups = [...new Set(ownedEntries(dir).map(entry => entry.identity.pgid).filter(pgid => pgid !== rootIdentity.pgid))].map(pgid => group(pgid));
+    for (const value of otherGroups) censusMembers(value);
+    const groupReady = helpersOnly
+      ? members.length === 1 && members[0].pid === rootIdentity.pid && members[0].started === rootIdentity.started && members[0].state === 'live'
+      : members.length === 0;
+    const sample = {observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), stage: helpersOnly ? 'helpers-before-root-release' : 'all-instances-after-root-exit', instances, group: census, postRoot, otherGroups, complete: postRoot.ready && targets.every(instance => ['gone', 'reused'].includes(instance.state)) && groupReady && (helpersOnly || otherGroups.every(value => censusMembers(value).length === 0))};
+    appendFileSync(join(dir, 'settlement-samples.log'), `${JSON.stringify(sample)}\n`);
+    return sample;
+  }
+  async function waitFor(test, duration, message) {
+    const end = Date.now() + duration;
+    do { if (test()) return; await pause(100); } while (Date.now() < end);
+    throw Error(message);
+  }
+  let reopen;
+  try {
+    for (const mode of selectedCase ? [selectedCase] : modes) {
+      const dir = mkdtempSync(join(output, `${mode}-`)), lease = join(dir, 'lease');
+      const entryDirectory = join(dir, 'entries'); mkdirSync(entryDirectory, {mode: 0o700});
+      const unarmed = mode === 'owner-death-unarmed', firstLaunch = mode === 'owner-death-first-launch', startupCut = unarmed || firstLaunch;
+      const profile = mode === 'profile-reopen' ? reopen?.profile : join(dir, 'profile');
+      if (!profile) throw Error('Reopen requires the completed first-launch generation');
+      if (mode === 'profile-reopen' && (!existsSync(profile) || !statSync(profile).isDirectory())) throw Error('The aborted initialized generation did not create its profile');
+      if (mode === 'profile-reopen' && !measureBarrier(reopen.dir, reopen.root, false).complete) throw Error('Previous profile generation is not empty before reopen');
+      const phase = (stage, detail = {}) => appendFileSync(join(dir, 'phases.log'), `${JSON.stringify({stage, observedAt: new Date().toISOString(), controllerMonotonicNs: process.hrtime.bigint().toString(), ...detail})}\n`);
+      const leaseHolders = stage => {
+        // Evidence only: never authorize cleanup from a numeric PID in lsof.
+        const result = spawnSync('/usr/sbin/lsof', ['-nP', '-Fpcfatn', lease], {encoding: 'utf8', timeout: 5000});
+        writeFileSync(join(dir, `lease-holders-${stage}.json`), JSON.stringify({observedAt: new Date().toISOString(), status: result.status, error: result.error?.message, stdout: result.stdout, stderr: result.stderr}, null, 2));
+      };
+      execFileSync('mkfifo', ['-m', '600', lease]);
+      const label = `dev.dsh.cefowner.${process.pid}.${randomBytes(6).toString('hex')}`, service = `${domain}/${label}`;
+      const argv = [manifest.executable, `--probe-directory=${dir}`, `--probe-url=${pageURL}`, `--probe-profile=${profile}`, ...(firstLaunch ? ['--probe-cut=first-launch'] : [])];
+      const plist = join(dir, 'probe.plist');
+      writeFileSync(plist, `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${argv.map(value => `<string>${xml(value)}</string>`).join('')}</array><key>EnvironmentVariables</key><dict><key>DSH_CEF_OWNER_PROBE_ENTRIES</key><string>${xml(entryDirectory)}</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>${xml(join(dir, 'stdout.log'))}</string><key>StandardErrorPath</key><string>${xml(join(dir, 'stderr.log'))}</string></dict></plist>`);
+      const owner = spawn(process.execPath, [script, '--lease-holder', lease, ...(unarmed ? ['--hold-arm'] : [])], {stdio: 'ignore'});
+      const ownerExit = new Promise((done, reject) => { owner.once('error', reject); owner.once('exit', (code, signal) => done({code, signal})); });
+      let loaded = true, killedOwner = false, profileLease, profileLeaseExited, profileLeaseInputError, profileLeaseOutput = '', profileReleased = false;
+      const lockPath = join(profile, '.dsh-probe-owner-lock');
+      const checkProfile = (stage, locked) => {
+        if (!profileReleased && profileLeaseExited) throw Error('External profile lease holder exited before the empty gate');
+        const result = JSON.parse(execFileSync(manifest.inspector, ['--profile-check', lockPath], {encoding: 'utf8', timeout: 5000}));
+        writeFileSync(join(dir, `profile-${stage}.json`), JSON.stringify({observedAt: new Date().toISOString(), ...result}, null, 2));
+        if (result.locked !== locked) throw Error(`Profile lease ${stage} did not have the expected lock state`);
+        phase(`profile-${stage}`, result);
+      };
+      const releaseProfile = async stage => {
+        if (profileReleased || !profileLease) return;
+        profileLease.stdin.end('R');
+        await waitFor(() => Boolean(profileLeaseExited), 5000, 'Profile lease holder did not join');
+        if (profileLeaseInputError || profileLeaseExited.code !== 0 || !profileLeaseOutput.includes('"event":"profile-lease-released"')) throw Error('Profile lease release failed');
+        profileReleased = true;
+        phase(`profile-released-${stage}`, profileLeaseExited);
+        checkProfile('released', false);
+      };
+      try {
+        mkdirSync(profile, {recursive: true, mode: 0o700});
+        profileLease = spawn(manifest.inspector, ['--profile-lease', lockPath], {stdio: ['pipe', 'pipe', 'pipe']});
+        profileLease.on('error', error => { profileLeaseExited = {error: error.message}; });
+        profileLease.on('close', (code, signal) => { profileLeaseExited = {code, signal}; });
+        profileLease.stdin.on('error', error => { profileLeaseInputError = error.message; writeFileSync(join(dir, 'profile-lease-input-error.json'), JSON.stringify({error: error.message})); });
+        profileLease.stdout.on('data', chunk => { profileLeaseOutput += chunk.toString(); writeFileSync(join(dir, 'profile-lease.log'), profileLeaseOutput); });
+        profileLease.stderr.on('data', chunk => appendFileSync(join(dir, 'profile-lease-stderr.log'), chunk));
+        await waitFor(() => {
+          if (profileLeaseExited) throw Error('Profile lease holder failed before readiness');
+          return profileLeaseOutput.includes('"event":"profile-lease-ready"');
+        }, 5000, 'External profile lease did not become ready');
+        checkProfile('before-launch', true);
+        const boot = run(['bootstrap', domain, plist], join(dir, 'bootstrap.json'));
+        if (boot.status !== 0) throw Error(`LaunchAgent bootstrap failed: ${boot.stderr}`);
+        await waitFor(() => {
+          assertEntryRecorder(dir);
+          const log = events(dir);
+          if (log.some(event => ['helper-sandbox-failed', 'helper-framework-failed', 'lease-open-failed', 'create-failed', 'self-audit-failed', 'load-error'].includes(event.event))) throw Error('Actual component startup failed; see stdout.log');
+          if (startupCut) return log.some(event => event.event === (unarmed ? 'lease-connected-unarmed' : 'first-launch-held')) && existsSync(`${lease}-writer.json`);
+          return log.some(event => event.event === 'initialized') && log.some(event => event.event === 'lease-armed') && new Set(log.filter(event => event.event === 'loaded' && event.status === 200).map(event => event.index)).size === 2;
+        }, 30000, 'Actual sandbox CEF pages/lease did not become ready');
+        if (!startupCut) await pause(1000);
+        const initialEvents = events(dir), initialized = initialEvents.find(event => event.event === 'initialized');
+        if (!startupCut && (initialized.crash_reporting !== false || initialized.version !== manifest.version)) throw Error('Runtime crash reporting/version differs from fixed candidate');
+        const rootEntry = initialEvents.find(event => event.event === 'broker-entry');
+        if (!rootEntry?.identity.started || rootEntry.identity.pgid !== rootEntry.identity.pid) throw Error('Job broker must be its actual process-group leader');
+        const before = group(rootEntry.identity.pgid);
+        const seenEntries = entries(dir), seen = new Set(seenEntries.map(event => `${event.identity.pid}:${event.identity.started}`));
+        const missing = Array.isArray(before.members) ? before.members.filter(member => !seen.has(`${member.pid}:${member.started}`)) : [];
+        writeFileSync(join(dir, 'kernel-before.json'), JSON.stringify({observedAt: new Date().toISOString(), group: before, seenEntries, missing}, null, 2));
+        for (const member of missing) {
+          const current = inspect(member);
+          writeFileSync(join(dir, `missing-${member.pid}-${member.started}.json`), JSON.stringify({original: member, current}, null, 2));
+          run(['procinfo', String(member.pid)], join(dir, `missing-procinfo-${member.pid}-${member.started}.json`));
+        }
+        admitKernelCensus(dir, before, rootEntry.identity);
+        const helpers = initialEvents.filter(event => event.event === 'helper-entry');
+        if (startupCut && (helpers.length || initialEvents.some(event => ['initialized', 'created', 'loaded'].includes(event.event)))) throw Error('Startup cut occurred after component admission');
+        if (unarmed && initialEvents.some(event => event.event === 'lease-armed')) throw Error('Unarmed cut already armed');
+        if (firstLaunch && !initialEvents.some(event => event.event === 'lease-armed')) throw Error('First launch lacks initial lease admission');
+        if (!startupCut && (!helpers.some(event => event.type === 'renderer') || !helpers.some(event => event.type === 'gpu-process') || !helpers.some(event => event.type === 'utility' && event.utility.includes('NetworkService')))) throw Error('Workload did not exercise renderer/GPU/network helper inventory');
+        if (helpers.some(event => !event.identity.started || event.identity.pgid !== rootEntry.identity.pgid)) throw Error('A real helper is outside the proposed owned PGID');
+        writeFileSync(join(dir, 'inventory-before.json'), JSON.stringify({helpers, before, launchIntents: initialEvents.filter(event => event.event === 'launch-intent')}, null, 2));
+        phase('inventory-complete', {root: rootEntry.identity, group: before});
+        run(['print', service], join(dir, 'job-before.json'));
+        for (const entry of entries(dir)) run(['procinfo', String(entry.identity.pid)], join(dir, `procinfo-${entry.identity.pid}.json`));
+        if (mode === 'normal-close' || mode === 'profile-reopen') writeFileSync(join(dir, 'close'), 'normal close\n');
+        else if (mode === 'broker-crash') writeFileSync(join(dir, 'crash'), 'SIGKILL inside owned broker\n');
+        else { if (!startupCut) leaseHolders('before-kill'); killedOwner = true; if (!owner.kill('SIGKILL')) throw Error('Could not kill the actual independent lease owner'); }
+        phase('transition-requested', {mode});
+        if (killedOwner) {
+          const exited = await ownerExit; phase('lease-owner-exited', exited);
+          if (exited.signal !== 'SIGKILL') throw Error('Lease owner did not really die by SIGKILL');
+          if (!startupCut) leaseHolders('after-kill');
+          if (firstLaunch) {
+            if (events(dir).some(event => event.event === 'helper-entry')) throw Error('Helper entered before the held launch was released');
+            writeFileSync(join(dir, 'launch-release'), 'owner SIGKILL confirmed before first helper entry\n');
+            phase('first-launch-release-requested');
+          }
+        }
+        let helperBarrier, shutdown;
+        if (startupCut) {
+          await waitFor(() => events(dir).some(event => event.event === 'startup-aborted' && event.stage === (unarmed ? 'before-framework' : 'context-initialized')), 15000, 'Uncommitted startup did not abort');
+          if (!events(dir).some(event => event.event === 'startup-lease-eof')) throw Error('Startup abort lacked actual lease EOF');
+          phase('startup-abort-observed');
+        }
+        if (mode !== 'broker-crash') {
+          if (!unarmed) {
+            await waitFor(() => {
+              const log = events(dir);
+              if (log.some(event => ['reap-error', 'root-release-timeout', 'lease-read-failed', 'lease-poll-failed', 'launch-hold-timeout'].includes(event.event))) throw Error('Broker lease/reap/hold failed');
+              shutdown = log.find(event => event.event === 'shutdown-return');
+              return Boolean(shutdown);
+            }, 15000, 'CefShutdown did not return');
+            phase('cef-shutdown-observed', {shutdown});
+            censusMembers(shutdown.group); // Unknown is still fatal; no instant-empty claim.
+            admitKernelCensus(dir, shutdown.children, rootEntry.identity, true);
+            writeFileSync(join(dir, 'shutdown-children.json'), JSON.stringify(shutdown.children, null, 2));
+          }
+          await waitFor(() => {
+            helperBarrier = measureBarrier(dir, rootEntry.identity, true);
+            return helperBarrier.complete;
+          }, 15000, 'Original helpers/reap did not settle while broker remained alive');
+          writeFileSync(join(dir, 'helper-barrier.json'), JSON.stringify(helperBarrier, null, 2));
+          phase('helper-reap-group-barrier-complete', {barrier: helperBarrier});
+          checkProfile('before-root-release', true);
+          writeFileSync(join(dir, 'release'), 'pre-root owned children settled; registered cleanup remains owned after root exit\n');
+          phase('broker-release-requested');
+        }
+        let finalBarrier;
+        await waitFor(() => {
+          finalBarrier = measureBarrier(dir, rootEntry.identity, false);
+          return finalBarrier.complete;
+        }, 15000, 'Original process instances/fresh group did not become empty');
+        const after = finalBarrier.group;
+        writeFileSync(join(dir, 'final-barrier.json'), JSON.stringify(finalBarrier, null, 2));
+        phase('all-instances-group-empty-before-cleanup', {barrier: finalBarrier});
+        checkProfile('after-final-empty', true);
+        await releaseProfile('after-final-empty');
+        const finalEvents = events(dir); shutdown = finalEvents.find(event => event.event === 'shutdown-return');
+        assertEntryRecorder(dir);
+        if (mode !== 'broker-crash') {
+          if (startupCut) {
+            if (finalEvents.some(event => ['created', 'loaded', 'lease-arm-timeout', 'lease-invalid-arm', 'lease-read-failed', 'lease-poll-failed', 'launch-hold-timeout', 'reap-error', 'root-release-timeout'].includes(event.event))) throw Error('Startup cut created pages or encountered a transport/gate failure');
+            if (unarmed && finalEvents.some(event => ['lease-armed', 'profile-configured', 'initialized', 'helper-entry', 'shutdown-enter'].includes(event.event))) throw Error('Unarmed startup entered CEF');
+            if (firstLaunch && (!shutdown || !finalEvents.some(event => event.event === 'helper-entry'))) throw Error('First-launch cut did not exercise real helper creation and CEF shutdown');
+          } else if (new Set(finalEvents.filter(event => event.event === 'before-close').map(event => event.index)).size !== 2 || !shutdown) throw Error('Missing normal OnBeforeClose/CefShutdown barrier');
+          if (mode === 'owner-death' && !finalEvents.some(event => event.event === 'lease-eof')) throw Error('Owner-death case did not exercise actual FIFO EOF');
+          if (!finalEvents.some(event => event.event === 'root-release')) throw Error('Held broker exited without the release barrier');
+        } else if (shutdown) throw Error('SIGKILL case unexpectedly ran graceful shutdown');
+        const runtime = finalEvents.find(event => event.event === 'initialized');
+        if (!unarmed && (runtime?.crash_reporting !== false || runtime?.version !== manifest.version)) throw Error('Runtime crash reporting/version differs from fixed candidate');
+        if (!unarmed && finalEvents.find(event => event.event === 'profile-configured')?.path !== profile) throw Error('CEF did not configure the expected profile');
+        postRootCleanup(dir, rootEntry.identity); // Validate retained cross-group roles even after they exit.
+        if (firstLaunch) reopen = {dir, profile, root: rootEntry.identity};
+        run(['print', service], join(dir, 'job-after.json'));
+        const observation = {mode, dir, service, profile, previousProfileGeneration: mode === 'profile-reopen' ? reopen : undefined, fixedVersion: runtime?.version, crashReporting: runtime?.crash_reporting, before, after, registeredInstances: entries(dir), kernelDiscovered: kernelOwned.get(dir), shutdown, helperBarrier, finalBarrier, outcome: startupCut ? 'OBSERVED_UNCOMMITTED_START_CONVERGED' : 'OBSERVED_FIXED_WORKLOAD_CONVERGED', limits: ['entry markers are not pre-exec ownership', 'audio/notification action/download and unexercised helper paths pending', 'group census does not prove a generic LaunchPlan tree owner', 'product daemon/profile-lock integration pending']};
+        summary.push(observation); writeFileSync(join(dir, 'observation.json'), JSON.stringify(observation, null, 2));
+        console.log(JSON.stringify({mode, outcome: observation.outcome, helpers: helpers.map(event => ({type: event.type, utility: event.utility, identity: event.identity}))}));
+      } finally {
+        phase('cleanup-start');
+        writeFileSync(join(dir, 'close'), 'probe cleanup\n');
+        writeFileSync(join(dir, 'launch-release'), 'probe cleanup only\n');
+        writeFileSync(join(dir, 'release'), 'probe cleanup only; not a measured barrier\n');
+        if (!killedOwner) owner.kill('SIGTERM');
+        await ownerExit;
+        if (loaded) { const result = run(['bootout', service], join(dir, 'cleanup-bootout.json')); phase('cleanup-bootout-complete', {status: result.status}); loaded = false; }
+        await pause(200);
+        const cleanup = [], observationErrors = [];
+        for (const entry of entries(dir)) {
+          const current = inspect(entry.identity);
+          if (current.state === 'unknown') observationErrors.push({original: entry.identity, ...current});
+          // Unknown liveness does not authorize an empty result or skipping
+          // cleanup. The original kernel audit token still safely targets only
+          // the probe-owned instance, even if numeric PID lookup is unavailable.
+          if (['live', 'zombie', 'unknown'].includes(current.state)) {
+            if (!Array.isArray(entry.audit) || entry.audit.length !== 8) throw Error('Cannot safely clean an instance without its original audit token');
+            const result = spawnSync(manifest.inspector, ['--cleanup-audit', ...entry.audit.map(String)], {encoding: 'utf8', timeout: 5000});
+            cleanup.push({identity: entry.identity, status: result.status, stdout: result.stdout, stderr: result.stderr});
+            if (result.status !== 0) throw Error('Audit-token cleanup failed');
+          }
+        }
+        let settlementError;
+        try {
+          await waitFor(() => {
+            const instances = instanceStates(dir);
+            for (const instance of instances.filter(value => value.state === 'unknown')) {
+              if (!observationErrors.some(value => value.original.pid === instance.original.pid && value.error === instance.error)) observationErrors.push(instance);
+            }
+            return instances.every(instance => ['gone', 'reused'].includes(instance.state));
+          }, 5000, 'Probe instance exit is unresolved (live/zombie/unknown)');
+        } catch (error) { settlementError = error.message; }
+        const rootEntry = entries(dir).find(entry => entry.event === 'broker-entry');
+        const finalGroup = rootEntry ? group(rootEntry.identity.pgid) : null;
+        const instances = instanceStates(dir);
+        const otherGroups = [...new Set(ownedEntries(dir).map(entry => entry.identity.pgid).filter(pgid => pgid !== rootEntry?.identity.pgid))].map(pgid => group(pgid));
+        writeFileSync(join(dir, 'cleanup.json'), JSON.stringify({signals: cleanup, observationErrors, settlementError, group: finalGroup, otherGroups, instances}, null, 2));
+        phase('cleanup-observed', {signals: cleanup.length, observationErrors, settlementError, group: finalGroup, instances});
+        if (observationErrors.length || settlementError || instances.some(instance => !['gone', 'reused'].includes(instance.state))) throw Error('Probe cleanup could not verify every original instance exited; see cleanup.json');
+        if (finalGroup && (finalGroup.error || finalGroup.truncated || finalGroup.members.length)) throw Error('Probe cleanup has an unresolved group member');
+        if (otherGroups.some(value => censusMembers(value).length)) throw Error('Cleanup has an unresolved post-root group member');
+        await releaseProfile('after-aborted-case-cleanup');
+        assertEntryRecorder(dir); // Check late teardown records after cleanup, never instead of cleanup.
+      }
+    }
+  } finally {
+    server.closeAllConnections(); await new Promise(done => server.close(done));
+    writeFileSync(join(output, 'summary.json'), JSON.stringify({kind: 'fixed-cef-workload-observation', cases: summary, formalOwnerQualification: false}, null, 2));
+  }
+}

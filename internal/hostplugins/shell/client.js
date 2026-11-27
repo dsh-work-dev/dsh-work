@@ -221,8 +221,9 @@ function modalMaskStyle(modal) {
 
 function connectShell(ctx) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
-  if (!shellOrigin) return;
-  const post = message => window.parent.postMessage({version: 1, ...message}, shellOrigin);
+  if (!shellOrigin || shellOrigin === 'null') return;
+  const documentToken = globalThis.__DSH_WORK_EMBEDDED_VERSION__ ? decodeURIComponent((location.hash || '').slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1] || '') : undefined;
+  const post = message => window.parent.postMessage({version: 1, ...(documentToken ? {document: documentToken} : {}), ...message}, shellOrigin);
   // The workspace and layout services are optional: the menu keeps working
   // without them, and the commands they serve report unavailable.
   const services = {uiWorkspace: undefined, layout: undefined};
@@ -324,7 +325,7 @@ function connectShell(ctx) {
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, {
       attributes: true, subtree: true, childList: true,
-      attributeFilter: ['aria-modal', 'data-shortcut-modal', 'hidden', 'open', 'role'],
+      attributeFilter: ['aria-modal', 'data-shortcut-modal', 'hidden', 'open', 'role', 'data-dsh-work-modal-ready'],
     });
     schedule();
     return () => {
@@ -501,7 +502,7 @@ function installLinkPolicy() {
     const anchor = event.target?.closest?.('a[href]');
     if (!anchor) return;
     const url = new URL(anchor.href, location.href);
-    if (url.origin !== location.origin) {
+    if (!globalThis.__DSH_WORK_ORIGINS__?.same(url,location.href)) {
       event.preventDefault();
       openExternal(url.href);
     } else if (isNewWindowTarget(anchor.target)) {
@@ -511,7 +512,7 @@ function installLinkPolicy() {
   }, true);
   window.open = ((raw, target) => {
     const url = new URL(raw ?? '', location.href);
-    if (url.origin !== location.origin) {
+    if (!globalThis.__DSH_WORK_ORIGINS__?.same(url,location.href)) {
       openExternal(url.href);
       return null;
     }

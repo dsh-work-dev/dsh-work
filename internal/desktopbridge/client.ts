@@ -1,4 +1,5 @@
 import {Stream} from '@wailsio/runtime';
+import {sameBridgeOrigin} from './origin-policy';
 import {createUploadWorkerAdapter, isGatewayRemoteMux, sessionExportDownloadRoute, sessionExportCommand, type StreamRequestInit} from './transport-core';
 export {Stream};
 
@@ -15,7 +16,7 @@ export async function workerFetch(input: RequestInfo | URL, init?: StreamRequest
   delete requestInit.onUploadProgress;
   const request = new Request(input, requestInit);
   const url = new URL(request.url);
-  if (url.origin !== location.origin || url.pathname.startsWith('/wails/')) return nativeFetch(request);
+  if (!sameBridgeOrigin(url,location.href) || url.pathname.startsWith('/wails/')) return nativeFetch(request);
   const socket = Stream('worker-fetch');
   socket.binaryType = 'arraybuffer';
   let settled = false, finished = false;
@@ -103,7 +104,7 @@ export async function workerFetch(input: RequestInfo | URL, init?: StreamRequest
 // The shell shows the outcome in its own localized, themed status line.
 function showSessionExportFeedback(result: 'saved'|'cancelled'|'error') {
  const shellOrigin=window.parent!==window?location.ancestorOrigins?.[0]:undefined;
- if(shellOrigin)window.parent.postMessage({version:1,type:'dsh-work/export-result',result},shellOrigin);
+ if(shellOrigin&&shellOrigin!=='null')window.parent.postMessage({version:1,type:'dsh-work/export-result',result},shellOrigin);
 }
 
 const exportInFlight=new Set<string>();

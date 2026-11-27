@@ -60,11 +60,17 @@ type ExitResult struct {
 }
 
 type Diagnostics struct {
-	PID             uint32
-	ActiveProcesses uint32
-	StdoutTail      string
-	StderrTail      string
-	Exit            ExitResult
+	PID uint32
+	// ProcessStarted is the platform's immutable process creation identity:
+	// Windows FILETIME, Linux boot-relative start ticks, or macOS start time in
+	// microseconds. Compare it only with the same platform's authenticated peer
+	// identity. Zero means unavailable; legacy Workers do not require admission.
+	ProcessStarted      uint64
+	ProcessStartedError string
+	ActiveProcesses     uint32
+	StdoutTail          string
+	StderrTail          string
+	Exit                ExitResult
 }
 
 // Worker owns one process boundary for one immutable generation.

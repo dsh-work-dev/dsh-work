@@ -25,6 +25,16 @@ func TestStandalonePermissionSurfaceHasOnlyNarrowAuthority(t *testing.T) {
 	if _, e := api.GetBrowserPermission(LocalClientContext(context.Background(), "worker")); e == nil {
 		t.Fatal("worker read consent")
 	}
+	called := false
+	SetBrowserPermissionRendered(api, func(string) { called = true })
+	for _, surface := range []string{"workspace", "worker", "browser-permission"} {
+		if err := api.ReportBrowserPermissionRendered(LocalClientContext(context.Background(), surface), "old-or-invented"); err == nil {
+			t.Fatalf("invalid render report admitted from %s", surface)
+		}
+	}
+	if called {
+		t.Fatal("render report without a current waiting permission reached its owner")
+	}
 }
 
 func TestAutomationBindingsRequireTrustedWorkbench(t *testing.T) {

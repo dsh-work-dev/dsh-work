@@ -18,6 +18,7 @@ export type {
     ComputerSnapshot,
     ComputerTarget,
     ComputerUse,
+    OwnedSelectionState,
     Snapshot,
     State
 } from "./models.js";

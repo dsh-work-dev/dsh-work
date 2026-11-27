@@ -1,7 +1,7 @@
 // The shell shows sign-out progress in its own localized, themed status line.
 function showSignOutFeedback(state) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
-  if (shellOrigin) window.parent.postMessage({version: 1, type: 'dsh-work/account-signout', state}, shellOrigin);
+  if (shellOrigin && shellOrigin !== 'null') window.parent.postMessage({version: 1, type: 'dsh-work/account-signout', state}, shellOrigin);
 }
 
 async function finishSignOutFeedback(value) {
@@ -21,7 +21,7 @@ async function finishSignOutFeedback(value) {
 
 function reportComponentReady(id) {
   const shellOrigin = window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
-  if (shellOrigin) window.parent.postMessage({version: 1, type: 'dsh-work/component-ready', id}, shellOrigin);
+  if (shellOrigin && shellOrigin !== 'null') window.parent.postMessage({version: 1, type: 'dsh-work/component-ready', id}, shellOrigin);
 }
 
 // DSH's desktop account UI starts sign-in and waits; the desktop shell opens the

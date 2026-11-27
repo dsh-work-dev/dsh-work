@@ -1,0 +1,68 @@
+//go:build linux
+
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/local/dsh-work/internal/localipc"
+)
+
+func TestLinuxProcessClientAndPeerContext(t *testing.T) {
+	identity := fmt.Sprintf("test-%d-%d", os.Getpid(), time.Now().UnixNano())
+	l, err := Listen(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _, _ := endpoint(identity)
+	defer os.Remove(path + ".lock")
+	defer l.Close()
+	seen := make(chan ProcessPeer, 1)
+	server := &http.Server{ConnContext: nativePeerContext, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := ProcessPeerFrom(r.Context())
+		if !ok {
+			http.Error(w, "missing peer", 403)
+			return
+		}
+		seen <- p
+		w.Write([]byte("{}"))
+	})}
+	go server.Serve(l)
+	defer server.Close()
+	started, err := localipc.ProcessStarted(uint32(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := ProcessPeer{PID: uint32(os.Getpid()), Started: started}
+	client := NewProcessClient(identity, expected)
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err = client.JSON(ctx, "/probe", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-seen; got != expected {
+		t.Fatalf("wrong peer context: %+v", got)
+	}
+	wrong := NewProcessClient(identity, ProcessPeer{PID: expected.PID, Started: expected.Started + 1})
+	defer wrong.Close()
+	if err = wrong.JSON(ctx, "/probe", nil, nil); err == nil {
+		t.Fatal("wrong creation accepted")
+	}
+	select {
+	case <-seen:
+		t.Fatal("rejected client reached handler")
+	default:
+	}
+	// Original non-process-specific callers still use the same user boundary.
+	plain := NewClient(identity)
+	defer plain.Close()
+	if err = plain.JSON(ctx, "/probe", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}

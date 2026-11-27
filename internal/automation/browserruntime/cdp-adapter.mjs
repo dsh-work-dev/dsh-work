@@ -51,6 +51,7 @@ var BrowserModel = class {
   _knownTabs = /* @__PURE__ */ new Map();
   // Subset of _knownTabs we've attached the debugger to and assigned a sessionId.
   _tabSessions = /* @__PURE__ */ new Map();
+  _tabAttaching = /* @__PURE__ */ new Map();
   _autoAttach = false;
   _nextSessionId = 1;
   constructor(sendToExtension) {
@@ -159,12 +160,26 @@ var BrowserModel = class {
     const existing = this._tabSessions.get(tabId);
     if (existing)
       return existing;
+    const pending = this._tabAttaching.get(tabId);
+    if (pending)
+      return pending;
+    const attaching = this._attachTabOnce(tabId);
+    this._tabAttaching.set(tabId, attaching);
+    try {
+      return await attaching;
+    } finally {
+      this._tabAttaching.delete(tabId);
+    }
+  }
+  async _attachTabOnce(tabId) {
     await this._sendToExtension("chrome.debugger.attach", [{ tabId }, "1.3"]);
     const result = await this._sendToExtension("chrome.debugger.sendCommand", [
       { tabId },
       "Target.getTargetInfo"
     ]);
     const targetInfo = result?.targetInfo;
+    if (!this._knownTabs.has(tabId))
+      throw new Error("Tab closed while attaching");
     const sessionId = `pw-tab-${this._nextSessionId++}`;
     const tabSession = { tabId, sessionId, targetInfo, childSessions: /* @__PURE__ */ new Set() };
     this._tabSessions.set(tabId, tabSession);

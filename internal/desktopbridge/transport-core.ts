@@ -1,3 +1,4 @@
+import {sameBridgeOrigin, gatewayBridgeURL} from './origin-policy';
 export type UploadProgress = {loaded: number; total?: number};
 export type StreamRequestInit = RequestInit & {
   duplex?: 'half';
@@ -14,10 +15,7 @@ type DSHUploadRequest = {
 
 export function isGatewayRemoteMux(raw: string | URL, pageHref: string): boolean {
   try {
-    const page = new URL(pageHref);
-    const target = new URL(raw, page);
-    const targetOrigin = target.origin.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
-    return target.username === '' && target.password === '' && targetOrigin === page.origin && target.pathname === '/api/remote.mux';
+    return gatewayBridgeURL(raw,pageHref);
   } catch {
     return false;
   }
@@ -27,7 +25,7 @@ export function isUploadFileRoute(raw: string | URL, pageHref: string): boolean 
   try {
     const page = new URL(pageHref);
     const target = new URL(raw, page);
-    return target.origin === page.origin && target.pathname === '/api/session/uploadFileBinary';
+    return sameBridgeOrigin(target,page.href) && target.pathname === '/api/session/uploadFileBinary';
   } catch {
     return false;
   }
@@ -119,7 +117,7 @@ export function parseSessionExportRoute(raw: string | URL, pageHref: string): Se
     const target = new URL(raw, page);
     const ids = target.searchParams.getAll('sessionId');
     const descendants = target.searchParams.getAll('includeDescendants');
-    if (target.username !== '' || target.password !== '' || target.origin !== page.origin || target.pathname !== '/api/session.export') return undefined;
+    if (!sameBridgeOrigin(target,page.href) || target.pathname !== '/api/session.export') return undefined;
     if (ids.length !== 1 || ids[0] === '' || ids[0].length > 4096 || descendants.length > 1) return undefined;
     const includeDescendants = descendants[0] ?? 'false';
     if (includeDescendants !== 'true' && includeDescendants !== 'false') return undefined;

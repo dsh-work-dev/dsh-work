@@ -1,0 +1,416 @@
+name: E67 platform IPC
+
+on:
+  push:
+    branches: ['codex/e67-embedded-browser']
+    paths:
+      - 'internal/**'
+      - 'main.go'
+      - 'cmd/dsh-work/**'
+      - 'frontend/**'
+      - 'bootstrap_linux.go'
+      - 'native/embeddedbrowser/**'
+      - 'scripts/build-embedded-cef-linux.sh'
+      - 'scripts/probe-linux-dsh-slot.mjs'
+      - 'scripts/linux-browser-agent-fixture.mjs'
+      - 'tools/dsh/package*.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'tools/posix-ipc-probe/**'
+      - 'tools/linux-runtime-probe/**'
+      - 'scripts/build-workeripc-mac.mjs'
+      - 'scripts/with-workeripc-mac.mjs'
+      - 'scripts/probe-mac-launchd-tree.mjs'
+      - 'scripts/build-mac-cef-owner-probe.mjs'
+      - 'scripts/probe-mac-cef-owner.mjs'
+      - 'tools/browser-lab/native/posix/**'
+      - '.github/workflows/e67-ipc.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      linux_native: ${{ steps.paths.outputs.linux_native }}
+      linux_peer: ${{ steps.paths.outputs.linux_peer }}
+      linux_facilities: ${{ steps.paths.outputs.linux_facilities }}
+      mac_product: ${{ steps.paths.outputs.mac_product }}
+      mac_probe: ${{ steps.paths.outputs.mac_probe }}
+      mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
+      mac_cef: ${{ steps.paths.outputs.mac_cef }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4.0.3
+        id: paths
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            linux_native:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'main.go'
+              - 'cmd/dsh-work/**'
+              - 'frontend/**'
+              - 'bootstrap_linux.go'
+              - 'native/embeddedbrowser/**'
+              - 'scripts/build-embedded-cef-linux.sh'
+              - 'scripts/probe-linux-dsh-slot.mjs'
+              - 'scripts/linux-browser-agent-fixture.mjs'
+              - 'tools/linux-runtime-probe/window.cc'
+              - 'tools/dsh/package*.json'
+            linux_peer:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'cmd/dsh-work/**'
+              - 'bootstrap_linux.go'
+            linux_facilities:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/linux-runtime-probe/**'
+            mac_product:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'scripts/build-workeripc-mac.mjs'
+              - 'scripts/with-workeripc-mac.mjs'
+              - 'tools/posix-ipc-probe/mach_reply_right_darwin.c'
+            mac_probe:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/posix-ipc-probe/mach_peer_darwin.c'
+            mac_launchd:
+              - '.github/workflows/e67-ipc.yml'
+              - 'scripts/probe-mac-launchd-tree.mjs'
+              - 'tools/posix-ipc-probe/launchd_tree_darwin.c'
+            mac_cef:
+              - '.github/workflows/e67-ipc.yml'
+              - 'tools/posix-ipc-probe/cef-owner/**'
+              - 'tools/browser-lab/native/posix/**'
+              - 'scripts/build-mac-cef-owner-probe.mjs'
+              - 'scripts/probe-mac-cef-owner.mjs'
+
+  mac-cef-owner:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_cef == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+          cache-dependency-path: tools/browser-lab/native/posix/host/go.sum
+      - name: Build the existing pinned sandbox bundle
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-cef
+          npm ci --ignore-scripts --prefix tools/browser-lab
+          node tools/browser-lab/native/posix/build.mjs 2>&1 | tee results/e67-mac-cef/lab-build.log
+      - name: Build isolated CEF ownership diagnostic
+        run: |
+          set -o pipefail
+          node scripts/build-mac-cef-owner-probe.mjs --lab-work "$GITHUB_WORKSPACE/tools/browser-lab/.work/posix" --output-dir "$RUNNER_TEMP/e67-cef-owner-build" 2>&1 | tee results/e67-mac-cef/probe-build.log
+      - name: Measure fixed CEF lifecycle and profile reuse
+        run: |
+          set -o pipefail
+          node scripts/probe-mac-cef-owner.mjs --manifest "$RUNNER_TEMP/e67-cef-owner-build/cef-owner-bundle.json" --output-dir "$RUNNER_TEMP/e67-cef-owner-results" 2>&1 | tee results/e67-mac-cef/probe.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-cef-owner
+          path: |
+            results/e67-mac-cef/*.log
+            ${{ runner.temp }}/e67-cef-owner-build/cef-owner-bundle.json
+            ${{ runner.temp }}/e67-cef-owner-results/**/*.json
+            ${{ runner.temp }}/e67-cef-owner-results/**/*.log
+
+  linux-managed-cef:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_native == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install native build and X11 dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcb-res0-dev libxcb-xfixes0-dev libxres-dev libssl-dev libnss3 libasound2t64 libgbm1 xvfb openbox imagemagick x11-utils dbus-x11 cmake ninja-build apparmor fonts-noto-cjk
+      - name: Prepare pinned CEF SDK and locked MCP publication
+        run: |
+          mkdir -p "$RUNNER_TEMP/e67-cef-sdk" "$RUNNER_TEMP/e67-browser-dependencies" results/e67-linux-native
+          name='cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_linux64'
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/e67-cef-sdk/sdk.tar.bz2" 'https://cef-builds.spotifycdn.com/cef_binary_156.0.15%2Bgcf671c0%2Bchromium-156.0.8078.80_linux64.tar.bz2'
+          tar -xjf "$RUNNER_TEMP/e67-cef-sdk/sdk.tar.bz2" -C "$RUNNER_TEMP/e67-cef-sdk"
+          echo "CEF_ROOT=$RUNNER_TEMP/e67-cef-sdk/$name" >> "$GITHUB_ENV"
+          cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
+          npm ci --ignore-scripts --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Exercise the product Browser package installer
+        env:
+          DSH_WORK_BROWSER_PREPARE_TEST: '1'
+        run: |
+          set -o pipefail
+          go test ./internal/platform/linux -run '^Test(LiveLinuxBrowserPreparation|AutomationPreparerKeepsComputerUnavailable)$' -count=1 -v -timeout=3m 2>&1 | tee results/e67-linux-native/browser-installer.log
+      - name: Build formal private CEF broker
+        run: |
+          set -o pipefail
+          bash scripts/build-embedded-cef-linux.sh "$CEF_ROOT" "$RUNNER_TEMP/e67-formal-cef" 2>&1 | tee results/e67-linux-native/build.log
+      - name: Build the Linux Wails candidate entry point
+        run: |
+          set -o pipefail
+          npm ci --prefix frontend
+          npm run --prefix frontend build:dev
+          go build -tags e67presenter -o "$RUNNER_TEMP/dsh-work-candidate" . 2>&1 | tee results/e67-linux-native/wails-build.log
+      - name: Prepare sandbox for this isolated CI component
+        run: |
+          sudo chown root:root "$RUNNER_TEMP/e67-formal-cef/Release/chrome-sandbox"
+          sudo chmod 4755 "$RUNNER_TEMP/e67-formal-cef/Release/chrome-sandbox"
+          cat > "$RUNNER_TEMP/e67-formal-cef.apparmor" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile e67-formal-cef-ci "$RUNNER_TEMP/e67-formal-cef/Release/dsh_cef_broker" flags=(unconfined) {
+            userns,
+          }
+          profile e67-wails-ci "$RUNNER_TEMP/dsh-work-candidate" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$RUNNER_TEMP/e67-formal-cef.apparmor"
+      - name: Exercise formal registry Service MCP and native lifetime
+        env:
+          GDK_BACKEND: x11
+          CGO_ENABLED: '1'
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-native
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1280x900x24' bash -c 'openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & go test -tags "server,e67presenter,e67nativefixture" -count=1 -v -timeout=90s ./internal/embeddedbrowser -run "^(TestLiveLinuxManagedPrivateCEFService|TestLinuxPresenterInterruptedPoll)$"' 2>&1 | tee results/e67-linux-native/managed-cef.log
+      - name: Prepare locked DSH and self-owned window observer
+        run: |
+          npm ci --ignore-scripts --prefix tools/dsh
+          c++ -std=c++20 -Wall -Wextra tools/linux-runtime-probe/window.cc -o "$RUNNER_TEMP/e67-x11-window" $(pkg-config --cflags --libs xcb xcb-res)
+          mkdir -p results/e67-linux-wails
+      - name: Exercise the actual Wails DSH embedded browser slot
+        env:
+          GDK_BACKEND: x11
+          DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_AGENT_TEST: '1'
+          DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-wails
+        run: |
+          set -o pipefail
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash <<'SH' 2>&1 | tee results/e67-linux-wails/integration.log
+          set -euo pipefail
+          openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & wm=$!
+          trap 'kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'; then break; fi
+            sleep 0.1
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
+          go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
+          SH
+      - name: Capture scoped sandbox denial evidence
+        if: failure()
+        run: |
+          mkdir -p results/e67-linux-wails
+          {
+            sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone
+            sudo aa-status
+            sudo journalctl -k --no-pager | grep -E 'apparmor=.*(userns|uid_map|bwrap|dsh-work-candidate)|bwrap.*(DENIED|denied)' | tail -n 80
+          } > results/e67-linux-wails/sandbox-diagnostic.log 2>&1 || true
+      - name: Remove isolated namespace grant
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/e67-formal-cef.apparmor"; then sudo apparmor_parser -R "$RUNNER_TEMP/e67-formal-cef.apparmor"; fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-managed-cef
+          path: |
+            results/e67-linux-native/*.log
+            results/e67-linux-native/*.json
+            results/e67-linux-native/*.png
+            results/e67-linux-wails/*.log
+            results/e67-linux-wails/*.json
+            results/e67-linux-wails/*.png
+
+  mac-launchd-tree:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_launchd == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Measure current-user LaunchAgent descendant ownership
+        run: node scripts/probe-mac-launchd-tree.mjs --output-dir "$RUNNER_TEMP/e67-launchd-tree"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-launchd-tree
+          path: |
+            ${{ runner.temp }}/e67-launchd-tree/**/*.json
+            ${{ runner.temp }}/e67-launchd-tree/**/*.log
+            ${{ runner.temp }}/e67-launchd-tree/**/*.identity
+            ${{ runner.temp }}/e67-launchd-tree/**/*.heartbeats
+
+  linux-runtime-facilities:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_facilities == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install isolated X11 probe dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev libxres-dev xvfb dbus-x11
+      - name: Build XRes system API probe
+        run: |
+          mkdir -p results/e67-linux-runtime
+          cc -Wall -Wextra -Werror tools/linux-runtime-probe/xres.c -o "$RUNNER_TEMP/e67-linux-xres" $(pkg-config --cflags --libs gtk4 xres)
+      - name: Observe unprivileged process ownership and X11 identity
+        env:
+          GDK_BACKEND: x11
+        run: |
+          dbus-run-session -- xvfb-run -a python3 tools/linux-runtime-probe/probe.py --xres-probe "$RUNNER_TEMP/e67-linux-xres" --output results/e67-linux-runtime/facilities.json
+      - name: Require both proposed facilities
+        run: |
+          python3 - <<'PY'
+          import json
+          report = json.load(open('results/e67-linux-runtime/facilities.json'))
+          assert report['systemd']['qualified'], 'Unprivileged user-manager process ownership unavailable; inspect facilities.json before selecting the product mechanism'
+          assert report['xres']['code'] == 0 and report['xres']['evidence']['qualified'], 'XRes client PID facility unavailable'
+          PY
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-runtime-facilities
+          path: results/e67-linux-runtime/facilities.json
+
+  linux-peer:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.linux_peer == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - name: Verify real Linux process admission
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-ipc
+          { uname -a; id; go version; test "$(uname -m)" = x86_64; } 2>&1 | tee results/e67-ipc/environment.log
+          CGO_ENABLED=0 go test -tags server -count=1 -v -timeout=60s ./internal/localipc ./internal/workeripc ./internal/daemon -run 'TestPeerProcessAndExit|TestSocketOwnershipAndCleanup|TestRejectUnsafePathsAndPreserveReplacement|TestParseProcessCreation|TestLinuxProcessInstanceAdmission|TestLinuxProcessClientAndPeerContext' 2>&1 | tee results/e67-ipc/linux-peer.log
+      - name: Exercise the actual delegated process owner
+        shell: bash
+        run: |
+          set -o pipefail
+          DSH_WORK_LINUX_SUPERVISOR_TEST=1 CGO_ENABLED=0 go test -count=1 -v -timeout=60s ./internal/platform/linux -run 'TestLiveSystemdAtomicCgroupOwner|TestLiveSystemdFailedLaunchCleanup|TestLiveSystemdCancelBeforeAdoption|TestLiveSystemdCommandExecutor|TestOwnedProcessExitedBeforePublish' 2>&1 | tee results/e67-ipc/linux-supervisor.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-linux-peer
+          path: results/e67-ipc/*.log
+
+  mac-sender-probe:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_probe == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify macOS 15 arm64 environment
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-ipc
+          { sw_vers; uname -a; test "$(uname -m)" = arm64; test "$(sw_vers -productVersion | cut -d. -f1)" = 15; } 2>&1 | tee results/e67-ipc/environment.log
+      - name: Compile standalone system API probe
+        shell: bash
+        run: |
+          set -o pipefail
+          clang -std=c11 -Wall -Wextra -Werror tools/posix-ipc-probe/mach_peer_darwin.c -o "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/compile.log
+      - name: Probe ordinary process sender identity
+        shell: bash
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/ordinary.log
+      - name: Probe ad-hoc hardened runtime
+        shell: bash
+        run: |
+          set -o pipefail
+          codesign --force --sign - --options runtime "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/sign.log
+          codesign -dvv "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/sign-details.log
+          "$RUNNER_TEMP/mach-peer" 2>&1 | tee results/e67-ipc/hardened.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-sender-probe
+          path: results/e67-ipc/*.log
+
+  mac-product-ipc:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_product == 'true'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Build same-process Node bridge
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-ipc
+          { sw_vers; uname -a; node --version; go version; test "$(uname -m)" = arm64; test "$(sw_vers -productVersion | cut -d. -f1)" = 15; } 2>&1 | tee results/e67-mac-ipc/environment.log
+          node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge" 2>&1 | tee results/e67-mac-ipc/build.log
+      - name: Exercise actual Go and Node process admission
+        shell: bash
+        run: |
+          set -o pipefail
+          CGO_ENABLED=1 go test -tags server -count=1 -v -timeout=60s -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/localipc ./internal/workeripc ./internal/daemon -run '^TestDarwin' 2>&1 | tee results/e67-mac-ipc/product-ipc.log
+      - name: Verify rejected Mach reply rights are reclaimed
+        shell: bash
+        run: |
+          set -o pipefail
+          clang -std=c11 -Wall -Wextra -Werror tools/posix-ipc-probe/mach_reply_right_darwin.c internal/localipc/mach_peer_darwin.c -o "$RUNNER_TEMP/mach-reply-right" 2>&1 | tee results/e67-mac-ipc/reply-right-build.log
+          "$RUNNER_TEMP/mach-reply-right" 2>&1 | tee results/e67-mac-ipc/reply-right.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-product-ipc
+          path: results/e67-mac-ipc/*.log

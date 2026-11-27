@@ -23,7 +23,9 @@ func TestNonWindowsComputerEntryPointsRemainUnavailable(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			preparer := NewAutomationPreparer(t.TempDir())
 			if preparer != nil {
-				t.Fatal("non-Windows must not install a computer backend")
+				if !errors.Is(preparer.Prepare(context.Background(), automation.Computer, func(automation.Progress) {}), automation.ErrUnavailable) {
+					t.Fatal("non-Windows must not install a computer backend")
+				}
 			}
 			manager, err := settings.New(settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")})
 			if err != nil {

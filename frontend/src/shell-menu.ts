@@ -10,13 +10,14 @@ export interface MenuBar {
 }
 
 /** ARIA menu bar drawn in the shell document; its menus overlay the DSH frame. */
-export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId) => void, onLeave: () => void): MenuBar {
+export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId) => void | Promise<void>, onLeave: () => void, onClosed: () => void = () => {}): MenuBar {
   const bar = document.createElement("div");
   bar.className = "shell-menubar";
   bar.setAttribute("role", "menubar");
   let menus: Menu[] = [];
   let openIndex = -1;
   let popup: HTMLElement | null = null;
+  let openRound=0,opening=false;
   const buttons = () => Array.from(bar.querySelectorAll<HTMLButtonElement>(".shell-menu-button"));
   const rows = () => (popup ? Array.from(popup.querySelectorAll<HTMLButtonElement>(".shell-menu-item")) : []);
   const focusRow = (index: number) => rows().find(row => Number(row.dataset.index) === index)?.focus();
@@ -27,11 +28,13 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
 
   const close = (refocus: boolean) => {
     const index = openIndex;
+    const hadMenu=index>=0||opening;openRound++;opening=false;
     popup?.remove();
     popup = null;
     openIndex = -1;
     buttons().forEach(button => button.setAttribute("aria-expanded", "false"));
     if (refocus && index >= 0) buttons()[index]?.focus();
+    if(hadMenu)onClosed();
   };
   const activate = (item: MenuItem) => {
     if (!item.enabled) return;
@@ -108,8 +111,9 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     else if (focusFirst) focusRow(stepItem(menu.items, -1, 1));
   };
   const show = (index: number, focusFirst: boolean) => {
-    onOpen(menus[index].id);
-    open(index, focusFirst);
+    const round=++openRound;opening=true;
+    const ready=onOpen(menus[index].id);
+    if(ready instanceof Promise){void ready.then(()=>{if(round===openRound){opening=false;open(index,focusFirst)}},()=>{if(round===openRound)close(false)})}else{opening=false;open(index,focusFirst)}
   };
 
   bar.addEventListener("keydown", event => {
@@ -128,7 +132,7 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     event.preventDefault();
   });
   document.addEventListener("pointerdown", event => {
-    if (openIndex >= 0 && !bar.contains(event.target as Node) && !popup?.contains(event.target as Node)) close(false);
+    if ((openIndex >= 0 || opening) && !bar.contains(event.target as Node) && !popup?.contains(event.target as Node)) close(false);
   }, true);
   // Focus moving into the DSH frame blurs the shell window.
   window.addEventListener("blur", () => close(false));

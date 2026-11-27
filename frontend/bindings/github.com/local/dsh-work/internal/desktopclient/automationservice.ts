@@ -91,6 +91,10 @@ export function RepairAutomation(capability: string): $CancellablePromise<automa
     return $Call.ByID(1992380405, capability);
 }
 
+export function ReportBrowserPermissionRendered(id: string): $CancellablePromise<void> {
+    return $Call.ByID(2107515121, id);
+}
+
 export function RetryAutomation(capability: string): $CancellablePromise<automation$0.Snapshot> {
     return $Call.ByID(23793204, capability);
 }

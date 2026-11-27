@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {createHmac,timingSafeEqual,randomBytes} from 'node:crypto';
 import {ExtensionProtocolV2} from './cdp-adapter.mjs';
+import {OwnedCEFProtocolV1} from './owned-cef.mjs';
 import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
 const socket=net.connect(process.env.DSH_WORK_BRIDGE_PIPE);
@@ -36,10 +37,12 @@ async function receive(m){
   if(model)throw Error('BROWSER_ADAPTER_ALREADY_INITIALIZED');
   refs=createRefScope(m.refScope);
   require=createRequire(path.join(m.dependencies,'package.json'));
-  for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
+  for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
   const {WebSocketServer}=require('ws');
   const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop()}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
-  model=new ExtensionProtocolV2(command);
+  const protocol=m.routeProtocol??'extension-v2';
+  if(!['extension-v2','owned-cef-v1'].includes(protocol))throw Error('BROWSER_ROUTE_PROTOCOL_REJECTED');
+  model=protocol==='owned-cef-v1'?new OwnedCEFProtocolV1(command):new ExtensionProtocolV2(command);
   indicator=value=>{void command('dsh.indicator',value,true).catch(()=>{});};
   const dispatch=async(method,params,sessionId)=>{
    if(method==='Browser.getVersion')return{protocolVersion:'1.3',product:'Chrome/DSH-Work',userAgent:'DSH-Work/0.2.0'};
@@ -60,7 +63,7 @@ async function receive(m){
   const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/stdio.js')));
   const {AjvJsonSchemaValidator}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/validation/ajv-provider.js')));
   validator=new AjvJsonSchemaValidator();
-  transport=new StdioClientTransport({cwd:m.workspace || process.cwd(),command:process.execPath,args:[path.join(m.dependencies,'node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint',`ws://127.0.0.1:${server.address().port}${endpointPath}`,'--output-dir',m.output,'--timeout-action','10000','--timeout-navigation','15000'],env:process.env,stderr:'pipe'});
+  transport=new StdioClientTransport({cwd:m.workspace || process.cwd(),command:process.execPath,args:[path.join(m.dependencies,'node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint',`ws://127.0.0.1:${server.address().port}${endpointPath}`,'--output-dir',m.output,'--timeout-action','10000','--timeout-navigation','15000',...(protocol==='owned-cef-v1'?['--snapshot-mode','none']:[])],env:process.env,stderr:'pipe'});
   client=new Client({name:'DSH-Work-browser',version:'0.2.0'});const connecting=client.connect(transport);transport.stderr?.resume();await connecting;
   const all=(await client.listTools()).tools;
   // SDK result is the contract; never invent schemas/descriptions for tools.

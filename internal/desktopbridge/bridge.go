@@ -15,12 +15,13 @@ import (
 const ChunkSize = 64 << 10
 
 type Bridge struct {
-	Client            *http.Client
-	Origin            string
-	Generation        string
-	OpenExternal      func(string) error
-	ReportBoot        func(context.Context, string, string) error
-	SaveSessionExport func(context.Context, string, func(io.Writer) error) (bool, error)
+	EmbeddedBrowserVersion string
+	Client                 *http.Client
+	Origin                 string
+	Generation             string
+	OpenExternal           func(string) error
+	ReportBoot             func(context.Context, string, string) error
+	SaveSessionExport      func(context.Context, string, func(io.Writer) error) (bool, error)
 }
 
 // ByteConn permits exercising the same Fetch implementation without a WebView.

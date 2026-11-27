@@ -558,3 +558,14 @@ func TestDSHPageReportSessionOpenedUsesAWorkspaceSurface(t *testing.T) {
 		t.Fatalf("pet surface report was accepted: %+v", result)
 	}
 }
+
+func TestNativeWindowDisposalRemainsAllowedDuringDrain(t *testing.T) {
+	if !maintenanceCallAllowed(Call{Service: "EmbeddedBrowserService", Method: "Closed"}) {
+		t.Fatal("final native disposal blocked during drain")
+	}
+	for _, method := range []string{"RegisterWindow", "Update", "Recover", "Action"} {
+		if maintenanceCallAllowed(Call{Service: "EmbeddedBrowserService", Method: method}) {
+			t.Fatalf("drain admitted new browser work: %s", method)
+		}
+	}
+}

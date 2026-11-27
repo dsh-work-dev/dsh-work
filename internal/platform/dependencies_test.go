@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestNewUsesNativeAdaptersOnlyOnWindows(t *testing.T) {
+func TestNewUsesQualifiedPlatformAdapters(t *testing.T) {
 	dependencies := New()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		if dependencies.Err != nil || dependencies.Supervisor == nil || dependencies.CommandExecutor == nil || dependencies.FileReplacer == nil {
-			t.Fatalf("Windows dependencies are incomplete: %+v", dependencies)
+			t.Fatalf("native dependencies are incomplete: %+v", dependencies)
 		}
 		return
 	}
 	if dependencies.Err == nil || dependencies.Supervisor != nil || dependencies.CommandExecutor != nil || dependencies.FileReplacer != nil {
-		t.Fatalf("non-Windows dependencies must fail closed without fake adapters: %+v", dependencies)
+		t.Fatalf("unimplemented dependencies must fail closed without fake adapters: %+v", dependencies)
 	}
 }

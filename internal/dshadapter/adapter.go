@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -291,7 +292,8 @@ func (a *Adapter) BuildLaunchPlan(launch LaunchContext) (supervisor.LaunchPlan, 
 		workingDirectory = launch.Workspace.Path
 	}
 	origin := workeripc.Origin
-	env := map[string]string{"DSH_HOME": dataDirectory}
+	env := launchEnvironment()
+	env["DSH_HOME"] = dataDirectory
 	for key, value := range launch.Runtime.Env {
 		env[key] = value
 	}
@@ -457,6 +459,11 @@ func (a *Adapter) locateExecutable() (string, error) {
 		filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh.cmd"),
 		filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh.exe"),
 		filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh"),
+	}
+	if runtime.GOOS == "linux" {
+		// Prefer the package's native executable launcher over the Windows
+		// repository shim when the locked development runtime is installed.
+		candidates = append([]string{filepath.Join(root, "tools", "dsh", "node_modules", ".bin", "dsh")}, candidates...)
 	}
 	for _, candidate := range candidates {
 		if path, err := existingExecutable(candidate); err == nil {

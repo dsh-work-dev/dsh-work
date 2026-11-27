@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux && (!darwin || !cgo)
 
 package daemon
 

@@ -207,12 +207,14 @@ func TestNewStreamInterruptsBlockedOldWriteBeforeStarting(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("new connection did not close the old subscription")
 	}
-	if tracker.AnyFocused() {
-		t.Fatal("new connection did not clear presence")
-	}
 	newTicker := receiveControlledTicker(t, clock)
 	if newTicker == nil {
 		t.Fatal("replacement stream has no ping ticker")
+	}
+	// Closing the old subscription wakes its readers before replacement setup
+	// has cleared presence. The new ticker marks completed initial delivery.
+	if tracker.AnyFocused() {
+		t.Fatal("new connection did not clear presence")
 	}
 	select {
 	case <-oldFinished:

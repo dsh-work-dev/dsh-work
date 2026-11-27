@@ -1,5 +1,6 @@
 function shellOrigin() {
-  return window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
+  const origin=window.parent && window.parent !== window ? window.location?.ancestorOrigins?.[0] : undefined;
+  return origin && origin !== 'null' ? origin : undefined;
 }
 
 function reportComponentReady(id) {

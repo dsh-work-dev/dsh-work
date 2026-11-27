@@ -163,3 +163,40 @@ func TestFullSubscriberQueueClosesSubscription(t *testing.T) {
 		t.Fatal("full subscription queue remained open")
 	}
 }
+
+func TestWindowSubscriptionsRetainUnmatchedStagedCommands(t *testing.T) {
+	h := New()
+	h.SendCommand("workspace-2", "before", time.Minute, true)
+	a, initial := h.SubscribeWindows([]string{"workspace"})
+	defer a.Close()
+	if len(initial) != 0 {
+		t.Fatalf("A consumed B command: %+v", initial)
+	}
+	h.SendCommand("workspace-2", "while-a-connected", time.Minute, true)
+	select {
+	case m := <-a.Messages:
+		t.Fatalf("B command broadcast to A: %+v", m)
+	default:
+	}
+	b, initial := h.SubscribeWindows([]string{"workspace-2"})
+	defer b.Close()
+	if len(initial) != 2 || initial[0].Name != "before" || initial[1].Name != "while-a-connected" {
+		t.Fatalf("B staged commands lost: %+v", initial)
+	}
+	h.SendCommand("workspace-2", "live", time.Minute, true)
+	if m := <-b.Messages; m.Name != "live" {
+		t.Fatalf("B live command: %+v", m)
+	}
+	select {
+	case m := <-a.Messages:
+		t.Fatalf("B live command reached A: %+v", m)
+	default:
+	}
+	h.SetTopic("shared", true)
+	if m := <-a.Messages; m.Topic != "shared" {
+		t.Fatal(m)
+	}
+	if m := <-b.Messages; m.Topic != "shared" {
+		t.Fatal(m)
+	}
+}

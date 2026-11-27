@@ -161,6 +161,10 @@ export interface ComputerUse {
     "rect"?: { [_ in string]?: any } | null;
 }
 
+export interface OwnedSelectionState {
+    "state": string;
+}
+
 export interface Snapshot {
     "components": Component[] | null;
     "computerEngine": string;

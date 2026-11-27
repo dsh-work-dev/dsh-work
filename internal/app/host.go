@@ -1799,10 +1799,10 @@ func (h *Host) waitReady(run *generationRun, worker supervisor.Worker) (dshadapt
 					return announcement, h.failureFor(err, lifecycle.ErrorInvalidTransition, "DSH Work could not publish DSH readiness.", false)
 				}
 				return announcement, nil
-			} else if failure.Code == lifecycle.ErrorDSHInvalidReadiness {
-				return announcement, failure
 			} else {
-				logging.Module(logging.ModLifecycle).Debug("readiness probe pending", "gen", run.generation)
+				// probeUntilReady already retries transient responses through
+				// the bounded deadline. Preserve its terminal probe/exit facts.
+				return announcement, failure
 			}
 		case <-deadline.C:
 			return announcement, h.failureFor(errors.New("DSH readiness deadline exceeded"), lifecycle.ErrorDSHReadinessTimeout, "DSH did not become ready before the bounded startup deadline.", true)

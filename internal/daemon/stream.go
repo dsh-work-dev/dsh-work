@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/local/dsh-work/internal/hostevents"
@@ -36,7 +37,7 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unavailable", http.StatusInternalServerError)
 		return
@@ -46,6 +47,10 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.UIStreamScope != nil {
+		s.serveUIStream(w, r)
+		return
+	}
 	ctx, cancel := context.WithCancel(r.Context())
 	s.streamStartMu.Lock()
 	if ctx.Err() != nil {
@@ -108,6 +113,10 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 		s.streamMu.Unlock()
 	}()
 
+	s.writeStream(w, ctx, subscription, initial, &s.streamWriteMu)
+}
+func (s *Server) writeStream(w http.ResponseWriter, ctx context.Context, subscription hostevents.Subscription, initial []hostevents.Message, writeMu *sync.Mutex) {
+	flusher := w.(http.Flusher)
 	defer subscription.Close()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
@@ -128,8 +137,8 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	write := func(message hostevents.Message) error {
-		s.streamWriteMu.Lock()
-		defer s.streamWriteMu.Unlock()
+		writeMu.Lock()
+		defer writeMu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return err
 		}

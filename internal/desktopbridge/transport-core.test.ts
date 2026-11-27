@@ -1,8 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {bridgeOrigin, sameBridgeOrigin} from './origin-policy';
 import {createUploadWorkerAdapter, isGatewayRemoteMux, isUploadFileRoute, parseSessionExportRoute, sessionExportCommand, sessionExportDownloadRoute} from './transport-core';
 
 const page = 'http://wails.localhost:48217/index.html';
+
+test('normalizes only configured Wails authorities and never equates opaque URLs', () => {
+  assert.equal(bridgeOrigin('wails://localhost/'), 'wails://localhost');
+  assert.equal(bridgeOrigin('wails://wails.localhost:48217/'), 'wails://wails.localhost:48217');
+  assert.equal(sameBridgeOrigin('/api/x', 'wails://wails.localhost:48217/'), true);
+  assert.equal(sameBridgeOrigin('wails://localhost/', 'wails://wails.localhost:48217/'), false);
+  for (const forged of ['wails://evil/', 'wails://wails.localhost:48218/', 'wails://wails.localhost:48217.evil/', 'wails://user@wails.localhost:48217/', 'data:text/plain,x', 'null']) {
+    assert.equal(bridgeOrigin(forged), undefined, forged);
+    assert.equal(sameBridgeOrigin(forged, forged), false, forged);
+    assert.equal(isGatewayRemoteMux('/api/remote.mux', forged), false, forged);
+  }
+  const worker = 'wails://wails.localhost:48217/';
+  assert.equal(isGatewayRemoteMux('/api/remote.mux', worker), true);
+  assert.equal(isGatewayRemoteMux('ws://wails.localhost:48217/api/remote.mux', worker), true);
+  assert.equal(isGatewayRemoteMux('ws://localhost/api/remote.mux', worker), false);
+  assert.equal(isGatewayRemoteMux('wss://wails.localhost:48217/api/remote.mux', worker), false);
+  assert.equal(isUploadFileRoute('/api/session/uploadFileBinary', worker), true);
+  assert.equal(isUploadFileRoute('wails://localhost/api/session/uploadFileBinary', worker), false);
+  assert.equal(parseSessionExportRoute('/api/session.export?sessionId=s1', worker)?.sessionId, 's1');
+});
 
 function fakeWorker() {
   const calls: Array<{message: unknown; transfer?: Transferable[]}> = [];

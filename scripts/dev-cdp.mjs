@@ -37,12 +37,13 @@ const send = (method, params = {}) => new Promise(resolve => {
 });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+const mainFrame=(await send('Page.getFrameTree')).result?.frameTree?.frame?.id;
 await send('Runtime.enable');
 await sleep(400);
 const contexts = events.filter(e => e.method === 'Runtime.executionContextCreated').map(e => e.params.context);
 const contextFor = which => which === 'dsh'
   ? [...contexts].reverse().find(c => DSH_ORIGIN.test(c.origin))?.id
-  : contexts.find(c => !DSH_ORIGIN.test(c.origin) && c.auxData?.isDefault)?.id;
+  : contexts.find(c => c.auxData?.frameId===mainFrame && c.auxData?.isDefault)?.id;
 
 async function evaluate(which, expression) {
   const contextId = contextFor(which);

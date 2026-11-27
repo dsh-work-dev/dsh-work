@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-//go:embed host.mjs
+//go:embed host.mjs native-socket.mjs
 var hostSource embed.FS
 
 const Origin = "http://127.0.0.1:1" // Routing identity only; never dialled as TCP.
@@ -62,6 +62,45 @@ func (t *Transport) ChildEnvironment() map[string]string {
 // It retains the same SID ACL, admission limits and mutual HMAC as Workers.
 func (t *Transport) Connect(ctx context.Context) (net.Conn, error) {
 	return t.dial(ctx, "pipe", "127.0.0.1:1")
+}
+
+// ConnectProcess additionally binds the authenticated pipe to the OS process
+// launched by the caller's supervisor. The per-launch secret proves the launch
+// instance; the kernel peer identity prevents a self-reported PID admission.
+func (t *Transport) ConnectProcess(ctx context.Context, pid uint32) (net.Conn, error) {
+	return t.connectProcess(ctx, pid, 0, false)
+}
+
+// ConnectProcessInstance binds a private broker to the exact process instance
+// captured by its supervisor. Existing PID-only callers retain their contract.
+func (t *Transport) ConnectProcessInstance(ctx context.Context, pid uint32, started uint64) (net.Conn, error) {
+	if started == 0 {
+		return nil, errors.New("WORKER_IPC_PROCESS_INSTANCE_REQUIRED")
+	}
+	return t.connectProcess(ctx, pid, started, true)
+}
+func (t *Transport) connectProcess(ctx context.Context, pid uint32, started uint64, instance bool) (net.Conn, error) {
+	c, err := t.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw := c
+	if tracked, ok := c.(*trackedConn); ok {
+		raw = tracked.Conn
+	}
+	actual, err := peerProcessID(raw)
+	if err != nil || pid == 0 || actual != pid {
+		c.Close()
+		return nil, errors.New("WORKER_IPC_PROCESS_REJECTED")
+	}
+	if instance {
+		actualStarted, e := peerProcessStarted(raw)
+		if e != nil || actualStarted != started {
+			c.Close()
+			return nil, errors.New("WORKER_IPC_PROCESS_INSTANCE_REJECTED")
+		}
+	}
+	return c, nil
 }
 
 func (t *Transport) dial(ctx context.Context, network, address string) (net.Conn, error) {
@@ -205,6 +244,13 @@ func (t *Transport) Prepare(root, runtimeExecutable, previousPatch string) (stri
 	if err := os.WriteFile(path, source, 0600); err != nil {
 		return "", err
 	}
+	socketSource, err := hostSource.ReadFile("native-socket.mjs")
+	if err != nil {
+		return "", err
+	}
+	if err = os.WriteFile(filepath.Join(root, "native-socket.mjs"), socketSource, 0600); err != nil {
+		return "", err
+	}
 	var rows []any
 	if previousPatch != "" {
 		b, err := os.ReadFile(previousPatch)
@@ -219,7 +265,11 @@ func (t *Transport) Prepare(root, runtimeExecutable, previousPatch string) (stri
 	rows = append(rows, map[string]any{"id": "webserver", "disabled": true}, map[string]any{"insert": []any{map[string]any{"id": "dsh-work-pipe", "name": u, "config": map[string]any{"host": "127.0.0.1", "port": 1, "compression": "none"}}}})
 	// Module imports happen before schema processing. Per-launch sidecar owns
 	// credentials and module resolution; only its path enters the patch graph.
-	config, _ := json.Marshal(map[string]string{"pipe": t.path, "token": t.token, "runtimeExecutable": runtimeExecutable})
+	connection := map[string]string{"pipe": t.path, "token": t.token, "runtimeExecutable": runtimeExecutable}
+	if err := prepareLocalBridge(connection); err != nil {
+		return "", err
+	}
+	config, _ := json.Marshal(connection)
 	if err := os.WriteFile(filepath.Join(root, "connection.json"), config, 0600); err != nil {
 		return "", err
 	}

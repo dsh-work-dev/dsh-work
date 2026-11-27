@@ -83,7 +83,7 @@ func TestAssetsProxyIndexWithoutEditingHTMLAndServeInjectedScripts(t *testing.T)
 		t.Fatalf("index was rewritten: status=%d body=%q", page.Code, page.Body.String())
 	}
 
-	for _, path := range []string{"/__work/bridge.js?generation=g1", "/__work/boot.js?generation=g1"} {
+	for _, path := range []string{"/__work/bridge.js?generation=g1", "/__work/boot.js?generation=g1", "/__work/origin.js?generation=g1"} {
 		response := httptest.NewRecorder()
 		bridge.Assets(response, httptest.NewRequest("GET", path, nil))
 		if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/javascript") || response.Body.Len() == 0 {

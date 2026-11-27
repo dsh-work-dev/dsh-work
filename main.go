@@ -22,6 +22,9 @@ var trayDarkIcon []byte
 var trayTemplateIcon []byte
 
 func main() {
+	if supervisorBootstrap() {
+		return
+	}
 	desktopapp.Run(desktopapp.Resources{
 		Assets: assets, AppIcon: appIcon, TrayIcon: trayIcon,
 		TrayDarkIcon: trayDarkIcon, TrayTemplateIcon: trayTemplateIcon,

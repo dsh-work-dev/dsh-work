@@ -36,7 +36,7 @@ jobs:
 
       # Frontend checks are platform-agnostic; run them once on Ubuntu.
       - name: Set up Node
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         uses: actions/setup-node@v5
         with:
           node-version: '>=24'
@@ -62,7 +62,14 @@ jobs:
           npm run --prefix frontend typecheck
 
       - name: Go tests
+        if: runner.os != 'macOS'
         run: go test ./internal/...
+      - name: Build macOS Worker IPC bridge
+        if: runner.os == 'macOS'
+        run: node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge"
+      - name: macOS Go tests with bundled Worker IPC bridge
+        if: runner.os == 'macOS'
+        run: go test -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/...
       - name: Build Go packages
         run: go build ./internal/...
 
