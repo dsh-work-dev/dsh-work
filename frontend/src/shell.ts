@@ -12,6 +12,8 @@ import {createMenuBar} from "./shell-menu";
 import {createToast} from "./shell-toast";
 import {windowKeyAction, type LinkTarget, type MenuAction, type MenuState, type WindowAction} from "./shell-menu-model";
 import {icon, type IconName} from "./ui/icons";
+import {splashContainer} from "./splash/container";
+import {createReveal} from "./splash/reveal";
 
 const links: Record<LinkTarget, string> = {
   "docs": "https://github.com/dsh-work-dev/dsh-work/tree/main/docs",
@@ -374,6 +376,23 @@ export function mountShell() {
 
   let frameRevision = 0;
   let eventSeen = false;
+  const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const startupReveal = createReveal({
+    finish: () => splashContainer().finish("ready"),
+    fadeOut: () => new Promise<void>(resolve => {
+      if (!hostSurface || reducedMotion()) return resolve();
+      hostSurface.classList.add("is-leaving");
+      window.setTimeout(resolve, 300);
+    }),
+    hide: () => { hostSurface?.setAttribute("hidden", "true"); hostSurface?.classList.remove("is-leaving"); },
+    show: () => { hostSurface?.classList.remove("is-leaving"); hostSurface?.removeAttribute("hidden"); },
+    reset: () => splashContainer().reset(),
+    dispose: () => splashContainer().dispose(),
+    mount: () => {
+      const backdrop = document.querySelector<HTMLElement>(".startup-backdrop");
+      if (backdrop) void splashContainer().mount(backdrop);
+    },
+  });
   const show = (url: string) => {
     if (!url || frame.getAttribute("src") !== url) {
       overviewActivity = {pending:0,running:false};
@@ -388,7 +407,7 @@ export function mountShell() {
       frame.hidden = true;
       syncOverview();
       frame.removeAttribute("src");
-      hostSurface?.removeAttribute("hidden");
+      startupReveal.restore();
       return;
     }
     if (frame.getAttribute("src") !== url) {
@@ -404,7 +423,7 @@ export function mountShell() {
     document.documentElement.setAttribute("data-shell-framed", "");
     frame.hidden = false;
     syncOverview();
-    hostSurface?.setAttribute("hidden", "true");
+    startupReveal.reveal();
   };
   // Reloads the DSH document only; the Worker keeps running.
   const reloadFrame = () => {

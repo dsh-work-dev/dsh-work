@@ -138,7 +138,7 @@
 :root[data-theme-id="glass"] .nav-item[aria-current] { box-shadow: 0 4px 14px rgb(60 50 120 / 12%); }
 :root[data-theme-id="glass"] .button-primary { font-weight: 600; }
 :root[data-theme-id="glass"] .tag-strong { border-color: transparent; background: linear-gradient(135deg, #6a48f5, #2479c9); color: #ffffff; }
-:root[data-theme-id="glass"] .page-head h1, :root[data-theme-id="glass"] .startup-head h1 {
+:root[data-theme-id="glass"] .page-head h1, :root[data-theme-id="glass"] .startup-panel-head h1 {
   width: fit-content;
   background: linear-gradient(120deg, var(--text) 30%, var(--accent));
   -webkit-background-clip: text;

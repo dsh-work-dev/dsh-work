@@ -1,0 +1,16 @@
+/* Settings → Splash screen: rows follow the Pets page; the preview is a 16:9 stage. */
+button.splash-list-item { width: 100%; min-height: 52px; border: 0; background: transparent; color: inherit; text-align: left; flex-wrap: nowrap; }
+button.splash-list-item > .icon { flex: none; margin-left: auto; color: var(--muted); transition: transform var(--motion); }
+button.splash-list-item[aria-expanded="true"] > .icon { transform: rotate(90deg); }
+button.splash-list-item:hover:not(:disabled) { background: var(--hover); }
+button.splash-list-item:disabled { opacity: .5; cursor: default; }
+.splash-list-copy { display: grid; gap: 2px; min-width: 0; }
+.splash-list-copy strong { font-weight: 500; overflow-wrap: anywhere; }
+.splash-list-copy span { color: var(--muted); font-size: var(--fs-meta); }
+.splash-preview { display: grid; gap: var(--space-3); padding: 0 var(--row-pad-x) var(--row-pad-y); }
+.splash-preview-stage { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius-group); background: #000; }
+.splash-preview > .actions { flex-wrap: wrap; }
+#splash-preview-states { margin-right: auto; }
+#splash-preview-states[hidden] + .button { margin-left: auto; }
+#splash-status:empty { display: none; }
+@media (prefers-reduced-motion: reduce) { button.splash-list-item > .icon { transition: none; } }

@@ -9,7 +9,7 @@
 .manager-load-state { display: flex; align-items: center; gap: var(--space-3); margin: calc(var(--space-2) * -1) 0 var(--space-4); color: var(--muted); font-size: var(--fs-meta); }
 .manager-load-state:not(:has(button:not([hidden]))):has(span:empty) { display: none; }
 .row-trail select { width: min(280px, 100%); }
-.brand-mark, .brand img { filter: var(--brand-filter); }
+.brand-mark { filter: var(--brand-filter); }
 
 /* ---------- browser connection setup ---------- */
 #automation-browser-setup-steps { list-style: decimal; padding-left: 1.5em; margin-top: var(--space-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }

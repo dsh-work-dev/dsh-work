@@ -77,7 +77,7 @@
   --page-head-border: 1px dashed #243024;
 }
 
-:root[data-theme-id="terminal"] :is(.page-head h1, .startup-head h1)::before { content: "> "; color: var(--accent); }
+:root[data-theme-id="terminal"] :is(.page-head h1, .startup-panel-head h1)::before { content: "> "; color: var(--accent); }
 :root[data-theme-id="terminal"] :is(.section-head h2, .version-overview-header h3)::before { content: "## "; color: var(--muted); }
 :root[data-theme-id="terminal"] .button:not(.button-icon)::before { content: "["; color: var(--muted); }
 :root[data-theme-id="terminal"] .button:not(.button-icon)::after { content: "]"; color: var(--muted); }

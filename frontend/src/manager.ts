@@ -19,6 +19,7 @@ import type {Snapshot as AutomationSnapshot} from "../bindings/github.com/local/
 import {mountAutomation} from "./automation";
 import {mountPets} from "./pets";
 import {mountDiagnostics} from "./diagnostics-panel";
+import {mountSplashSettings} from "./splash/settings";
 import {buildOverviewModel, sameRunContext, type OverviewLane} from "./overview";
 import {subscribeLocale, t} from "./i18n";
 import {icon} from "./ui/icons";
@@ -135,14 +136,14 @@ export function runtimePreparationProgressPercent(preparation: Pick<RuntimePrepa
   return preparation.state === "installed" ? 100 : undefined;
 }
 
-type ManagerSection = "environment" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "about";
+type ManagerSection = "environment" | "profiles" | "plugins" | "runtimes" | "data-directories" | "diagnostics" | "settings" | "notifications" | "browser" | "computer" | "pets" | "splash" | "about";
 
 type DesktopUpdateState = UpdateSnapshot;
 
 function sectionName(value: string | null): ManagerSection {
   if (value === "backups") return "profiles";
   if (value === "overview") return "settings";
-  if (value === "environment" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "about") {
+  if (value === "environment" || value === "profiles" || value === "plugins" || value === "runtimes" || value === "data-directories" || value === "diagnostics" || value === "settings" || value === "notifications" || value === "browser" || value === "computer" || value === "pets" || value === "splash" || value === "about") {
     return value;
   }
   return "settings";
@@ -365,6 +366,7 @@ export function mountManager() {
  browser: {title: "manager.browser"},
  computer: {title: "manager.computer"},
     pets: {title: "manager.pets"},
+    splash: {title: "manager.splash"},
     about: {title: "manager.about"}
   };
 
@@ -434,6 +436,7 @@ export function mountManager() {
     restart: () => HostService.Restart(),
     checkUpdates: () => { showSection("about"); void performUpdateAction(); },
   });
+  const splashSettings = mountSplashSettings();
 
   const sectionPositions = new Map<ManagerSection, number>();
   const sectionFocus = new Map<ManagerSection, {element: HTMLElement; selector?: string}>();
@@ -1904,6 +1907,7 @@ export function mountManager() {
     renderUpdate();
     renderBuiltinComponents();
     pets.renderLocale();
+    splashSettings.renderLocale();
   });
 
   dataDirectory.addEventListener("change", () => fillProfiles());

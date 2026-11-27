@@ -46,6 +46,7 @@ system-wide Windows service.
 | `internal/hostevents` | transport-neutral daemon state topics and expiring one-shot commands |
 | `internal/presence` | per-surface focus used by notification and navigation decisions |
 | `internal/desktopclient` | typed UI service proxies to the daemon |
+| `internal/splash` | UI-owned splash catalog, media import, local service and confined media delivery |
 | `internal/app` | Host commands, manager operations and process locks |
 | `internal/lifecycle` | window policy, quit flow and lifecycle value types |
 | `internal/supervisor` | platform-neutral Worker process contract |
@@ -413,6 +414,42 @@ the Wails build configuration.
 The callback listener is the one exception to "no TCP listener". It accepts no
 Worker traffic and only local requests. Revisit it if DSH offers a callback
 that does not need a loopback origin.
+
+## Splash
+
+The UI process owns the splash catalog, imported files and `SplashService`;
+the daemon does not manage them. Built-in scenes are registered in
+`frontend/src/splash/scene.ts`. The ids in `internal/splash/builtin.go` must
+match that registry. Users can import PNG, JPEG, WebP, GIF, AVIF and SVG images,
+or WebM and MP4 videos, up to 200 MiB. Files are copied into
+`splash/` under the active [app data root](#storage-layout) and recorded in
+`catalog.json` there. A missing or unreadable catalog, an unknown selection or a missing file falls
+back to the whale. Import does not change the current selection; deleting the
+selected item returns it to the whale. A media decoding error or a first-frame
+load timeout also falls back to the whale, keeping the current progress and
+startup result. If the built-in scene cannot render, its background colour
+remains.
+
+The shell serves imported media at `GET|HEAD /__splash/<id>`. The catalog
+must contain the 32-character lowercase hex id. Files are read through
+`os.OpenRoot` and `http.ServeContent`, which also supports video Range
+requests. Responses have a fixed content type,
+`X-Content-Type-Options: nosniff`,
+`Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox` and
+`Cache-Control: no-store`. The frontend displays imported files through
+`<img>` and `<video>`; SVG scripts and external resources cannot run in
+image context, and CSP keeps the URL inert when opened as a document.
+
+The splash lives beside settings because it controls the UI before a Worker
+exists and must also work when startup fails. A frontend scene registry keeps
+the built-in animation with its renderer; a separate catalog keeps imported
+media out of the Host preference schema. The shell-only Wails asset middleware
+serves files before the dev proxy or embedded assets, without another listener
+or daemon endpoint. The built-in Character Tide draws an original Bezier whale tail and decoupled
+live water/droplet simulation onto Canvas 2D, using `@chenglou/pretext` to pack
+locale-aware brand text strips to exact row widths without DOM reflows. Geometry, physics and typography ship with
+the shell so rendering does not depend on a Worker or on decoded media. Revisit this boundary if scenes need to be shared
+across UI clients or loaded from plugins.
 
 ## Storage layout
 

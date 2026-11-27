@@ -28,6 +28,7 @@ import (
 	"github.com/local/dsh-work/internal/nativeui"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/settings"
+	"github.com/local/dsh-work/internal/splash"
 	"github.com/local/dsh-work/internal/storagepaths"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -196,6 +197,17 @@ func runDesktopClient(identity string, resources Resources) error {
 		defer mu.Unlock()
 		return current.Update
 	}}
+	// The daemon has already applied any pending storage move. Keep the
+	// UI-owned catalog under that same app-data root.
+	var splashDir string
+	storageCtx, storageCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	var locations storagepaths.State
+	if err := client.Call(storageCtx, "StorageService", "GetLocations", "workspace", nil, &locations); err == nil && locations.Current.Root != "" {
+		splashDir = filepath.Join(locations.Current.Root, "splash")
+	}
+	storageCancel()
+	splashStore := splash.NewStore(splashDir)
+	splashService := &splash.SplashService{Store: splashStore, ChooseFile: func() (string, error) { return nativeui.ChooseSplashMedia(desktop) }}
 	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
@@ -205,7 +217,8 @@ func runDesktopClient(identity string, resources Resources) error {
 			application.NewService(&desktopclient.DiagnosticsService{Client: client}),
 			application.NewService(shellService),
 			application.NewService(&desktopclient.LogService{}),
-		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
+			application.NewService(splashService),
+		}, Assets: application.AssetOptions{Middleware: func(next http.Handler) http.Handler { return workerSurface.Middleware(splashStore.Handler(next)) }, Handler: shellState(func() string {
 			mu.Lock()
 			defer mu.Unlock()
 			return shellWorkerURL(current.URL)

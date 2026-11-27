@@ -80,8 +80,8 @@
 :root[data-theme-id="deco"] .section-head { margin-bottom: 14px; }
 :root[data-theme-id="deco"] .section-head + .group { margin-top: 4px; }
 /* centred titles between gold rules, fan above the page title */
-:root[data-theme-id="deco"] :is(.page-head, .startup-head) { position: relative; justify-content: center; padding-top: 34px; text-align: center; }
-:root[data-theme-id="deco"] :is(.page-head, .startup-head)::before {
+:root[data-theme-id="deco"] :is(.page-head, .startup-panel-head) { position: relative; justify-content: center; padding-top: 34px; text-align: center; }
+:root[data-theme-id="deco"] :is(.page-head, .startup-panel-head)::before {
   content: "";
   position: absolute;
   top: 0;
@@ -92,7 +92,7 @@
   -webkit-mask: radial-gradient(circle at 50% 100%, #000 29px, transparent 30px);
   mask: radial-gradient(circle at 50% 100%, #000 29px, transparent 30px);
 }
-:root[data-theme-id="deco"] :is(.page-head h1, .startup-head h1) { margin: 0; color: #e8c860; text-transform: uppercase; letter-spacing: 0.22em; }
+:root[data-theme-id="deco"] :is(.page-head h1, .startup-panel-head h1) { margin: 0; color: #e8c860; text-transform: uppercase; letter-spacing: 0.22em; }
 :root[data-theme-id="deco"] .page-head h1 { margin-right: 0; }
 :root[data-theme-id="deco"] .section-head h2 { display: flex; align-items: center; gap: 14px; color: #e8c860; text-transform: uppercase; letter-spacing: 0.24em; }
 :root[data-theme-id="deco"] .section-head h2::before, :root[data-theme-id="deco"] .section-head h2::after { content: ""; flex: 0 0 28px; height: 5px; border-block: 1px solid #d4af37; }

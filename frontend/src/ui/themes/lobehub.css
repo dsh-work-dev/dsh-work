@@ -158,7 +158,6 @@
 }
 /* the startup panel is inset like the Settings one; its shell fills the panel instead of the window */
 :root[data-theme-id="lobehub"] .startup { min-height: calc(100vh - 2 * var(--space-2)); margin: var(--space-2); }
-:root[data-theme-id="lobehub"] .startup-shell { min-height: calc(100vh - 2 * var(--space-2) - 2px); }
 :root[data-theme-id="lobehub"] dialog { background: var(--panel-bg); }
 :root[data-theme-id="lobehub"] :is(dialog, .shell-nav) {
   -webkit-backdrop-filter: saturate(150%) blur(10px);
