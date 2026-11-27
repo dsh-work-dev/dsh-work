@@ -80,7 +80,7 @@
 
 :root[data-theme-id="brutal"] .nav-item { border: 2px solid transparent; }
 :root[data-theme-id="brutal"] .nav-item[aria-current] { border-color: #111111; box-shadow: 3px 3px 0 #111111; }
-:root[data-theme-id="brutal"] :is(.page-head h1, .startup-head h1) { width: fit-content; background: linear-gradient(transparent 58%, #ffd23f 58%, #ffd23f 92%, transparent 92%); }
+:root[data-theme-id="brutal"] :is(.page-head h1, .startup-panel-head h1) { width: fit-content; background: linear-gradient(transparent 58%, #ffd23f 58%, #ffd23f 92%, transparent 92%); }
 :root[data-theme-id="brutal"] .section-head h2 {
   flex: none;
   margin-right: auto;
@@ -102,4 +102,3 @@
 :root[data-theme-id="brutal"] .switch-track { border-width: 3px; }
 :root[data-theme-id="brutal"] .switch input:checked + .switch-track { background: #7ae582; border-color: #111111; }
 :root[data-theme-id="brutal"] .switch input:checked + .switch-track .switch-thumb { background: #111111; border-color: #111111; }
-:root[data-theme-id="brutal"] .startup-shell { gap: 20px; }

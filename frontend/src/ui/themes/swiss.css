@@ -85,8 +85,7 @@
 :root[data-theme-id="swiss"] .section-head h2 { letter-spacing: 0.02em; }
 :root[data-theme-id="swiss"] .row:is(.is-selected, [aria-selected="true"]) .row-main > :is(strong, label) { color: var(--accent); }
 :root[data-theme-id="swiss"] .nav-item[aria-current] { padding-left: 16px; }
-:root[data-theme-id="swiss"] .startup-check { padding-inline: 0; }
-:root[data-theme-id="swiss"] .step-more, :root[data-theme-id="swiss"] .check-body { padding-left: 0; }
+:root[data-theme-id="swiss"] .step-more { padding-left: 0; }
 /* red is kept for the primary action, failure and current place */
 :root[data-theme-id="swiss"] { --marker-done-bg: var(--ink); --marker-done-fg: var(--on-ink); }
 /* flush rows only in unboxed groups; bordered containers keep an inset */

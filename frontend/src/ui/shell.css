@@ -1,8 +1,8 @@
 /* R-50 prototype: shell chrome around the framed DSH document. */
 html[data-shell] body { display: flex; flex-direction: column; height: 100vh; margin: 0; overflow: hidden; }
 html[data-shell] #host-surface { flex: 1; min-height: 0; overflow: auto; }
-/* The startup layout fills the window; under the shell bar it fills the area below it. */
-html[data-shell] .startup-shell { min-height: 100%; box-sizing: border-box; }
+/* While DSH loads behind it, the startup surface covers the frame below the 40px bar. */
+html[data-shell][data-shell-framed] #host-surface:not([hidden]) { position: fixed; inset: 40px 0 0 0; z-index: 10; }
 
 .shell-bar {
   position: relative; z-index: 20;

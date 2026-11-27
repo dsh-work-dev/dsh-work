@@ -55,6 +55,8 @@ DSH Work runs its own DSH profile, DSH Work, and can import plugins, settings, s
 
 ## Current capabilities
 
+- The startup surface shows a replaceable splash: the built-in Character Tide
+  draws a whale tail and wake above the startup status bar. Settings can import an image or video.
 - The managed DSH Work profile disables product analytics, desktop telemetry,
   feedback OTel export, official-API Session-log contribution and plugin
   inventory reporting. Profile initialization migrates these rows back to the

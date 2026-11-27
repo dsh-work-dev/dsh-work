@@ -67,3 +67,12 @@ func SaveDiagnosticsBundle(app *application.App, filename string) (string, error
 	}
 	return path, err
 }
+
+func ChooseSplashMedia(app *application.App) (string, error) {
+	path, err := app.Dialog.OpenFile().CanChooseDirectories(false).CanChooseFiles(true).
+		AddFilter("Images and videos", "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.avif;*.svg;*.webm;*.mp4").PromptForSingleSelection()
+	if runtime.GOOS == "windows" && err != nil && err.Error() == "cancelled by user" {
+		return "", nil
+	}
+	return path, err
+}

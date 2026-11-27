@@ -75,7 +75,7 @@ Every Settings page follows one grammar so pages read as one application:
 ## Navigation and pages
 
 The sidebar groups Application (General, Notifications,
-Browser, Computer, Pets), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
+Browser, Computer, Pets, Splash screen), DSH environment (Runtimes, Profiles, Plugins), and Maintenance (Storage,
 Diagnostics, About). The narrow-window selector uses the same groups. Switching sections
 preserves their selection and remembers content scroll and return focus within
 the current Settings instance.
@@ -94,6 +94,7 @@ from the overview's DSH Work tile.
 | Profiles | One column, list then detail. All profiles lists only existing profiles; each row shows the name, current marker when applicable, and plugin count. Its heading has Import profile and Import from DSH. Choosing a row opens that profile's detail, and All profiles returns to the list, as does choosing Profiles in the sidebar. The detail has the name with Switch on its heading, a group with backups (manage history, back up now) and plugins, and a Profile actions group with one row each for clone, export, rename and delete. DSH Work's own profile is titled DSH Work; it has no rename or delete rows, and built-in profiles have none either. |
 | Plugins | Explicit profile scope and current-profile mutation rules. Each third-party plugin row offers Remove (and Upgrade when available). When two or more plugins have updates, Upgrade all on the Installed heading upgrades them in one change: the Worker stops once, every package updates in order, then one health check decides. A failure is handled as one plugin change, so automatic rollback returns the profile to its state before the first upgrade. While the profile is running, the row also has an enable switch at its right edge, and a disabled plugin is marked in its details. Below the list, Official plugins (官方插件) opens with only explicitly modified entries shown, grouped by official layer. Show all reveals the complete searchable tree; Show modified only returns to edited entries. The heading counts entries in the selected view. Modifications are enablement or configuration overrides in the profile's own patch, excluding matching Work-managed defaults. An unchanged profile shows “No official plugins modified.” Each entry DSH allows to be toggled gets the same switch. Operation feedback sits near its controls. A 内置组件 section lists DSH Work's own DSH plugins (shell, account and desktop pet integration) with their load state and no controls. Check for updates re-runs the registry check. A plugin DSH disables because it does not declare support for the running DSH version is marked with that version and offers Enable anyway, which grants DSH's exemption for that exact plugin and DSH version after confirmation; an install or upgrade DSH refuses for the same reason asks before retrying with that exemption. |
 | Pets | Display section (show, always on top, size), then the pet list. The pet being viewed opens its preview in place under its row (large preview, description, Clear/Retry/Use), one pet at a time; the page opens on the pet in use. Arrow keys move between pets. |
+| Splash screen | Built-in scenes first, then imported images and videos, with Import in the group footer. One row opens a 16:9 preview in place, with Use and Remove for imported media. Scenes also offer Waiting, Success and Failure. The page opens on the splash in use; arrow keys move between rows. |
 | General and Notifications | General has Startup (failure policy) and Interface (language, theme, appearance) sections; Notifications is one group with the desktop switch and its nested event switches. |
 | Storage and About | Storage has one section per location, with migration save/cancel in the user-data footer. About has a product section (version, description, help, copy diagnostics) and an application update section. |
 | Diagnostics | Recent problems from the last 7 days, one row each with a plain title, time and repeat count, or a short empty state. Expanding a row shows the code and message, the actions that fit its code, Copy report and Report on GitHub. Below, a Logs group has the Detailed logging switch, Open log folder and Export diagnostics bundle; an exported bundle shows its saved path and any files left out. |
@@ -125,23 +126,37 @@ The Browser page directs toolchain failures to Runtimes and distinguishes
 component repair from extension reload. Follow [the setup and repair flow](browser-setup.md)
 rather than deleting caches or rebinding for every failure.
 
-Startup shows Node, DSH, profile/plugins and service-start steps. When a step
-fails, its summary, available recovery actions and bounded diagnostic output
-appear together. Copy and Report problem are available beside the diagnostics. A failure with no
-known step is presented as a general failure rather than assigned to Node.
-When the Worker fails to start or stops unexpectedly, a panel lists that
+The startup surface fills the window with the selected splash. Its bottom
+status bar shows the current step and four progress segments: Node, DSH,
+profile/plugins and service start. The bar offers cancellation while available,
+Settings, Logs and Quit. The default Character Tide sweeps a whale tail made
+of characters across the water. Spray trails the swing, then breaks out into
+a wake at the point of impact. On success the current slap resolves into a wake.
+When startup needs the user, the tail sinks and the recovery panel appears.
+The shell waits at most 1.2 seconds for the closing animation, fades the
+startup surface out over 300 ms, and releases its scene. With reduced motion,
+the scene holds a still frame and skips the fade.
+
+When a step fails or a component must be downloaded, the splash dims and a
+solid panel rises above the bar. The panel groups the failed step, its summary,
+available recovery actions and diagnostic output. Copy and Report problem are
+beside the diagnostics. A failure with no known step is presented as a general
+failure.
+When the Worker fails to start or stops unexpectedly, the panel lists that
 profile's third-party plugins with Disable and Remove. Plugins the failure
 output names (up to three) come first and are marked; already disabled plugins
 show their state and offer only Remove. With two or more enabled plugins,
 Disable all and start turns them all off in one step. Each action asks for
 confirmation and then starts again. Disable keeps the plugin installed; turn it
 back on in Plugins once DSH is running, one at a time to find the one that
-fails.
+fails. Retry lowers the panel and returns the splash to waiting.
 
-Normal startup exposes optional logs and cancellation. Failed startup exposes
-logs automatically and initially positions them at the error. Manual log scroll
-is retained. Version recovery opens a focused selector; confirmation replaces
-the selection view and cancellation returns to the record.
+Normal startup exposes optional logs. Failed startup exposes logs automatically
+and initially positions them at the error. Manual log scroll is retained.
+Version recovery opens a focused selector; confirmation replaces the selection
+view and cancellation returns to the record. Leaving the splash settings page
+or closing Settings releases its preview; reopening the page previews the
+splash in use. Imported media become active only after Use.
 
 Settings errors follow the triggering operation, and failed operation logs
 expand automatically. Selected transient success notices clear after five

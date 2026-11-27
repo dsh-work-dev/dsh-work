@@ -70,11 +70,10 @@
   border-right: 2px solid #000000;
   background: #ffffff;
 }
-:root[data-theme-id="ink"] .startup-shell { border-inline: 2px solid #000000; background: #ffffff; }
 
 /* striped title bars */
-:root[data-theme-id="ink"] :is(.page-head h1, .startup-head h1) { display: flex; align-items: center; gap: 10px; width: 100%; }
-:root[data-theme-id="ink"] :is(.page-head h1, .startup-head h1)::after {
+:root[data-theme-id="ink"] :is(.page-head h1, .startup-panel-head h1) { display: flex; align-items: center; gap: 10px; width: 100%; }
+:root[data-theme-id="ink"] :is(.page-head h1, .startup-panel-head h1)::after {
   content: "";
   flex: 1;
   height: 11px;

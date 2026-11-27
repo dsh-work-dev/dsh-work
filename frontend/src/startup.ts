@@ -8,7 +8,8 @@ import {acquisitionPreparation, runtimePreparationText, formatRuntimeBytes} from
 import {mountOperationLog} from "./operation-log";
 import {applyLocale, subscribeLocale, t} from "./i18n";
 import {latestProblem, reportOnGitHub} from "./diagnostics";
-import {icon} from "./ui/icons";
+import {currentStep, publicSteps, startupAttention, stepStates, type StepInput} from "./splash/steps";
+import {splashContainer} from "./splash/container";
 
 export function mountHost() {
   const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -42,10 +43,33 @@ export function mountHost() {
   let lastError = "";
   let lastPhase = "configuration";
   let acquisitionKind: "node" | "dsh" | undefined;
+  let acquisitionWithin: number | null = null;
   let starting: ReturnType<typeof ManagerService.SetRunContext> | undefined;
-  const progressPanel = element("startup-progress");
   const progressMessage = element("startup-progress-message");
-  const progressBar = element<HTMLProgressElement>("startup-progress-bar");
+  const splash = splashContainer();
+  const backdrop = document.querySelector<HTMLElement>(".startup-backdrop")!;
+  const panel = element("startup-panel");
+  const drawer = element("startup-drawer");
+  let panelOpen = false;
+  let panelRevision = 0;
+  void splash.mount(backdrop);
+  function setPanel(open: boolean) {
+    if (open === panelOpen) return;
+    panelOpen = open;
+    const revision = ++panelRevision;
+    if (open) {
+      void splash.finish("failed").then(() => {
+        if (revision !== panelRevision) return;
+        panel.hidden = false;
+        panel.append(diagnostics);
+        requestAnimationFrame(() => element("app-title").focus({preventScroll: true}));
+      });
+    } else {
+      panel.hidden = true;
+      drawer.append(diagnostics);
+      splash.reset();
+    }
+  }
   const pluginFault = element("startup-plugin-fault");
   const pluginFaultTitle = element("startup-plugin-fault-title");
   const pluginFaultList = element("startup-plugin-fault-list");
@@ -140,32 +164,26 @@ export function mountHost() {
     const stopped = status.state === "Stopped" && !busy;
     element("app-title").textContent = t(status.state === "Stopping" ? "startup.stopping" : failed ? "startup.attention" : stopped ? "startup.stopped" : "startup.startTitle");
     const code = status.error?.code ?? "";
-    const phase = status.state === "Starting" ? status.phase : lastPhase;
-    let current = acquisitionKind === "node" ? 0 : acquisitionKind === "dsh" ? 1 : phase === "node" || phase === "configuration" ? 0 : phase === "runtime" ? 1 : phase === "profile" ? 2 : 3;
-    if (failed) current = code.includes("NODE") ? 0 : code.includes("PROFILE") ? 2 : code.includes("RUNTIME") || code.includes("VERSION") ? 1 : code.startsWith("DSH_") || code.includes("PROCESS") ? 3 : -1;
-    if (missing && !active() && !busy) current = !installedNode() ? 0 : 1;
+    const stepInput: StepInput = {
+      ready: status.state === "Ready", starting: status.state === "Starting",
+      phase: status.state === "Starting" ? status.phase : lastPhase, acquisition: acquisitionKind,
+      failed, errorCode: code, missing: !!missing, nodeInstalled: !!installedNode(), active: active(), busy,
+    };
+    const current = stopped && !missing ? -1 : currentStep(stepInput);
+    const states = stepStates(stepInput, current);
     const ids = ["node", "dsh", "profile", "start"];
     const values = [launch?.nodeVersion || (selectedNode === "system" ? snapshot?.systemNode?.version : snapshot?.nodes?.find(n => n.id === selectedNode)?.version), launch?.runtimeVersion || selectedVersion(), startupProfileName(status, snapshot?.configured?.profile.name), t("startup.ready")];
     const labels = ["startup-node-state", "startup-dsh-state", "startup-profile", "startup-start-state"];
     ids.forEach((id, index) => {
       const row = element(`check-${id}`);
-      const done = status.state === "Ready" || index < current;
-      const running = index === current && (busy || status.state === "Starting");
-      row.dataset.state = done ? "done" : index === current && failed ? "failed" : running ? "active" : "pending";
-      const marker = row.querySelector(".check-marker")!;
-      if (done) marker.replaceChildren(icon("check"));
-      else if (index === current && failed) marker.replaceChildren(icon("triangle-alert"));
-      else if (running) marker.replaceChildren(icon("loader"));
-      else marker.textContent = String(index + 1);
+      const done = states[index] === "done";
+      const running = states[index] === "active";
+      row.dataset.state = states[index];
+      row.style.setProperty("--fill", acquiring && acquisitionKind === id && states[index] === "active" ? String(acquisitionWithin ?? 0) : "0");
       element(labels[index]).textContent = done ? index === 1 ? `${values[index] ?? ""} · ${t("startup.localInstalled")}` : values[index] ?? t("startup.available") : running ? t(index === 3 ? "startup.launching" : "startup.checking") : index === current && missing ? t("startup.missingComponent") : index === current && stopped ? t("startup.stopped") : index === current && failed ? t("startup.stepFailed") : t("startup.waiting");
       if (index === 2 && values[index] && !done) element(labels[index]).textContent = `${values[index]} · ${element(labels[index]).textContent}`;
     });
     retry.textContent = t(missing ? "startup.installAndStart" : failed ? "common.retry" : "startup.continue");
-    const currentBody = current >= 0 && !connectionFailed ? element(`check-${ids[current]}`).querySelector(".check-body")! : undefined;
-    for (const content of [progressPanel, resolution]) {
-      if (currentBody) { if (content.parentElement !== currentBody) currentBody.append(content); }
-      else document.querySelector(".startup-footer")!.before(content);
-    }
     const needsAttention = failed || !!lastError || connectionFailed;
     resolution.classList.toggle("has-error", needsAttention);
     diagnostics.hidden = !needsAttention && !logsRequested;
@@ -173,8 +191,6 @@ export function mountHost() {
     logToggle.hidden = needsAttention;
     logToggle.setAttribute("aria-expanded", String(!diagnostics.hidden));
     if (connectionFailed) output.textContent = lastError || t("startup.readError");
-    progressPanel.hidden = !acquiring;
-    if (!acquiring) progressBar.removeAttribute("value");
     element("node-controls").hidden = !(snapshot && !installedNode() && !active() && !busy);
     element("dsh-controls").hidden = !(snapshot && installedNode() && (!installedRuntime()) && !active() && !busy);
     element("status-message").textContent = t(code.includes("PROFILE") && status.error?.detail?.includes("ERR_MODULE_NOT_FOUND") ? "startup.moduleFailure" : code.includes("PROFILE") ? "startup.profileFailure" : code === "DSH_READINESS_TIMEOUT" ? "startup.timeoutFailure" : "startup.failureMessage");
@@ -198,14 +214,22 @@ export function mountHost() {
 
       element("app-title").textContent = t("startup.attention");
       for (const id of ["startup-node-state", "startup-dsh-state", "startup-profile", "startup-start-state"]) element(id).textContent = "—";
-      ["node", "dsh", "profile", "start"].forEach((id, index) => {
+      ids.forEach(id => {
         const row = element(`check-${id}`);
         row.dataset.state = "pending";
-        row.querySelector(".check-marker")!.textContent = String(index + 1);
       });
       retry.hidden = false; retry.disabled = busy; retry.textContent = t("common.retry");
       cancel.hidden = true; restoreButton.hidden = true;
     }
+    const attention = startupAttention({failed, stopped, error: !!lastError, connectionFailed, missing: !!missing, active: active(), busy});
+    setPanel(attention);
+    const stepText = (index: number) => `${element(`check-${ids[index]}`).querySelector("strong")!.textContent} · ${element(labels[index]).textContent}`;
+    if (!acquiring) {
+      progressMessage.textContent = status.state === "Ready" ? t("startup.ready") : connectionFailed ? t("startup.readError") : stopped && !missing ? t("startup.stopped") : current >= 0 ? stepText(current) : t("startup.attention");
+    }
+    if (current >= 0 && !attention) splash.progress(publicSteps[current], null);
+    element("startup-summary").textContent = current >= 0 && !connectionFailed ? stepText(current) : "";
+    drawer.hidden = attention || diagnostics.hidden;
   }
 
   function renderEnvironment() {
@@ -265,7 +289,7 @@ export function mountHost() {
     element("diagnostic-copy-status").textContent = "";
     logsRequested = false;
     busy = true; acquiring = !!acquisition; acquisitionKind = acquisition; cancelRequested = false; errorPanel.hidden = true; lastError = "";
-    progressMessage.textContent = t("startup.preparing"); progressBar.removeAttribute("value");
+    if (acquisition) progressMessage.textContent = t("startup.preparing");
     if (acquisition) {
 
       panels[acquisition].hidden = false;
@@ -279,7 +303,7 @@ export function mountHost() {
       if (acquisition) panels[acquisition].querySelector("p")!.textContent = t(cancelRequested ? "runtimes.cancelled" : "runtimes.failed");
     }
     finally {
-      busy = false; acquiring = false; acquisitionKind = undefined; cancelRequested = false;
+      busy = false; acquiring = false; acquisitionKind = undefined; acquisitionWithin = null; cancelRequested = false;
       Object.values(panels).forEach(panel => { panel.querySelector("progress")!.hidden = true; });
       if (!connectionFailed) {
         try {
@@ -347,8 +371,7 @@ export function mountHost() {
       snapshot = await ManagerService.InstallRuntime(version);
     }
     if (cancelRequested || !snapshot) return;
-    acquiring = false; acquisitionKind = undefined;
-    progressMessage.textContent = t("host.titleStarting"); progressBar.removeAttribute("value");
+    acquiring = false; acquisitionKind = undefined; acquisitionWithin = null;
     const target = {profile: snapshot.configured?.profile ?? {dataDirectoryId: "dsh-work", name: "dsh-work"}, runtimeId: selectedRuntime, node: selectedNode === "system" ? {kind: NodeSelectionKind.NodeSelectionSystem} : {kind: NodeSelectionKind.NodeSelectionManaged, installationId: selectedNode}};
     starting = ManagerService.SetRunContext(target);
     try { await starting; } finally { starting = undefined; }
@@ -416,8 +439,10 @@ export function mountHost() {
     panels[kind].querySelector("p")!.textContent = text;
     if (busy && update.state === "active") {
       progressMessage.textContent = text;
-      if (update.hasTotal && update.totalBytes) { progressBar.max = update.totalBytes; progressBar.value = update.receivedBytes ?? 0; }
-      else progressBar.removeAttribute("value");
+      const within = update.hasTotal && update.totalBytes ? (update.receivedBytes ?? 0) / update.totalBytes : null;
+      acquisitionWithin = within;
+      element(`check-${kind}`).style.setProperty("--fill", String(within ?? 0));
+      splash.progress(kind, within);
     }
     const progress = panels[kind].querySelector("progress")!;
     progress.hidden = update.state !== "active";
@@ -447,7 +472,7 @@ export function mountHost() {
   }
   const timer = window.setInterval(() => void poll(), 500);
   const offLocale = subscribeLocale(() => { renderEnvironment(); Object.values(logs).forEach(log => log.labels()); });
-  window.addEventListener("pagehide", () => { disposed = true; clearInterval(timer); offAcquisition(); offLifecycle(); offLocale(); }, {once: true});
+  window.addEventListener("pagehide", () => { disposed = true; splash.dispose(); clearInterval(timer); offAcquisition(); offLifecycle(); offLocale(); }, {once: true});
   window.addEventListener("focus", () => void refreshEnvironment().catch(showError));
   render();
   async function initialize() {

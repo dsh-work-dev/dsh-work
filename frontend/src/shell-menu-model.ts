@@ -24,7 +24,7 @@ export interface MenuState {
   sidebarLeftOpen?: boolean;
 }
 
-export type SettingsSection = "overview" | "settings" | "notifications" | "browser" | "computer" | "pets" | "runtimes" | "profiles" | "plugins" | "data-directories" | "diagnostics" | "about";
+export type SettingsSection = "overview" | "settings" | "notifications" | "browser" | "computer" | "pets" | "splash" | "runtimes" | "profiles" | "plugins" | "data-directories" | "diagnostics" | "about";
 export type WindowAction = "close" | "zoom-in" | "zoom-out" | "zoom-reset" | "fullscreen";
 /** Window actions with keys of their own, handled by the shell and forwarded by the DSH plugin. */
 export const keyedWindowActions: readonly WindowAction[] = ["zoom-in", "zoom-out", "zoom-reset", "fullscreen"];
@@ -108,7 +108,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       {...host("showPet", {kind: "pet"}, !state.busy && state.pet.ready), checked: state.pet.visible},
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
-      settings("settings", "general"), settings("notifications", "notifications"), settings("browser", "browser"), settings("computer", "computer"), settings("pets", "pets"),
+      settings("settings", "general"), settings("notifications", "notifications"), settings("browser", "browser"), settings("computer", "computer"), settings("pets", "pets"), settings("splash", "splash"),
       separator,
       settings("runtimes", "runtimes"), settings("profiles", "profiles"), settings("plugins", "plugins"),
       separator,

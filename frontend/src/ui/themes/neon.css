@@ -87,7 +87,7 @@
     var(--group-bg);
 }
 :root[data-theme-id="neon"] .button:not(.button-quiet):not(.button-icon) { clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px)); text-transform: uppercase; letter-spacing: 0.04em; }
-:root[data-theme-id="neon"] :is(.page-head h1, .startup-head h1) { color: #ffffff; text-shadow: 0 0 6px #00f0ff, 0 0 18px rgb(0 240 255 / 60%), 2px 0 0 rgb(255 42 109 / 70%); }
+:root[data-theme-id="neon"] :is(.page-head h1, .startup-panel-head h1) { color: #ffffff; text-shadow: 0 0 6px #00f0ff, 0 0 18px rgb(0 240 255 / 60%), 2px 0 0 rgb(255 42 109 / 70%); }
 :root[data-theme-id="neon"] .page-head { border-image: linear-gradient(90deg, #ff2a6d, #00f0ff 60%, transparent) 1; }
 :root[data-theme-id="neon"] .section-head h2 { color: #00f0ff; text-transform: uppercase; letter-spacing: 0.1em; text-shadow: 0 0 8px rgb(0 240 255 / 55%); }
 :root[data-theme-id="neon"] .section-head h2::before { content: "// "; color: #ff2a6d; }
