@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/platform"
@@ -34,6 +36,17 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) (runErr error) {
+	if len(args) > 0 && args[0] == "cef-package-verify" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		result := distribution.Inspect(exe, version.String(), runtime.GOARCH, version.CEFPublicationSHA256)
+		if result.State != distribution.Ready {
+			return fmt.Errorf("CEF_PACKAGE_INVALID: %s: %w", result.State, result.Reason)
+		}
+		return nil
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version") {
 		printVersion(stdout)
 		return nil

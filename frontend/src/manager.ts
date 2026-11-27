@@ -492,7 +492,8 @@ export function mountManager() {
       case UpdatePhase.UpdateAvailable: return t("about.update.available", {version: target});
       case UpdatePhase.UpdateDownloading: return t("about.update.downloading", {version: target});
       case UpdatePhase.UpdateVerifying: return t("about.update.verifying", {version: target});
-      case UpdatePhase.UpdateReady: return t("about.update.ready", {version: target});
+      case UpdatePhase.UpdateReady: return state.errorCode === "shutdown"
+        ? t("about.update.shutdownDeferred") : t("about.update.ready", {version: target});
       case UpdatePhase.UpdateInstalling: return t("about.update.installing");
       case UpdatePhase.UpdateError:
         if (state.errorCode === "check") return t("about.update.errorCheck");

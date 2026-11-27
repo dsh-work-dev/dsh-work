@@ -11,15 +11,21 @@ type WindowAdmission struct {
 	Lease   string `json:"lease"`
 	Surface string `json:"surface"`
 }
+type artifactAdmission struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 type presenterWindow struct {
-	serial   sync.Mutex
-	peer     PresenterPeer
-	parent   uintptr
-	owner    presenterOwner
-	lease    string
-	closed   bool
-	finished bool
-	done     chan struct{}
+	artifactPick *artifactAdmission
+	serial       sync.Mutex
+	peer         PresenterPeer
+	parent       uintptr
+	owner        presenterOwner
+	lease        string
+	closed       bool
+	finished     bool
+	done         chan struct{}
 }
 
 func (r *PresenterRegistry) RegisterWindow(ctx context.Context, peer PresenterPeer, surface string, parent uintptr) (WindowAdmission, error) {
@@ -54,6 +60,7 @@ func (r *PresenterRegistry) RegisterWindow(ctx context.Context, peer PresenterPe
 		}
 		if !window.finished {
 			window.closed = true
+			window.retireArtifactPick()
 			window.finished = true
 			close(window.done)
 		}
@@ -85,6 +92,7 @@ func (r *PresenterRegistry) RegisterWindow(ctx context.Context, peer PresenterPe
 		}
 		wasClosed := window.closed
 		window.closed = true
+		window.retireArtifactPick()
 		window.finished = true
 		close(window.done)
 		if !wasClosed && r.WindowRetired != nil {
@@ -119,6 +127,7 @@ func (r *PresenterRegistry) RetireDocument(ctx context.Context, peer PresenterPe
 		return err
 	}
 	defer w.serial.Unlock()
+	w.retireArtifactPick()
 	return r.closeWindowViews(ctx, peer, surface)
 }
 func (r *PresenterRegistry) WindowStreamScope(peer PresenterPeer, lease string) (string, <-chan struct{}, error) {
@@ -175,6 +184,7 @@ func (r *PresenterRegistry) CloseWindow(ctx context.Context, peer PresenterPeer,
 	lease := w.lease
 	if !w.closed {
 		w.closed = true
+		w.retireArtifactPick()
 		if r.WindowRetired != nil {
 			r.WindowRetired(peer, surface)
 		}
@@ -196,6 +206,7 @@ func (r *PresenterRegistry) invalidateWindow(w *presenterWindow, surface string)
 	defer w.serial.Unlock()
 	if !w.closed {
 		w.closed = true
+		w.retireArtifactPick()
 		if r.WindowRetired != nil {
 			r.WindowRetired(w.peer, surface)
 		}
@@ -218,4 +229,14 @@ func (r *PresenterRegistry) finishWindowLocked(w *presenterWindow) error {
 		close(w.done)
 	}
 	return nil
+}
+
+// Called with the window serial lock. The native picker closes its done barrier
+// immediately after its actual STA drains, before reacquiring registry locks.
+func (w *presenterWindow) retireArtifactPick() {
+	if p := w.artifactPick; p != nil {
+		p.cancel()
+		<-p.done
+		w.artifactPick = nil
+	}
 }

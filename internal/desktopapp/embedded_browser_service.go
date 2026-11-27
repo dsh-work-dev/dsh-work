@@ -6,6 +6,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/daemon"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 )
 
 // embeddedBrowserService is a presenter-only bridge. No Agent identity or
@@ -18,10 +19,42 @@ type embeddedBrowserService struct {
 }
 
 func (s *embeddedBrowserService) Capability(ctx context.Context) (bool, error) {
-	return s != nil && s.Registry != nil && s.Compatible != nil && s.Compatible(ctx), nil
+	state, err := s.Availability(ctx)
+	return state.State == distribution.Ready, err
+}
+func (s *embeddedBrowserService) Availability(ctx context.Context) (distribution.Availability, error) {
+	if embeddedDevelopmentRoot() == "" {
+		publication := embeddedPublication()
+		if publication.State != distribution.Ready {
+			return distribution.Availability{State: publication.State, Code: availabilityCode(publication.State)}, nil
+		}
+	} else if embeddedExecutable() == "" {
+		return distribution.Availability{State: distribution.Missing, Code: availabilityCode(distribution.Missing)}, nil
+	}
+	if s == nil || s.Registry == nil || s.Compatible == nil || !s.Compatible(ctx) {
+		return distribution.Availability{State: distribution.UnsupportedRuntime, Code: availabilityCode(distribution.UnsupportedRuntime)}, nil
+	}
+	return distribution.Availability{State: distribution.Ready, Code: availabilityCode(distribution.Ready)}, nil
+}
+
+func availabilityCode(state distribution.State) string {
+	switch state {
+	case distribution.Missing:
+		return "CEF_INSTALL_MISSING"
+	case distribution.Corrupt:
+		return "CEF_INSTALL_CORRUPT"
+	case distribution.Incompatible:
+		return "CEF_INSTALL_INCOMPATIBLE"
+	case distribution.UnsupportedRuntime:
+		return "CEF_DSH_RUNTIME_UNSUPPORTED"
+	case distribution.UnsupportedPlatform:
+		return "CEF_PLATFORM_UNSUPPORTED"
+	default:
+		return "CEF_READY"
+	}
 }
 func (s *embeddedBrowserService) nativePeer(ctx context.Context) (embeddedbrowser.PresenterPeer, string, error) {
-	enabled := s != nil && s.Registry != nil && embeddedDevelopmentRoot() != ""
+	enabled := s != nil && s.Registry != nil && embeddedRuntimeReady()
 	p, ok := daemon.ProcessPeerFrom(ctx)
 	surface := daemon.SurfaceFrom(ctx)
 	if !enabled || !ok || !embeddedWorkspaceSurface(surface) {
@@ -49,6 +82,13 @@ func (s *embeddedBrowserService) Hide(ctx context.Context) error {
 		return err
 	}
 	return s.Registry.Hide(ctx, peer, surface)
+}
+func (s *embeddedBrowserService) Cover(ctx context.Context) ([]embeddedbrowser.Preview, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Registry.Cover(ctx, peer, surface)
 }
 func (s *embeddedBrowserService) Detach(ctx context.Context, slot string) error {
 	peer, surface, err := s.peer(ctx)
@@ -115,6 +155,14 @@ func (s *embeddedBrowserService) CloseInstance(ctx context.Context) error {
 	return s.Registry.CloseInstance(ctx, peer, surface)
 }
 
+func (s *embeddedBrowserService) PrepareCloseInstance(ctx context.Context) error {
+	peer, surface, err := s.nativePeer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.PrepareCloseInstance(ctx, peer, surface)
+}
+
 func (s *embeddedBrowserService) QuitOwned(ctx context.Context, owners []embeddedbrowser.ExpectedUIOwner, expires int64) error {
 	if s == nil || s.Registry == nil || s.Quit == nil || len(owners) > 2 {
 		return errors.New("CEF_RUNNER_QUIT_UNAVAILABLE")
@@ -154,4 +202,44 @@ func (s *embeddedBrowserService) ConfigureMacPresenter(ctx context.Context, pare
 		return err
 	}
 	return embeddedbrowser.ConfigureMacPresenter(peer, uintptr(parent), endpoint, token)
+}
+
+func (s *embeddedBrowserService) AnswerDialog(ctx context.Context, slot string, dialog embeddedbrowser.WebDialog, accept bool, text string) error {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.AnswerDialog(ctx, peer, surface, slot, dialog, accept, text)
+}
+
+func (s *embeddedBrowserService) PresentDialog(ctx context.Context, slot string, dialog embeddedbrowser.WebDialog, ready bool) error {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return err
+	}
+	return s.Registry.PresentDialog(ctx, peer, surface, slot, dialog, ready)
+}
+
+func (s *embeddedBrowserService) CancelDownload(ctx context.Context, slot, id string) error {
+	peer, surface, e := s.peer(ctx)
+	if e != nil {
+		return e
+	}
+	return s.Registry.CancelDownload(ctx, peer, surface, slot, id)
+}
+
+func (s *embeddedBrowserService) Popup(ctx context.Context, slot string, popup embeddedbrowser.WebPopup, action string) (string, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return "", err
+	}
+	return s.Registry.Popup(ctx, peer, surface, slot, popup, action)
+}
+
+func (s *embeddedBrowserService) OpenArtifact(ctx context.Context, parent uint64, windowLease, slot string) (embeddedbrowser.ViewState, error) {
+	peer, surface, err := s.peer(ctx)
+	if err != nil {
+		return embeddedbrowser.ViewState{}, err
+	}
+	return s.Registry.OpenArtifact(ctx, peer, surface, uintptr(parent), windowLease, slot)
 }

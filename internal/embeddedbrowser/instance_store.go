@@ -22,9 +22,10 @@ type InstanceConfig struct {
 	directory string
 }
 type TabDescriptor struct {
-	Slot  string `json:"slot"`
-	URL   string `json:"url"`
-	Title string `json:"title"`
+	ArtifactName string `json:"artifactName,omitempty"`
+	Slot         string `json:"slot"`
+	URL          string `json:"url"`
+	Title        string `json:"title"`
 }
 type instanceCatalog struct {
 	Version int               `json:"version"`
@@ -200,17 +201,23 @@ func safeDescriptor(d TabDescriptor) (TabDescriptor, error) {
 	if len(d.Slot) == 0 || len(d.Slot) > 1024 || len(d.URL) > 8192 {
 		return TabDescriptor{}, errors.New("CEF_DESCRIPTOR_REJECTED")
 	}
-	u, err := url.Parse(d.URL)
-	if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return TabDescriptor{}, errors.New("CEF_DESCRIPTOR_URL_REJECTED")
+	if d.ArtifactName != "" {
+		if d.URL != "" || len(d.ArtifactName) > 255 || filepath.Base(d.ArtifactName) != d.ArtifactName || strings.ContainsAny(d.ArtifactName, "\\/\x00\r\n") {
+			return TabDescriptor{}, errors.New("CEF_DESCRIPTOR_ARTIFACT_REJECTED")
+		}
+	} else {
+		u, err := url.Parse(d.URL)
+		if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return TabDescriptor{}, errors.New("CEF_DESCRIPTOR_URL_REJECTED")
+		}
+		// Persist only a safe navigation description, not token-bearing query/hash,
+		// form values, DOM, engine identity, permission or executable state.
+		u.RawQuery = ""
+		u.ForceQuery = false
+		u.Fragment = ""
+		u.RawFragment = ""
+		d.URL = u.String()
 	}
-	// Persist only a safe navigation description, not token-bearing query/hash,
-	// form values, DOM, engine identity, permission or executable state.
-	u.RawQuery = ""
-	u.ForceQuery = false
-	u.Fragment = ""
-	u.RawFragment = ""
-	d.URL = u.String()
 	d.Title = strings.Map(func(c rune) rune {
 		if c < ' ' || c == 127 {
 			return -1

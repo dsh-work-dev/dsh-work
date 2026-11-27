@@ -3,7 +3,7 @@
 package desktopclient
 
 /*
-#cgo CXXFLAGS: -std=c++20
+#cgo CXXFLAGS: -std=c++20 -x objective-c++
 #cgo LDFLAGS: -framework Cocoa -framework QuartzCore
 #include <stdlib.h>
 #include "presenter_view_darwin.h"

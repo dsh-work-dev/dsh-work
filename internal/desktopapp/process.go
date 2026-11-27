@@ -20,11 +20,13 @@ import (
 	"github.com/local/dsh-work/internal/automation/computeruia"
 	"github.com/local/dsh-work/internal/browserhost"
 	"github.com/local/dsh-work/internal/daemon"
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/storagepaths"
+	"github.com/local/dsh-work/internal/version"
 )
 
 type Resources struct {
@@ -33,6 +35,14 @@ type Resources struct {
 }
 
 func Run(resources Resources) {
+	if len(os.Args) > 1 && os.Args[1] == "cef-package-verify" {
+		exe, err := os.Executable()
+		if err != nil || distribution.Inspect(exe, version.String(), "amd64", version.CEFPublicationSHA256).State != distribution.Ready {
+			fmt.Fprintln(os.Stderr, "CEF_PACKAGE_INVALID")
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "computer-uia-probe" {
 		if err := computeruia.RunHelper(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

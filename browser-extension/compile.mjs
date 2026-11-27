@@ -8,6 +8,7 @@ export async function compileRoutes() {
  return result.outputFiles[0].contents;
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
+ await import('../scripts/build-action-indicator.mjs');
  fs.writeFileSync(new URL('routes.js',import.meta.url),await compileRoutes());
  await build({entryPoints:[fileURLToPath(new URL('playwright/cdpRelayV2.ts',import.meta.url))],bundle:true,format:'esm',platform:'node',outfile:fileURLToPath(new URL('../internal/automation/browserruntime/cdp-adapter.mjs',import.meta.url)),banner:{js:'/*! Microsoft Playwright, Apache-2.0. See browser-extension/LICENSE, NOTICE and PROVENANCE.txt. */'}});
 }

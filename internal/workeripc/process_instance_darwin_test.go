@@ -39,8 +39,16 @@ func TestDarwinNodeProcessAdmission(t *testing.T) {
 import {readFileSync} from 'node:fs';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {openPrivateSocket} from './native-socket.mjs';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
 const config=JSON.parse(readFileSync(new URL('./connection.json',import.meta.url)));
 const socket=await openPrivateSocket(config);
+// The bridge's external owner is now unreachable. Force its real N-API
+// finalizer, then exercise the cold-child-spawn path before the live echo.
+for(let i=0;i<3;i++){global.gc();await new Promise(setImmediate)}
+const child=spawn(process.execPath,['-e','process.exit(0)'],{stdio:'ignore'});
+const [code]=await once(child,'exit');if(code!==0)throw Error('cold child failed');
+global.gc();await new Promise(setImmediate);
 socket.on('error',error=>{ console.error(error.code); process.exitCode=1; });
 let bytes=Buffer.alloc(0),nonce,done=false;
 socket.on('data',chunk=>{
@@ -60,7 +68,7 @@ socket.on('data',chunk=>{
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, node, fixture)
+	cmd := exec.CommandContext(ctx, node, "--expose-gc", fixture)
 	var output strings.Builder
 	cmd.Stdout = &output
 	cmd.Stderr = &output

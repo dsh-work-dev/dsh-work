@@ -586,6 +586,20 @@ Section "Program files" SEC_PROGRAM_FILES
     ClearErrors
     !insertmacro wails.files
     !insertmacro dshwork.cli
+    !ifdef ARG_DSH_WORK_CEF_DIR
+        SetOutPath "$DshWorkStagingDir\embedded-cef"
+        ; CEF's SET_LPAC_ACLS grants this SID on its build output, but NSIS
+        ; extracts fresh files. Grant the same inheritable read/execute ACE
+        ; before extraction so sandboxed children can load DLLs/resources.
+        StrCpy $DshWorkFailureStage "grant CEF sandbox read access in $DshWorkStagingDir"
+        ClearErrors
+        ExecWait '"$SYSDIR\icacls.exe" "$DshWorkStagingDir\embedded-cef" /grant "*S-1-15-2-2:(OI)(CI)(RX)"' $0
+        IfErrors packageStageFailed
+        StrCmp $0 0 0 packageStageFailed
+        StrCpy $DshWorkFailureStage "extract CEF publication into $DshWorkStagingDir"
+        File /r "${ARG_DSH_WORK_CEF_DIR}\*"
+        SetOutPath "$DshWorkStagingDir"
+    !endif
     File "..\..\..\LICENSE"
     File "..\..\..\COMMERCIAL.md"
     IfErrors packageStageFailed
@@ -593,6 +607,20 @@ Section "Program files" SEC_PROGRAM_FILES
     IfFileExists "$DshWorkStagingDir\${PRODUCT_EXECUTABLE}" 0 packageStageFailed
     StrCpy $DshWorkFailureStage "verify CLI executable $DshWorkStagingDir\${CLI_EXECUTABLE}"
     IfFileExists "$DshWorkStagingDir\${CLI_EXECUTABLE}" 0 packageStageFailed
+    !ifdef ARG_DSH_WORK_CEF_DIR
+        StrCpy $DshWorkFailureStage "verify CEF publication in $DshWorkStagingDir"
+        IfFileExists "$DshWorkStagingDir\embedded-cef\publication.json" 0 packageStageFailed
+        IfFileExists "$DshWorkStagingDir\embedded-cef\dsh_cef_broker.exe" 0 packageStageFailed
+        IfFileExists "$DshWorkStagingDir\embedded-cef\dsh_cef_broker.dll" 0 packageStageFailed
+        ClearErrors
+        ExecWait '"$DshWorkStagingDir\${PRODUCT_EXECUTABLE}" cef-package-verify' $0
+        IfErrors packageStageFailed
+        StrCmp $0 0 0 packageStageFailed
+        ClearErrors
+        ExecWait '"$DshWorkStagingDir\${CLI_EXECUTABLE}" cef-package-verify' $0
+        IfErrors packageStageFailed
+        StrCmp $0 0 0 packageStageFailed
+    !endif
     StrCpy $DshWorkFailureStage "move staged install into $INSTDIR"
     !insertmacro dshwork.replaceInstall
     Call dshwork.registerProtocol

@@ -2,7 +2,7 @@
 // No launch/navigation/model/permission calls. Restores its sidebar width/open state.
 // Usage: node scripts/probe-browser-layout.mjs <port> <output.json>
 // Native HWND visibility/pixels remain a separate OS check; State is its ACK.
-import {readFileSync,writeFileSync} from 'node:fs';
+import {writeFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 const [port='9333',output='bin/browser-layout.json']=process.argv.slice(2);
 const targets=await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -19,15 +19,19 @@ const shell=contexts.find(c=>c.auxData?.frameId===main&&c.auxData?.isDefault)?.i
 const dsh=contexts.find(c=>/wails\.localhost:48217/.test(c.origin)&&c.auxData?.isDefault)?.id;
 assert(shell&&dsh,'Shell and DSH contexts required');
 const evaluate=async(contextId,expression)=>{const r=await send('Runtime.evaluate',{contextId,expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};
-const generated=readFileSync(new URL('../frontend/bindings/github.com/local/dsh-work/internal/desktopclient/embeddedbrowserservice.ts',import.meta.url),'utf8');
-const stateId=Number(generated.match(/export function State\([^]*?\$Call\.ByID\((\d+)/)?.[1]);assert(stateId);
 const report={port:Number(port),samples:[]};let original,installed=false;
-async function snapshot(){return evaluate(shell,`(async()=>{const frame=document.querySelector('iframe'),token=decodeURIComponent(new URL(frame.src).hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const {Call}=await import('/wails/runtime.js');const rows=[];for(const slot of __browserLayoutProbe.slots){try{rows.push({slot,state:await Call.ByID(${stateId},token,slot)})}catch(error){rows.push({slot,error:String(error)})}}return {at:performance.now(),rows,updates:__browserLayoutProbe.updates.slice()}})()`)}
+// Use the document's existing bridge. Importing another Wails runtime replaces
+// its global dispatcher and strands the application's own event listeners.
+async function snapshot(){
+ const sample=await evaluate(shell,`({at:performance.now(),slots:[...__browserLayoutProbe.slots],updates:__browserLayoutProbe.updates.slice()})`);
+ const rows=await evaluate(dsh,`(async()=>{const origin=location.ancestorOrigins[0],token=decodeURIComponent(location.hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');const rows=[];for(const slot of ${JSON.stringify(sample.slots)}){try{const state=await new Promise((resolve,reject)=>{const id=crypto.randomUUID();const finish=(error,value)=>{clearTimeout(timer);removeEventListener('message',receive);error?reject(Error(error)):resolve(value)};const receive=e=>{const m=e.data;if(e.source===parent&&e.origin===origin&&m?.version===1&&m.type==='dsh-work/browser-result'&&m.id===id)finish(m.error,m.value)};const timer=setTimeout(()=>finish('Browser state probe timed out'),6000);addEventListener('message',receive);parent.postMessage({version:1,type:'dsh-work/browser',id,action:'state',document:token,slot},origin)});rows.push({slot,state})}catch(error){rows.push({slot,error:String(error)})}}return rows})()`);
+ return {at:sample.at,rows,updates:sample.updates};
+}
 const until=async(label,fn)=>{const deadline=Date.now()+6000;while(Date.now()<deadline){const value=await fn();if(value)return value;await pause(30)}throw Error(label+' deadline')};
 const mouse=(type,x,y)=>send('Input.dispatchMouseEvent',{type,x,y,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1});
 async function drag(from,to){await mouse('mousePressed',from.x,from.y);try{for(let n=1;n<=32;n++){await mouse('mouseMoved',from.x+(to.x-from.x)*n/32,from.y);await pause(12);if(n%4===0)report.samples.push(await snapshot())}}finally{await mouse('mouseReleased',to.x,from.y)}await pause(150)}
 try{
- await evaluate(shell,`(()=>{if(globalThis.__browserLayoutProbe)throw Error('Probe already installed');const frame=document.querySelector('iframe'),probe={slots:new Set(),updates:[]};probe.listen=e=>{if(e.source!==frame.contentWindow||e.data?.type!=='dsh-work/browser')return;const m=e.data;if(typeof m.slot==='string')probe.slots.add(m.slot);if(m.action==='update')probe.updates.push({at:performance.now(),slot:m.slot,visible:m.visible,rect:m.rect})};addEventListener('message',probe.listen);globalThis.__browserLayoutProbe=probe;return true})()`);installed=true;
+ await evaluate(shell,`(()=>{if(globalThis.__browserLayoutProbe)throw Error('Probe already installed');const frame=document.querySelector('iframe'),probe={slots:new Set(),updates:[],dispatcher:window._wails.dispatchWailsEvent};probe.listen=e=>{if(e.source!==frame.contentWindow||e.data?.type!=='dsh-work/browser')return;const m=e.data;if(typeof m.slot==='string')probe.slots.add(m.slot);if(m.action==='update')probe.updates.push({at:performance.now(),slot:m.slot,visible:m.visible,rect:m.rect})};addEventListener('message',probe.listen);globalThis.__browserLayoutProbe=probe;return true})()`);installed=true;
  report.before=await until('existing slot polling',async()=>{const value=await snapshot();return value.rows.length?value:undefined});const ready=report.before.rows.filter(r=>r.state?.state==='ready'&&r.state.visible);assert.equal(ready.length,1,'Exactly one isolated ready browser slot required');report.identity=ready[0];
  original=await evaluate(dsh,`(()=>{const panel=[...document.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(e=>e.getClientRects().length),handle=document.querySelector('[data-side="rightbar"]');if(!panel||!handle)throw Error('Expanded dock resize control required');const r=handle.getBoundingClientRect();return{width:panel.getBoundingClientRect().width,x:r.x+r.width/2,y:r.y+Math.min(100,r.height/2)}})()`);
  const offset=await evaluate(shell,`(()=>{const r=document.querySelector('iframe').getBoundingClientRect();return{x:r.left,y:r.top}})()`);
@@ -47,7 +51,7 @@ try{
 }catch(error){report.error=String(error);process.exitCode=1}
 finally{
  try{if(original){await evaluate(dsh,`(()=>{const b=document.querySelector('[data-sidebar-right-expand]');if(b&&!b.disabled&&b.getClientRects().length)b.click();return true})()`);await pause(400);const current=await evaluate(dsh,`(()=>{const p=[...document.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(e=>e.getClientRects().length),h=document.querySelector('[data-side="rightbar"]'),r=h?.getBoundingClientRect();return{width:p?.getBoundingClientRect().width,x:r?.x+r?.width/2,y:r?.y+Math.min(100,r?.height/2)}})()`);if(Math.abs(current.width-original.width)>2){const offset=await evaluate(shell,`(()=>{const r=document.querySelector('iframe').getBoundingClientRect();return{x:r.x,y:r.y}})()`),x=current.x+offset.x,y=current.y+offset.y,end=x+current.width-original.width;await mouse('mousePressed',x,y);try{for(let n=1;n<=16;n++){await mouse('mouseMoved',x+(end-x)*n/16,y);await pause(16)}}finally{await mouse('mouseReleased',end,y)}await pause(200)}report.restoredWidth=await evaluate(dsh,`(()=>{const p=[...document.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(e=>e.getClientRects().length);return p?.getBoundingClientRect().width})()`);if(Math.abs(report.restoredWidth-original.width)>2)throw Error('Sidebar width was not restored')}}catch(error){report.restoreError=String(error);process.exitCode=1}
- if(installed)await evaluate(shell,`(()=>{removeEventListener('message',__browserLayoutProbe.listen);delete globalThis.__browserLayoutProbe;return true})()`);
+ if(installed){report.dispatcherPreserved=await evaluate(shell,`(()=>{const same=__browserLayoutProbe.dispatcher===window._wails.dispatchWailsEvent;removeEventListener('message',__browserLayoutProbe.listen);delete globalThis.__browserLayoutProbe;return same})()`);if(!report.dispatcherPreserved){report.restoreError='Wails event dispatcher changed';process.exitCode=1}}
  writeFileSync(output,JSON.stringify(report,null,2));ws.close();console.log(JSON.stringify({output,passed:report.passed,error:report.error,restoreError:report.restoreError}));
 }
 

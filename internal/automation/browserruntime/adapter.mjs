@@ -12,7 +12,7 @@ import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
 import {openPrivateSocket} from './native-socket.mjs';
 // Trusted launch-only diagnostics: fixed, once-per-process metadata only.
-const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
+const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','private-end','private-finish','cdp-upgrade','cdp-connected','uncaught-exception','unhandled-rejection','process-exit-zero','process-exit-nonzero','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
 const diagnosticSeen=new Set();
 let diagnosticStop;
 const diagnostic=stage=>{
@@ -22,6 +22,11 @@ const diagnostic=stage=>{
  try{fs.writeSync(2,'DSH_MCP_EVENT '+stage+'\n')}catch{}
 };
 diagnostic('entry');
+if(process.env.DSH_WORK_BROWSER_DIAGNOSTICS==='1'){
+ // Monitor, not a handler: Node retains its default exception/exit behavior.
+ process.on('uncaughtExceptionMonitor',(_error,origin)=>diagnostic(origin==='unhandledRejection'?'unhandled-rejection':'uncaught-exception'));
+ process.on('exit',code=>diagnostic(code===0?'process-exit-zero':'process-exit-nonzero'));
+}
 let stopping=false;
 const connection=JSON.parse(fs.readFileSync(new URL('./native-connection.json',import.meta.url),'utf8'));
 const socket=await openPrivateSocket(connection,()=>stopping);
@@ -38,6 +43,7 @@ const mac=role=>createHmac('sha256',token).update(role).update(nonce).digest();
 const send=m=>{const b=Buffer.from(JSON.stringify(m));if(b.length>8*1024*1024)throw Error('BROWSER_ADAPTER_MESSAGE_TOO_LARGE');const h=Buffer.alloc(4);h.writeUInt32LE(b.length);socket.write(Buffer.concat([h,b]));};
 async function stop(reason){if(stopping)return;stopping=true;diagnostic('stop-'+reason);for(const p of commands.values()){clearTimeout(p.timer);p.reject(Error('BROWSER_ROUTE_CLOSED'))}commands.clear();try{await client?.close()}catch{}try{await transport?.close()}catch{}cdp?.terminate();wss?.close();server?.close();socket.destroy();}
 socket.on('error',()=>void stop('private-error'));socket.on('close',()=>void stop('private-close'));
+socket.on('end',()=>diagnostic('private-end'));socket.on('finish',()=>diagnostic('private-finish'));
 socket.setTimeout(3000,()=>{diagnostic('stop-private-timeout');socket.destroy()});
 let frameScheduled=false;
 function dispatchFrame(){
@@ -72,11 +78,11 @@ async function receive(m){
   require=createRequire(path.join(m.dependencies,'package.json'));
   for(const [name,version] of [['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1']])if(JSON.parse(fs.readFileSync(path.join(m.dependencies,'node_modules',name,'package.json'))).version!==version)throw Error('BROWSER_DEPENDENCY_UPDATE_REQUIRED');
   const {WebSocketServer}=require('ws');
-  const command=(method,params,optional=false)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop('wire-timeout')}},optional?250:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
+  const command=(method,params,optional=false,optionalTimeout=250)=>new Promise((resolve,reject)=>{const id=++commandId;const timer=setTimeout(()=>{commands.delete(id);reject(Error('BROWSER_WIRE_TIMEOUT'));if(!optional){send({kind:'fatal',error:'BROWSER_WIRE_TIMEOUT'});void stop('wire-timeout')}},optional?optionalTimeout:20000);commands.set(id,{resolve,reject,timer});try{send({kind:'wire',payload:{id,method,params}})}catch(e){clearTimeout(timer);commands.delete(id);reject(e)}});
   const protocol=m.routeProtocol??'extension-v2';
   if(!['extension-v2','owned-cef-v1'].includes(protocol))throw Error('BROWSER_ROUTE_PROTOCOL_REJECTED');
   model=protocol==='owned-cef-v1'?new OwnedCEFProtocolV1(command):new ExtensionProtocolV2(command);
-  indicator=value=>{void command('dsh.indicator',value,true).catch(()=>{});};
+  indicator=value=>protocol==='owned-cef-v1'?command('dsh.indicator',value,true,900).catch(()=>{}):void command('dsh.indicator',value,true).catch(()=>{});
   const dispatch=async(method,params,sessionId)=>{
    if(method==='Browser.getVersion')return{protocolVersion:'1.3',product:'Chrome/DSH-Work',userAgent:'DSH-Work/0.2.0'};
    if(method==='Browser.setDownloadBehavior')return{};
@@ -86,8 +92,8 @@ async function receive(m){
   };
   const endpointPath='/cdp/'+randomBytes(24).toString('hex');
   server=http.createServer((_req,res)=>res.writeHead(404).end());wss=new WebSocketServer({noServer:true,maxPayload:8*1024*1024});
-  server.on('upgrade',(req,s,head)=>{if(req.url!==endpointPath||req.headers.origin||cdp||stopping){s.destroy();return}wss.handleUpgrade(req,s,head,ws=>wss.emit('connection',ws))});
-  wss.on('connection',ws=>{cdp=ws;model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop('cdp-error'));ws.on('close',()=>void stop('cdp-close'));ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
+  server.on('upgrade',(req,s,head)=>{if(req.url!==endpointPath||req.headers.origin||cdp||stopping){s.destroy();return}diagnostic('cdp-upgrade');wss.handleUpgrade(req,s,head,ws=>wss.emit('connection',ws))});
+  wss.on('connection',ws=>{cdp=ws;diagnostic('cdp-connected');model.connectOverCDP(value=>{if(ws.readyState===1)ws.send(JSON.stringify(value))});ws.on('error',()=>void stop('cdp-error'));ws.on('close',()=>void stop('cdp-close'));ws.on('message',async data=>{let v;try{v=JSON.parse(data);const result=await dispatch(v.method,v.params,v.sessionId);if(ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,result}))}catch(e){if(v&&ws.readyState===1)ws.send(JSON.stringify({id:v.id,sessionId:v.sessionId,error:{code:-32000,message:e.message}}))}})});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve)});
   // Go may now flush the extension's initialization messages into this model.
   send({kind:'adapter-ready'});diagnostic('adapter-ready');
@@ -111,7 +117,7 @@ async function receive(m){
    const args=m.arguments;if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(schema.inputSchema.properties??{},k)))throw Error('BROWSER_INVALID_ARGUMENT');
    const validated=validator.getValidator(schema.inputSchema)(args);if(!validated.valid)throw Error('BROWSER_INVALID_ARGUMENT: '+validated.errorMessage);
    if(Buffer.byteLength(JSON.stringify(args))>256*1024)throw Error('BROWSER_INPUT_TOO_LARGE: reduce complete UTF-8 JSON arguments to 262144 bytes');
-   if(m.tool==='browser_file_upload'||m.tool==='browser_drop') {let total=0;for(const file of args.paths??[]){if(!path.isAbsolute(file))throw Error('BROWSER_UPLOAD_ABSOLUTE_PATH_REQUIRED');const stat=fs.statSync(file);if(!stat.isFile())throw Error('BROWSER_UPLOAD_NOT_FILE');total+=stat.size;}if(total>256*1024)throw Error('BROWSER_UPLOAD_TOO_LARGE: total file size must not exceed 262144 bytes');}
+   if(m.tool==='browser_file_upload'||m.tool==='browser_drop') {if(model instanceof OwnedCEFProtocolV1&&(m.tool==='browser_file_upload'||args.paths?.length>0))throw Error('BROWSER_FILE_RESOURCE_REQUIRED');let total=0;for(const file of args.paths??[]){if(!path.isAbsolute(file))throw Error('BROWSER_UPLOAD_ABSOLUTE_PATH_REQUIRED');const stat=fs.statSync(file);if(!stat.isFile())throw Error('BROWSER_UPLOAD_NOT_FILE');total+=stat.size;}if(total>256*1024)throw Error('BROWSER_UPLOAD_TOO_LARGE: total file size must not exceed 262144 bytes');}
    m.arguments=refs.argumentsForMCP(args);
   }catch(e){send({kind:'result',id:m.id,error:e.message});return}
   try{
@@ -126,10 +132,11 @@ async function receive(m){
    // Only Go-admitted calls reach here. Inspections and pending approvals do
    // not animate; the extension receives geometry, never target text/values.
    // Reuse the gateway's mandatory, immediately preceding inspection. Optional
-   // display never adds an MCP query or waits ahead of the admitted action.
+   // display never adds an MCP query. CEF setup is bounded; actual click
+   // arrival/order is enforced by its native input gate.
    const target=m.arguments.target??m.arguments.fields?.[0]?.target??m.arguments.startTarget;
    const rect=['browser_type','browser_fill_form','browser_select_option'].includes(m.tool)?geometry.get(target):undefined;geometry.clear();
-   indicator({running:true,rect,action:m.tool});
+   await indicator({running:true,rect,action:m.tool});
    let rawResult;
    try{rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
    finally{indicator({running:false})}

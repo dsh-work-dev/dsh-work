@@ -2,28 +2,96 @@
 #include "presentation_window.h"
 #include <bcrypt.h>
 #include <windows.h>
+#include <condition_variable>
+#include <deque>
 namespace dsh_platform {
 using Window = CefWindowHandle;
 inline HANDLE pipe_handle = INVALID_HANDLE_VALUE;
+inline HANDLE transport_stop = nullptr;
+inline std::mutex transport_mutex;
+inline std::condition_variable transport_changed;
+struct OutboundFrame { std::string key, bytes; };
+inline std::deque<OutboundFrame> transport_queue;
+inline size_t transport_bytes = 0;
+inline bool transport_closed = false;
+inline std::thread transport_writer;
+// A truncated frame invalidates this authenticated stream. Process retirement
+// closes all writer handles; Host cleanup still requires its kernel/tree join.
+[[noreturn]] inline void RetireTransport() {
+  TerminateProcess(GetCurrentProcess(), 74);
+  ExitProcess(74);
+}
 bool Transfer(bool write, void *bytes, DWORD size) {
   auto *p = static_cast<char *>(bytes);
   while (size) {
     DWORD n = 0;
     OVERLAPPED operation = {};
     operation.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!operation.hEvent)
-      return false;
+    if (!operation.hEvent) return false;
     bool ok = write ? !!WriteFile(pipe_handle, p, size, &n, &operation)
                     : !!ReadFile(pipe_handle, p, size, &n, &operation);
-    if (!ok && GetLastError() == ERROR_IO_PENDING)
-      ok = !!GetOverlappedResult(pipe_handle, &operation, &n, TRUE);
+    if (!ok && GetLastError() == ERROR_IO_PENDING) {
+      HANDLE events[] = {operation.hEvent, transport_stop};
+      // Only the dedicated sender waits for outbound capacity. No CEF or
+      // download cancellation thread waits on Host pipe reads.
+      DWORD wait = WaitForMultipleObjects(transport_stop ? 2 : 1, events, FALSE,
+                                         write ? 10000 : INFINITE);
+      if (wait != WAIT_OBJECT_0) {
+        CancelIoEx(pipe_handle, &operation);
+        if (WaitForSingleObject(operation.hEvent, 1000) != WAIT_OBJECT_0)
+          RetireTransport(); // never return with an in-flight stack OVERLAPPED
+        GetOverlappedResult(pipe_handle, &operation, &n, FALSE);
+        CloseHandle(operation.hEvent);
+        if (write && wait == WAIT_TIMEOUT) RetireTransport();
+        return false;
+      }
+      ok = !!GetOverlappedResult(pipe_handle, &operation, &n, FALSE);
+    }
     CloseHandle(operation.hEvent);
-    if (!ok || !n)
-      return false;
+    if (!ok || !n) return false;
     p += n;
     size -= n;
   }
   return true;
+}
+inline void QueueFrame(std::string json, std::string key) {
+  uint32_t size = static_cast<uint32_t>(json.size());
+  std::string frame(reinterpret_cast<const char*>(&size), sizeof(size));
+  frame += json;
+  std::lock_guard<std::mutex> lock(transport_mutex);
+  if (transport_closed) return;
+  constexpr size_t capacity=16u<<20;
+  if(frame.size()>capacity)RetireTransport();
+  // Latest progress is replaceable; terminal/control messages never are.
+  if (!key.empty()) for (auto& queued : transport_queue) if (queued.key == key) {
+    const auto remaining=transport_bytes-queued.bytes.size();
+    if(remaining>capacity-frame.size())RetireTransport();
+    queued.bytes = std::move(frame); transport_bytes=remaining+queued.bytes.size();
+    transport_changed.notify_one(); return;
+  }
+  if (transport_queue.size() >= 256 || transport_bytes > capacity-frame.size())
+    RetireTransport();
+  transport_bytes += frame.size();
+  transport_queue.push_back({std::move(key),std::move(frame)});
+  transport_changed.notify_one();
+}
+inline void StartTransportWriter() {
+  transport_writer=std::thread([] {
+    for (;;) {
+      OutboundFrame frame;
+      {
+        std::unique_lock<std::mutex> lock(transport_mutex);
+        transport_changed.wait(lock,[]{return transport_closed||!transport_queue.empty();});
+        if (transport_closed) return;
+        frame=std::move(transport_queue.front());transport_queue.pop_front();
+        transport_bytes-=frame.bytes.size();
+      }
+      if (!Transfer(true,frame.bytes.data(),static_cast<DWORD>(frame.bytes.size()))) {
+        if (WaitForSingleObject(transport_stop,0)==WAIT_OBJECT_0) return;
+        RetireTransport();
+      }
+    }
+  });
 }
 std::string TakeEnvironment(const char *input) {
   auto wide = CefString(input).ToWString();
@@ -78,14 +146,23 @@ inline bool OpenTransport(const std::string &path) {
   pipe_handle =
       CreateFileW(wide.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                   OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-  return pipe_handle != INVALID_HANDLE_VALUE;
+  if (pipe_handle == INVALID_HANDLE_VALUE) return false;
+  transport_stop=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+  return transport_stop != nullptr;
 }
 inline void Erase(std::string &token) {
   SecureZeroMemory(token.data(), token.size());
   token.clear();
 }
-inline void CancelTransport() { CancelIoEx(pipe_handle, nullptr); }
-inline void CloseTransport() { CloseHandle(pipe_handle); }
+inline void CancelTransport() {
+  {std::lock_guard<std::mutex> lock(transport_mutex);transport_closed=true;}
+  if(transport_stop)SetEvent(transport_stop);
+  transport_changed.notify_all();CancelIoEx(pipe_handle,nullptr);
+}
+inline void CloseTransport() {
+  CancelTransport();if(transport_writer.joinable())transport_writer.join();
+  CloseHandle(pipe_handle);if(transport_stop)CloseHandle(transport_stop);
+}
 inline bool Visible(Window hwnd) {
   return IsWindow(hwnd) && IsWindowVisible(hwnd) &&
          !IsIconic(GetAncestor(hwnd, GA_ROOT));

@@ -16,18 +16,66 @@ type PresenterPeer struct {
 }
 type SlotBounds struct{ X, Y, Width, Height float64 }
 type PixelBounds struct{ X, Y, Width, Height int }
+
+// Preview is an ephemeral, display-only image of an admitted visible view.
+// It is never an automation artifact or a file grant.
+type Preview struct {
+	Slot     string `json:"slot"`
+	Data     string `json:"data"`
+	Lease    string `json:"lease"`
+	Document string `json:"document"`
+	Frame    string `json:"frame"`
+	URL      string `json:"url"`
+}
+
+// WebDialog is authenticated engine metadata. Website message text is absent.
+type WebDialog struct {
+	Epoch         string `json:"epoch"`
+	Document      string `json:"document"`
+	View          string `json:"view"`
+	Presentation  string `json:"presentation"`
+	Origin        string `json:"origin"`
+	Kind          string `json:"kind"`
+	Message       string `json:"message"`
+	DefaultPrompt string `json:"defaultPrompt"`
+	Truncated     bool   `json:"truncated"`
+}
+
+// WebPopup is immutable engine request metadata, never caller-supplied authority.
+type WebPopup struct {
+	Context       string `json:"context"`
+	FrameDocument string `json:"frameDocument"`
+	ID            string `json:"id"`
+	Browser       string `json:"browser"`
+	Popup         string `json:"popup"`
+	Frame         string `json:"frame"`
+	Document      string `json:"document"`
+	View          string `json:"view"`
+	Presentation  string `json:"presentation"`
+	Origin        string `json:"origin"`
+	SourceURL     string `json:"sourceURL"`
+	URL           string `json:"url"`
+	UserGesture   bool   `json:"userGesture"`
+}
+
 type ViewState struct {
-	Instance         string `json:"instance,omitempty"`
-	BrokerGeneration string `json:"brokerGeneration,omitempty"`
-	Title            string `json:"title"`
-	CanGoBack        bool   `json:"canGoBack"`
-	CanGoForward     bool   `json:"canGoForward"`
-	Lease            string `json:"lease"`
-	State            string `json:"state"`
-	URL              string `json:"url"`
-	Visible          bool   `json:"visible"`
-	Target           string `json:"target"`
-	Document         string `json:"document"`
+	ArtifactName     string         `json:"artifactName,omitempty"`
+	Popup            *WebPopup      `json:"popup,omitempty"`
+	PopupVisible     bool           `json:"popupVisible,omitempty"`
+	Downloads        []DownloadView `json:"downloads,omitempty"`
+	Dialog           *WebDialog     `json:"dialog,omitempty"`
+	DialogVisible    bool           `json:"dialogVisible,omitempty"`
+	Instance         string         `json:"instance,omitempty"`
+	BrokerGeneration string         `json:"brokerGeneration,omitempty"`
+	Title            string         `json:"title"`
+	CanGoBack        bool           `json:"canGoBack"`
+	CanGoForward     bool           `json:"canGoForward"`
+	Lease            string         `json:"lease"`
+	State            string         `json:"state"`
+	URL              string         `json:"url"`
+	Visible          bool           `json:"visible"`
+	Target           string         `json:"target"`
+	Document         string         `json:"document"`
 	// Read-only CEF identity evidence; never accepts authority from a caller.
 	Frame   string      `json:"frame,omitempty"`
 	Epoch   string      `json:"epoch"`
@@ -170,6 +218,9 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 		}
 		p.target = target
 	}
+	if address != "" && p.view.ArtifactName != "" {
+		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
+	}
 	if address != "" && address != p.view.URL {
 		if e := p.target.Navigate(ctx, address); e != nil {
 			return p.view, e
@@ -285,6 +336,36 @@ func (r *PresenterRegistry) Hide(ctx context.Context, peer PresenterPeer, surfac
 	return result
 }
 
+func (r *PresenterRegistry) Cover(ctx context.Context, peer PresenterPeer, surface string) ([]Preview, error) {
+	r.mu.Lock()
+	views := make(map[string]*presentation)
+	for key, p := range r.views {
+		if p.surface == surface {
+			views[key] = p
+		}
+	}
+	r.mu.Unlock()
+	previews := make([]Preview, 0, len(views))
+	for key, p := range views {
+		p.serial.Lock()
+		if p.peer == peer && p.target != nil && p.view.Visible && p.view.State == "ready" && p.view.Frame != "" {
+			shotCtx, cancel := context.WithTimeout(ctx, time.Second)
+			raw, err := p.target.broker.controlCall(shotCtx, "target.preview", p.target.owner, map[string]string{"view": p.view.Lease, "presentation": p.view.Epoch, "document": p.view.Document, "frame": p.view.Frame})
+			cancel()
+			if err == nil {
+				var shot struct {
+					Data string `json:"data"`
+				}
+				if json.Unmarshal(raw, &shot) == nil && len(shot.Data) > 0 && len(shot.Data) <= 6*1024*1024 {
+					previews = append(previews, Preview{Slot: key[len(surface)+1:], Data: shot.Data, Lease: p.view.Lease, Document: p.view.Document, Frame: p.view.Frame, URL: p.view.URL})
+				}
+			}
+		}
+		p.serial.Unlock()
+	}
+	return previews, r.Hide(ctx, peer, surface)
+}
+
 // loss invalidates the descriptor before awaiting native frame-close evidence.
 // Failure retains both target and process owners so Detach/Close can retry.
 func (r *PresenterRegistry) loseLocked(p *presentation) error {
@@ -348,6 +429,10 @@ func (r *PresenterRegistry) Recover(ctx context.Context, peer PresenterPeer, sur
 			p.serial.Unlock()
 			return view, err
 		}
+	}
+	if p.view.ArtifactName != "" {
+		p.serial.Unlock()
+		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
 	}
 	p.owner = nil
 	p.view.Lease = rand.Text()
@@ -427,11 +512,22 @@ func (r *PresenterRegistry) closeWindowViews(ctx context.Context, peer Presenter
 }
 
 type navigationState struct {
+	Popup                            *WebPopup `json:"popup"`
+	PopupVisible                     bool
+	PresentationFailure              string
+	DialogVisible                    bool
+	Dialog                           *WebDialog `json:"dialog"`
 	URL, Title                       string
 	Loading, CanGoBack, CanGoForward bool
 }
 
 func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) error {
+	p.view.Downloads = nil
+	for _, d := range p.target.broker.DownloadState() {
+		if d.owner == p.target.owner || d.owner == "" {
+			p.view.Downloads = append(p.view.Downloads, d)
+		}
+	}
 	raw, err := p.target.broker.controlCall(ctx, "target.navigation", p.target.owner, nil)
 	if err != nil {
 		return err
@@ -440,6 +536,16 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 	if json.Unmarshal(raw, &state) != nil {
 		return errors.New("CEF_NAVIGATION_STATE_REJECTED")
 	}
+	if state.PresentationFailure != "" {
+		p.view.State = "presentationFailed"
+		p.view.Visible = false
+		p.view.Failure = state.PresentationFailure
+		return nil
+	}
+	p.view.Popup = state.Popup
+	p.view.PopupVisible = state.PopupVisible
+	p.view.Dialog = state.Dialog
+	p.view.DialogVisible = state.DialogVisible
 	p.view.URL = state.URL
 	p.view.Title = state.Title
 	p.view.CanGoBack = state.CanGoBack
@@ -459,6 +565,10 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 			p.view.Frame = ""
 		}
 	}
+	if p.target.artifact != nil && p.view.State == "ready" && !p.target.broker.FrameGraph().ProcessJoinComplete {
+		p.view.State = "loading"
+		p.view.Frame = ""
+	}
 	return nil
 }
 func (r *PresenterRegistry) Action(ctx context.Context, peer PresenterPeer, surface, slot, action string) error {
@@ -473,4 +583,86 @@ func (r *PresenterRegistry) Action(ctx context.Context, peer PresenterPeer, surf
 	}
 	_, err := p.target.broker.controlCall(ctx, "target.action", p.target.owner, map[string]any{"action": action})
 	return err
+}
+
+func (r *PresenterRegistry) AnswerDialog(ctx context.Context, peer PresenterPeer, surface, slot string, dialog WebDialog, accept bool, text ...string) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != dialog.View {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
+	input := ""
+	if len(text) > 0 {
+		input = text[0]
+	}
+	_, err := p.target.broker.controlCall(ctx, "target.dialog.answer", p.target.owner, map[string]any{"dialog": dialog, "accept": accept, "text": input})
+	return err
+}
+
+func (r *PresenterRegistry) PresentDialog(ctx context.Context, peer PresenterPeer, surface, slot string, dialog WebDialog, ready bool) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != dialog.View || !p.view.Visible {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
+	method := "target.dialog.suspend"
+	if ready {
+		method = "target.dialog.ready"
+	}
+	_, err := p.target.broker.controlCall(ctx, method, p.target.owner, map[string]any{"dialog": dialog})
+	return err
+}
+
+// Cancellation is admitted by the existing Host surface and exact target owner.
+func (r *PresenterRegistry) CancelDownload(ctx context.Context, peer PresenterPeer, surface, slot, id string) error {
+	p := r.get(surface, slot)
+	if p == nil {
+		return ErrClosed
+	}
+	p.serial.Lock()
+	if p.peer != peer || p.target == nil {
+		p.serial.Unlock()
+		return ErrClosed
+	}
+	b, owner := p.target.broker, p.target.owner
+	p.serial.Unlock()
+	for _, d := range b.DownloadState() {
+		if d.ID == id && d.owner == owner {
+			return b.CancelDownload(ctx, id, false)
+		}
+	}
+	return ErrClosed
+}
+
+// Popup only dispatches an approved URL. It grants no automation ownership.
+func (r *PresenterRegistry) Popup(ctx context.Context, peer PresenterPeer, surface, slot string, popup WebPopup, action string) (string, error) {
+	p := r.get(surface, slot)
+	if p == nil {
+		return "", ErrClosed
+	}
+	p.serial.Lock()
+	defer p.serial.Unlock()
+	if p.peer != peer || p.target == nil || p.view.Lease != popup.View || !p.view.Visible ||
+		(action != "suspend" && action != "ready" && action != "allow" && action != "deny") {
+		return "", errors.New("CEF_POPUP_AUTHORIZATION_CHANGED")
+	}
+	raw, err := p.target.broker.controlCall(ctx, "target.popup", p.target.owner, map[string]any{"popup": popup, "action": action})
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.URL != "" && (action != "allow" || result.URL != popup.URL) {
+		return "", errors.New("CEF_POPUP_RESULT_REJECTED")
+	}
+	return result.URL, nil
 }

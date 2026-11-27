@@ -88,3 +88,26 @@ func TestInitializationKeepsFirstFailureWhenItCancelsResource(t *testing.T) {
 		t.Fatal("unrelated cancellation changed")
 	}
 }
+
+func TestPendingDialogExecutorCrossesOnlyLayoutFence(t *testing.T) {
+	a := automation.OwnedBrowserIdentity{BrokerGeneration: "g", Target: "t", Document: "d", Frame: "f", ScopeEpoch: "s", ViewLease: "v", PresentationEpoch: "1", ViewVisible: true, FrameScopeReady: true, Dialog: "2"}
+	b := a
+	b.PresentationEpoch = "2"
+	if !samePendingDialog(a, b) || sameExecutorDocument(a, b) {
+		t.Fatal("pending lifetime and exact call identity conflated")
+	}
+	for _, mutate := range []func(*automation.OwnedBrowserIdentity){
+		func(i *automation.OwnedBrowserIdentity) { i.Dialog = "" },
+		func(i *automation.OwnedBrowserIdentity) { i.Dialog = "3" },
+		func(i *automation.OwnedBrowserIdentity) { i.ViewVisible = false },
+		func(i *automation.OwnedBrowserIdentity) { i.Document = "replacement" },
+		func(i *automation.OwnedBrowserIdentity) { i.ViewLease = "replacement" },
+		func(i *automation.OwnedBrowserIdentity) { i.ScopeEpoch = "replacement" },
+	} {
+		changed := b
+		mutate(&changed)
+		if samePendingDialog(a, changed) {
+			t.Fatal("different or hidden dialog retained executor", changed)
+		}
+	}
+}

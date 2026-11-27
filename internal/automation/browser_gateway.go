@@ -567,6 +567,9 @@ func (s *Service) inspectBrowser(ctx context.Context, r Request) (BrowserEvidenc
 	copy := r
 	copy.Tool = "__dsh_inspect"
 	copy.Arguments = map[string]any{"targets": targets, "tabs": r.Tool == "browser_tabs"}
+	if _, owned := OwnedBrowserCallFromContext(ctx); owned && r.Tool == "browser_handle_dialog" {
+		copy.Arguments["modal"] = "dialog"
+	}
 	if r.Tool == "browser_file_upload" {
 		// Locked MCP permits context-level tabs/list during a chooser, while
 		// tab-level evaluate and snapshot are blocked. Require its live modal
@@ -585,11 +588,33 @@ func (s *Service) inspectBrowser(ctx context.Context, r Request) (BrowserEvidenc
 	err = json.Unmarshal(data, &evidence)
 	return evidence, err
 }
+func browserRequiresFileResource(r Request) bool {
+	if r.Tool == "browser_file_upload" {
+		return true
+	}
+	if r.Tool == "browser_drop" {
+		switch paths := r.Arguments["paths"].(type) {
+		case []any:
+			return len(paths) > 0
+		case []string:
+			return len(paths) > 0
+		}
+	}
+	// Invalid argument types still reach normal schema validation, never fs.
+	return false
+}
+
 func (s *Service) AuthorizeBrowser(ctx context.Context, r Request) (BrowserDecision, error) {
 	if err := s.admitOwnedIntent(ctx, r); err != nil {
 		return BrowserDecision{}, err
 	}
 	s.mu.Lock()
+	// Owned pages have no file-resource grants yet. A website risk approval
+	// cannot authorize reading arbitrary Host paths supplied by an Agent.
+	if s.ownedLocked(r) != nil && browserRequiresFileResource(r) {
+		s.mu.Unlock()
+		return BrowserDecision{}, errors.New("BROWSER_FILE_RESOURCE_REQUIRED")
+	}
 	if s.gate == nil {
 		s.mu.Unlock()
 		return BrowserDecision{}, ErrUnavailable

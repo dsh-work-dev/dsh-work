@@ -30,6 +30,7 @@ export function projectComputerTool(ctx, schema, execute, factory) {
  const create=factory??createRequire(process.argv[1])('@deepseek-ai/dsh-mcp-client').createMcpToolDefinition;
  return {...create(ctx,{name:'my_'+schema.name,rawName:schema.name,description:schema.description,inputSchema:schema.inputSchema,call:execute}),timeoutMs:90000};
 }
+export const projectBrowserTool=projectComputerTool;
 export function apply(ctx,config) {
  let state,stream,closed=false,disposers=[],registeredEpoch,computerEpoch,computerDisposers=[];
  const computerLifetimes=new WeakMap(),computerRoundSync=new WeakMap();
@@ -130,7 +131,7 @@ export function apply(ctx,config) {
   if(registeredEpoch===epoch)return;
   unregister();registeredEpoch=epoch;
   for(const schema of schemas){
-  const definition=projectTool(schema,async(args,exec)=>{
+  const execute=async(args,exec)=>{
    if(closed || !stream || !state?.browserAccess&&state?.browser.epoch!==epoch || !state?.browser.enabled || !state.gatewayConnected || !state.defaultBrowserEnabled || !state.canChange)throw Error('AUTOMATION_REVOKED');
    if(!args||typeof args!=='object'||Array.isArray(args)||validation&&Object.keys(args).length)throw Error('AUTOMATION_INVALID_ARGUMENT');
    const top=identity(exec,ctx.agents,ctx.sessions);
@@ -146,7 +147,8 @@ export function apply(ctx,config) {
    if(state?.browserAccess?state.browser.epoch>request.epoch:state?.browser.epoch!==epoch)throw Error('AUTOMATION_REVOKED');
    if(result?.isError)throw Error(result.content?.filter(x=>x.type==='text').map(x=>x.text).join('\n')||'MCP tool failed');
    return result;
-  });
+  };
+  const definition=validation?projectTool(schema,execute):projectBrowserTool(ctx,schema,execute,config.mcpToolFactory);
   disposers.push(ctx.tools.register(definition));
   }
  }

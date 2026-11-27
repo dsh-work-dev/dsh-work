@@ -43,6 +43,7 @@ type updateBackendFake struct {
 	installCalls  int
 	recheckCalls  int
 	recheckErr    error
+	installErr    error
 	checkCalls    int
 	discarded     bool
 	switches      []string
@@ -109,7 +110,36 @@ func (f *updateBackendFake) Install(_ context.Context, restart bool) error {
 	f.installCalls++
 	f.restart = restart
 	f.mu.Unlock()
-	return nil
+	return f.installErr
+}
+
+func TestManualInstallFailureReopensMaintenanceOwner(t *testing.T) {
+	for _, failStop := range []bool{true, false} {
+		backend := &updateBackendFake{installErr: errors.New("installer launch failed")}
+		closed, reopened := false, false
+		runner := &updateRunner{backend: backend, state: daemon.UpdateSnapshot{Phase: daemon.UpdateReady}, beforeInstall: func(context.Context) error { closed = true; return nil }, stopUI: func() error {
+			if !closed {
+				t.Fatal("UI stopped before native close")
+			}
+			if failStop {
+				return errors.New("UI stop timed out")
+			}
+			return nil
+		}, installFailed: func() error {
+			if !closed {
+				t.Fatal("recovery before maintenance")
+			}
+			reopened = true
+			return nil
+		}}
+		state := runner.runInstall(context.Background(), true)
+		if state.Phase != daemon.UpdateError || !reopened {
+			t.Fatal("manual install failure stranded closed registry", state)
+		}
+		if failStop && backend.installs() != 0 {
+			t.Fatal("stop failure still launched installer")
+		}
+	}
 }
 
 func (f *updateBackendFake) installs() int {
@@ -187,6 +217,64 @@ func TestUpdateRunnerManualDownloadThenExplicitInstall(t *testing.T) {
 	}
 }
 
+func TestUpdateRunnerTerminalPublicationAcceptsNextAction(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		automatic bool
+		initial   daemon.UpdatePhase
+		published daemon.UpdatePhase
+		next      daemon.UpdateAction
+	}{
+		{"manual check", false, daemon.UpdateIdle, daemon.UpdateAvailable, daemon.UpdateActionDownload},
+		{"manual download", false, daemon.UpdateAvailable, daemon.UpdateReady, daemon.UpdateActionInstall},
+		{"automatic download", true, daemon.UpdateIdle, daemon.UpdateReady, daemon.UpdateActionInstall},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &updateBackendFake{release: pendingFor("2.0.0", 100)}
+			runner := &updateRunner{
+				backend: backend, current: "1.0.0", pending: backend.release,
+				state: daemon.UpdateSnapshot{Phase: tc.initial},
+			}
+			type result struct {
+				busy bool
+				err  error
+			}
+			actionResult := make(chan result, 1)
+			// Issue the next action before the publication returns, pinning the
+			// window where Snapshot already exposes an actionable terminal state.
+			runner.publish = func(state daemon.UpdateSnapshot) {
+				if state.Phase == tc.published {
+					busy := runner.busy.Load()
+					actionResult <- result{busy, runner.Action(context.Background(), tc.next)}
+				}
+			}
+			if tc.initial == daemon.UpdateAvailable {
+				if err := runner.Action(context.Background(), daemon.UpdateActionDownload); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				runner.Trigger(context.Background(), tc.automatic)
+			}
+			select {
+			case got := <-actionResult:
+				if got.err != nil {
+					t.Fatal(got.err)
+				}
+				if got.busy {
+					t.Fatal("terminal state was published while the previous operation still owned busy; next action was dropped")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("terminal state was not published")
+			}
+			if tc.next == daemon.UpdateActionDownload {
+				waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateReady })
+			} else {
+				waitForUpdate(t, func() bool { return backend.installs() == 1 })
+			}
+		})
+	}
+}
+
 func TestUpdateRunnerRefusesSwappedPayloadBeforeStoppingTheUI(t *testing.T) {
 	backend := &updateBackendFake{recheckErr: selfupdate.ErrStagedPayloadChanged}
 	var stopUICalled bool
@@ -224,6 +312,42 @@ func TestUpdateRunnerDoesNotEnterInstallingWhenUIStopFails(t *testing.T) {
 	waitForUpdate(t, func() bool { return runner.Snapshot().Phase == daemon.UpdateError })
 	if backend.installs() != 0 {
 		t.Fatal("the installer ran after the UI stop failed")
+	}
+}
+
+func TestUpdateRunnerDownloadShutdownVetoKeepsOwnerAndRetry(t *testing.T) {
+	backend := &updateBackendFake{}
+	stopped, exited := false, make(chan struct{}, 1)
+	runner := &updateRunner{backend: backend, state: daemon.UpdateSnapshot{Phase: daemon.UpdateReady, InstallMode: daemon.UpdateInstallInstaller},
+		beforeInstall: func(context.Context) error { return errors.New("download writer not drained") },
+		stopUI:        func() error { stopped = true; return nil },
+	}
+	if !runner.InstallOnExit(func() { exited <- struct{}{} }) {
+		t.Fatal("exit was not claimed")
+	}
+	waitForUpdate(t, func() bool { return !runner.exitPending.Load() })
+	select {
+	case <-exited:
+		t.Fatal("download veto still quit")
+	default:
+	}
+	if stopped || backend.installs() != 0 || runner.Snapshot().Phase != daemon.UpdateReady || runner.Snapshot().ErrorCode != "shutdown" {
+		t.Fatal("preflight lost owner/candidate", runner.Snapshot())
+	}
+	runner.Stop()
+	defer runner.Stop()
+	runner.beforeInstall = func(context.Context) error {
+		if stopped {
+			t.Fatal("UI stopped before native barrier")
+		}
+		return nil
+	}
+	if err := runner.Action(context.Background(), daemon.UpdateActionInstall); err != nil {
+		t.Fatal(err)
+	}
+	waitForUpdate(t, func() bool { return !runner.busy.Load() })
+	if !stopped || backend.installs() != 1 {
+		t.Fatal("ready candidate was not retryable")
 	}
 }
 

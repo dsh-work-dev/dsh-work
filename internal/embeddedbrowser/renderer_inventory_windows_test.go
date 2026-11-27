@@ -199,7 +199,7 @@ func runRendererGraphFixture(t *testing.T, fault, uncertainty bool) {
 	for role, frameID := range frames {
 		found := false
 		for _, frame := range joined.Frames {
-			if frame.Frame == frameID && frame.Attached && frame.Main && frame.Child == uint32(children[role]) && joined.MainFrames[frame.Owner] == frameID {
+			if frame.Frame == frameID && frame.Attached && frame.Main && frame.Child == uint32(children[role]) && joined.MainFrames[(frameTab{frame.Owner, frame.Tab}).snapshotKey()] == frameID {
 				for _, process := range joined.Processes {
 					if process.Child == frame.Child && process.PID == renderers[children[role]].PID && process.Started == renderers[children[role]].Started && !process.Exited {
 						found = true

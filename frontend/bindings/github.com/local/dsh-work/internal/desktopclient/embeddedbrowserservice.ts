@@ -11,9 +11,20 @@ import * as automation$0 from "../automation/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as embeddedbrowser$0 from "../embeddedbrowser/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as distribution$0 from "../embeddedbrowser/distribution/models.js";
 
 export function Action(document: string, slot: string, action: string): $CancellablePromise<void> {
     return $Call.ByID(1070156010, document, slot, action);
+}
+
+export function AnswerDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, accept: boolean, text: string): $CancellablePromise<void> {
+    return $Call.ByID(2939582890, document, slot, dialog, accept, text);
+}
+
+export function Availability(): $CancellablePromise<distribution$0.Availability> {
+    return $Call.ByID(3840925459);
 }
 
 /**
@@ -24,8 +35,16 @@ export function BeginDocument(document: string): $CancellablePromise<boolean> {
     return $Call.ByID(199062276, document);
 }
 
+export function CancelDownload(document: string, slot: string, id: string): $CancellablePromise<void> {
+    return $Call.ByID(2330640698, document, slot, id);
+}
+
 export function Capability(): $CancellablePromise<boolean> {
     return $Call.ByID(3254308590);
+}
+
+export function Cover(): $CancellablePromise<embeddedbrowser$0.Preview[] | null> {
+    return $Call.ByID(2111677083);
 }
 
 export function Detach(document: string, slot: string): $CancellablePromise<void> {
@@ -33,8 +52,8 @@ export function Detach(document: string, slot: string): $CancellablePromise<void
 }
 
 /**
- * ExitUI is present only as a disabled-by-default development lifetime action;
- * it quits this real UI process, not the daemon or another process.
+ * ExitUI closes the admitted instance before quitting this real UI process;
+ * it does not terminate the daemon or another UI process.
  */
 export function ExitUI(): $CancellablePromise<void> {
     return $Call.ByID(2323151634);
@@ -44,8 +63,24 @@ export function Hide(): $CancellablePromise<void> {
     return $Call.ByID(2487194256);
 }
 
+/**
+ * OpenArtifact carries user intent only. The daemon owns the native file picker
+ * and receives no page-selected path or root capability.
+ */
+export function OpenArtifact(document: string, slot: string): $CancellablePromise<embeddedbrowser$0.ViewState> {
+    return $Call.ByID(1079395994, document, slot);
+}
+
 export function Overlay(blocked: boolean): $CancellablePromise<void> {
     return $Call.ByID(1081105216, blocked);
+}
+
+export function Popup(document: string, slot: string, popup: embeddedbrowser$0.WebPopup, action: string): $CancellablePromise<string> {
+    return $Call.ByID(4241183938, document, slot, popup, action);
+}
+
+export function PresentDialog(document: string, slot: string, dialog: embeddedbrowser$0.WebDialog, ready: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2715742487, document, slot, dialog, ready);
 }
 
 export function Recover(document: string, slot: string, address: string): $CancellablePromise<embeddedbrowser$0.ViewState> {

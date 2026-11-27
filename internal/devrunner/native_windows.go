@@ -289,7 +289,9 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 		exe  string
 		args []string
 	}{
-		{n.tools["python"], []string{"-m", "cmake", "--build", "bin/embedded-cef-vs2022", "--config", "Release", "--target", "dsh_cef_broker", "--parallel", "8"}},
+		// Reusable MSBuild nodes outlive a successful root process, keeping its
+		// supervised Job nonempty and preventing the next build stage.
+		{n.tools["python"], []string{"-m", "cmake", "--build", "bin/embedded-cef-vs2022", "--config", "Release", "--target", "dsh_cef_broker", "--parallel", "8", "--", "/nodeReuse:false"}},
 		{n.tools["powershell"], []string{"-NoProfile", "-File", filepath.Join(n.config.Workspace, "scripts", "start-embedded-development.ps1"), "-BuildOnly", "-Runtime", n.config.Runtime}},
 	}
 	for _, command := range commands {
@@ -312,9 +314,23 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 			err = errors.Join(ctx.Err(), w.ForceStop(force))
 			stop()
 		}
+		// Preserve the root result before stopping any surviving descendants.
+		exit := w.ExitResult()
 		cleanup, stop := context.WithTimeout(context.Background(), 8*time.Second)
 		joinErr := w.WaitEmpty(cleanup)
 		stop()
+		if errors.Is(joinErr, context.DeadlineExceeded) && !live(w) {
+			d := w.Diagnostics()
+			n.log("build root exited pid=%d exit=%d; stopping remaining owned Job processes active=%d", d.PID, exit.Code, d.ActiveProcesses)
+			force, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			joinErr = w.ForceStop(force)
+			cancel()
+			if joinErr == nil {
+				joined, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				joinErr = w.WaitEmpty(joined)
+				cancel()
+			}
+		}
 		if joinErr == nil {
 			joinErr = w.Close()
 		}
@@ -323,7 +339,9 @@ func (n *Native) buildCandidate(ctx context.Context) error {
 			n.buildOwner = nil
 			n.mu.Unlock()
 		}
-		exit := w.ExitResult()
+		if !exit.Started {
+			exit = w.ExitResult()
+		}
 		if err != nil || joinErr != nil || !exit.Started || exit.Code != 0 || exit.Err != "" {
 			n.setBuildFailure()
 			return errors.Join(err, joinErr, fmt.Errorf("build failed: exit=%d error=%s; see %s", exit.Code, exit.Err, n.buildLog))
@@ -673,6 +691,15 @@ func (n *Native) reapBuild(ctx context.Context) error {
 	}
 	if live(w) {
 		return errors.New("build is still active; cleanup owner retained")
+	}
+	// A failed earlier join can retain reusable build-tool descendants after
+	// the root exits. Stop only this owned Job, then prove it empty before
+	// releasing ownership; a root exit alone is not cleanup completion.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := w.ForceStop(ctx); err != nil {
+		return fmt.Errorf("build tree cleanup stop failed; owner retained: %w", err)
 	}
 	if err := w.WaitEmpty(ctx); err != nil {
 		return fmt.Errorf("build tree cleanup unfinished: %w", err)

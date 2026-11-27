@@ -10,7 +10,7 @@ export interface MenuBar {
 }
 
 /** ARIA menu bar drawn in the shell document; its menus overlay the DSH frame. */
-export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId) => void | Promise<void>, onLeave: () => void, onClosed: () => void = () => {}): MenuBar {
+export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId, bounds: DOMRect) => void | Promise<void>, onLeave: () => void, onClosed: () => void = () => {}): MenuBar {
   const bar = document.createElement("div");
   bar.className = "shell-menubar";
   bar.setAttribute("role", "menubar");
@@ -112,7 +112,16 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
   };
   const show = (index: number, focusFirst: boolean) => {
     const round=++openRound;opening=true;
-    const ready=onOpen(menus[index].id);
+    // A previous popup must leave the screen before releasing native Hide.
+    popup?.remove();popup=null;
+    // Measure the real menu before exposing it above a native browser view.
+    const probe=document.createElement("div");probe.className="shell-menu";
+    probe.style.visibility="hidden";probe.style.pointerEvents="none";
+    probe.setAttribute("role","menu");
+    menus[index].items.forEach((entry,i)=>probe.append(row(entry,i)));
+    const rect=buttons()[index].getBoundingClientRect();probe.style.left=`${rect.left}px`;probe.style.top=`${rect.bottom}px`;
+    document.body.append(probe);const bounds=probe.getBoundingClientRect();probe.remove();
+    const ready=onOpen(menus[index].id,bounds);
     if(ready instanceof Promise){void ready.then(()=>{if(round===openRound){opening=false;open(index,focusFirst)}},()=>{if(round===openRound)close(false)})}else{opening=false;open(index,focusFirst)}
   };
 

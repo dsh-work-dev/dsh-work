@@ -12,6 +12,7 @@ on:
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
       - 'scripts/build-embedded-cef-mac.mjs'
+      - 'scripts/build-mac-preview*.mjs'
       - 'cmd/dsh-cef-owner-mac/**'
       - 'scripts/probe-linux-dsh-slot.mjs'
       - 'scripts/linux-browser-agent-fixture.mjs'
@@ -28,6 +29,11 @@ on:
       - 'tools/browser-lab/native/posix/**'
       - '.github/workflows/e67-ipc.yml'
   workflow_dispatch:
+    inputs:
+      mac_validation:
+        description: Explicitly run Mac feature validation (normal development uses a Mac device)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -101,10 +107,11 @@ jobs:
               - 'native/embeddedbrowser/**'
               - 'cmd/dsh-cef-owner-mac/**'
               - 'scripts/build-embedded-cef-mac.mjs'
+              - 'scripts/build-mac-preview*.mjs'
 
   mac-private-cef:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_native == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -143,12 +150,41 @@ jobs:
           set -o pipefail
           go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^(TestCrashProjectionRequiresGeneration|TestLiveMacPrivateCEF)$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
       - name: Prepare the formal Mac same-process carrier and locked MCP
+        id: mac_browser_dependencies
         run: |
           node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge"
           mkdir -p "$RUNNER_TEMP/e67-browser-dependencies"
           cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
           npm ci --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Build and verify the restricted Mac runtime
+        id: restricted_runtime
+        run: |
+          set -o pipefail
+          npm ci --prefix tools/dsh --no-audit --no-fund
+          mkdir -p "$RUNNER_TEMP/e67-restricted-test"
+          node scripts/build-mac-preview-sandbox.mjs --output-dir "$RUNNER_TEMP/e67-restricted-test"
+          CGO_ENABLED=1 go test -c -tags e67nativefixture ./internal/embeddedbrowser/macowner -o "$RUNNER_TEMP/e67-restricted-test/macowner.test"
+          DSH_WORK_CEF_MAC_PUBLICATION="$RUNNER_TEMP/e67-formal-mac/publication.json" DSH_WORK_EXECUTABLE="$GITHUB_WORKSPACE/tools/dsh/node_modules/.bin/dsh" node scripts/with-workeripc-mac.mjs --asset "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" "$RUNNER_TEMP/e67-restricted-test/macowner.test" -test.run '^TestLiveMacRestrictedDSH$' -test.v -test.timeout 100s 2>&1 | tee results/e67-mac-private/restricted-runtime.log
+      - name: Build the actual Mac Wails preview entry point
+        id: mac_preview_build
+        if: success() || (failure() && steps.restricted_runtime.outcome == 'failure')
+        run: |
+          set -o pipefail
+          (cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build:dev)
+          node scripts/build-mac-preview.mjs --output-dir "$RUNNER_TEMP/e67-mac-preview" --bridge "$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node" --sandbox "$RUNNER_TEMP/e67-restricted-test/dsh-preview-sandbox.node" --fixture 1 2>&1 | tee results/e67-mac-private/preview-build.log
+      - name: Exercise the actual Mac Wails DSH browser slot
+        if: ${{ !cancelled() && steps.restricted_runtime.outcome == 'success' && steps.mac_preview_build.outcome == 'success' }}
+        env:
+          DSH_WORK_MAC_PREVIEW_EXECUTABLE: ${{ runner.temp }}/e67-mac-preview/DSH Work Preview.app/Contents/MacOS/dsh-work
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-preview-results
+        run: |
+          set -o pipefail
+          go test -tags e67presenter,e67nativefixture ./internal/desktopapp -run '^TestLiveMacWailsPreviewSlot$' -count=1 -v -timeout=180s 2>&1 | tee results/e67-mac-private/wails-preview.log
       - name: Exercise formal Mac engine Service and locked MCP
+        id: mac_browser_service
+        if: ${{ !cancelled() && steps.mac_browser_dependencies.outcome == 'success' }}
         env:
           DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
           DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
@@ -157,6 +193,7 @@ jobs:
           set -o pipefail
           go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacEngineServiceMCP$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-mcp.log
       - name: Exercise abrupt Service-host death and same-profile recovery
+        if: ${{ !cancelled() && steps.mac_browser_service.outcome == 'success' }}
         env:
           DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
           DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
@@ -171,12 +208,15 @@ jobs:
           path: |
             results/e67-mac-private/*.log
             ${{ runner.temp }}/e67-formal-mac/publication.json
+            ${{ runner.temp }}/e67-mac-preview/mac-preview-build.json
+            ${{ runner.temp }}/e67-mac-preview-results/*.json
+            ${{ runner.temp }}/e67-mac-preview-results/*.png
             ${{ runner.temp }}/e67-mac-private-results/*.json
             ${{ runner.temp }}/e67-mac-private-results/*.png
 
   mac-cef-owner:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_cef == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -395,7 +435,7 @@ jobs:
 
   mac-launchd-tree:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_launchd == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -481,7 +521,7 @@ jobs:
 
   mac-sender-probe:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_probe == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:
@@ -517,7 +557,7 @@ jobs:
 
   mac-product-ipc:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_product == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
     runs-on: macos-15
     timeout-minutes: 10
     steps:

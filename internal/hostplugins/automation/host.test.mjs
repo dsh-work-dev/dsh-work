@@ -19,7 +19,7 @@ function harness(validation){
  const routes=new Map(),definitions=new Map(),effects=[],events=new Map();
  const a={id:'a',session:{id:'a',header:{}}};
  const ctx={webServer:{register:route=>{routes.set(route.path,route.handler);return ()=>routes.delete(route.path)}},connection:{requestRejection:()=>undefined},agents:new Map([['a',a]]),sessions:new Map([['a',a.session]]),tools:{register:definition=>{definitions.set(definition.name,definition);return ()=>definitions.delete(definition.name)}},effect:fn=>{const dispose=fn();if(dispose)effects.push(dispose)},on:(name,fn)=>events.set(name,fn)};
- const token='a'.repeat(64);apply(ctx,{generation:'worker',token,validation});
+ const token='a'.repeat(64);apply(ctx,{generation:'worker',token,validation,mcpToolFactory:(_ctx,options)=>projectTool({name:options.rawName,description:options.description,inputSchema:options.inputSchema},options.call)});
  async function request(route,value,auth=token){const req=Readable.from(value===undefined?[]:[Buffer.from(JSON.stringify(value))]);req.headers={'x-dsh-work-token':auth};req.method=route==='events'?'GET':'POST';const res=new EventEmitter();Object.assign(res,{status:0,chunks:[],writeHead(status){this.status=status},write(chunk){this.chunks.push(chunk)},end(value){this.value=value;this.emit('close')},destroy(){this.emit('close')},flushHeaders(){}});await routes.get('/__dshwork/automation/'+route)(req,res);return res}
  return {ctx,events,a,definitions,request,close:()=>effects.reverse().forEach(fn=>fn())};
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/local/dsh-work/internal/settings"
 	"io"
 	"sync"
 	"time"
@@ -13,13 +14,17 @@ import (
 // InstanceRegistryConfig is daemon-owned. A tool or frame cannot choose a
 // profile directory, broker factory, or persistent instance identity.
 type InstanceRegistryConfig struct {
-	Store          *InstanceStore
-	AcquireProfile func(string) (io.Closer, error)
-	StartBroker    func(context.Context, InstanceConfig) (*Broker, error)
-	OnFailure      func(string, error)
+	Store            *InstanceStore
+	AcquireProfile   func(string) (io.Closer, error)
+	StartBroker      func(context.Context, InstanceConfig) (*Broker, error)
+	OnFailure        func(string, error)
+	DownloadDecision DownloadDecision
+	ArtifactLocale   func() settings.Locale
 }
 
 type instancePresenter struct {
+	downloadResume    func()
+	downloadPreparing bool
 	serial            sync.Mutex
 	config            InstanceConfig
 	peer              PresenterPeer
@@ -39,14 +44,16 @@ type instancePresenter struct {
 // InstancePresenterRegistry is the sole multi-instance lifetime owner. The
 // existing presenter module remains local to exactly one broker namespace.
 type InstancePresenterRegistry struct {
-	mu            sync.Mutex
-	shutdown      sync.Mutex
-	config        InstanceRegistryConfig
-	instances     map[string]*instancePresenter
-	surfaces      map[string]*instancePresenter
-	processes     map[PresenterPeer]*instancePresenter
-	closed        bool
-	WindowRetired func(PresenterPeer, string)
+	mu             sync.Mutex
+	shutdown       sync.Mutex
+	config         InstanceRegistryConfig
+	instances      map[string]*instancePresenter
+	surfaces       map[string]*instancePresenter
+	processes      map[PresenterPeer]*instancePresenter
+	closed         bool
+	downloadPaused bool
+	quitAdmission  bool
+	WindowRetired  func(PresenterPeer, string)
 }
 
 func NewInstancePresenterRegistry(c InstanceRegistryConfig) (*InstancePresenterRegistry, error) {
@@ -69,7 +76,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 	}
 	defer verified.Close()
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.downloadPaused || r.quitAdmission {
 		r.mu.Unlock()
 		return WindowAdmission{}, ErrClosed
 	}
@@ -87,7 +94,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 	i.serial.Lock()
 	defer i.serial.Unlock()
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.downloadPaused || r.quitAdmission {
 		r.mu.Unlock()
 		return WindowAdmission{}, ErrClosed
 	}
@@ -160,7 +167,7 @@ func (r *InstancePresenterRegistry) RegisterInstanceWindow(ctx context.Context, 
 			}
 		}
 		for _, d := range rows {
-			i.views.views[presentationKey(surface, d.Slot)] = &presentation{peer: peer, surface: surface, parent: parent, view: ViewState{Lease: rand.Text(), State: "NeedsReload", URL: d.URL, Title: d.Title}, cleaned: true}
+			i.views.views[presentationKey(surface, d.Slot)] = &presentation{peer: peer, surface: surface, parent: parent, view: ViewState{Lease: rand.Text(), State: "NeedsReload", URL: d.URL, Title: d.Title, ArtifactName: d.ArtifactName}, cleaned: true}
 		}
 		cancel := i.cancel
 		go func() {
@@ -231,6 +238,12 @@ func (r *InstancePresenterRegistry) startLocked(ctx context.Context, i *instance
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	r.mu.Lock()
+	paused := r.downloadPaused || r.quitAdmission
+	r.mu.Unlock()
+	if paused || i.downloadResume != nil {
+		return errors.New("DOWNLOAD_SHUTDOWN_BUSY")
+	}
 	if i.broker != nil {
 		select {
 		case <-i.broker.done:
@@ -298,8 +311,12 @@ func (r *InstancePresenterRegistry) rememberLocked(i *instancePresenter) error {
 	for key, p := range i.views.views {
 		p.serial.Lock()
 		slot := key[len(p.surface)+1:]
-		if p.view.URL != "" {
-			result = errors.Join(result, r.config.Store.Remember(i.config, TabDescriptor{Slot: slot, URL: p.view.URL, Title: p.view.Title}))
+		if p.view.URL != "" || p.view.ArtifactName != "" {
+			d := TabDescriptor{Slot: slot, URL: p.view.URL, Title: p.view.Title, ArtifactName: p.view.ArtifactName}
+			if d.ArtifactName != "" {
+				d.URL = ""
+			}
+			result = errors.Join(result, r.config.Store.Remember(i.config, d))
 		}
 		p.serial.Unlock()
 	}
@@ -365,6 +382,11 @@ func (r *InstancePresenterRegistry) retireInstanceLocked(i *instancePresenter, f
 		if err == nil {
 			i.profile = nil
 		}
+	}
+	if i.downloadResume != nil {
+		i.downloadResume()
+		i.downloadResume = nil
+		i.downloadPreparing = false
 	}
 	if result != nil && !force {
 		return errors.Join(i.cleanupErr, result)
@@ -438,11 +460,20 @@ func (r *InstancePresenterRegistry) CloseInstance(ctx context.Context, peer Pres
 	if i == nil {
 		return nil
 	}
+	if err := r.PrepareCloseInstance(ctx, peer, surface); err != nil {
+		return err
+	}
 	i.serial.Lock()
 	defer i.serial.Unlock()
 	if i.peer != peer {
 		return errors.New("CEF_INSTANCE_OWNER_REJECTED")
 	}
+	defer func() {
+		if i.downloadResume != nil {
+			i.downloadResume()
+			i.downloadResume = nil
+		}
+	}()
 	return r.retireLocked(i, false)
 }
 func (r *InstancePresenterRegistry) Close() error {
@@ -450,6 +481,7 @@ func (r *InstancePresenterRegistry) Close() error {
 	defer r.shutdown.Unlock()
 	r.mu.Lock()
 	r.closed = true
+	r.quitAdmission = false
 	instances := make([]*instancePresenter, 0, len(r.instances))
 	for _, i := range r.instances {
 		instances = append(instances, i)
@@ -560,13 +592,39 @@ func (r *InstancePresenterRegistry) Hide(ctx context.Context, p PresenterPeer, s
 	defer i.serial.Unlock()
 	return i.views.Hide(ctx, p, s)
 }
+func (r *InstancePresenterRegistry) Cover(ctx context.Context, p PresenterPeer, s string) ([]Preview, error) {
+	i, e := r.lockSurface(p, s)
+	if e != nil {
+		return nil, e
+	}
+	defer i.serial.Unlock()
+	return i.views.Cover(ctx, p, s)
+}
 func (r *InstancePresenterRegistry) Detach(ctx context.Context, p PresenterPeer, s, slot string) error {
 	i, e := r.lockSurface(p, s)
 	if e != nil {
 		return e
 	}
 	defer i.serial.Unlock()
-	return i.views.Detach(ctx, p, s, slot)
+	view := i.views.get(s, slot)
+	artifact := false
+	if view != nil {
+		view.serial.Lock()
+		artifact = view.view.ArtifactName != ""
+		view.serial.Unlock()
+	}
+	if err := i.views.Detach(ctx, p, s, slot); err != nil {
+		return err
+	}
+	if artifact {
+		if err := r.config.Store.Forget(i.config, slot); err != nil {
+			return err
+		}
+		i.views.mu.Lock()
+		delete(i.views.views, presentationKey(s, slot))
+		i.views.mu.Unlock()
+	}
+	return nil
 }
 func (r *InstancePresenterRegistry) Action(ctx context.Context, p PresenterPeer, s, slot, a string) error {
 	i, e := r.lockSurface(p, s)
@@ -719,8 +777,8 @@ func (r *InstancePresenterRegistry) QuitOwned(ctx context.Context, owners []Expe
 		return errors.New("CEF_QUIT_REQUEST_EXPIRED")
 	}
 	r.mu.Lock()
-	prior := r.closed
-	r.closed = true
+	prior := r.quitAdmission
+	r.quitAdmission = true
 	list := make([]*instancePresenter, 0, len(r.instances))
 	for _, i := range r.instances {
 		list = append(list, i)
@@ -730,7 +788,7 @@ func (r *InstancePresenterRegistry) QuitOwned(ctx context.Context, owners []Expe
 	defer func() {
 		if !accepted {
 			r.mu.Lock()
-			r.closed = prior
+			r.quitAdmission = prior
 			r.mu.Unlock()
 		}
 	}()
@@ -787,4 +845,40 @@ func (r *InstancePresenterRegistry) OwnedWindowViewTarget(peer PresenterPeer, su
 		return nil, errors.New("CEF_VIEW_ADMISSION_REJECTED")
 	}
 	return p.target, nil
+}
+
+func (r *InstancePresenterRegistry) AnswerDialog(ctx context.Context, p PresenterPeer, surface, slot string, dialog WebDialog, accept bool, text ...string) error {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return err
+	}
+	defer i.serial.Unlock()
+	return i.views.AnswerDialog(ctx, p, surface, slot, dialog, accept, text...)
+}
+
+func (r *InstancePresenterRegistry) PresentDialog(ctx context.Context, p PresenterPeer, surface, slot string, dialog WebDialog, ready bool) error {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return err
+	}
+	defer i.serial.Unlock()
+	return i.views.PresentDialog(ctx, p, surface, slot, dialog, ready)
+}
+
+func (r *InstancePresenterRegistry) CancelDownload(ctx context.Context, p PresenterPeer, surface, slot, id string) error {
+	i, e := r.lockSurface(p, surface)
+	if e != nil {
+		return e
+	}
+	defer i.serial.Unlock()
+	return i.views.CancelDownload(ctx, p, surface, slot, id)
+}
+
+func (r *InstancePresenterRegistry) Popup(ctx context.Context, p PresenterPeer, surface, slot string, popup WebPopup, action string) (string, error) {
+	i, err := r.lockSurface(p, surface)
+	if err != nil {
+		return "", err
+	}
+	defer i.serial.Unlock()
+	return i.views.Popup(ctx, p, surface, slot, popup, action)
 }
