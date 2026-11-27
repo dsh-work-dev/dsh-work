@@ -390,11 +390,11 @@ func runDaemon(identity string, resources Resources) {
 			return browserruntime.Runtime{Node: resolved.Node.NodePath, Environment: agentDiagnostic.environment(resolved.Node.ChildEnvironment), Dependencies: directory}, nil
 		},
 	}), browserruntime.ToolSchemas())
-	computerHelperExecutable, _ := os.Executable()
+	computerSupervisor := computerRuntimeSupervisor(dependencies.Supervisor, config.CacheDirectory)
 	computerFactory := computerruntime.NewFactory(computerruntime.Config{
-		Supervisor: dependencies.Supervisor, Root: filepath.Join(config.CacheDirectory, "automation", "computer-sessions"),
+		Supervisor: computerSupervisor, Root: computerRuntimeRoot(config.CacheDirectory),
 		Resolve: func(ctx context.Context, engine string) (computerruntime.Runtime, error) {
-			if manager == nil || engine != "cua-driver" && engine != "auv" {
+			if manager == nil || !computerEngineSupported(engine) {
 				return computerruntime.Runtime{}, automation.ErrUnavailable
 			}
 			capability := automation.Computer
@@ -433,13 +433,14 @@ func runDaemon(identity string, resources Resources) {
 			return computerruntime.Runtime{Node: resolved.Node.NodePath, Environment: resolved.Node.ChildEnvironment, Dependencies: directory, Driver: driver}, nil
 		},
 	})
-	// Computer resources require native engine ownership and input verification.
-	if runtime.GOOS != "windows" {
-		computerFactory = nil
+	var computerProbe automation.ComputerElementProbe
+	if runtime.GOOS == "windows" {
+		computerHelperExecutable, _ := os.Executable()
+		computerProbe = computeruia.NewProbe(dependencies.Supervisor, computerHelperExecutable)
 	}
 	automationState.ConfigureComputerGateway(automation.ComputerGatewayConfig{
 		Inspect: automation.InspectComputerTarget, Acquire: automation.AcquireComputerDesktopLease,
-		Probe: computeruia.NewProbe(dependencies.Supervisor, computerHelperExecutable), Factory: computerFactory,
+		Probe: computerProbe, Factory: computerFactory, SupportsEngine: computerEngineSupported,
 	})
 	automationBridge.Attach(automationState)
 	automationService := dshworkapp.NewAutomationService(automationState)
@@ -1626,6 +1627,10 @@ func runDaemon(identity string, resources Resources) {
 	if stopPetMenuRefresh != nil {
 		stopPetMenuRefresh()
 	}
+}
+
+func computerRuntimeRoot(cache string) string {
+	return filepath.Join(cache, "automation", "computer-sessions")
 }
 
 func executableExists(path string) bool {

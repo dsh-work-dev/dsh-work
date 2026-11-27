@@ -3,7 +3,7 @@ import {mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node
 import {basename, isAbsolute, join, relative} from 'node:path';
 
 // Stage the signed CEF publication before the outer app is signed.
-export function stageMacEmbeddedCEF(app, publicationPath) {
+export function stageMacEmbeddedCEF(app, publicationPath, {installedOwner} = {}) {
   const source = JSON.parse(readFileSync(publicationPath, 'utf8'));
   if (source.kind !== 'dsh-owned-cef-mac' || source.architecture !== 'arm64' ||
       !source.sandbox || basename(source.app) !== 'DSHWorkBrowser.app' || realpathSync(source.app) !== source.app) {
@@ -25,6 +25,7 @@ export function stageMacEmbeddedCEF(app, publicationPath) {
     app: bundle,
     executable: relocate(source.executable),
     owner: relocate(source.owner),
+    installedOwner,
     helpers: source.helpers.map(relocate),
     sandbox: source.sandbox,
     minimumOS: source.minimumOS,

@@ -83,7 +83,7 @@ func TestLiveMacLockedAutomationPublication(t *testing.T) {
 	rows := preparer.Inventory()
 	if !preparer.Ready(automation.Computer) || !preparer.Ready(automation.AUV) || len(rows) != 3 ||
 		rows[1].InstalledVersion != automation.DriverVersion || rows[1].BackendAvailable ||
-		rows[2].InstalledVersion != automation.AUVVersion || rows[2].BackendAvailable {
+		rows[2].InstalledVersion != automation.AUVVersion || !rows[2].BackendAvailable {
 		t.Fatalf("published computer engine inventory: %+v", rows)
 	}
 	driver, err := automation.AUVExecutable(auv)

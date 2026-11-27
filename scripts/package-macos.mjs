@@ -77,7 +77,7 @@ try {
   for (const name of ['workeripc-mac.node', 'dsh-preview-sandbox.node']) {
     copyFileSync(join(addons, name), join(executables, name));
   }
-  stageMacEmbeddedCEF(app, join(cef, 'publication.json'));
+  stageMacEmbeddedCEF(app, join(cef, 'publication.json'), {installedOwner: 'dsh-work'});
   signMacApplication(run, app, signing, join(repo, 'build/darwin/cef-helper-jit.plist'));
   const verifyApplication = candidate => {
     const bin = join(candidate, 'Contents', 'MacOS');

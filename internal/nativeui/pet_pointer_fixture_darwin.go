@@ -12,6 +12,13 @@ static bool dshPreviewPetIgnoresMouse(void *native) {
     return ((NSWindow *)native).ignoresMouseEvents;
 }
 
+static bool dshPreviewPetPrepareWindow(void *native) {
+    NSWindow *window = (NSWindow *)native;
+    if (!window.isVisible) return false;
+    if (!(window.occlusionState & NSWindowOcclusionStateVisible)) [window orderFrontRegardless];
+    return true;
+}
+
 static NSPoint dshPreviewPetScreenPoint(NSWindow *window, double x, double y) {
     NSRect bounds = [window.contentView convertRect:window.contentView.bounds toView:nil];
     return [window convertPointToScreen:NSMakePoint(NSMinX(bounds) + x * NSWidth(bounds),
@@ -66,27 +73,40 @@ static int dshPreviewPetClick(void *native) {
     if (!window) return -1;
     NSNumber *state = objc_getAssociatedObject(window, &dshPreviewPetClickKey);
     if (state) return state.intValue;
+    if (!window.isKeyWindow) return 0;
     WKWebView *webView = dshPreviewPetWebView(window.contentView);
     if (!webView) return -1;
     objc_setAssociatedObject(window, &dshPreviewPetClickKey, @0, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *observe = @"(() => {"
         "const touch = document.querySelector('#pet-touch:not([hidden])');"
-        "if (!touch) return false;"
+        "if (!touch) return null;"
+        "const rect = touch.getBoundingClientRect();"
+        "const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;"
+        "if (document.elementFromPoint(x, y) !== touch) return null;"
+        "globalThis.__dshPreviewTrustedPetClick = false;"
         "touch.addEventListener('click', event => { globalThis.__dshPreviewTrustedPetClick = event.isTrusted; }, {once: true});"
-        "return true;"
+        "return [x / innerWidth, y / innerHeight];"
     "})()";
     [webView evaluateJavaScript:observe completionHandler:^(id result, NSError *error) {
-        if (error || ![result boolValue] || !window.isVisible || window.ignoresMouseEvents) {
+        if (error || ![result isKindOfClass:[NSArray class]] || [result count] != 2 ||
+            !window.isVisible || !window.isKeyWindow || window.ignoresMouseEvents) {
             objc_setAssociatedObject(window, &dshPreviewPetClickKey, @(-1), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             return;
         }
+        NSArray *point = result;
         NSRect bounds = webView.bounds;
-        CGFloat y = webView.isFlipped ? 0.66 : 0.34;
-        NSPoint location = [webView convertPoint:NSMakePoint(NSWidth(bounds) * 0.50, NSHeight(bounds) * y) toView:nil];
+        CGFloat x = [point[0] doubleValue], y = [point[1] doubleValue];
+        if (!webView.isFlipped) y = 1 - y;
+        NSPoint location = [webView convertPoint:NSMakePoint(NSMinX(bounds) + NSWidth(bounds) * x,
+                                                             NSMinY(bounds) + NSHeight(bounds) * y) toView:nil];
         for (NSEventType type = NSEventTypeLeftMouseDown; type <= NSEventTypeLeftMouseUp; ++type) {
             NSEvent *event = [NSEvent mouseEventWithType:type location:location modifierFlags:0
                 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:window.windowNumber
                 context:nil eventNumber:1 clickCount:1 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+            if (event.window != window) {
+                objc_setAssociatedObject(window, &dshPreviewPetClickKey, @(-1), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                return;
+            }
             [window sendEvent:event];
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
@@ -109,6 +129,14 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// PrepareMacPreviewPetWindow raises the fixture when another window obscures it.
+// Wait for the overlay to show itself before changing its order.
+func PrepareMacPreviewPetWindow(window application.Window) bool {
+	return application.InvokeSyncWithResult(func() bool {
+		return bool(C.dshPreviewPetPrepareWindow(window.NativeWindow()))
+	})
+}
 
 // CheckMacPreviewPetPointer drives the real sampler using only local points
 // in the isolated Pet window. The hit map comes from its running WebView.
@@ -169,8 +197,12 @@ func CheckMacPreviewPetPointer(window application.Window, hitTest func(float64, 
 	return evidence, nil
 }
 
-// CheckMacPreviewPetClick sends the mouse sequence only to the fixture window.
+// CheckMacPreviewPetClick focuses the fixture window so AppKit delivers both
+// native mouse edges to WebKit.
 func CheckMacPreviewPetClick(window application.Window) (bool, error) {
+	if !window.IsFocused() {
+		window.Focus()
+	}
 	state := application.InvokeSyncWithResult(func() int {
 		return int(C.dshPreviewPetClick(window.NativeWindow()))
 	})

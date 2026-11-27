@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -84,6 +85,35 @@ func startEmbeddedBroker(ctx context.Context, c embeddedbrowser.Config) (*embedd
 }
 
 type macBrowserComponentSupervisor struct{ cache string }
+
+func computerEngineSupported(engine string) bool {
+	return runtime.GOARCH == "arm64" && engine == "auv"
+}
+
+type macComputerSupervisor struct {
+	cache       string
+	publication func() (macowner.Publication, error)
+}
+
+func computerRuntimeSupervisor(_ supervisor.Adapter, cache string) supervisor.Adapter {
+	return &macComputerSupervisor{cache: cache, publication: ownedMacPublication}
+}
+
+func (s *macComputerSupervisor) Start(ctx context.Context, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	publication, err := s.publication()
+	if err != nil {
+		return nil, err
+	}
+	dependencies, err := automation.PublishedPackage(s.cache, automation.AUV)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := macowner.NewAUVAdapter(ctx, publication, plan.Executable, dependencies, computerRuntimeRoot(s.cache))
+	if err != nil {
+		return nil, err
+	}
+	return owner.Start(ctx, plan, raw)
+}
 
 func embeddedBrowserSupervisor(base supervisor.Adapter, cache string) supervisor.Adapter {
 	if embeddedDevelopmentRoot() == "" && !embeddedRuntimeReady() {

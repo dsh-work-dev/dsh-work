@@ -200,6 +200,7 @@ func (g *guard) admitMCPGroupLocked(c Census) error {
 		return ErrCleanupPending
 	}
 	root := g.state.Broker
+	cfg := g.cfg.MCP
 	for _, p := range c.Members {
 		if p.State == "gone" {
 			continue
@@ -210,20 +211,38 @@ func (g *guard) admitMCPGroupLocked(c Census) error {
 		if p.PID == g.state.Owner.PID && p.Started == g.state.Owner.Started {
 			continue
 		}
-		if _, ok := g.state.Owned[processKey(p)]; ok {
+		if record, ok := g.state.Owned[processKey(p)]; ok {
+			if p.State == "live" && (record.Role == "auv-native" || record.Role == "auv-native-child") &&
+				!pinnedJobFile(p.Path, cfg.AUVDriver, cfg.AUVDevice, cfg.AUVInode) {
+				return ErrCleanupPending
+			}
 			continue
 		}
 		// The fixed SDK child is non-detached and registers before its entry.
 		// Keep its real pre-registration instance too; map-empty never means empty.
-		cfg := g.cfg.MCP
 		path, device, inode, role := cfg.Node, cfg.NodeDevice, cfg.NodeInode, "mcp-stdio-preentry"
 		if cfg.AUVDriver != "" {
 			path, device, inode, role = cfg.AUVDriver, cfg.AUVDevice, cfg.AUVInode, "auv-native"
 		}
-		if p.PGID != g.state.Owner.PGID || p.PPID != root.PID || !pinnedJobFile(p.Path, path, device, inode) {
+		if p.PGID != g.state.Owner.PGID || !pinnedJobFile(p.Path, path, device, inode) {
 			return ErrCleanupPending
+		}
+		if p.PPID != root.PID {
+			// The AUV daemon starts its local runner with the same pinned
+			// executable. Admit only that immediate worker generation.
+			if cfg.AUVDriver == "" || !auvRunnerParent(p, root, cfg) {
+				return ErrCleanupPending
+			}
+			role = "auv-native-child"
 		}
 		g.state.Owned[processKey(p)] = owned{Process: p, Role: role}
 	}
 	return nil
+}
+
+func auvRunnerParent(child, root Process, cfg *mcpConfig) bool {
+	parent, err := process(child.PPID)
+	return err == nil && parent.State == "live" && parent.PGID == child.PGID &&
+		parent.PPID == root.PID && parent.Started >= root.Started && parent.Started <= child.Started &&
+		pinnedJobFile(parent.Path, cfg.AUVDriver, cfg.AUVDevice, cfg.AUVInode)
 }

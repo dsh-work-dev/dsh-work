@@ -21,8 +21,81 @@ import (
 	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
 	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
+	"github.com/local/dsh-work/internal/embeddedbrowser/macowner"
 	"github.com/local/dsh-work/internal/localipc"
 )
+
+func TestLiveMacDMGBrowserOwner(t *testing.T) {
+	host := os.Getenv("DSH_WORK_TEST_DMG_EXECUTABLE")
+	if !filepath.IsAbs(host) {
+		t.Skip("requires the executable from a mounted DMG")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	publication, err := macowner.OpenInstalledPublication(ctx, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := filepath.Join(t.TempDir(), "profile")
+	if err := os.Mkdir(profile, 0700); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := macowner.New(publication, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker, err := embeddedbrowser.Start(ctx, embeddedbrowser.Config{
+		Executable: publication.Executable, Profile: profile, Supervisor: owner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = broker.Close() })
+	selection, err := broker.Select(ctx, automation.Request{Session: "dmg-browser", Lifetime: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab, err := selection.Open(ctx, "Packaged browser identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForInstalledBrowserTab(t, ctx, tab.Messages())
+	journals, err := filepath.Glob(filepath.Join(profile, ".dsh-cef-owner", "generation-*.json"))
+	if err != nil || len(journals) != 1 {
+		t.Fatalf("expected one browser owner generation, got %d: %v", len(journals), err)
+	}
+	data, err := os.ReadFile(journals[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		Body struct{ Owner macowner.Process }
+	}
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	if canonical, err := filepath.EvalSymlinks(host); err != nil || record.Body.Owner.Path != canonical {
+		t.Fatalf("browser did not launch under the packaged DSH Work executable: %q (%v)", record.Body.Owner.Path, err)
+	}
+	if err := tab.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Close(); err != nil {
+		if state, readErr := os.ReadFile(journals[0]); readErr == nil {
+			var status struct {
+				Body struct {
+					Phase        string
+					NativeEvents []struct{ Name string }
+				}
+			}
+			if json.Unmarshal(state, &status) == nil {
+				t.Logf("owned browser shutdown phase=%s events=%v", status.Body.Phase, status.Body.NativeEvents)
+			}
+		}
+		t.Fatal(err)
+	}
+	t.Log("Packaged DSH Work executable owned the browser, opened a CEF tab, and retired it")
+}
 
 func TestLiveMacInstalledPublication(t *testing.T) {
 	want := distribution.State(os.Getenv("DSH_WORK_TEST_INSTALLED_CEF_STATE"))

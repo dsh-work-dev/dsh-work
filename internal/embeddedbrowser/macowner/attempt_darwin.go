@@ -210,7 +210,7 @@ func ownedRunParent(run string) bool {
 }
 
 func (a *Adapter) recoverableAttemptProgram(attempt launchAttempt) bool {
-	if attempt.Program == a.publication.Owner {
+	if attempt.Program == a.publication.Owner || attempt.Program == a.ownerProgram() {
 		return true
 	}
 	// A new application bundle can retire an earlier publication's attempt.
@@ -221,7 +221,9 @@ func (a *Adapter) recoverableAttemptProgram(attempt launchAttempt) bool {
 	}
 	macOS := filepath.Dir(attempt.Program)
 	contents := filepath.Dir(macOS)
-	if filepath.Base(attempt.Program) != "dsh-cef-owner" || filepath.Base(macOS) != "MacOS" ||
+	name := filepath.Base(attempt.Program)
+	knownOwner := name == "dsh-cef-owner" || name == workExecutable && a.publication.hostOwner != ""
+	if !knownOwner || filepath.Base(macOS) != "MacOS" ||
 		filepath.Base(contents) != "Contents" || filepath.Ext(filepath.Dir(contents)) != ".app" {
 		return false
 	}

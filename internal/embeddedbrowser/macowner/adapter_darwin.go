@@ -36,14 +36,16 @@ const browserExecutable = "DSHWorkBrowser"
 var ErrUnsupportedPlatform = errors.New("MAC_CEF_PLATFORM_UNAVAILABLE")
 
 type Publication struct {
-	Kind       string   `json:"kind"`
-	Version    string   `json:"version"`
-	App        string   `json:"app"`
-	Executable string   `json:"executable"`
-	Owner      string   `json:"owner"`
-	Helpers    []string `json:"helpers"`
-	Sandbox    bool     `json:"sandbox"`
-	verified   bool
+	Kind           string   `json:"kind"`
+	Version        string   `json:"version"`
+	App            string   `json:"app"`
+	Executable     string   `json:"executable"`
+	Owner          string   `json:"owner"`
+	InstalledOwner string   `json:"installedOwner,omitempty"`
+	Helpers        []string `json:"helpers"`
+	Sandbox        bool     `json:"sandbox"`
+	verified       bool
+	hostOwner      string
 }
 
 // OpenPublication accepts the installed component selected by trusted app
@@ -114,6 +116,13 @@ type Adapter struct {
 	worker             *Worker
 	mcp                *mcpConfig
 	restricted         *restrictedConfig
+}
+
+func (a *Adapter) ownerProgram() string {
+	if a.publication.hostOwner != "" && a.restricted == nil {
+		return a.publication.hostOwner
+	}
+	return a.publication.Owner
 }
 
 // New is per-profile and CEF-specific. It deliberately does not become the
@@ -329,7 +338,8 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if a.restricted != nil {
 		w.state.Component = "restricted-dsh"
 	}
-	w.attempt = &launchAttempt{Generation: plan.GenerationID, Job: job, Run: run, Program: a.publication.Owner}
+	program := a.ownerProgram()
+	w.attempt = &launchAttempt{Generation: plan.GenerationID, Job: job, Run: run, Program: program}
 	a.worker = w
 	defer func() {
 		if w.attempt != nil && !w.attempt.Submitted {
@@ -370,7 +380,11 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err = writePrivate(configPath, data); err != nil {
 		return nil, err
 	}
-	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>` + escaped(job) + `</string><key>Program</key><string>` + escaped(a.publication.Owner) + `</string><key>ProgramArguments</key><array><string>` + escaped(a.publication.Owner) + `</string><string>--guard</string><string>` + escaped(configPath) + `</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>`
+	var association string
+	if program == a.publication.hostOwner {
+		association = `<key>AssociatedBundleIdentifiers</key><array><string>` + workBundleID + `</string></array>`
+	}
+	plist := `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>` + escaped(job) + `</string><key>Program</key><string>` + escaped(program) + `</string><key>ProgramArguments</key><array><string>` + escaped(program) + `</string><string>--guard</string><string>` + escaped(configPath) + `</string></array>` + association + `<key>RunAtLoad</key><true/><key>KeepAlive</key><false/><key>AbandonProcessGroup</key><false/><key>ExitTimeOut</key><integer>3</integer><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string></dict></plist>`
 	plistPath := filepath.Join(run, "owner.plist")
 	if err = writePrivate(plistPath, []byte(plist)); err != nil {
 		return nil, err
@@ -396,7 +410,7 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 			if len(match) == 2 {
 				pid, _ := strconv.ParseUint(string(match[1]), 10, 32)
 				owner, e := process(uint32(pid))
-				if e == nil && owner.State == "live" && owner.Path == a.publication.Owner {
+				if e == nil && owner.State == "live" && owner.Path == program {
 					socketBefore, _ := os.Lstat(cfg.Socket)
 					conn, e = localipc.Dial(ctx, cfg.Socket)
 					if e == nil {

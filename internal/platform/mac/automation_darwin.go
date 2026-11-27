@@ -70,7 +70,7 @@ func (p *AutomationPreparer) Inventory() []automation.Component {
 			automation.Component{ID: "cua-driver", Name: "Cua Driver", Capability: automation.Computer,
 				SupportedVersion: automation.DriverVersion, Adapter: "@modelcontextprotocol/client 2.2.0"},
 			automation.Component{ID: "auv", Name: "AUV", Capability: automation.AUV,
-				SupportedVersion: automation.AUVVersion, Adapter: "@auv-js/sdk " + automation.AUVVersion})
+				SupportedVersion: automation.AUVVersion, Adapter: "@auv-js/sdk " + automation.AUVVersion, BackendAvailable: true})
 	}
 	for n := range rows {
 		row := &rows[n]

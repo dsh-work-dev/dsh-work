@@ -57,12 +57,19 @@ func (o *observedMCP) Start(ctx context.Context, plan supervisor.LaunchPlan, raw
 // is invented: InstancePresenterRegistry and real UI presentation remain separate.
 func TestLiveMacEngineServiceMCP(t *testing.T) {
 	manifest, deps, evidence := os.Getenv("DSH_WORK_CEF_MAC_PUBLICATION"), os.Getenv("DSH_WORK_BROWSER_TEST_DEPENDENCIES"), os.Getenv("DSH_WORK_CEF_TEST_EVIDENCE")
-	if manifest == "" || deps == "" || evidence == "" {
+	host := os.Getenv("DSH_WORK_TEST_DMG_EXECUTABLE")
+	if (manifest == "" && host == "") || deps == "" || evidence == "" {
 		t.Fatal("explicit formal publication, prepared locked MCP dependencies and evidence required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	pub, err := OpenPublication(ctx, manifest)
+	var pub Publication
+	var err error
+	if host != "" {
+		pub, err = OpenInstalledPublication(ctx, host)
+	} else {
+		pub, err = OpenPublication(ctx, manifest)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,6 +309,9 @@ consentLoop:
 		t.Fatal("unexpected MCP resources", len(workers))
 	}
 	for _, worker := range workers {
+		if host != "" && (native.worker.owner.Path != host || worker.owner.Path != host) {
+			t.Fatalf("browser and MCP did not share the packaged DSH Work owner: %q, %q", native.worker.owner.Path, worker.owner.Path)
+		}
 		if err = worker.WaitEmpty(ctx); err != nil {
 			t.Fatal("actual MCP tree empty", err)
 		}

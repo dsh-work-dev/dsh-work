@@ -178,7 +178,7 @@ func (s *Service) snapshotLocked() Snapshot {
 		v.Computer.Availability = "unavailable"
 	}
 	v.ComputerAccess = s.computerSnapshotLocked()
-	if s.computer != nil && s.computer.config.Factory != nil && v.ComputerAccess.Failure == "" && s.state.CanChange && s.state.GatewayConnected && v.Computer.Enabled && v.Computer.Dependency == "prepared" {
+	if s.computer != nil && s.computer.config.supports(v.ComputerEngine) && v.ComputerAccess.Failure == "" && s.state.CanChange && s.state.GatewayConnected && v.Computer.Enabled && v.Computer.Dependency == "prepared" {
 		v.Computer.Availability = "available"
 		v.ComputerTools = ComputerToolSchemas(s.state.ComputerEngine)
 	}

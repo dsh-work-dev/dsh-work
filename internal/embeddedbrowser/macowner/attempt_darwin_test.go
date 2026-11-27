@@ -101,6 +101,19 @@ func TestRecoveryAcrossPublicationsRequiresOldJobPins(t *testing.T) {
 	if adapter.recoverableAttemptProgram(foreign) {
 		t.Fatal("non-owner executable was accepted")
 	}
+	oldHost := old
+	oldHost.Program = "/release/Old.app/Contents/MacOS/dsh-work"
+	if adapter.recoverableAttemptProgram(oldHost) {
+		t.Fatal("preview publication accepted an installed owner")
+	}
+	adapter.publication.hostOwner = "/release/New.app/Contents/MacOS/dsh-work"
+	if !adapter.recoverableAttemptProgram(oldHost) || !adapter.recoverableAttemptProgram(old) {
+		t.Fatal("installed publication could not recover earlier owner generations")
+	}
+	oldHost.PlistInode = 0
+	if adapter.recoverableAttemptProgram(oldHost) {
+		t.Fatal("earlier installed owner accepted without the plist pin")
+	}
 	adapter.publication.verified = false
 	if adapter.recoverableAttemptProgram(old) {
 		t.Fatal("an unverified successor publication was accepted")

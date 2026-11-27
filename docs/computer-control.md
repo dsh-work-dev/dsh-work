@@ -1,10 +1,10 @@
-# Computer control on Windows
+# Computer control
 
 Settings → 电脑 selects an engine and manages application access. Installation
 is explicit; enabling computer control or selecting an engine only inspects
 already-published components. There is no engine fallback.
 
-## Current execution surface
+## Windows execution surface
 
 Cua Driver 0.28.1 is connected through the pinned official
 `@modelcontextprotocol/client@2.2.0`. The Host projects these tools into the DSH
@@ -38,6 +38,24 @@ background keyboard input is unsupported upstream; it is not routed to Cua.
 
 Install or update AUV explicitly in Settings → 电脑 before selecting it. The
 updated lock does not install it or change the user's selected engine.
+
+## macOS execution surface
+
+On Apple Silicon, select AUV in Settings → 电脑. It supports window discovery,
+window screenshots, background coordinate clicks and scrolling, and release.
+The Host checks the target's process and window identity, grants access per
+application, and revokes temporary grants and outstanding permits on Stop.
+macOS requires Screen & System Audio Recording for screenshots and
+Accessibility for click delivery.
+
+The signed DSH Work package starts the browser and AUV LaunchAgent using the
+main application's executable in guard mode. The job declares the DSH Work
+bundle identifier, so macOS can attribute protected operations to **DSH Work**.
+The browser renderer and AUV driver run in their owned process groups and keep
+their existing app and site authorization rules. Renaming the browser bundle
+would leave it as a separate permission identity. The standalone development
+publication still uses its nested guard. Recheck attribution and cleanup when
+the package signing identity or LaunchAgent entry point changes.
 
 ## Application and action decisions belong to the Host
 
@@ -155,11 +173,10 @@ The CI Shared contracts matrix exercises shared authorization and lifecycle
 logic with injected inspected targets and resources. It does not execute
 Windows binaries on macOS/Linux. Windows-only policy tests use drive, UNC,
 extended and mixed-case process image paths and pass their classification into
-the real authorization gateway. Non-Windows tests exercise the native
-unsupported inspector, desktop lease and preparer, and verify that enabling
-either engine publishes no computer tools and authorizes no backend launch.
-These checks are distinct from the opt-in native interaction tests below;
-ordinary CI does not provide their owned application/SDK fixtures.
+the real authorization gateway. The opt-in macOS tests use the signed AUV
+package, a standalone AppKit button, and the installed browser publication
+from a mounted DMG. Ordinary CI runs the shared checks. The native interaction
+tests require a graphical session and its system permission grants.
 
 The opt-in Windows tests exercise the real rc.5 Agent/tool registry, Host app
 consent and DSH action approval, official SDK/driver, native fixture state,

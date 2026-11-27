@@ -9,10 +9,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 const installedManifest = "dsh-cef-publication.json"
 const installedBrowser = "Frameworks/DSHWorkBrowser.app"
+const workBundleID = "com.local.dsh-work"
+const workExecutable = "dsh-work"
 
 // OpenInstalledPublication opens the browser sealed inside the running app's
 // signed bundle. All paths are relative to Contents so the app can move.
@@ -69,7 +72,25 @@ func OpenInstalledPublication(ctx context.Context, executable string) (Publicati
 			return publication, errors.New("installed CEF component path rejected")
 		}
 	}
-	return verifyPublication(ctx, publication)
+	publication, err = verifyPublication(ctx, publication)
+	if err != nil {
+		return publication, err
+	}
+	if publication.InstalledOwner == "" {
+		return publication, nil
+	}
+	plist := filepath.Join(contents, "Info.plist")
+	identifier, err := exec.CommandContext(ctx, "/usr/bin/plutil", "-extract", "CFBundleIdentifier", "raw", plist).Output()
+	if err != nil || strings.TrimSpace(string(identifier)) != workBundleID || publication.InstalledOwner != workExecutable {
+		return Publication{}, errors.New("installed CEF host identity rejected")
+	}
+	host := filepath.Join(macOS, workExecutable)
+	info, err := os.Lstat(host)
+	if err != nil || !info.Mode().IsRegular() {
+		return Publication{}, errors.New("installed CEF host entry point rejected")
+	}
+	publication.hostOwner = host
+	return publication, nil
 }
 
 // OpenHostPublication shares the installed locator with isolated preview runs.

@@ -70,11 +70,17 @@ type ComputerSnapshot struct {
 	Use            *ComputerUse            `json:"use,omitempty"`
 }
 type ComputerGatewayConfig struct {
-	Factory ComputerFactory
-	Acquire func() (func() error, error)
-	Probe   ComputerElementProbe
-	Inspect func(uint32, uint64) (ComputerTarget, error)
+	Factory        ComputerFactory
+	Acquire        func() (func() error, error)
+	Probe          ComputerElementProbe
+	Inspect        func(uint32, uint64) (ComputerTarget, error)
+	SupportsEngine func(string) bool
 }
+
+func (c ComputerGatewayConfig) supports(engine string) bool {
+	return c.Factory != nil && c.Inspect != nil && (c.SupportsEngine == nil || c.SupportsEngine(engine))
+}
+
 type computerPending struct {
 	view   ComputerConsent
 	choice chan bool
@@ -172,7 +178,7 @@ func (s *Service) computerValidLocked(r Request) bool {
 			return false
 		}
 	}
-	return s.computer != nil && s.computer.config.Factory != nil && s.computer.config.Inspect != nil && r.Capability == Computer && s.state.CanChange && s.state.GatewayConnected && r.Generation == s.state.Generation && s.slots[Computer].state.Enabled && v.Dependency == "prepared" && v.Epoch == r.Epoch && r.Session != "" && r.Lifetime != "" && !s.stopped[revocationKey(r)]
+	return s.computer != nil && s.computer.config.supports(s.state.ComputerEngine) && r.Capability == Computer && s.state.CanChange && s.state.GatewayConnected && r.Generation == s.state.Generation && s.slots[Computer].state.Enabled && v.Dependency == "prepared" && v.Epoch == r.Epoch && r.Session != "" && r.Lifetime != "" && !s.stopped[revocationKey(r)]
 }
 func sameComputerOwner(a, b Request) bool {
 	return a.Generation == b.Generation && a.Session == b.Session && a.Lifetime == b.Lifetime
