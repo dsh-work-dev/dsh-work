@@ -75,7 +75,6 @@
       <aside class="shell-nav" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
         <button id="manager-close" class="nav-item manager-back" type="button"><span data-icon="chevron-left"></span><span data-i18n="manager.close">Back to workbench</span></button>
         <select id="manager-section-select" class="nav-picker" data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-          <option value="overview" data-i18n="manager.overview">Overview</option>
           <optgroup label="Application" data-i18n-label="manager.groupApplication">
           <option value="settings" data-i18n="manager.general">General</option>
           <option value="notifications" data-i18n="manager.notifications">Notifications</option>
@@ -95,7 +94,6 @@
           </optgroup>
         </select>
         <nav data-i18n-aria-label="manager.settingsSections" aria-label="Settings sections">
-          <button class="nav-item" data-manager-section="overview" type="button"><span data-icon="layout-dashboard"></span><span data-i18n="manager.overview">Overview</span></button>
           <div class="nav-group" role="group" aria-labelledby="settings-group-application">
             <h2 id="settings-group-application" class="nav-heading" data-i18n="manager.groupApplication">Application</h2>
             <button class="nav-item" data-manager-section="settings" type="button"><span data-icon="settings"></span><span data-i18n="manager.general">General</span></button>
@@ -122,7 +120,7 @@
       <div class="shell-content" id="manager-content" tabindex="-1">
         <div class="page">
           <header class="page-head">
-            <h1 id="manager-title" tabindex="-1" data-i18n="manager.overview">Overview</h1>
+            <h1 id="manager-title" tabindex="-1" data-i18n="manager.general">General</h1>
           </header>
 
           <!--
@@ -131,63 +129,7 @@
             control sits in a group row. A page with a single group omits the
             section heading. Only operation results appear outside groups.
           -->
-          <section id="manager-section-overview" class="panel" data-manager-panel="overview" aria-labelledby="manager-title">
-            <section class="section" aria-labelledby="overview-current-title">
-              <div class="section-head"><h2 id="overview-current-title" data-i18n="manager.currentEnvironment">Current environment</h2><button id="environment-edit" class="button" data-i18n="environment.edit" type="button">Switch environment</button></div>
-              <div class="group">
-                <dl class="facts" data-i18n-aria-label="manager.currentEnvironment" aria-label="Current environment">
-                  <div><dt data-i18n="field.launchState">Launch state</dt><dd><span id="manager-current-state" class="tag" data-i18n="value.notRunning">Not running</span></dd></div>
-                  <div><dt>DSH</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                  <div><dt data-i18n="field.node">Node</dt><dd id="manager-current-node">—</dd></div>
-                </dl>
-                <div id="environment-editor" class="row row-foot" hidden>
-                  <div class="form-grid">
-                    <label class="field"><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
-                    <label class="field"><span data-i18n="field.node">Node</span><select id="manager-node"></select></label>
-                    <select id="manager-data-directory" hidden aria-hidden="true" tabindex="-1"></select>
-                    <label class="field"><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
-                  </div>
-                  <div class="row-trail"><button id="environment-cancel" class="button button-quiet" data-i18n="common.cancel" type="button">Cancel</button><button id="environment-apply" class="button button-primary" data-i18n="environment.apply" type="button">Switch and restart</button></div>
-                </div>
-              </div>
-            </section>
 
-            <section id="manager-configured-context" class="section" aria-labelledby="overview-configured-title" hidden>
-              <div class="section-head"><h2 id="overview-configured-title" data-i18n="manager.configuredContext">Configured context</h2></div>
-              <div class="group">
-                <dl class="facts" data-i18n-aria-label="manager.configuredContext" aria-label="Configured context">
-                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-configured-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                </dl>
-              </div>
-            </section>
-
-            <section id="manager-known-good-context" class="section" aria-labelledby="overview-known-good-title" hidden>
-              <div class="section-head"><h2 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h2><button id="known-good-return" class="button" data-i18n="recovery.restore" type="button">Return</button></div>
-              <div class="group">
-                <dl class="facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
-                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
-                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
-                </dl>
-              </div>
-            </section>
-
-            <section id="manager-switch-failure" class="section notice" aria-live="polite" hidden>
-              <div class="notice-head"><span data-icon="triangle-alert"></span><div><strong data-i18n="recovery.title">Run context needs attention</strong><p id="manager-switch-failure-detail" class="note"></p></div></div>
-              <details class="operation-log">
-                <summary data-i18n="switch.diagnostics">Diagnostic details</summary>
-                <div class="operation-log-toolbar"><button id="manager-switch-copy" class="button button-quiet button-compact" data-i18n="logs.copy" type="button">Copy</button></div>
-                <pre id="manager-switch-diagnostic" class="operation-log-output" tabindex="0"></pre>
-              </details>
-              <div class="actions">
-                <button id="manager-switch-retry" class="button button-primary" data-i18n="common.retry" type="button">Retry</button>
-                <button id="manager-switch-restore" class="button" data-i18n="recovery.restore" type="button">Restore known good</button>
-              </div>
-            </section>
-
-            <section id="version-restore-points" class="section restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
-          </section>
 
           <section id="manager-section-profiles" class="panel" data-manager-panel="profiles" aria-labelledby="manager-title" hidden>
             <section id="profile-list-view" class="section" aria-labelledby="profiles-all-title">
@@ -589,5 +531,63 @@
     </main>
     <script type="module" src="/src/main.ts"></script>
     <span id="manager-current-data-directory" hidden></span><span id="manager-configured-data-directory" hidden></span><span id="manager-known-good-data-directory" hidden></span>
-  </body>
+
+<dialog id="overview-environment-dialog" class="overview-environment-dialog" aria-labelledby="overview-environment-title"><header class="dialog-head"><h2 id="overview-environment-title" data-i18n="manager.currentEnvironment">Current environment</h2><button type="button" id="overview-environment-close" class="button" data-i18n="startup.close">Close</button></header>          <section id="overview-environment-controls" aria-labelledby="overview-environment-title">
+            <section class="section" aria-labelledby="overview-current-title">
+              <div class="section-head"><h2 id="overview-current-title" data-i18n="manager.currentEnvironment">Current environment</h2><button id="environment-edit" class="button" data-i18n="environment.edit" type="button">Switch environment</button></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.currentEnvironment" aria-label="Current environment">
+                  <div><dt data-i18n="field.launchState">Launch state</dt><dd><span id="manager-current-state" class="tag" data-i18n="value.notRunning">Not running</span></dd></div>
+                  <div><dt>DSH</dt><dd id="manager-current-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-current-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                  <div><dt data-i18n="field.node">Node</dt><dd id="manager-current-node">—</dd></div>
+                </dl>
+                <div id="environment-editor" class="row row-foot" hidden>
+                  <div class="form-grid">
+                    <label class="field"><span data-i18n="field.runtime">Runtime</span><select id="manager-runtime"></select></label>
+                    <label class="field"><span data-i18n="field.node">Node</span><select id="manager-node"></select></label>
+                    <select id="manager-data-directory" hidden aria-hidden="true" tabindex="-1"></select>
+                    <label class="field"><span data-i18n="field.profile">Profile</span><select id="manager-profile"></select></label>
+                  </div>
+                  <div class="row-trail"><button id="environment-cancel" class="button button-quiet" data-i18n="common.cancel" type="button">Cancel</button><button id="environment-apply" class="button button-primary" data-i18n="environment.apply" type="button">Switch and restart</button></div>
+                </div>
+              </div>
+            </section>
+
+            <section id="manager-configured-context" class="section" aria-labelledby="overview-configured-title" hidden>
+              <div class="section-head"><h2 id="overview-configured-title" data-i18n="manager.configuredContext">Configured context</h2></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.configuredContext" aria-label="Configured context">
+                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-configured-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-configured-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                </dl>
+              </div>
+            </section>
+
+            <section id="manager-known-good-context" class="section" aria-labelledby="overview-known-good-title" hidden>
+              <div class="section-head"><h2 id="overview-known-good-title" data-i18n="manager.knownGoodContext">Known-good context</h2><button id="known-good-return" class="button" data-i18n="recovery.restore" type="button">Return</button></div>
+              <div class="group">
+                <dl class="facts" data-i18n-aria-label="manager.knownGoodContext" aria-label="Known-good context">
+                  <div><dt data-i18n="field.runtime">Runtime</dt><dd id="manager-known-good-runtime" data-i18n="value.noRuntime">No runtime</dd></div>
+                  <div><dt data-i18n="field.profile">Profile</dt><dd id="manager-known-good-profile" data-i18n="value.noProfile">No profile selected</dd></div>
+                </dl>
+              </div>
+            </section>
+
+            <section id="manager-switch-failure" class="section notice" aria-live="polite" hidden>
+              <div class="notice-head"><span data-icon="triangle-alert"></span><div><strong data-i18n="recovery.title">Run context needs attention</strong><p id="manager-switch-failure-detail" class="note"></p></div></div>
+              <details class="operation-log">
+                <summary data-i18n="switch.diagnostics">Diagnostic details</summary>
+                <div class="operation-log-toolbar"><button id="manager-switch-copy" class="button button-quiet button-compact" data-i18n="logs.copy" type="button">Copy</button></div>
+                <pre id="manager-switch-diagnostic" class="operation-log-output" tabindex="0"></pre>
+              </details>
+              <div class="actions">
+                <button id="manager-switch-retry" class="button button-primary" data-i18n="common.retry" type="button">Retry</button>
+                <button id="manager-switch-restore" class="button" data-i18n="recovery.restore" type="button">Restore known good</button>
+              </div>
+            </section>
+
+            <section id="version-restore-points" class="section restore-points-panel" aria-label="Version snapshots" data-i18n-aria-label="points.title"></section>
+          </section></dialog>
+</body>
 </html>

@@ -2,6 +2,7 @@ package desktopapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -37,6 +38,7 @@ import (
 	"github.com/local/dsh-work/internal/maintenance"
 	"github.com/local/dsh-work/internal/nativeui"
 	dshworknotifications "github.com/local/dsh-work/internal/notifications"
+	"github.com/local/dsh-work/internal/overviewpc"
 	dshworkpet "github.com/local/dsh-work/internal/pet"
 	"github.com/local/dsh-work/internal/platform"
 	"github.com/local/dsh-work/internal/presence"
@@ -188,9 +190,31 @@ func runDaemon(identity string, resources Resources) {
 		logging.Module(logging.ModRuntime).Error("manager state unavailable", logging.ErrAttrs(managerErr, lifecycle.ErrorManagerStateInvalid)...)
 		manager = nil
 	}
+	overview := &daemon.OverviewService{Root: storage.Root, Replacer: dependencies.FileReplacer, RecoverySource: func(ctx context.Context) (*dshmanager.SwitchAttempt, error) {
+		if manager == nil {
+			return nil, nil
+		}
+		_, attempt, err := manager.RunContextState(ctx)
+		return attempt, err
+	}, ProfileKey: func(ctx context.Context) (string, error) {
+		if manager == nil {
+			return "", nil
+		}
+		target, _, err := manager.RunContextState(ctx)
+		if err != nil {
+			return "", err
+		}
+		if target == nil {
+			return "", nil
+		}
+		encoded, err := json.Marshal(target)
+		return string(encoded), err
+	}}
+	overview.Initialize()
 	channel := workerchannel.New()
-	channel.SetWorkerObserver(func(ctx context.Context, auth string, transport http.RoundTripper) {
+	channel.SetWorkerObserver(func(ctx context.Context, generation, auth string, transport http.RoundTripper) {
 		petActivity.Start(ctx, auth, transport)
+		daemon.SetOverviewWorker(overview, ctx, generation, auth, transport)
 		automationBridge.Start(ctx, auth, transport)
 	})
 	var automaticRuntimeRollback atomic.Bool
@@ -203,6 +227,7 @@ func runDaemon(identity string, resources Resources) {
 		Channel:                  channel,
 		PlatformError:            dependencies.Err,
 		AutomaticRuntimeRollback: automaticRuntimeRollback.Load,
+		SwitchAttemptRecorded:    overview.ObserveRecovery,
 		WorkerOutput: func(generation string, event supervisor.OutputEvent) {
 			logging.WorkerOutput(generation, string(event.Stream), event.Text)
 		},
@@ -311,6 +336,9 @@ func runDaemon(identity string, resources Resources) {
 		if acquisitionStreamPublisher != nil && acquisitionStreamPublisher.enqueue(status, true) {
 			acquisitionStreamPublisher.drain()
 		}
+	})
+	dshworkapp.SetManagerOverviewEvent(managerService, func(event dshworkapp.ManagerOverviewEvent) {
+		overview.RecordEvent(daemon.OverviewEvent{ID: event.ID, At: event.At, Kind: event.Kind, State: event.State})
 	})
 	dshworkapp.SetBackupFileActions(managerService,
 		func() (string, error) { return nativeui.ChooseProfileBackup(desktop) },
@@ -524,9 +552,14 @@ func runDaemon(identity string, resources Resources) {
 	hub.SetTopic("automation", automationState.Snapshot())
 	tracker := presence.New()
 	interactions := dshinteraction.New()
+	overview.PC = overviewpc.New(overviewpc.Config{DataPath: config.DSHDataDirectory, OwnedProcesses: func(ctx context.Context) (overviewpc.Ownership, error) {
+		g, p, e := host.OwnedProcesses(ctx)
+		return overviewpc.Ownership{Generation: g, PIDs: p}, e
+	}})
+	defer overview.PC.Close()
 	daemonHostService := &daemon.HostService{HostService: hostService}
 	server := &daemon.Server{Host: host, Channel: channel, Settings: settingsManager, Root: storage.Root, PID: os.Getpid(), Hub: hub, Presence: tracker, Interactions: interactions, Services: map[string]any{
-		"HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
+		"OverviewService": overview, "HostService": daemonHostService, "WindowService": &daemon.WindowService{Settings: settingsManager, Presence: tracker, Interactions: interactions},
 		"DSHPageService":    &daemon.DSHPageService{Activity: petActivity, Interactions: interactions},
 		"AutomationService": automationService, "ManagerService": managerService, "SettingsService": settingsService, "StorageService": storageService, "PetSettingsService": petSettingsService, "DiagnosticsService": diagnosticsService,
 	}, Maintenance: maintenance.InstallerInProgress}
@@ -1196,6 +1229,7 @@ func runDaemon(identity string, resources Resources) {
 	var lifecycleLogMu sync.Mutex
 	var lifecycleLogKey, lifecycleLogFailure string
 	host.SetPublish(func(status lifecycle.Status) {
+		overview.Observe(status)
 		if status.State == lifecycle.StateStarting && status.Phase == lifecycle.PhaseCheckpoint {
 			go func() {
 				if _, err := launcher.Open("__boot", "workspace"); err != nil {
@@ -1225,11 +1259,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 		profile := false
 		if manager != nil {
-			if snapshot, err := manager.Snapshot(context.Background()); err == nil {
-				selection := snapshot.Current
-				if selection == nil {
-					selection = snapshot.Configured
-				}
+			if selection, _, err := manager.RunContextState(context.Background()); err == nil {
 				profile = selection != nil && selection.Profile.DataDirectoryID == "dsh-work" && selection.Profile.Name == dshmanager.AppProfileName
 			}
 		}

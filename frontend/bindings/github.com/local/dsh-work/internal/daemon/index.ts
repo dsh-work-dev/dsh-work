@@ -8,5 +8,7 @@ export {
 } from "./models.js";
 
 export type {
+    OverviewEvent,
+    OverviewSnapshot,
     UpdateSnapshot
 } from "./models.js";

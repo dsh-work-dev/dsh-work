@@ -925,6 +925,8 @@ func TestHostCancellingCandidateSwitchStopsWithoutAutomaticRestore(t *testing.T)
 func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
 	fixture := newRunContextSwitchFixture(t)
 	defer fixture.close()
+	var observed *dshmanager.SwitchAttempt
+	fixture.host.deps.SwitchAttemptRecorded = func(attempt *dshmanager.SwitchAttempt) { observed = attempt }
 	fixture.dsh.setFailure("beta", true)
 	fixture.startReady(t)
 
@@ -939,6 +941,9 @@ func TestHostRollsBackCandidateFailureWithoutWorkerOverlap(t *testing.T) {
 	assertRunContext(t, snapshot.KnownGood, fixture.target("alpha"), "rolled-back known-good")
 	if snapshot.LastSwitchAttempt == nil || snapshot.LastSwitchAttempt.Target != target || snapshot.LastSwitchAttempt.Rollback != dshmanager.RollbackRestored {
 		t.Fatalf("retained failed attempt = %#v", snapshot.LastSwitchAttempt)
+	}
+	if observed == nil || observed.Rollback != dshmanager.RollbackRestored || observed.CompletedAt != snapshot.LastSwitchAttempt.CompletedAt {
+		t.Fatalf("terminal rollback observer = %#v, want the persisted attempt", observed)
 	}
 	if status := fixture.host.Status(); status.State != lifecycle.StateReady {
 		t.Fatalf("host status after successful rollback = %+v, want Ready", status)

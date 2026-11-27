@@ -326,6 +326,7 @@ export interface PluginUpgradeAllRequest {
     "target": PluginTarget;
     "packages": string[] | null;
     "acceptIncompatible"?: boolean;
+    "expectedGeneration"?: string;
 }
 
 export interface PluginUpgradeRequest {

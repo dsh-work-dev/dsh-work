@@ -111,6 +111,13 @@ func (s *HostService) DisableFaultPlugin(ctx context.Context, packageName string
 	return value, err
 }
 
+func (s *HostService) DisableFaultPluginAndRetry(ctx context.Context, generation, packageName string) (lifecycle.Status, error) {
+	if s.Local != nil { return s.Local.DisableFaultPluginAndRetry(ctx, generation, packageName) }
+	var value lifecycle.Status
+	err := call(ctx, s.Client, "HostService", "DisableFaultPluginAndRetry", []any{generation, packageName}, &value)
+	return value, err
+}
+
 func (s *HostService) DisableFaultPlugins(ctx context.Context) (lifecycle.Status, error) {
 	if s.Local != nil { return s.Local.DisableFaultPlugins(ctx) }
 	var value lifecycle.Status

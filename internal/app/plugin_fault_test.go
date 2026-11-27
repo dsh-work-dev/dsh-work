@@ -160,6 +160,72 @@ func TestPluginFaultListsProfilePluginsWithSuspectsFirst(t *testing.T) {
 	}
 }
 
+type faultThenReadySupervisor struct {
+	first  exitingSupervisor
+	second readyThenExitSupervisor
+	starts int
+}
+
+func (s *faultThenReadySupervisor) Start(ctx context.Context, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	s.starts++
+	if s.starts == 1 {
+		return s.first.Start(ctx, plan, raw)
+	}
+	return s.second.Start(ctx, plan, raw)
+}
+
+func TestDisableFaultPluginAndRetryUsesObservedFailedSelection(t *testing.T) {
+	supervisor := &faultThenReadySupervisor{first: exitingSupervisor{stderr: "Error: dsh: failed to apply loader entry ws (@acme/widget/workspace): boom"}}
+	host, statuses, profilePath := newFaultTestHostWith(t, supervisor)
+	host.Start()
+	failed := waitForStatus(t, statuses, lifecycle.StateFailed)
+	ctx := context.Background()
+	service := NewHostService(host, nil)
+	if _, err := service.DisableFaultPluginAndRetry(ctx, failed.GenerationID, "@acme/widget"); err == nil {
+		t.Fatal("an untrusted surface changed the failed profile")
+	}
+	ctx = LocalClientContext(ctx, "workspace")
+	if _, err := service.DisableFaultPluginAndRetry(ctx, "older-failure", "@acme/widget"); err == nil {
+		t.Fatal("an expired generation changed the failed profile")
+	}
+	if manifest := readFaultProfile(t, profilePath); !slices.Contains(manifest.DSH.Profile.Bundles, "@acme/widget") {
+		t.Fatal("rejected requests disabled the plugin")
+	}
+	other := filepath.Join(filepath.Dir(profilePath), "other")
+	if err := os.Mkdir(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-web-app"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := host.deps.Manager.(*dshmanager.Manager)
+	selection, _, err := manager.RunContextState(ctx)
+	if err != nil || selection == nil {
+		t.Fatalf("failed selection = %v (%v)", selection, err)
+	}
+	changed := *selection
+	changed.Profile.Name = "other"
+	if _, err := manager.SetConfigured(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.DisableFaultPluginAndRetry(ctx, failed.GenerationID, "@acme/widget"); err == nil {
+		t.Fatal("retry accepted after the configured selection changed")
+	}
+	if manifest := readFaultProfile(t, profilePath); !slices.Contains(manifest.DSH.Profile.Bundles, "@acme/widget") {
+		t.Fatal("stale selection disabled the plugin")
+	}
+	if _, err := manager.SetConfigured(ctx, *selection); err != nil {
+		t.Fatal(err)
+	}
+	ready, err := service.DisableFaultPluginAndRetry(ctx, failed.GenerationID, "@acme/widget")
+	if err != nil || ready.State != lifecycle.StateReady || ready.GenerationID == failed.GenerationID || ready.LaunchSelection == nil || ready.LaunchSelection.ProfileName != "web" {
+		t.Fatalf("retry did not start the observed profile: %+v, %v", ready, err)
+	}
+	if manifest := readFaultProfile(t, profilePath); slices.Contains(manifest.DSH.Profile.Bundles, "@acme/widget") {
+		t.Fatal("the failed profile still selects the plugin")
+	}
+}
+
 func TestPluginFaultWithoutNamedPluginStillOffersPlugins(t *testing.T) {
 	host, _, statuses, _ := newFaultTestHost(t, "Error: worker exited")
 	host.Start()

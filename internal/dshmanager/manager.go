@@ -889,6 +889,21 @@ func (m *Manager) RemoveDataDirectory(ctx context.Context, id string) (Snapshot,
 	return m.Snapshot(context.Background())
 }
 
+// RunContextState returns the committed selection (or configured selection when
+// stopped) and latest switch result without refreshing the Settings catalog.
+func (m *Manager) RunContextState(ctx context.Context) (*RunContext, *SwitchAttempt, error) {
+	if err := contextError(ctx); err != nil {
+		return nil, nil, err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	selected := m.current
+	if selected == nil {
+		selected = m.configured
+	}
+	return cloneRunContext(selected), cloneSwitchAttempt(m.lastSwitchAttempt), nil
+}
+
 func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err := contextError(ctx); err != nil {
 		return Snapshot{}, err
@@ -993,6 +1008,9 @@ func (m *Manager) UpgradePlugin(ctx context.Context, request PluginUpgradeReques
 // UpgradePlugins upgrades each package in order and stops at the first
 // failure. Without a Host there is no Worker to restart or restore.
 func (m *Manager) UpgradePlugins(ctx context.Context, request PluginUpgradeAllRequest) (PluginResult, error) {
+	if request.ExpectedGeneration != "" {
+		return PluginResult{}, failure(lifecycle.ErrorManagerOperationBusy, "The current DSH run could not be verified", "retry from the DSH Work window")
+	}
 	packages, err := NormalizePluginUpgradeBatch(request.Packages)
 	if err != nil {
 		return PluginResult{}, err

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/local/dsh-work/internal/dshmanager"
+	"github.com/local/dsh-work/internal/lifecycle"
 )
 
 type versionRecoveryManager interface {
@@ -73,7 +74,7 @@ type restoreCancellation struct {
 	cancel context.CancelFunc
 }
 
-func (s *ManagerService) RestorePoint(ctx context.Context, id string) (dshmanager.Snapshot, error) {
+func (s *ManagerService) RestorePoint(ctx context.Context, id string) (result dshmanager.Snapshot, resultErr error) {
 	if s == nil || s.manager == nil || s.host == nil {
 		return dshmanager.Snapshot{}, managerUnavailable()
 	}
@@ -89,6 +90,8 @@ func (s *ManagerService) RestorePoint(ctx context.Context, id string) (dshmanage
 	s.restoreCancel.cancel = cancel
 	s.restoreCancel.mu.Unlock()
 	defer func() { cancel(); s.restoreCancel.mu.Lock(); s.restoreCancel.cancel = nil; s.restoreCancel.mu.Unlock() }()
+	operationID := lifecycle.NewCorrelationID()
+	defer func() { s.recordOverviewEvent(operationID, "restore", resultErr) }()
 	return s.host.RestoreVersionPoint(ctx, id)
 }
 func (s *ManagerService) CancelRestore(ctx context.Context) error {

@@ -411,6 +411,45 @@ func (w *jobWorker) activeProcesses() (uint32, error) {
 	return w.queryActiveProcesses()
 }
 
+// OwnedProcessIDs enumerates the kernel-owned Job Object, including descendants.
+// It never uses executable names or parent-PID guesses to infer membership.
+func (w *jobWorker) OwnedProcessIDs(ctx context.Context) ([]int32, error) {
+	w.closeMu.Lock()
+	defer w.closeMu.Unlock()
+	if w.closed {
+		return nil, nil
+	}
+	for capacity := 64; capacity <= 1<<20; capacity *= 2 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		buffer := make([]uintptr, (8+capacity*int(unsafe.Sizeof(uintptr(0)))+int(unsafe.Sizeof(uintptr(0)))-1)/int(unsafe.Sizeof(uintptr(0))))
+		base := unsafe.Pointer(&buffer[0])
+		err := win.QueryInformationJobObject(w.job, win.JobObjectBasicProcessIdList, uintptr(base), uint32(len(buffer)*int(unsafe.Sizeof(uintptr(0)))), nil)
+		if err == win.ERROR_MORE_DATA {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("enumerate Worker Job Object: %w", err)
+		}
+		count := *(*uint32)(unsafe.Add(base, 4))
+		if count > uint32(capacity) {
+			continue
+		}
+		pids := make([]int32, 0, count)
+		for i := uint32(0); i < count; i++ {
+			pid := *(*uintptr)(unsafe.Add(base, 8+uintptr(i)*unsafe.Sizeof(uintptr(0))))
+			if pid == 0 || pid > 1<<31-1 {
+				return nil, fmt.Errorf("invalid Worker process ID %d", pid)
+			}
+			pids = append(pids, int32(pid))
+		}
+		sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+		return pids, nil
+	}
+	return nil, fmt.Errorf("Worker process list exceeds enumeration limit")
+}
+
 // queryActiveProcesses reads the Job Object while closeMu is held by either
 // activeProcesses or Close. Keeping the handle check and query under one lock
 // prevents Diagnostics from querying a handle after Close releases it.

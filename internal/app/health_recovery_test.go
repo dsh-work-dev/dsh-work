@@ -224,7 +224,8 @@ func TestUpgradePluginsRestartsWorkerOnce(t *testing.T) {
 			f.startReady(t)
 			before := f.host.Status().GenerationID
 			target := dshmanager.PluginTarget{Profile: f.target("alpha").Profile}
-			_, err := f.host.UpgradePlugins(context.Background(), dshmanager.PluginUpgradeAllRequest{Target: target, Packages: []string{"alpha", " beta ", "alpha", "gamma"}})
+			request := dshmanager.PluginUpgradeAllRequest{Target: target, Packages: []string{"alpha", " beta ", "alpha", "gamma"}, ExpectedGeneration: before}
+			_, err := f.host.UpgradePlugins(context.Background(), request)
 			want := []string{"update:alpha", "update:beta", "update:gamma"}
 			if fail != "" {
 				want = want[:2]
@@ -245,6 +246,11 @@ func TestUpgradePluginsRestartsWorkerOnce(t *testing.T) {
 			status := f.host.Status()
 			if status.State != lifecycle.StateReady || status.GenerationID == before {
 				t.Fatalf("status after batch = %#v", status)
+			}
+			_, err = f.host.UpgradePlugins(context.Background(), request)
+			assertFailureCode(t, err, lifecycle.ErrorManagerOperationBusy)
+			if len(manager.calls) != len(want) || f.host.Status().GenerationID != status.GenerationID {
+				t.Fatalf("duplicate request mutated replacement Worker: %v", manager.calls)
 			}
 		})
 	}

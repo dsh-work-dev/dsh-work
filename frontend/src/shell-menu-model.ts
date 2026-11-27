@@ -96,6 +96,7 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       host("quit", {kind: "quit"}, quittable),
     ]},
     {id: "view", label: t("shell.menu.view"), badge: false, items: [
+      settings("overview", "overview"), separator,
       dsh("sidebar.left.toggle"), dsh("sidebar.right.toggle"),
       separator,
       windowItem("zoomIn", "zoom-in"),
@@ -107,8 +108,6 @@ export function buildMenus(state: MenuState, t: (key: string) => string): Menu[]
       {...host("showPet", {kind: "pet"}, !state.busy && state.pet.ready), checked: state.pet.visible},
     ]},
     {id: "settings", label: t("shell.menu.settings"), badge: false, items: [
-      settings("overview", "overview"),
-      separator,
       settings("settings", "general"), settings("notifications", "notifications"), settings("browser", "browser"), settings("computer", "computer"), settings("pets", "pets"),
       separator,
       settings("runtimes", "runtimes"), settings("profiles", "profiles"), settings("plugins", "plugins"),

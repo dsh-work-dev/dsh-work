@@ -3,7 +3,7 @@ import {ManagerService} from "../bindings/github.com/local/dsh-work/internal/des
 import type {Snapshot, RestorePoint} from "../bindings/github.com/local/dsh-work/internal/dshmanager";
 import {currentLocale, subscribeLocale, t} from "./i18n";
 
-export function mountRestorePoints(container: HTMLElement, updated: (snapshot: Snapshot) => void, startup = false) {
+export function mountRestorePoints(container: HTMLElement, updated: (snapshot: Snapshot) => void, startup = false, activityChanged = () => {}) {
   const heading = document.createElement(startup ? "h3" : "h2");
   const summary = document.createElement("p"); summary.className = "note";
   const actions = document.createElement("div"); actions.className = "actions";
@@ -25,14 +25,23 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   const close = document.createElement("button"); close.type = "button"; close.className = "button button-secondary";
   const previewActions = document.createElement("div"); previewActions.className = "actions"; previewActions.append(confirm, close);
   let previewRequest = 0;
-  function closePreview() {
+  let previewPending = false;
+  let dismissDirectRestore: (() => void) | undefined;
+  function cancelPendingPreview() {
     previewRequest++;
+    if (previewPending) feedback.textContent = "";
+    previewPending = false;
+  }
+  function closePreview() {
+    cancelPendingPreview();
     preview.hidden = true;
     if (startup) list.hidden = summary.hidden = actions.hidden = false;
     else { inspector.hidden = !selected; list.hidden = !!selected; }
+    controls();
   }
   preview.append(previewTitle, previewBody, previewActions);
   close.onclick = () => {
+    if (dismissDirectRestore) { history.close(); return; }
     closePreview();
     if (!startup) inspector.querySelector<HTMLButtonElement>("[data-restore]")?.focus();
     if (startup) Array.from(list.querySelectorAll<HTMLButtonElement>("button[data-point-id]")).find(button => button.dataset.pointId === selected?.id)?.focus();
@@ -46,7 +55,20 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   const dismiss = document.createElement("button"); dismiss.type = "button"; dismiss.className = "button button-secondary";
   dismiss.onclick = () => edit.close(); editActions.append(submit, dismiss); form.append(editTitle, input, editActions); edit.append(form);
   let editAction: ((value: string) => Promise<Snapshot>) | undefined;
-  form.onsubmit = event => {event.preventDefault(); const action = editAction; const value = input.value; edit.close(); if (action) void run(() => action(value));};
+  let dismissDirectSave: (() => void) | undefined;
+  let saving = false;
+  edit.addEventListener("close", () => {
+    const onDismiss = dismissDirectSave;
+    dismissDirectSave = undefined;
+    onDismiss?.();
+  });
+  form.onsubmit = event => {
+    event.preventDefault();
+    if (!editAction || submit.disabled) return;
+    const action = editAction, value = input.value;
+    dismissDirectSave = undefined;
+    edit.close(); void run(() => action(value));
+  };
   if (startup) container.append(heading, summary, actions, feedback, list, preview, edit);
   else {
     // Same grammar as every Settings section: heading, then one group row.
@@ -61,20 +83,35 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
     actions.append(browse);
   }
   actions.append(save, cancel);
-  browse.onclick = () => {selected = undefined; inspector.hidden = preview.hidden = true; list.hidden = false; history.append(cancel, feedback); history.showModal();};
+  function openHistory() {
+    cancelPendingPreview();
+    selected = undefined; inspector.hidden = preview.hidden = true; list.hidden = false;
+    if (!history.open) {history.append(cancel, feedback); history.showModal();}
+    controls();
+  }
+  browse.onclick = openHistory;
   historyClose.onclick = () => history.close();
-  history.addEventListener("close", () => {previewRequest++; container.append(feedback); actions.append(cancel);});
-  let reopenHistory = false;
-  edit.addEventListener("close", () => {if (reopenHistory) {reopenHistory = false; history.append(cancel, feedback); history.showModal();}});
+  history.addEventListener("close", () => {
+    if (!history.open) {
+      cancelPendingPreview(); container.append(feedback); actions.append(cancel);
+      const onDismiss = dismissDirectRestore;
+      dismissDirectRestore = undefined;
+      onDismiss?.();
+    }
+  });
   let snapshot: Snapshot | undefined; let blocked = false; let busy = false; let selected: RestorePoint | undefined;
+  let activeRestore = false;
+  let cancelling = false;
   let signature = "";
   let terminalOperation = "";
 
+  function mutationBlocked() { return blocked || busy || snapshot?.restorePoints?.operation?.status === "running"; }
   function editPoint(title: string, value: string, label: string, action: (value: string) => Promise<Snapshot>, deleting = false) {
-    if (busy || blocked) return;
+    if (mutationBlocked() || edit.open) return;
     editAction = action; editTitle.textContent = title; input.value = value; input.hidden = deleting;
+    saving = label === "points.save";
     input.setAttribute("aria-label", t("points.name")); submit.classList.toggle("button-danger", deleting); submit.textContent = t(label); dismiss.textContent = t("common.cancel");
-    if (!startup && history.open) { reopenHistory = true; history.close(); }
+    controls();
     edit.showModal(); (deleting ? dismiss : input).focus();
   }
 
@@ -83,24 +120,26 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
   function controls() {
     const operation = snapshot?.restorePoints?.operation;
     const recovering = operation?.status === "running";
+    const disabled = mutationBlocked();
     heading.hidden = startup;
     historyTitle.textContent = t("points.title"); historyClose.textContent = t("startup.close");
     browse.textContent = t("points.browse", {count: snapshot?.restorePoints?.points?.length ?? 0});
     browse.disabled = !snapshot?.restorePoints?.points?.length;
-    for (const button of Array.from(inspector.querySelectorAll<HTMLButtonElement>("button[data-mutation]"))) button.disabled = busy || blocked || recovering || button.dataset.unavailable === "true";
+    for (const button of Array.from(inspector.querySelectorAll<HTMLButtonElement>("button[data-mutation]"))) button.disabled = disabled || button.dataset.unavailable === "true" || (previewPending && button.hasAttribute("data-restore"));
     heading.textContent = t("points.title"); save.textContent = t("points.save"); cancel.textContent = t("common.cancel");
-    save.hidden = startup; save.disabled = busy || blocked || recovering || !snapshot?.restorePoints?.canSave;
-    confirm.disabled = busy || blocked || recovering || !!selected?.unavailable;
-    cancel.hidden = !busy; confirm.textContent = t("points.restore"); close.textContent = t("common.cancel");
-    for (const button of Array.from(list.querySelectorAll<HTMLButtonElement>("button"))) button.disabled = busy || blocked || recovering || button.dataset.unavailable === "true";
+    save.hidden = startup; save.disabled = disabled || !snapshot?.restorePoints?.canSave;
+    submit.disabled = disabled || (saving && !snapshot?.restorePoints?.canSave);
+    confirm.disabled = disabled || !selected || !!selected.unavailable;
+    cancel.hidden = !recovering && !activeRestore; cancel.disabled = cancelling;
+    confirm.textContent = t("points.restore"); close.textContent = t("common.cancel");
+    for (const button of Array.from(list.querySelectorAll<HTMLButtonElement>("button"))) button.disabled = (startup && (disabled || previewPending)) || button.dataset.unavailable === "true";
     if (operation && operation.status === "running") {
-      feedback.textContent = t(`points.stage.${operation.stage}`); cancel.hidden = false;
+      feedback.textContent = t(`points.stage.${operation.stage}`);
     } else {
       const terminal = JSON.stringify([operation, currentLocale()]);
       if (terminal !== terminalOperation) {
         terminalOperation = terminal;
-        if (operation?.status === "failed") feedback.textContent = operation.error || t("points.saveFailed");
-        else if (operation?.status === "completed") feedback.textContent = busy ? t("points.restored") : "";
+        if (!busy && !previewPending && operation?.status === "failed") feedback.textContent = operation.error || t("points.saveFailed");
       }
     }
   }
@@ -140,9 +179,9 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
     controls();
   }
   function showDetails(point: RestorePoint) {
-    previewRequest++; selected = point; inspector.replaceChildren(); list.hidden = true; preview.hidden = true; inspector.hidden = false;
+    cancelPendingPreview(); selected = point; inspector.replaceChildren(); list.hidden = true; preview.hidden = true; inspector.hidden = false;
     const back = document.createElement("button"); back.type = "button"; back.className = "button button-secondary button-compact"; back.textContent = t("points.back");
-    back.onclick = () => { inspector.hidden = true; list.hidden = false; Array.from(list.querySelectorAll<HTMLButtonElement>("button")).find(b => b.dataset.pointId === point.id)?.focus(); selected = undefined; };
+    back.onclick = () => { cancelPendingPreview(); inspector.hidden = true; list.hidden = false; Array.from(list.querySelectorAll<HTMLButtonElement>("button")).find(b => b.dataset.pointId === point.id)?.focus(); selected = undefined; controls(); };
     const title = document.createElement("h3"); title.textContent = name(point);
     const metadata = document.createElement("dl"); metadata.className = "version-metadata";
     for (const [label, value] of [["DSH", point.dshVersion], [t("points.profile"), point.target.profile.name], ["Node.js", point.nodeVersion], [t("points.packageManager"), point.packageManager], [t("points.lockfile"), point.lockfile || "—"], [t("points.created"), date(point.createdAt)]]) {
@@ -164,27 +203,32 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
     inspector.append(tools); controls(); back.focus();
   }
   async function showPreview(point: RestorePoint) {
-    if (busy || blocked) return;
+    if (mutationBlocked() || previewPending || point.unavailable) return;
     const request = ++previewRequest;
+    previewPending = true; feedback.textContent = t("view.loading"); controls();
+    const isCurrent = () => request === previewRequest && !!container.getClientRects().length && (startup || history.open);
     try {
       const result = await ManagerService.PreviewRestorePoint(point.id);
-      if (request !== previewRequest || !container.getClientRects().length || (!startup && !history.open)) return;
+      if (!isCurrent()) return;
       selected = result;
-      previewTitle.textContent = t("points.restoreTitle", {name: name(point)});
+      previewTitle.textContent = t("points.restoreTitle", {name: name(result)});
       const current = snapshot?.current ?? snapshot?.configured;
       const currentRuntime = snapshot?.runtimes?.find(r => r.id === current?.runtimeId);
       const currentPlugins = snapshot?.profiles?.find(p => p.ref.dataDirectoryId === current?.profile.dataDirectoryId && p.ref.name === current.profile.name)?.plugins ?? [];
       const changes = new Map(currentPlugins.map(p => [p.package, `${p.version || "—"} → ${t("points.removed")}`]));
-      for (const plugin of point.plugins ?? []) changes.set(plugin.name, `${currentPlugins.find(p => p.package === plugin.name)?.version ?? "—"} → ${plugin.version}`);
-      previewBody.textContent = `${t("points.restoreDescription")}\n\nDSH ${currentRuntime?.version ?? "—"} → ${point.dshVersion}\nProfile: ${point.target.profile.name}\n${Array.from(changes, ([name, value]) => `${name}: ${value}`).join("\n")}`;
+      for (const plugin of result.plugins ?? []) changes.set(plugin.name, `${currentPlugins.find(p => p.package === plugin.name)?.version ?? "—"} → ${plugin.version}`);
+      previewBody.textContent = `${t("points.restoreDescription")}\n\nDSH ${currentRuntime?.version ?? "—"} → ${result.dshVersion}\n${t("points.profile")}: ${result.target.profile.name}\n${Array.from(changes, ([name, value]) => `${name}: ${value}`).join("\n")}`;
       if (startup) { list.hidden = summary.hidden = actions.hidden = true; preview.hidden = false; }
       else { list.hidden = inspector.hidden = true; preview.hidden = false; }
+      previewPending = false; feedback.textContent = ""; controls();
       confirm.focus();
-    } catch (error) {if (request === previewRequest) feedback.textContent = String(error);}
+    } catch (error) {if (isCurrent()) feedback.textContent = String(error);}
+    finally {if (request === previewRequest) {previewPending = false; controls();}}
   }
   async function run(action: () => Promise<Snapshot>, restore = false) {
-    if (busy || blocked) return;
-    busy = true; feedback.textContent = t("view.loading"); controls();
+    if (mutationBlocked()) return;
+    busy = true; activeRestore = restore;
+    feedback.textContent = t("view.loading"); controls(); activityChanged();
     let polling = false; let acceptingPolls = true;
     const timer = restore ? window.setInterval(async () => {
       if (polling) return; polling = true;
@@ -193,13 +237,42 @@ export function mountRestorePoints(container: HTMLElement, updated: (snapshot: S
     try {snapshot = await action(); acceptingPolls = false; transientStatus(feedback, t(restore ? "points.restored" : "points.saved")); updated(snapshot);}
     catch (error) {acceptingPolls = false; feedback.textContent = String(error); try {snapshot = await ManagerService.GetSnapshot(); updated(snapshot);} catch {}}
     finally {
-      acceptingPolls = false; if (timer !== undefined) clearInterval(timer); busy = false; render();
-      if (!startup && selected) { const current = snapshot?.restorePoints?.points?.find(p => p.id === selected?.id); if (current) showDetails(current); else {selected = undefined; inspector.hidden = true; list.hidden = false;} }
+      acceptingPolls = false; if (timer !== undefined) clearInterval(timer); busy = activeRestore = false; render(); activityChanged();
+      if (!startup && history.open && selected) { const current = snapshot?.restorePoints?.points?.find(p => p.id === selected?.id); if (current) showDetails(current); else {selected = undefined; inspector.hidden = true; list.hidden = false; historyClose.focus();} }
     }
   }
   save.onclick = () => editPoint(t("points.name"), new Date().toLocaleString(currentLocale()), "points.save", label => ManagerService.SaveRestorePoint(label));
-  confirm.onclick = () => {const id = selected?.id; closePreview(); if (id) void run(() => ManagerService.RestorePoint(id), true);};
-  cancel.onclick = () => void ManagerService.CancelRestore().catch(error => {feedback.textContent = String(error);});
+  confirm.onclick = () => {
+    const id = selected?.id;
+    if (!id || confirm.disabled) return;
+    dismissDirectRestore = undefined;
+    closePreview();
+    void run(() => ManagerService.RestorePoint(id), true);
+  };
+  cancel.onclick = async () => {
+    if (cancelling) return;
+    cancelling = true; controls();
+    try {await ManagerService.CancelRestore(); cancelling = false; controls();}
+    catch (error) {cancelling = false; controls(); feedback.textContent = String(error);}
+  };
   subscribeLocale(() => render());
-  return {closePreview, render(next: Snapshot | undefined, disabled: boolean) {snapshot = next; blocked = disabled; render();}};
+  return {
+    closePreview,
+    save(onDismiss?: () => void) {
+      if (save.disabled || edit.open) return false;
+      dismissDirectSave = onDismiss;
+      save.click();
+      return true;
+    },
+    preview(pointId: string, onDismiss?: () => void) {
+      const point = snapshot?.restorePoints?.points?.find(p => p.id === pointId);
+      if (!point || startup) return false;
+      dismissDirectRestore = onDismiss;
+      openHistory(); showDetails(point);
+      void showPreview(point);
+      return true;
+    },
+    busy: () => busy,
+    render(next: Snapshot | undefined, disabled: boolean) {snapshot = next; blocked = disabled; render();},
+  };
 }

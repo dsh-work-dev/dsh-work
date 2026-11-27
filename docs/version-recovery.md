@@ -23,7 +23,7 @@ references. Manual points remain until explicitly deleted; points referenced by
 success pointers or an unfinished recovery are protected. Manual saving requires
 a current verified normal environment whose dependency inputs have not changed.
 
-Settings Overview shows a compact latest-verified summary, record count, save
+The environment dialog (from the overview's DSH Work tile) shows a compact latest-verified summary, record count, save
 action and history entry. History uses newest-first rows; selecting a record
 opens metadata, plugin versions and restore/rename/delete actions in the same
 dialog. Restore confirmation replaces those details. Closing returns focus to

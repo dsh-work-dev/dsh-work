@@ -1,3 +1,5 @@
+import {mountOverview} from "./overview-controller";
+import "./ui/overview-shell.css";
 import {Browser, Events, Window} from "@wailsio/runtime";
 import {HostService, ShellService} from "../bindings/github.com/local/dsh-work/internal/desktopclient";
 import {UpdateAction} from "../bindings/github.com/local/dsh-work/internal/daemon/models";
@@ -146,25 +148,97 @@ export function mountShell() {
       case "restart": void busyAction(async () => { menuState.lifecycle = (await HostService.Restart()).state; }); break;
       case "quit": void busyAction(() => HostService.Quit()); break;
       // A DSH command shows its result in DSH, so Settings steps aside.
-      case "dsh": closeSettingsPanel(); sendCommand(action.id); break;
+      case "dsh": closeOverview(); closeSettingsPanel(); sendCommand(action.id); break;
     }
   };
   const menuBar = createMenuBar(t, run, id => {
     if (id === "view") { void refreshPet(); void syncWindow(); }
-  }, () => frame.contentWindow?.focus());
+  }, () => {
+    if (settingsOpen) document.getElementById("manager-title")?.focus();
+    else if (overviewOpen) focusOverview();
+    else if (frame.hidden) hostSurface?.focus();
+    else frame.contentWindow?.focus();
+  });
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, modalMask, controls);
   document.body.prepend(bar);
   document.body.append(toast.element);
   document.body.append(frame);
 
+  let overviewOpen = false;
+  let sidebarWidth = 0;
+  // The sidebar client reports pending/running from DSH's own session store; offline comes from the Host lifecycle.
+  let overviewActivity = {pending:0,running:false};
+  let overviewOffline = true;
+  let overview: ReturnType<typeof mountOverview> | undefined;
+  const overviewPanel = document.createElement("section");
+  overviewPanel.className = "overview-shell"; overviewPanel.hidden = true;
+  const overviewContent = document.createElement("div"); overviewPanel.append(overviewContent);
+  const overviewToggle = document.createElement("button");
+  overviewToggle.type = "button"; overviewToggle.className = "shell-overview-toggle";
+  overviewToggle.append(icon("layout-dashboard"));
+  const overviewLabel = () => t("overview.title");
+  const labelOverview = () => {overviewToggle.title=overviewLabel();overviewToggle.setAttribute("aria-label",overviewLabel());};
+  labelOverview(); subscribeLocale(labelOverview);
+  bar.insertBefore(overviewToggle,drag); document.body.append(overviewPanel);
   let settingsOpen = false;
+  let overviewVisit = 0;
+  let externalSessionRequest = "";
+  let overviewReturnSelector = "";
+  overviewPanel.tabIndex = -1;
+  const focusOverview = (selector = "") => {
+    const target = selector ? overviewPanel.querySelector<HTMLElement>(selector) : null;
+    (target && !target.matches(":disabled") ? target : overviewPanel).focus({preventScroll:true});
+  };
   let dshModal = {active: false, background: "", blur: ""};
   const sendFrameMessage = (message: Record<string, unknown>) => {
     const src = frame.getAttribute("src");
     if (!src) return;
     frame.contentWindow?.postMessage({version: 1, ...message}, new URL(src).origin);
   };
+  const syncOverview = () => {
+    overviewPanel.hidden = !overviewOpen || settingsOpen;
+    overviewPanel.style.left = `${frame.hidden ? 0 : sidebarWidth}px`;
+    overviewToggle.setAttribute("aria-pressed",String(!overviewPanel.hidden));
+    overview?.setVisible(overviewOpen && !settingsOpen);
+    if (hostSurface) {
+      hostSurface.inert = settingsOpen || overviewOpen;
+      if (settingsOpen || overviewOpen) hostSurface.setAttribute("aria-hidden","true");
+      else hostSurface.removeAttribute("aria-hidden");
+    }
+    updateModalMask();
+  };
+  const closeOverview = () => { overviewOpen=false;syncOverview();sendFrameMessage({type:"dsh-work/overview-closed"}); };
+  const openOverview = () => {closeSettingsPanel();overviewVisit++;externalSessionRequest="";overviewOpen=true;syncOverview();sendFrameMessage({type:"dsh-work/overview-opened"});focusOverview();};
+  const syncOverviewBadge = () => {
+    overviewToggle.dataset.attention = overviewActivity.pending ? "pending" : overviewOffline ? "offline" : overviewActivity.running ? "running" : "none";
+    overviewToggle.dataset.badge = overviewActivity.pending ? String(Math.min(999, overviewActivity.pending)) : overviewOffline ? "!" : "";
+    sendFrameMessage({type:"dsh-work/overview-badge",offline:overviewOffline});
+  };
+  overviewToggle.onclick = () => overviewPanel.hidden ? openOverview() : closeOverview();
+  // Overview navigation is local to this window; Pet commands acknowledge the daemon.
+  const sessionRequests = new Map<string, (error?: string) => void>();
+  overview = mountOverview(overviewContent, {
+    openSession: sessionId => new Promise<void>((resolve,reject) => {
+      if (frame.hidden || !frame.getAttribute("src")) { reject(new Error(t("overview.sessionUnavailable"))); return; }
+      const id = "overview:" + crypto.randomUUID();
+      const visit = overviewVisit;
+      const finish = (error?: string) => {
+        clearTimeout(timer); sessionRequests.delete(id);
+        if (error) reject(new Error(t("overview.sessionUnavailable")));
+        else {if (visit === overviewVisit && overviewOpen && !settingsOpen) closeOverview(); resolve();}
+      };
+      const timer = window.setTimeout(() => finish("timeout"), 10000);
+      sessionRequests.set(id, finish);
+      sendFrameMessage({type:"dsh-work/open-session", id, sessionId});
+    }),
+  });
+  Events.On("lifecycle", event => {
+    overviewOffline = (event.data as {state?: string} | undefined)?.state !== "Ready";
+    syncOverviewBadge();
+  });
+  void HostService.GetWorkspaceStatus().then(status => {overviewOffline = status.state !== "Ready";syncOverviewBadge();}).catch(() => {});
+  window.addEventListener("dsh-work:overview-open",openOverview);
   // Any CSS colour (color-mix, transparent, nested var()) resolved to RGBA by painting one pixel.
   const pixel = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
   const resolveColor = (value: string): Rgba | undefined => {
@@ -214,7 +288,7 @@ export function mountShell() {
     sendFrameMessage({type: "dsh-work/appearance", mode, tokens});
   };
   const updateModalMask = () => {
-    const visible = dshModal.active && !settingsOpen;
+    const visible = dshModal.active && !settingsOpen && !overviewOpen;
     modalMask.hidden = !visible;
     if (visible) {
       modalMask.style.removeProperty("--shell-modal-mask");
@@ -228,7 +302,18 @@ export function mountShell() {
     }
   };
   const openSettingsPanel = () => {
+    if (!settingsOpen) {
+      overviewVisit++;
+      externalSessionRequest = "";
+      overviewReturnSelector = "";
+      const active = document.activeElement;
+      if (overviewOpen && active instanceof HTMLElement && overviewPanel.contains(active) && active.dataset.action) {
+        const tile = active.closest<HTMLElement>("[data-tile]")?.dataset.tile;
+        overviewReturnSelector = (tile ? `[data-tile="${CSS.escape(tile)}"] ` : "") + `[data-action="${CSS.escape(active.dataset.action)}"]`;
+      }
+    }
     settingsOpen = true;
+    syncOverview();
     managerSurface?.removeAttribute("hidden");
     if (hostSurface) {
       hostSurface.inert = true;
@@ -243,15 +328,17 @@ export function mountShell() {
   const closeSettingsPanel = () => {
     if (!settingsOpen) return;
     settingsOpen = false;
+    syncOverview();
     managerSurface?.setAttribute("hidden", "");
     if (hostSurface) {
-      hostSurface.inert = false;
-      hostSurface.removeAttribute("aria-hidden");
+      hostSurface.inert = overviewOpen;
+      if (!overviewOpen) hostSurface.removeAttribute("aria-hidden");
     }
     frame.inert = false;
     frame.removeAttribute("aria-hidden");
     updateModalMask();
-    if (frame.hidden) hostSurface?.focus();
+    if (overviewOpen) focusOverview(overviewReturnSelector);
+    else if (frame.hidden) hostSurface?.focus();
     else frame.contentWindow?.focus();
   };
   const clearDshModal = () => {
@@ -267,7 +354,8 @@ export function mountShell() {
   window.addEventListener("dsh-work:appearance", sendAppearance);
   sendAppearance();
   Events.On("settings-close", closeSettingsPanel);
-  if (new URLSearchParams(window.location.search).has("section")) openSettingsPanel();
+  if (new URLSearchParams(window.location.search).get("section") === "overview") openOverview();
+  else if (new URLSearchParams(window.location.search).has("section")) openSettingsPanel();
 
   subscribeLocale(() => {
     menuBar.render(menuState);
@@ -287,6 +375,10 @@ export function mountShell() {
   let frameRevision = 0;
   let eventSeen = false;
   const show = (url: string) => {
+    if (!url || frame.getAttribute("src") !== url) {
+      overviewActivity = {pending:0,running:false};
+      syncOverviewBadge();
+    }
     if (!url) {
       frameRevision++;
       clearDshModal();
@@ -294,6 +386,7 @@ export function mountShell() {
       setMenu({dsh: null, framed: false, sidebarLeftOpen: undefined});
       document.documentElement.removeAttribute("data-shell-framed");
       frame.hidden = true;
+      syncOverview();
       frame.removeAttribute("src");
       hostSurface?.removeAttribute("hidden");
       return;
@@ -310,6 +403,7 @@ export function mountShell() {
     setMenu({framed: true});
     document.documentElement.setAttribute("data-shell-framed", "");
     frame.hidden = false;
+    syncOverview();
     hostSurface?.setAttribute("hidden", "true");
   };
   // Reloads the DSH document only; the Worker keeps running.
@@ -331,6 +425,7 @@ export function mountShell() {
     const command = event.data as {id?: unknown; sessionId?: unknown; parentSessionId?: unknown} | undefined;
     const src = frame.getAttribute("src");
     if (!src || typeof command?.id !== "string" || typeof command.sessionId !== "string" || typeof command.parentSessionId !== "string") return;
+    externalSessionRequest = overviewOpen && !settingsOpen ? command.id : "";
     frame.contentWindow?.postMessage({version: 1, type: "dsh-work/open-session", id: command.id,
       sessionId: command.sessionId, parentSessionId: command.parentSessionId}, new URL(src).origin);
   });
@@ -348,6 +443,21 @@ export function mountShell() {
   window.addEventListener("message", event => {
     const src = frame.getAttribute("src");
     if (!src || event.source !== frame.contentWindow || event.origin !== new URL(src).origin) return;
+    if (event.data?.version === 1) {
+      if (event.data.type === "dsh-work/component-ready" && event.data.id === "overview") {
+        syncOverviewBadge();
+        sendFrameMessage({type:overviewOpen?"dsh-work/overview-opened":"dsh-work/overview-closed"});
+        return;
+      }
+      if (event.data.type === "dsh-work/open-overview") {openOverview();return;}
+      if (event.data.type === "dsh-work/overview-activity" && Number.isInteger(event.data.pending) && event.data.pending >= 0 && typeof event.data.running === "boolean") {
+        overviewActivity = {pending:Math.min(event.data.pending,9999),running:event.data.running};syncOverviewBadge();return;
+      }
+      if (event.data.type === "dsh-work/close-overview") {closeOverview();return;}
+      if (event.data.type === "dsh-work/overview-geometry" && typeof event.data.sidebarWidth === "number" && Number.isFinite(event.data.sidebarWidth)) {
+        sidebarWidth=Math.max(0,Math.min(event.data.sidebarWidth,window.innerWidth/2));syncOverview();return;
+      }
+    }
     const message = parseFrameMessage(event.data,currentLocale());
     if (!message) return;
     if (message.type === "catalog") setMenu({dsh: message.commands});
@@ -356,6 +466,11 @@ export function mountShell() {
       if (message.id === "shell") sendAppearance();
     }
     else if (message.type === "open-session-result") {
+      if (message.id.startsWith("overview:")) {sessionRequests.get(message.id)?.(message.error);return;}
+      if (message.id === externalSessionRequest) {
+        externalSessionRequest = "";
+        if (!message.error && overviewOpen && !settingsOpen) closeOverview();
+      }
       void ShellService.ReportSessionOpened(message.id, message.error).catch(report("report opened conversation"));
     }
     else if (message.type === "interaction") {
@@ -368,7 +483,7 @@ export function mountShell() {
     else if (message.type === "modal-mask") {
       dshModal = {active: message.active, background: message.background, blur: message.blur};
       updateModalMask();
-      if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
+      if (dshModal.active && !settingsOpen && !overviewOpen) frame.contentWindow?.focus();
     }
     else if (message.type === "window-key") void runWindow(message.action).catch(report(message.action));
     // A cancelled save dialog was the user's own choice and needs no message.
@@ -391,12 +506,12 @@ export function mountShell() {
   // Alt pressed alone or F10 focuses the menu bar, as in a native window.
   let altAlone = false;
   window.addEventListener("keydown", event => {
-    if (event.key === "Escape" && settingsOpen && !document.querySelector("#manager-surface dialog[open]")) {
+    if (event.key === "Escape" && settingsOpen && !(event.target instanceof Element && event.target.closest(".shell-menu,.shell-menubar")) && !document.querySelector("dialog[open]")) {
       event.preventDefault();
       closeSettingsPanel();
       return;
     }
-    if (dshModal.active && !settingsOpen && (event.key === "F10" || event.key === "Alt")) {
+    if (dshModal.active && !settingsOpen && !overviewOpen && (event.key === "F10" || event.key === "Alt")) {
       event.preventDefault();
       frame.contentWindow?.focus();
       return;
@@ -418,7 +533,7 @@ export function mountShell() {
   window.addEventListener("keyup", event => {
     if (event.key === "Alt" && altAlone) {
       event.preventDefault();
-      if (dshModal.active && !settingsOpen) frame.contentWindow?.focus();
+      if (dshModal.active && !settingsOpen && !overviewOpen) frame.contentWindow?.focus();
       else menuBar.focus();
     }
     altAlone = false;

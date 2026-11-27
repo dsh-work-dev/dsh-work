@@ -83,8 +83,13 @@ DSH Work runs its own DSH profile, DSH Work, and can import plugins, settings, s
   change: one Worker stop, ordered upgrades, one health check, and rollback of
   the whole batch on failure.
 - Successful normal startup records the last successful version snapshot.
-  Settings Overview presents a compact record summary and save action, with
-  history and selected-record management in a dedicated dialog.
+  The environment dialog (opened from the overview's DSH Work tile) presents a
+  compact record summary and save action, with history and selected-record
+  management in a dedicated dialog.
+- The overview, entered from DSH's sidebar or the title bar, shows
+  conversations, output, usage, DSH Work, DSH and this computer in tiles the
+  user can reorder. It is drawn by DSH Work, so it also works while DSH is not
+  running. See [Overview](overview.md).
 - Settings General offers automatic recovery of the last successful snapshot or
   user choice. The failed-startup surface offers retry and snapshot recovery,
   and lists the failed profile's third-party plugins so the user can disable

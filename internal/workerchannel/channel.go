@@ -25,11 +25,11 @@ type Session interface {
 type Adapter struct {
 	mu       sync.RWMutex
 	current  *session
-	observer func(context.Context, string, http.RoundTripper)
+	observer func(context.Context, string, string, http.RoundTripper)
 }
 
 func New() *Adapter { return &Adapter{} }
-func (a *Adapter) SetWorkerObserver(fn func(context.Context, string, http.RoundTripper)) {
+func (a *Adapter) SetWorkerObserver(fn func(context.Context, string, string, http.RoundTripper)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.observer = fn
@@ -102,7 +102,7 @@ func (s *session) Activate(auth string) {
 	observer := s.owner.observer
 	s.owner.mu.Unlock()
 	if observer != nil {
-		observer(s.ctx, auth, s.pipe.HTTP)
+		observer(s.ctx, s.generation, auth, s.pipe.HTTP)
 	}
 }
 func (s *session) Close() error {
