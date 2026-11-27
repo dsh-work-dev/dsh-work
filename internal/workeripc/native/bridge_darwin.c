@@ -10,13 +10,14 @@
 #include <fcntl.h>
 #include <string.h>
 
-typedef struct { int fd; } socket_owner;
+typedef struct { int fd; dsh_ipc_peer peer; } socket_owner;
 typedef struct {
   napi_env env;
   napi_async_work work;
   napi_deferred promise;
   napi_async_cleanup_hook_handle cleanup;
   int cancel[2],fd,error,closing;
+  dsh_ipc_peer peer;
   char path[104];
 } connection;
 static void finalize_socket(napi_env env,void *data,void *hint) {
@@ -27,8 +28,8 @@ static napi_value failure(napi_env env,const char *message) {
   napi_throw_error(env,"WORKER_IPC_MAC_BRIDGE_FAILED",message); return NULL;
 }
 static void execute(napi_env env,void *data) {
-  (void)env; connection *c=data; dsh_ipc_peer peer={0};
-  c->error=dsh_ipc_connect(c->path,c->cancel[0],&c->fd,&peer);
+  (void)env; connection *c=data;
+  c->error=dsh_ipc_connect(c->path,c->cancel[0],&c->fd,&c->peer);
 }
 static void shutdown_connection(napi_async_cleanup_hook_handle handle,void *data) {
   (void)handle; connection *c=data; c->closing=1;
@@ -40,7 +41,7 @@ static void complete(napi_env env,napi_status status,void *data) {
   if(!c->closing && status==napi_ok && !c->error) {
     socket_owner *owner=calloc(1,sizeof(*owner)); napi_value value;
     if(owner) {
-      owner->fd=c->fd;
+      owner->fd=c->fd; owner->peer=c->peer;
       if(napi_create_external(env,owner,finalize_socket,NULL,&value)==napi_ok) {
         c->fd=-1; (void)napi_resolve_deferred(env,c->promise,value);
       } else { free(owner); c->error=ENOMEM; }
@@ -105,9 +106,21 @@ static napi_value close_socket(napi_env env,napi_callback_info info) {
   socket_owner *owner=argument(env,info); if(!owner) return NULL;
   if(owner->fd>=0) { close(owner->fd); owner->fd=-1; } return NULL;
 }
+static napi_value peer_identity(napi_env env,napi_callback_info info) {
+  socket_owner *owner=argument(env,info); if(!owner) return NULL;
+  if(owner->fd<0) return failure(env,"socket ownership already transferred");
+  napi_value value,pid,started;
+  napi_create_object(env,&value);
+  napi_create_uint32(env,owner->peer.pid,&pid);
+  napi_create_bigint_uint64(env,owner->peer.started,&started);
+  napi_set_named_property(env,value,"pid",pid);
+  napi_set_named_property(env,value,"started",started);
+  return value;
+}
 static napi_value initialize(napi_env env,napi_value exports) {
   napi_property_descriptor properties[]={
     {"connect",NULL,connect_socket,NULL,NULL,NULL,napi_default,NULL},
+    {"peer",NULL,peer_identity,NULL,NULL,NULL,napi_default,NULL},
     {"fd",NULL,descriptor,NULL,NULL,NULL,napi_default,NULL},
     {"release",NULL,release,NULL,NULL,NULL,napi_default,NULL},
     {"close",NULL,close_socket,NULL,NULL,NULL,napi_default,NULL}

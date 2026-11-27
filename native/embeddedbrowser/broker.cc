@@ -34,6 +34,9 @@
 
 #ifdef _WIN32
 #include "platform_win.h"
+#elif defined(__APPLE__)
+#include "mac/platform_mac.h"
+#include "mac/presenter_mac.h"
 #else
 #include "platform_linux.h"
 #endif
@@ -74,9 +77,11 @@ void Event(const std::string& route, const std::string& method, CefRefPtr<CefLis
   auto m = CefDictionaryValue::Create(); m->SetString("method", method);
   m->SetList("params", params); Send(route, m);
 }
+#include "frame_graph.h"
 #include "artifact_resource.h"
 void FinishArtifact(const std::shared_ptr<ArtifactState>& state);
 class Client;
+void PauseAllControl();
 std::map<std::string,CefRefPtr<Client>> closing_clients;
 struct Tab {
   std::string route;
@@ -87,12 +92,17 @@ struct Tab {
 std::map<int, Tab> tabs;
 int next_tab = 0;
 class Client final : public CefClient, public CefLifeSpanHandler,
-                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler {
+                     public CefDevToolsMessageObserver, public CefRequestHandler,public CefFrameHandler,public CefLoadHandler,public CefDisplayHandler,public CefJSDialogHandler,public CefDownloadHandler
+#ifdef __APPLE__
+                     , public CefRenderHandler
+#endif
+{
   std::string route_,owner_route_;
   std::shared_ptr<ArtifactState> artifact_;
   int create_id_, tab_;
   std::set<std::string> engine_frames_;
   bool browser_closed_=false,closing_=false;
+  int graph_browser_=0;
   std::string policy_denied_;
   std::vector<std::function<void()>> revoke_waiters_,close_waiters_;
   bool close_notified_=false,view_visible_=true,managed_=false;
@@ -110,7 +120,7 @@ class Client final : public CefClient, public CefLifeSpanHandler,
   std::string document_url_,guard_document_,guard_url_,guard_token_,navigation_origin_,guard_scope_;
   static std::string Origin(const std::string& url){CefURLParts parts;if(!CefParseURL(url,parts))return {};auto origin=CefString(&parts.origin).ToString();if(!origin.empty()&&origin.back()=='/')origin.pop_back();return origin;}
   void DocumentChanged(const std::string& url){
-    document_epoch_++;document_url_=url;
+    document_epoch_++;document_url_=url;frame_graph.OwnedDocument(owner_route_,document_epoch_);
 
   }
   std::map<int, int> pending_;
@@ -133,6 +143,23 @@ public:
   CefRefPtr<CefDisplayHandler> GetDisplayHandler()override{return this;}
   CefRefPtr<CefJSDialogHandler> GetJSDialogHandler()override{return this;}
   CefRefPtr<CefDownloadHandler> GetDownloadHandler()override{return this;}
+#ifdef __APPLE__
+  CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
+  void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override {
+    dsh_platform::BrowserViewRect(browser->GetIdentifier(),rect);
+  }
+  bool GetScreenInfo(CefRefPtr<CefBrowser> browser,CefScreenInfo& info)override {
+    return dsh_platform::BrowserScreenInfo(browser->GetIdentifier(),info);
+  }
+  void OnPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::PaintElementType type,
+               const CefRenderHandler::RectList&, const void* buffer,
+               int width, int height) override {
+    dsh_platform::BrowserPaint(browser->GetIdentifier(),type,buffer,width,height);
+  }
+  void OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser,const CefRange& range,const CefRenderHandler::RectList& rects)override{
+    dsh_platform::BrowserIME(browser->GetIdentifier(),range,rects);
+  }
+#endif
   void RejectUnsupportedPolicy(const std::string& error){
     // Authority belongs only to the installed call. A manual page event emits
     // diagnostics, but cannot poison a future unrelated permit.
@@ -159,11 +186,17 @@ public:
     RejectUnsupportedPolicy("CEF_DOWNLOAD_UNSUPPORTED");return true;
   }
   const std::string& PolicyDenial()const{return policy_denied_;}
-  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else scope_epoch_++;}
+  void OnLoadStart(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,TransitionType)override{if(frame->IsMain()){loaded_=false;DocumentChanged(frame->GetURL());}else scope_epoch_++;frame_graph.Load(owner_route_,frame);}
   void OnLoadEnd(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,int)override{if(frame->IsMain()){loaded_=true;}}
   void OnTitleChange(CefRefPtr<CefBrowser>,const CefString& title)override{page_title_=title;}
   void OnAddressChange(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,const CefString& url)override{if(frame->IsMain()){if(url.ToString()!=document_url_)DocumentChanged(url);}else scope_epoch_++;}
-  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();return dsh_platform::Visible(hwnd);}
+  bool ViewVisible(){if(closing_||!view_visible_)return false;if(view_lease_.empty())return !managed_;if(!view_visible_||!tabs.contains(tab_))return false;auto hwnd=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
+#ifdef __APPLE__
+    return dsh_platform::BrowserVisible(tabs.at(tab_).browser);
+#else
+    return dsh_platform::Visible(hwnd);
+#endif
+  }
   Dict NavigationState(){if(closing_||!tabs.contains(tab_))return nullptr;auto browser=tabs.at(tab_).browser;auto value=CefDictionaryValue::Create();value->SetString("url",browser->GetMainFrame()->GetURL());value->SetString("title",page_title_.substr(0,4096));value->SetBool("loading",browser->IsLoading());value->SetBool("canGoBack",browser->CanGoBack());value->SetBool("canGoForward",browser->CanGoForward());return value;}
   bool NavigationAction(const std::string& action){if(control_blocked||closing_||!tabs.contains(tab_))return false;auto browser=tabs.at(tab_).browser;RevokeGuard();if(action=="reload")browser->Reload();else if(action=="back"&&browser->CanGoBack())browser->GoBack();else if(action=="forward"&&browser->CanGoForward())browser->GoForward();else return false;return true;}
   bool FrameScopeReady(){
@@ -209,13 +242,25 @@ public:
     managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;
     if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
     auto browser=tabs.at(tab_).browser;auto hwnd=browser->GetHost()->GetWindowHandle();
-    auto error=dsh_platform::Present(hwnd,args);if(!error.empty())return error;
+#ifdef __APPLE__
+    auto self=CefRefPtr<Client>(this);
+    auto error=dsh_platform::PresentBrowser(browser,args,[self]{self->RevokeGuard();});
+#else
+    auto error=dsh_platform::Present(hwnd,args);
+#endif
+    if(!error.empty())return error;
     auto bounds=args->GetDictionary("bounds");bool visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
     // No identity changes until every operation and final OS readback passed.
     view_lease_=args->GetString("view");presentation_epoch_=args->GetString("epoch");view_visible_=visible;
     browser->GetHost()->NotifyMoveOrResizeStarted();browser->GetHost()->WasResized();return {};
   }
-  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());}
+  std::string Hide(Dict args){managed_=true;guard_required_=true;RevokeGuard();view_visible_=false;if(args)presentation_epoch_=args->GetString("epoch");if(!tabs.contains(tab_))return "CEF_PRESENT_TARGET_GONE";
+#ifdef __APPLE__
+    return dsh_platform::HideBrowser(tabs.at(tab_).browser,args);
+#else
+    return dsh_platform::Hide(tabs.at(tab_).browser->GetHost()->GetWindowHandle());
+#endif
+  }
   bool Navigate(const std::string& url){auto origin=Origin(url);if(control_blocked||closing_||!tabs.contains(tab_)||(origin.rfind("http://",0)!=0&&origin.rfind("https://",0)!=0))return false;if(artifact_&&!ArtifactURL(artifact_,url))return false;RevokeGuard();tabs.at(tab_).browser->GetMainFrame()->LoadURL(url);return true;}
   bool GuardValid(){
  if(control_blocked||closing_)return false;
@@ -250,10 +295,18 @@ bool RequiresGuard()const{return guard_required_;}
   }
   CefRefPtr<CefFrameHandler> GetFrameHandler()override{return this;}
   void OnFrameCreated(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {
+    frame_graph.Created(owner_route_,tab_,frame);
     engine_frames_.insert(frame->GetIdentifier().ToString());if(!frame->IsMain())scope_epoch_++;
     if(artifact_)artifact_->live_frames.insert(frame->GetIdentifier().ToString());
   }
+  void OnFrameAttached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame,bool reattached)override {frame_graph.Attached(owner_route_,frame,reattached);}
+  void OnFrameDetached(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> frame)override {frame_graph.Detached(owner_route_,frame);}
+  void OnMainFrameChanged(CefRefPtr<CefBrowser>,CefRefPtr<CefFrame> previous,CefRefPtr<CefFrame> next)override {frame_graph.MainChanged(owner_route_,tab_,graph_browser_,previous,next);}
   void OnFrameDestroyed(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame)override {
+    frame_graph.Destroyed(owner_route_,frame);
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("frame-destroyed-enter");
+#endif
     engine_frames_.erase(frame->GetIdentifier().ToString());if(!frame->IsMain())scope_epoch_++;
     if(artifact_){artifact_->live_frames.erase(frame->GetIdentifier().ToString());artifact_->destroyed_frames++;
       if(artifact_->browser>0)ArtifactEvent(artifact_,"artifact.detached",browser->GetIdentifier(),frame->GetIdentifier().ToString());
@@ -261,8 +314,12 @@ bool RequiresGuard()const{return guard_required_;}
     }
     FlushRevocation();
     if(browser_closed_&&engine_frames_.empty()){closing_clients.erase(owner_route_);if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();}
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("frame-destroyed-return");
+#endif
   }
   void OnAfterCreated(CefRefPtr<CefBrowser> b) override {
+    graph_browser_=b->GetIdentifier();frame_graph.Bound(owner_route_,graph_browser_);
     tabs.emplace(tab_, Tab{route_, b, b->GetHost()->AddDevToolsMessageObserver(this),artifact_});
     if(artifact_){artifact_->browser=b->GetIdentifier();ArtifactEvent(artifact_,"artifact.bound",b->GetIdentifier());artifact_->admitted=true;CefPostTask(TID_IO,base::BindOnce(AdmitArtifactResources,artifact_));}
     auto tab = CefDictionaryValue::Create(); tab->SetInt("id", tab_);
@@ -292,13 +349,23 @@ bool RequiresGuard()const{return guard_required_;}
     return true;
 #endif
   }
-  void OnBeforeClose(CefRefPtr<CefBrowser>) override {
+  void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close");
+    dsh_platform::RetireBrowser(browser->GetIdentifier());
+#endif
     browser_closed_=true;closing_clients[owner_route_]=this;pending_.clear();pending_methods_.clear();
     tabs.erase(tab_);
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close-tab-erased");
+#endif
     if(artifact_){artifact_->closed_browsers++;FinishArtifact(artifact_);}
     auto args = CefListValue::Create(); args->SetInt(0, tab_); Event(route_, "tab.closed", args);
     FlushRevocation();
     if (stopping && tabs.empty()&&artifacts.empty()&&closing_clients.empty()) CefQuitMessageLoop();
+#if defined(__APPLE__)
+    dsh_platform::Lifecycle("before-close-return");
+#endif
   }
   bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
       const CefString&, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
@@ -313,10 +380,10 @@ bool RequiresGuard()const{return guard_required_;}
       const CefString& error_string) override {
     // This reports a browser callback, not the complete renderer influence set.
     // Pause before publishing the event, and retire all installed authority.
-    control_blocked = true;
-    for(const auto& [_,tab]:tabs)static_cast<Client*>(tab.browser->GetHost()->GetClient().get())->PauseControl();
+    PauseAllControl();
     auto m = CefDictionaryValue::Create(); m->SetString("kind", "fault");
     m->SetString("generation", generation); m->SetString("scope", "broker");
+    m->SetString("graphRevision",std::to_string(frame_graph.Revision()));m->SetString("faultEpoch",std::to_string(frame_graph.Fault()));
     m->SetInt("reportedBrowser",browser->GetIdentifier());m->SetInt("reportedTab",tab_);
     m->SetInt("terminationStatus",static_cast<int>(status));m->SetInt("errorCode",error_code);
     // Arbitrary engine strings may contain page data. Keep typed codes only.
@@ -351,7 +418,7 @@ bool RequiresGuard()const{return guard_required_;}
     if (!tabs.at(tab_).browser->GetHost()->SendDevToolsMessage(json.data(), json.size())) {
       pending_.erase(serial); pending_methods_.erase(serial); Result(route_, id, nullptr, "CEF_DEVTOOLS_DISPATCH_REJECTED");
     }else{
-      auto observed=CefDictionaryValue::Create();observed->SetString("kind","dispatch.observed");observed->SetString("generation",generation);observed->SetString("route",route_);observed->SetString("method",method);Write(observed);
+      auto observed=CefDictionaryValue::Create();observed->SetString("kind","dispatch.observed");observed->SetString("generation",generation);observed->SetString("route",route_);observed->SetString("method",method);observed->SetInt("id",id);Write(observed);
     }
   }
   bool OnDevToolsMessage(CefRefPtr<CefBrowser>, const void* data, size_t size) override {
@@ -386,6 +453,13 @@ bool RequiresGuard()const{return guard_required_;}
   }
   IMPLEMENT_REFCOUNTING(Client);
 };
+void PauseAllControl(){
+ control_blocked=true;
+ std::vector<CefRefPtr<Client>> clients;
+ for(const auto& [_,tab]:tabs)clients.emplace_back(static_cast<Client*>(tab.browser->GetHost()->GetClient().get()));
+ for(const auto& client:clients)client->PauseControl();
+}
+
 bool Create(const std::string& route, int id, const std::string& url,std::shared_ptr<ArtifactState> artifact={},bool managed=false) {
   CefWindowInfo window;
   if(!dsh_platform::ConfigureWindow(window)){Result(route,id,nullptr,"CEF_NATIVE_WINDOW_UNAVAILABLE");return false;}
@@ -433,11 +507,18 @@ void RevokeArtifact(std::shared_ptr<ArtifactState> state) {
   },state)));
 }
 void Shutdown() {
+#if defined(__APPLE__)
+  dsh_platform::Lifecycle("shutdown-enter");
+#endif
   if (stopping.exchange(true)) return;
   std::vector<std::shared_ptr<ArtifactState>> states;
   for(const auto& [_,state]:artifacts)states.push_back(state);
   for(auto& state:states)RevokeArtifact(state);
-  for (const auto& [_, tab] : tabs) if(!tab.artifact)tab.browser->GetHost()->CloseBrowser(true);
+  // Windowless CloseBrowser may synchronously call OnBeforeClose and erase
+  // tabs. Own the selected browser references before invoking any callback.
+  std::vector<CefRefPtr<CefBrowser>> browsers;
+  for (const auto& [_, tab] : tabs) if(!tab.artifact)browsers.push_back(tab.browser);
+  for (auto& browser : browsers) browser->GetHost()->CloseBrowser(true);
   if(tabs.empty()&&artifacts.empty()&&closing_clients.empty())CefQuitMessageLoop();
 }
 // This candidate admits only the real locked-MCP inventory exercised by the
@@ -491,6 +572,9 @@ void Command(Dict m) {
   if (m->GetString("generation").ToString() != generation) return;
   auto route = m->GetString("route").ToString();
   auto kind = m->GetString("kind").ToString();
+  if(kind=="control.pause"){
+    PauseAllControl();auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));response->SetDictionary("result",CefDictionaryValue::Create());Write(response);return;
+  }
   if(kind.rfind("target.",0)==0){
     auto response=CefDictionaryValue::Create();response->SetString("kind","target.result");response->SetString("generation",generation);response->SetString("request",m->GetString("request"));
     Client* client=nullptr;for(const auto& [_,tab]:tabs){auto candidate=static_cast<Client*>(tab.browser->GetHost()->GetClient().get());if(candidate->OwnsRoute(route)){client=candidate;break;}}
@@ -525,7 +609,9 @@ void Command(Dict m) {
     return;
   }
   if (kind == "close") {
-    for (const auto& [_, t] : tabs) if (t.route == route) t.browser->GetHost()->CloseBrowser(true);
+    std::vector<CefRefPtr<CefBrowser>> browsers;
+    for (const auto& [_, t] : tabs) if (t.route == route) browsers.push_back(t.browser);
+    for (auto& browser : browsers) browser->GetHost()->CloseBrowser(true);
     return;
   }
   if (control_blocked) {auto payload=m->GetDictionary("payload");if(payload)Result(route,payload->GetInt("id"),nullptr,"CEF_BROKER_CONTROL_PAUSED");return;}
@@ -576,6 +662,11 @@ public:
   void OnContextInitialized() override {
     auto ready = CefDictionaryValue::Create(); ready->SetString("kind", "ready");
     ready->SetString("generation", generation); ready->SetInt("protocol",1); Write(ready);
+#ifdef __APPLE__
+    dsh_platform::StartOwnerMonitor([] {
+      CefPostTask(TID_UI, base::BindOnce(Shutdown));
+    });
+#endif
     reader = std::thread([] {
       while (true) {
         uint32_t size = 0;
@@ -603,11 +694,29 @@ int RunBroker(CefMainArgs args,void* sandbox){
   if(!OpenTransport(path)||!Authenticate(token))return 73;
   Erase(token);
   CefSettings settings;CefString(&settings.root_cache_path)=profile;CefString(&settings.cache_path)=profile;settings.remote_debugging_port=0;
+#ifdef __APPLE__
+  settings.windowless_rendering_enabled=true;
+  settings.log_severity=LOGSEVERITY_DISABLE;
+#endif
   CefRefPtr<App> app=new App;if(!CefInitialize(args,settings,app,sandbox))return CefGetExitCode();
-  CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();CefShutdown();CloseTransport();return 0;
+  CefRunMessageLoop();CancelTransport();if(reader.joinable())reader.join();
+#ifdef __APPLE__
+  // CEF is still initialized, but the pump and transport reader are joined.
+  // The owner notification must never prevent the actual CEF shutdown.
+  dsh_platform::PrepareOwnedShutdown();
+#endif
+  CefShutdown();
+#ifdef __APPLE__
+  // No CEF calls after this point. The external owner retains the profile
+  // through post-root child cleanup; its bounded release is not root exit.
+  int owned_exit=dsh_platform::FinishOwnedShutdown();
+  CloseTransport();return owned_exit;
+#else
+  CloseTransport();return 0;
+#endif
 }
 #ifdef _WIN32
 CEF_BOOTSTRAP_EXPORT int RunWinMain(HINSTANCE instance,LPWSTR,int,void* sandbox,cef_version_info_t*){return RunBroker(CefMainArgs(instance),sandbox);}
-#else
+#elif !defined(__APPLE__)
 int main(int argc,char** argv){return RunBroker(CefMainArgs(argc,argv),nullptr);}
 #endif

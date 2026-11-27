@@ -11,6 +11,8 @@ on:
       - 'bootstrap_linux.go'
       - 'native/embeddedbrowser/**'
       - 'scripts/build-embedded-cef-linux.sh'
+      - 'scripts/build-embedded-cef-mac.mjs'
+      - 'cmd/dsh-cef-owner-mac/**'
       - 'scripts/probe-linux-dsh-slot.mjs'
       - 'scripts/linux-browser-agent-fixture.mjs'
       - 'tools/dsh/package*.json'
@@ -41,6 +43,7 @@ jobs:
       mac_probe: ${{ steps.paths.outputs.mac_probe }}
       mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
       mac_cef: ${{ steps.paths.outputs.mac_cef }}
+      mac_native: ${{ steps.paths.outputs.mac_native }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4.0.3
@@ -91,6 +94,85 @@ jobs:
               - 'tools/browser-lab/native/posix/**'
               - 'scripts/build-mac-cef-owner-probe.mjs'
               - 'scripts/probe-mac-cef-owner.mjs'
+            mac_native:
+              - '.github/workflows/e67-ipc.yml'
+              - 'go.{mod,sum}'
+              - 'internal/**'
+              - 'native/embeddedbrowser/**'
+              - 'cmd/dsh-cef-owner-mac/**'
+              - 'scripts/build-embedded-cef-mac.mjs'
+
+  mac-private-cef:
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mac_native == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify Mac owner measurement and failed-launch recovery
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-mac-private
+          go test ./internal/embeddedbrowser/macowner -run '^(TestGroupCountPreservesMeasurementErrors|TestUnsubmittedAttemptCleansPrivateFiles|TestCancelledUncertainAttemptRetainsRetryableOwner|TestNativeLifecycleEvidenceFiltersStderr|TestJobOwnershipUsesFileIdentity|TestLegacyAttemptUpgradesBeforeRetirement|TestRecoveryRefreshPreservesGuardTerminalFacts|TestMCPLifecycleEvidenceFiltersStderr)$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/recovery.log
+      - name: Prepare the approved unmodified CEF SDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/cef-sdk" results/e67-mac-private
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" 'https://cef-builds.spotifycdn.com/cef_binary_156.0.15%2Bgcf671c0%2Bchromium-156.0.8078.80_macosarm64.tar.bz2'
+          tar -xjf "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" -C "$RUNNER_TEMP/cef-sdk"
+      - name: Build the formal Mac owner and private CEF bundle
+        run: |
+          set -o pipefail
+          node scripts/build-embedded-cef-mac.mjs --cef-root "$RUNNER_TEMP/cef-sdk/cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64" --output-dir "$RUNNER_TEMP/e67-formal-mac" 2>&1 | tee results/e67-mac-private/build.log
+      - name: Verify authenticated kernel process targets
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture ./internal/localipc -run '^TestDarwinAuthenticatedTarget$' -count=1 -v -timeout=90s 2>&1 | tee results/e67-mac-private/target.log
+      - name: Exercise the formal private broker and same-profile reopening
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture ./internal/embeddedbrowser/macowner -run '^(TestCrashProjectionRequiresGeneration|TestLiveMacPrivateCEF)$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/private.log
+      - name: Prepare the formal Mac same-process carrier and locked MCP
+        run: |
+          node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge"
+          mkdir -p "$RUNNER_TEMP/e67-browser-dependencies"
+          cp internal/automation/assets/browser/package.json internal/automation/assets/browser/package-lock.json "$RUNNER_TEMP/e67-browser-dependencies/"
+          npm ci --ignore-scripts --no-audit --no-fund --prefix "$RUNNER_TEMP/e67-browser-dependencies"
+      - name: Exercise formal Mac engine Service and locked MCP
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacEngineServiceMCP$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-mcp.log
+      - name: Exercise abrupt Service-host death and same-profile recovery
+        env:
+          DSH_WORK_CEF_MAC_PUBLICATION: ${{ runner.temp }}/e67-formal-mac/publication.json
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ runner.temp }}/e67-mac-private-results
+          DSH_WORK_BROWSER_TEST_DEPENDENCIES: ${{ runner.temp }}/e67-browser-dependencies
+        run: |
+          set -o pipefail
+          go test -tags e67nativefixture -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/embeddedbrowser/macowner -run '^TestLiveMacServiceHostDeathAndProfileReopen$' -count=1 -v -timeout=150s 2>&1 | tee results/e67-mac-private/service-host-death.log
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: e67-mac-private-cef
+          path: |
+            results/e67-mac-private/*.log
+            ${{ runner.temp }}/e67-formal-mac/publication.json
+            ${{ runner.temp }}/e67-mac-private-results/*.json
+            ${{ runner.temp }}/e67-mac-private-results/*.png
 
   mac-cef-owner:
     needs: changes
@@ -229,6 +311,57 @@ jobs:
           xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
           go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
           SH
+      - name: Exercise independent Linux UI lifetimes and persistent profiles
+        env:
+          GDK_BACKEND: x11
+          DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_AGENT_TEST: '0'
+          DSH_WORK_LINUX_DUAL_TEST: '1'
+          DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-dual
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-linux-dual
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash <<'SH' 2>&1 | tee results/e67-linux-dual/integration.log
+          set -euo pipefail
+          openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & wm=$!
+          trap 'kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'; then break; fi
+            sleep 0.1
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
+          go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
+          SH
+      - name: Exercise root-only Linux UI death and explicit recovery
+        env:
+          GDK_BACKEND: x11
+          DSH_WORK_ISOLATED_XVFB: '1'
+          DSH_WORK_LINUX_AGENT_TEST: '0'
+          DSH_WORK_LINUX_DUAL_TEST: '1'
+          DSH_WORK_LINUX_DUAL_FAULT: '1'
+          DSH_WORK_LINUX_WAILS_EXECUTABLE: ${{ runner.temp }}/dsh-work-candidate
+          DSH_WORK_CEF_TEST_EXECUTABLE: ${{ runner.temp }}/e67-formal-cef/Release/dsh_cef_broker
+          DSH_WORK_X11_WINDOW_OBSERVER: ${{ runner.temp }}/e67-x11-window
+          DSH_WORK_EXECUTABLE: ${{ github.workspace }}/tools/dsh/node_modules/.bin/dsh
+          DSH_WORK_CEF_TEST_EVIDENCE: ${{ github.workspace }}/results/e67-linux-fault
+        run: |
+          set -o pipefail
+          mkdir -p results/e67-linux-fault
+          dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bash <<'SH' 2>&1 | tee results/e67-linux-fault/integration.log
+          set -euo pipefail
+          openbox > "$DSH_WORK_CEF_TEST_EVIDENCE/openbox.log" 2>&1 & wm=$!
+          trap 'kill "$wm" 2>/dev/null || true; wait "$wm" 2>/dev/null || true' EXIT
+          for i in $(seq 1 50); do
+            if xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'; then break; fi
+            sleep 0.1
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x'
+          go test -tags e67presenter,e67nativefixture -count=1 -v -timeout=210s ./internal/desktopapp -run '^TestLiveLinuxWailsDSHSlot$'
+          SH
       - name: Capture scoped sandbox denial evidence
         if: failure()
         run: |
@@ -253,6 +386,12 @@ jobs:
             results/e67-linux-wails/*.log
             results/e67-linux-wails/*.json
             results/e67-linux-wails/*.png
+            results/e67-linux-dual/**/*.log
+            results/e67-linux-dual/**/*.json
+            results/e67-linux-dual/**/*.png
+            results/e67-linux-fault/**/*.log
+            results/e67-linux-fault/**/*.json
+            results/e67-linux-fault/**/*.png
 
   mac-launchd-tree:
     needs: changes

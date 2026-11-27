@@ -87,8 +87,15 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentTest := os.Getenv("DSH_WORK_LINUX_AGENT_TEST") == "1"
+	dualTest := os.Getenv("DSH_WORK_LINUX_DUAL_TEST") == "1"
+	if os.Getenv("DSH_WORK_LINUX_DUAL_FAULT") == "1" && !dualTest {
+		t.Fatal("fault lifecycle requires explicit dual fixture mode")
+	}
+	if agentTest && dualTest {
+		t.Fatal("Agent and dual lifecycle fixtures must run independently")
+	}
 	if agentTest {
-		for _, name := range []string{"agent-permission-browser.captured", "agent-permission-site.captured", "agent-completed.json"} {
+		for _, name := range []string{"agent-permission-browser.captured", "agent-permission-site.captured", "agent-completed.json", "agent-failure-observation-request.json", "agent-failure-observation.json"} {
 			if _, err = os.Stat(filepath.Join(out, name)); !os.IsNotExist(err) {
 				t.Fatal("Agent evidence directory contains a stale handshake", name, err)
 			}
@@ -104,19 +111,38 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		}
 	}
 	var reportMu sync.Mutex
-	var report struct {
-		Nonce, Input string
-		Tick         int
-	}
+	var report linuxFixtureReport
+	var reportAt time.Time
+	reports := map[string]linuxFixtureReport{}
+	pageLoads := 0
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/report" {
 			reportMu.Lock()
-			_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&report)
+			var next linuxFixtureReport
+			if json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&next) == nil && next.Nonce != "" {
+				reports[next.Nonce] = next
+				if report.Nonce == "" || next.Nonce == report.Nonce {
+					report = next
+					reportAt = time.Now()
+				}
+			}
 			reportMu.Unlock()
 			w.WriteHeader(204)
 			return
 		}
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
+		if dualTest {
+			reportMu.Lock()
+			pageLoads++
+			sequence := pageLoads
+			reportMu.Unlock()
+			fmt.Fprintf(w, `<!doctype html><title>Linux DSH slot fixture</title><style>body{background:#ddf4e4;color:#143324;font:22px system-ui;padding:24px}input{font:inherit}</style><h1>Real DSH Linux CEF slot</h1><input aria-label="Unsubmitted fixture input" value=""><script>const nonce=crypto.randomUUID(),storageBefore=localStorage.getItem("e67-marker")||"",cookieBefore=document.cookie,marker=storageBefore||crypto.randomUUID();localStorage.setItem("e67-marker",marker);document.cookie="e67="+marker+"; Path=/; SameSite=Strict; Max-Age=3600";const input=document.querySelector("input");input.value=%d===1?"linux-dsh-original":"linux-dsh-dirty-"+nonce;let tick=0;setInterval(()=>fetch("/report",{method:"POST",body:JSON.stringify({nonce,input:input.value,dirty:input.value!==input.defaultValue,tick:++tick,marker,storageBefore,cookieBefore})}),250)</script>`, sequence)
+			return
+		}
 		fmt.Fprint(w, `<!doctype html><title>Linux DSH slot fixture</title><style>body{background:#ddf4e4;color:#143324;font:22px system-ui;padding:24px}input{font:inherit}</style><h1>Real DSH Linux CEF slot</h1><input aria-label="Unsubmitted fixture input" value="linux-dsh-original"><script>const nonce=crypto.randomUUID();let tick=0;setInterval(()=>fetch('/report',{method:'POST',body:JSON.stringify({nonce,input:document.querySelector('input').value,tick:++tick})}),250)</script>`)
 	}))
 	defer fixture.Close()
@@ -133,6 +159,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 	env["DSH_WORK_EMBEDDED_ROOT"] = root
 	env["DSH_WORK_EMBEDDED_UI_INSTANCE"] = "1"
 	env["DSH_WORK_CEF_EXECUTABLE"] = native
+	if agentTest {
+		env["DSH_WORK_LINUX_AGENT_DIAGNOSTICS"] = "1"
+	}
 	owner := linuxplatform.NewSystemdAdapter()
 	var workers []supervisor.Worker
 	nativeFD := -1
@@ -374,8 +403,12 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			_ = os.WriteFile(filepath.Join(out, "failure-capture.log"), []byte(redact.Secrets(fmt.Sprint(err, " ", string(output)))), 0600)
 		}
 	}()
+	var observeAgentFailure func()
 	readPhase := func(name string, dst any) {
 		wait(name, func() bool {
+			if observeAgentFailure != nil {
+				observeAgentFailure()
+			}
 			if b, e := os.ReadFile(filepath.Join(out, "failure.json")); e == nil {
 				t.Fatalf("first inspector failure: %s", b)
 			}
@@ -535,6 +568,39 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		t.Fatal("capture verified restored UI", e, string(output))
 	}
 	if agentTest {
+		failureObserved := false
+		observeAgentFailure = func() {
+			if failureObserved {
+				return
+			}
+			if _, err := os.Stat(filepath.Join(out, "agent-failure-observation-request.json")); err != nil {
+				return
+			}
+			failureObserved = true
+			type heartbeat struct {
+				ReceivedAt     time.Time `json:"receivedAt"`
+				SameNonce      bool      `json:"sameNonce"`
+				InputUnchanged bool      `json:"inputUnchanged"`
+				Tick           int       `json:"tick"`
+			}
+			measure := func() heartbeat {
+				reportMu.Lock()
+				defer reportMu.Unlock()
+				return heartbeat{reportAt, report.Nonce == resumedBaseline.Nonce, report.Input == resumedBaseline.Input, report.Tick}
+			}
+			before := measure()
+			after := before
+			// One bounded read-only observation of the fixture's own HTTP reports;
+			// it neither evaluates the guest nor retries the failed MCP operation.
+			for end := time.Now().Add(750 * time.Millisecond); time.Now().Before(end); {
+				after = measure()
+				if after.ReceivedAt.After(before.ReceivedAt) || ctx.Err() != nil {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			save("agent-failure-observation", map[string]any{"before": before, "after": after, "heartbeatAdvanced": after.Tick > before.Tick && after.ReceivedAt.After(before.ReceivedAt), "sameDocumentNonce": before.SameNonce && after.SameNonce})
+		}
 		for _, kind := range []string{"browser", "site"} {
 			var permission struct {
 				Request struct {
@@ -604,11 +670,29 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 			t.Fatal("read-only Agent tool changed or lost the document", agentReport)
 		}
 	}
+	var extraUI supervisor.Worker
+	var extraNativeJoin func()
+	if dualTest {
+		readReport := func(nonce string) (linuxFixtureReport, map[string]linuxFixtureReport) {
+			reportMu.Lock()
+			defer reportMu.Unlock()
+			copy := map[string]linuxFixtureReport{}
+			for k, v := range reports {
+				copy[k] = v
+			}
+			return reports[nonce], copy
+		}
+		extraUI, extraNativeJoin = exerciseLinuxDualLifecycle(t, ctx, repo, root, out, node, native, observer, fixture.URL+"/", env, client, snapshot.Status.GenerationID, ui, restored, guest, resumedBaseline, readReport, start)
+	}
 	if e = os.WriteFile(filepath.Join(out, "quit.request"), nil, 0600); e != nil {
 		t.Fatal(e)
 	}
 	readPhase("quit-requested", &map[string]any{})
-	for _, w := range []supervisor.Worker{ui, background} {
+	normalWorkers := []supervisor.Worker{ui, background}
+	if extraUI != nil {
+		normalWorkers = append(normalWorkers, extraUI)
+	}
+	for _, w := range normalWorkers {
 		select {
 		case <-w.Exited():
 		case <-ctx.Done():
@@ -623,6 +707,9 @@ func TestLiveLinuxWailsDSHSlot(t *testing.T) {
 		if e = w.Close(); e != nil {
 			t.Fatal(e)
 		}
+	}
+	if extraNativeJoin != nil {
+		extraNativeJoin()
 	}
 	poll := []unix.PollFd{{Fd: int32(nativeFD), Events: unix.POLLIN}}
 	if n, e := unix.Poll(poll, 0); e != nil || n != 1 {

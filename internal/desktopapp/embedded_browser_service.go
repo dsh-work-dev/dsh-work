@@ -145,3 +145,13 @@ func (s *embeddedBrowserService) SelectControl(ctx context.Context, parent uint6
 	}
 	return s.Automation.SelectOwnedBrowser(ctx, automation.OwnedSelectionIntent{Generation: actual, Session: session, Source: windowLease + "/" + document + "/" + viewLease, Resolve: resolve})
 }
+
+// ConfigureMacPresenter receives only the native registrar's private channel.
+// It is not exposed by the frontend-bound EmbeddedBrowserService wrapper.
+func (s *embeddedBrowserService) ConfigureMacPresenter(ctx context.Context, parent uint64, endpoint, token string) error {
+	peer, _, err := s.nativePeer(ctx)
+	if err != nil {
+		return err
+	}
+	return embeddedbrowser.ConfigureMacPresenter(peer, uintptr(parent), endpoint, token)
+}

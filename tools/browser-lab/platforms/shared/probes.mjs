@@ -3,7 +3,7 @@ import {readFileSync,copyFileSync} from 'node:fs';
 
 // One Playwright owner for both actions and observation. These token-protected
 // lab endpoints are fixed probes, not a new Agent evaluate capability.
-export function batchOperations({getBrowser,tabs,hostState,root,session,refresh}) {
+export function batchOperations({getBrowser,tabs,hostState,root,session,refresh,record}) {
  const observations=new Map();let client,owner;
  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
  const timeout=(p,ms)=>Promise.race([p,new Promise(r=>setTimeout(()=>r({timeout:true}),ms))]);
@@ -37,8 +37,9 @@ export function batchOperations({getBrowser,tabs,hostState,root,session,refresh}
   if(path==='/permission-result')return tabs.get('A').page.evaluate(()=>({state:Notification.permission,request:window.lab.notificationRequest||null}));
   if(path==='/storage-get'||path==='/storage-set'){
    if(!/^browser_lab_[a-f0-9]+$/.test(body.key))throw Error('Invalid fixture key');const tab=tabs.get(body.tab||'A');if(!tab)throw Error('Invalid fixture tab');
-   if(path==='/storage-set')await tab.page.evaluate(({key,value})=>{localStorage.setItem(key,value);document.cookie=key+'='+value+'; Path=/; Max-Age=3600; SameSite=Lax'},{key:body.key,value:String(body.value)});
-   return tab.page.evaluate(key=>({localStorage:localStorage.getItem(key),cookie:document.cookie}),body.key);
+   const stage=state=>record('profile-storage-stage',{operation:path,tab:tab.name,targetId:tab.targetId,state});
+   if(path==='/storage-set'){stage('write-begin');await tab.page.evaluate(({key,value})=>{localStorage.setItem(key,value);document.cookie=key+'='+value+'; Path=/; Max-Age=3600; SameSite=Lax'},{key:body.key,value:String(body.value)});stage('write-complete')}
+   stage('read-begin');const result=await tab.page.evaluate(key=>({localStorage:localStorage.getItem(key),cookie:document.cookie}),body.key);stage('read-complete');return result;
   }
   throw Error('Unknown fixed batch probe');
  }

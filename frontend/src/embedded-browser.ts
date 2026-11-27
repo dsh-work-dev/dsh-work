@@ -17,6 +17,8 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
   const right=Math.min(viewport.right,x+Math.max(0,value.width as number)*scaleX),bottom=Math.min(viewport.bottom,y+Math.max(0,value.height as number)*scaleY);
   return {X:x,Y:y,Width:Math.max(0,right-x),Height:Math.max(0,bottom-y)} satisfies SlotBounds;
  };
+ const layoutChanged=()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-layout"},origin)};
+ const frameObserver=new ResizeObserver(layoutChanged);frameObserver.observe(frame);
  return {
   get enabled(){return enabled},
   async retireDocument(token:string){documentToken=token;accepting=false;return native(async()=>{candidate=await EmbeddedBrowserService.BeginDocument(token);return candidate})},
@@ -29,7 +31,8 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
    if(typeof m.id!=="string"||m.id.length>128||typeof m.action!=="string")return true;
    const slot=m.slot,token=documentToken;
    if(!accepting||m.document!==token)return true;
-   void (async()=>{
+   const execute=async()=>{
+    if(!accepting||documentToken!==token)throw Error("Browser document retired");
     enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable");
     if(m.action==="modal-overlay") {if(typeof m.blocked!=="boolean")throw Error("Invalid modal intent");await modalIntent(m.blocked);return true}
     if(typeof slot!=="string"||slot.length>1024)throw Error("Invalid browser slot");
@@ -42,7 +45,8 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement, modalIntent: (bl
      case "action":if(!["back","forward","reload"].includes(String(m.command)))throw Error("Invalid browser action");return EmbeddedBrowserService.Action(token,slot,String(m.command));
      default:throw Error("Unsupported browser request");
     }
-   })().then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token)send(m.id as string,undefined,String(error))});
+   };
+   void (m.action==="modal-overlay"?execute():native(execute)).then(value=>{if(accepting&&documentToken===token)send(m.id as string,value)},error=>{if(accepting&&documentToken===token)send(m.id as string,undefined,String(error))});
    return true;
   }
  };

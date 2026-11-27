@@ -185,7 +185,21 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 	if pixels.Width <= 0 || pixels.Height <= 0 {
 		visible = false
 	}
-	_, err = p.target.broker.controlCall(ctx, "target.present", p.target.owner, map[string]any{"parent": fmt.Sprint(parent), "pid": int(peer.PID), "started": fmt.Sprint(peer.Started), "view": p.view.Lease, "epoch": fmt.Sprint(p.epoch), "bounds": pixels, "visible": visible})
+	parameters, err := presenterParameters(peer, parent)
+	if err != nil {
+		return p.view, err
+	}
+	if parameters == nil {
+		parameters = map[string]any{}
+	}
+	parameters["parent"] = fmt.Sprint(parent)
+	parameters["pid"] = int(peer.PID)
+	parameters["started"] = fmt.Sprint(peer.Started)
+	parameters["view"] = p.view.Lease
+	parameters["epoch"] = fmt.Sprint(p.epoch)
+	parameters["bounds"] = pixels
+	parameters["visible"] = visible
+	_, err = p.target.broker.controlCall(ctx, "target.present", p.target.owner, parameters)
 	if err != nil {
 		p.view.State = "presentationFailed"
 		p.view.Visible = false

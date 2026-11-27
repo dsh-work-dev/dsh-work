@@ -58,6 +58,29 @@ func (t *Transport) ChildEnvironment() map[string]string {
 	return map[string]string{"DSH_WORK_BRIDGE_PIPE": t.path, "DSH_WORK_BRIDGE_TOKEN": t.token}
 }
 
+// PrepareNativeClient writes the carrier for an owned non-HTTP adapter into
+// its caller-created private session directory. Only the application bundle
+// selects a native bridge; the launch token remains in ChildEnvironment.
+// The caller owns these files and removes them after joining its child.
+func (t *Transport) PrepareNativeClient(root string) error {
+	connection := map[string]string{"pipe": t.path}
+	if err := prepareLocalBridge(connection); err != nil {
+		return err
+	}
+	source, err := hostSource.ReadFile("native-socket.mjs")
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(root, "native-socket.mjs"), source, 0600); err != nil {
+		return err
+	}
+	config, err := json.Marshal(connection)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "native-connection.json"), config, 0600)
+}
+
 // Connect returns one authenticated child connection for a non-HTTP adapter.
 // It retains the same SID ACL, admission limits and mutual HMAC as Workers.
 func (t *Transport) Connect(ctx context.Context) (net.Conn, error) {

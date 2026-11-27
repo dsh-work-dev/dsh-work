@@ -29,12 +29,13 @@ type Runtime struct {
 	Environment        map[string]string
 }
 type Config struct {
-	Service    *automation.Service
-	Supervisor supervisor.Adapter
-	Resolve    func(context.Context) (Runtime, error)
-	Root       string
-	OutputRoot string
-	Observe    func(automation.Request, Observation)
+	Service      *automation.Service
+	Supervisor   supervisor.Adapter
+	Resolve      func(context.Context) (Runtime, error)
+	Root         string
+	OutputRoot   string
+	Observe      func(automation.Request, Observation)
+	ObserveStage func(string)
 	// Routes is an in-process provider dependency. Nil preserves the external
 	// browser selection contract; no route identity comes from tool arguments.
 	Routes RouteProvider
@@ -105,6 +106,7 @@ type resource struct {
 	failed           error
 	owner            automation.Request
 	observe          func(automation.Request, Observation)
+	observeFailure   func(string)
 	ownedTarget      automation.OwnedBrowserTarget
 	ownedIdentity    automation.OwnedBrowserIdentity
 }
@@ -168,6 +170,9 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		if err != nil {
 			return nil, err
 		}
+		if runtime.Environment["DSH_WORK_BROWSER_DIAGNOSTICS"] == "1" {
+			r.observeFailure = c.ObserveStage
+		}
 		if !filepath.IsAbs(runtime.Node) || !filepath.IsAbs(runtime.Dependencies) {
 			return nil, errors.New("BROWSER_RUNTIME_PATH_INVALID")
 		}
@@ -193,6 +198,9 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		if err != nil {
 			return nil, err
 		}
+		if err = r.ipc.PrepareNativeClient(r.dir); err != nil {
+			return nil, err
+		}
 		env := map[string]string{}
 		for _, kv := range os.Environ() {
 			k, v, ok := strings.Cut(kv, "=")
@@ -207,7 +215,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		for k, v := range r.ipc.ChildEnvironment() {
 			env[k] = v
 		}
-		r.worker, err = c.Supervisor.Start(ctx, supervisor.LaunchPlan{GenerationID: "browser-" + filepath.Base(r.dir), Executable: runtime.Node, Args: []string{filepath.Join(r.dir, "adapter.mjs")}, Env: env, WorkingDirectory: r.dir, ExpectedOrigin: workeripc.Origin}, nil)
+		r.worker, err = c.Supervisor.Start(ctx, supervisor.LaunchPlan{GenerationID: "browser-" + filepath.Base(r.dir), Executable: runtime.Node, Args: []string{filepath.Join(r.dir, "adapter.mjs")}, Env: env, WorkingDirectory: r.dir, ExpectedOrigin: workeripc.Origin}, adapterDiagnosticOutput(runtime.Environment["DSH_WORK_BROWSER_DIAGNOSTICS"] == "1", c.ObserveStage))
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +225,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 		}()
 		bounded, stop := context.WithTimeout(ctx, 25*time.Second)
 		defer stop()
-		r.conn, err = r.ipc.Connect(bounded)
+		r.conn, err = connectRuntimeProcess(bounded, r.ipc, r.worker)
 		if err != nil {
 			return nil, err
 		}
@@ -267,7 +275,7 @@ func newFactory(c Config, wrap bool) automation.Factory {
 			case <-ctx.Done():
 				r.Close()
 			case <-r.worker.Exited():
-				r.fail(errors.New("BROWSER_MCP_EXITED"))
+				r.failAt("failure-worker-exited", errors.New("BROWSER_MCP_EXITED"))
 			case <-r.done:
 			}
 		}()
@@ -292,7 +300,7 @@ func (r *resource) receive() {
 	for {
 		var m envelope
 		if err := browsernative.ReadWireMessage(r.conn, &m); err != nil {
-			r.fail(err)
+			r.failAt("failure-adapter-read", err)
 			return
 		}
 		switch m.Kind {
@@ -310,7 +318,7 @@ func (r *resource) receive() {
 				return
 			}
 		case "fatal":
-			r.fail(errors.New(m.Error))
+			r.failAt("failure-adapter-fatal", errors.New(m.Error))
 			return
 		case "wire":
 			r.mu.Lock()
@@ -321,7 +329,7 @@ func (r *resource) receive() {
 				return
 			}
 			if err := route.Send(r.ctx, m.Payload); err != nil {
-				r.fail(err)
+				r.failAt("failure-route-send", err)
 				return
 			}
 		case "result":
@@ -345,11 +353,11 @@ func (r *resource) forward(route automation.BrowserRoute) {
 		select {
 		case m := <-route.Messages():
 			if err := r.write(map[string]any{"kind": "wire", "payload": m}); err != nil {
-				r.fail(err)
+				r.failAt("failure-adapter-write", err)
 				return
 			}
 		case <-route.Done():
-			r.fail(route.Err())
+			r.failAt("failure-route-done", route.Err())
 			return
 		case <-r.done:
 			return
@@ -457,11 +465,18 @@ func (r *resource) initializationFailure(cancellation error) error {
 	return cancellation
 }
 func (r *resource) fail(err error) {
+	r.failAt("", err)
+}
+func (r *resource) failAt(source string, err error) {
 	r.mu.Lock()
+	first := r.failed == nil
 	if r.failed == nil {
 		r.failed = err
 	}
 	r.mu.Unlock()
+	if first && r.observeFailure != nil && runtimeFailureStage(source) {
+		r.observeFailure(source)
+	}
 	r.cancel()
 	r.signaled.Do(func() { close(r.done) })
 	go r.Close()
@@ -535,4 +550,17 @@ func (r *resource) AutomationTerminal() bool {
 	default:
 		return false
 	}
+}
+
+// New component supervisors can bind their actual kernel process instance.
+// Older supervisors retain the original authenticated carrier contract.
+func connectRuntimeProcess(ctx context.Context, ipc *workeripc.Transport, worker supervisor.Worker) (net.Conn, error) {
+	if instance, ok := worker.(interface{ PrivateConnectionProcess() (uint32, uint64) }); ok {
+		pid, started := instance.PrivateConnectionProcess()
+		if pid == 0 || started == 0 {
+			return nil, errors.New("BROWSER_RUNTIME_PROCESS_INSTANCE_REQUIRED")
+		}
+		return ipc.ConnectProcessInstance(ctx, pid, started)
+	}
+	return ipc.Connect(ctx)
 }

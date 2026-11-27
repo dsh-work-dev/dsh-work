@@ -41,30 +41,39 @@ type Config struct {
 	Supervisor          supervisor.Adapter
 	// ObserveProtocol receives method names only, never page values or CDP data.
 	ObserveProtocol func(direction, method string)
+	ObserveCommand  func(ProtocolObservation)
 }
 
 type Broker struct {
-	mu, writeMu      sync.Mutex
-	worker           supervisor.Worker
-	ipc              *workeripc.Transport
-	conn             net.Conn
-	generation       string
-	routes           map[string]*route
-	ready            chan error
-	done             chan struct{}
-	closed           chan struct{}
-	once             sync.Once
-	closeMu          sync.Mutex
-	closeAttempted   bool
-	workerNeedsClose bool
-	treeNeedsJoin    bool
-	closeErr         error
-	err              error
-	observe          func(string, string)
-	artifacts        map[string]*Artifact
-	controls         map[string]chan controlResult
-	targets          map[string][]*OwnedTarget
-	termination      *RendererTermination
+	mu, writeMu           sync.Mutex
+	worker                supervisor.Worker
+	ipc                   *workeripc.Transport
+	conn                  net.Conn
+	generation            string
+	routes                map[string]*route
+	ready                 chan error
+	done                  chan struct{}
+	closed                chan struct{}
+	once                  sync.Once
+	closeMu               sync.Mutex
+	closeAttempted        bool
+	workerNeedsClose      bool
+	treeNeedsJoin         bool
+	closeErr              error
+	err                   error
+	observe               func(string, string)
+	commands              *commandObserver
+	artifacts             map[string]*Artifact
+	controls              map[string]chan controlResult
+	targets               map[string][]*OwnedTarget
+	termination           *RendererTermination
+	frames                *frameGraph
+	renderers             *rendererTracker
+	rendererNeedsClose    bool
+	framePauseOnce        sync.Once
+	framePauseDone        chan struct{}
+	controlPauseConfirmed bool
+	rendererJoinReason    string
 }
 
 func (b *Broker) RendererTermination() (RendererTermination, bool) {
@@ -106,7 +115,7 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &Broker{ipc: ipc, generation: rand.Text(), routes: map[string]*route{}, ready: make(chan error, 1), done: make(chan struct{}), closed: make(chan struct{}), observe: c.ObserveProtocol, artifacts: map[string]*Artifact{}}
+	b := &Broker{ipc: ipc, generation: rand.Text(), routes: map[string]*route{}, ready: make(chan error, 1), done: make(chan struct{}), closed: make(chan struct{}), observe: c.ObserveProtocol, commands: newCommandObserver(c.ObserveCommand), artifacts: map[string]*Artifact{}}
 	env := map[string]string{}
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
@@ -144,6 +153,8 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	if err != nil {
 		return nil, errors.Join(err, b.Close())
 	}
+	b.renderers = newRendererTracker(b, c.Executable)
+	b.rendererNeedsClose = b.renderers != nil
 	go b.receive()
 	go func() {
 		select {
@@ -218,7 +229,7 @@ func (b *Broker) write(m map[string]any) error {
 	defer b.writeMu.Unlock()
 	select {
 	case <-b.done:
-		if m["kind"] != "release" && m["kind"] != "close" && m["kind"] != "shutdown" && m["kind"] != "artifact.revoke" && m["kind"] != "resource.result" && m["kind"] != "target.revoke" && m["kind"] != "target.end" && m["kind"] != "target.close" && m["kind"] != "target.hide" && m["kind"] != "target.state" && m["kind"] != "target.navigation" {
+		if m["kind"] != "control.pause" && m["kind"] != "release" && m["kind"] != "close" && m["kind"] != "shutdown" && m["kind"] != "artifact.revoke" && m["kind"] != "resource.result" && m["kind"] != "target.revoke" && m["kind"] != "target.end" && m["kind"] != "target.close" && m["kind"] != "target.hide" && m["kind"] != "target.state" && m["kind"] != "target.navigation" {
 			return b.failure()
 		}
 	default:
@@ -239,6 +250,7 @@ func (b *Broker) receive() {
 		var m struct {
 			Kind, Generation, Route, Scope, Method, Owner string
 			Protocol                                      int
+			ID                                            int
 			Payload                                       json.RawMessage
 		}
 		if err := json.Unmarshal(raw, &m); err != nil {
@@ -249,6 +261,27 @@ func (b *Broker) receive() {
 			b.abort(errors.New("CEF_GENERATION_REJECTED"))
 			return
 		}
+		if m.Kind == "frame.lifecycle" {
+			b.mu.Lock()
+			if b.frames == nil {
+				b.frames = &frameGraph{}
+			}
+			if b.frames.invalidReason != "" {
+				b.mu.Unlock()
+				continue
+			}
+			err := b.frames.apply(raw)
+			b.mu.Unlock()
+			if err != nil {
+				b.pauseFrameGraph(err)
+				continue
+			}
+			if b.renderers != nil {
+				b.renderers.notify()
+			}
+			continue
+		}
+
 		if m.Kind == "target.closed" {
 			b.mu.Lock()
 			targets := b.targets[m.Owner]
@@ -260,6 +293,7 @@ func (b *Broker) receive() {
 			continue
 		}
 		if m.Kind == "dispatch.observed" {
+			b.commands.accepted(m.Route, m.ID, m.Method)
 			if b.observe != nil {
 				b.observe("dispatch", m.Method)
 			}
@@ -324,8 +358,34 @@ func (b *Broker) receive() {
 				return
 			}
 			b.mu.Lock()
+			var graphFault struct {
+				Revision string `json:"graphRevision"`
+				Epoch    string `json:"faultEpoch"`
+			}
+			_ = json.Unmarshal(raw, &graphFault)
+			if (b.frames == nil || b.frames.invalidReason == "") && (graphFault.Revision != "" || graphFault.Epoch != "") {
+				revision, revisionErr := graphSequence(graphFault.Revision)
+				epoch, epochErr := graphSequence(graphFault.Epoch)
+				if b.frames == nil {
+					b.frames = &frameGraph{}
+				}
+				if revisionErr != nil || epochErr != nil || revision != b.frames.revision || epoch != b.frames.fault+1 {
+					b.frames.invalidReason = "CEF_GRAPH_FAULT_FENCE_REJECTED"
+					b.termination = &termination
+					b.controlPauseConfirmed = true
+					b.mu.Unlock()
+					b.invalidate(errors.New("CEF_GRAPH_FAULT_FENCE_REJECTED"))
+					continue
+				}
+				b.frames.fault = epoch
+			}
 			b.termination = &termination
+			b.controlPauseConfirmed = true
 			b.mu.Unlock()
+			if b.renderers != nil {
+				b.renderers.fence(b.frameGraphOnly(), termination)
+				b.renderers.notify()
+			}
 			b.invalidate(errors.New("CEF_RENDERER_SCOPE_UNCERTAIN"))
 			// Preserve broker-owned documents and the cleanup owner. Control
 			// cannot resume in this candidate; Close/parent cancellation disposes.
@@ -351,6 +411,7 @@ func (b *Broker) receive() {
 				b.observe("result", "rejected")
 			}
 		}
+		b.commands.response(m.Route, m.Payload)
 		if r == nil {
 			continue
 		}
@@ -394,7 +455,7 @@ func (b *Broker) Close() error {
 		b.closeErr = b.close()
 		b.closeAttempted = true
 		close(b.closed)
-	} else if b.workerNeedsClose || b.treeNeedsJoin {
+	} else if b.workerNeedsClose || b.treeNeedsJoin || b.rendererNeedsClose {
 		b.closeErr = errors.Join(b.closeErr, b.joinWorker())
 	}
 
@@ -496,13 +557,14 @@ func (r *route) Send(ctx context.Context, p json.RawMessage) error {
 		}
 		r.broker.observe("command", method)
 	}
+	r.broker.commands.command(r.id, p)
 	return r.broker.write(map[string]any{"kind": "wire", "route": r.id, "payload": p})
 }
 func (r *route) Messages() <-chan json.RawMessage { return r.messages }
 func (r *route) Done() <-chan struct{}            { return r.done }
 func (r *route) Err() error                       { r.mu.Lock(); defer r.mu.Unlock(); return r.err }
 func (r *route) finish(err error) {
-	r.once.Do(func() { r.mu.Lock(); r.err = err; close(r.done); r.mu.Unlock() })
+	r.once.Do(func() { r.broker.commands.retire(r.id); r.mu.Lock(); r.err = err; close(r.done); r.mu.Unlock() })
 }
 func (r *route) Close() error {
 	r.finish(automation.ErrRevoked)
@@ -517,7 +579,7 @@ func (r *route) Close() error {
 func (b *Broker) CleanupPending() bool {
 	b.closeMu.Lock()
 	defer b.closeMu.Unlock()
-	return !b.closeAttempted || b.workerNeedsClose || b.treeNeedsJoin
+	return !b.closeAttempted || b.workerNeedsClose || b.treeNeedsJoin || b.rendererNeedsClose
 }
 
 // joinWorker retains the real job/process handles until an explicit successful
@@ -525,6 +587,11 @@ func (b *Broker) CleanupPending() bool {
 // ownership is independent and retryable.
 func (b *Broker) joinWorker() error {
 	var result error
+	if b.rendererNeedsClose {
+		complete, err := b.renderers.close()
+		result = errors.Join(result, err)
+		b.rendererNeedsClose = !complete
+	}
 	if b.treeNeedsJoin {
 		wait, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		err := b.worker.WaitEmpty(wait)
@@ -550,4 +617,43 @@ func (b *Broker) joinWorker() error {
 		b.workerNeedsClose = false
 	}
 	return result
+}
+
+// A missing/contradictory graph is an observation failure, not proof that any
+// healthy document was destroyed. Establish the native final-dispatch pause;
+// only inability to confirm this safety barrier requires terminal cleanup.
+func (b *Broker) pauseFrameGraph(cause error)    { b.pauseGraph(cause, true) }
+func (b *Broker) pauseRendererGraph(cause error) { b.pauseGraph(cause, false) }
+func (b *Broker) pauseGraph(cause error, invalidSequence bool) {
+	b.framePauseOnce.Do(func() {
+		b.mu.Lock()
+		if b.frames == nil {
+			b.frames = &frameGraph{}
+		}
+		if invalidSequence {
+			b.frames.invalidReason = cause.Error()
+		} else {
+			b.rendererJoinReason = cause.Error()
+		}
+		b.framePauseDone = make(chan struct{})
+		done := b.framePauseDone
+		b.mu.Unlock()
+		b.invalidate(cause)
+		if b.renderers != nil {
+			b.renderers.notify()
+		}
+		go func() {
+			defer close(done)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, err := b.controlCall(ctx, "control.pause", "", nil)
+			if err != nil {
+				b.abort(errors.Join(errors.New("CEF_GRAPH_PAUSE_UNCONFIRMED"), err))
+				return
+			}
+			b.mu.Lock()
+			b.controlPauseConfirmed = true
+			b.mu.Unlock()
+		}()
+	})
 }
