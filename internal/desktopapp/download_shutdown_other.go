@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && (!darwin || !cgo || server)
 
 package desktopapp
 
@@ -9,7 +9,6 @@ import (
 )
 
 func askDownloadShutdownPlatform(ctx context.Context, _ *application.App, _ settings.Locale) (bool, error) {
-	// Download coordinators currently exist only on Windows. Preserve the
-	// other platforms' existing exit contract without a new UI prerequisite.
+	// Platforms without a native coordinator retain their exit contract.
 	return false, ctx.Err()
 }

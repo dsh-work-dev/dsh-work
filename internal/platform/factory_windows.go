@@ -21,11 +21,11 @@ func NewRuntimeInstaller(storeRoot string) dshmanager.RuntimeInstaller {
 }
 
 func NewNodeReleaseCatalog(storeRoot string) dshmanager.NodeReleaseCatalog {
-	return winplatform.NewNodeReleaseCatalog(storeRoot)
+	return nodeReleaseCatalogFor(storeRoot, "windows")
 }
 
 func NewDSHReleaseCatalog(storeRoot string) dshmanager.DSHReleaseCatalog {
-	return winplatform.NewDSHReleaseCatalog(storeRoot)
+	return dshReleaseCatalogFor(storeRoot)
 }
 
 func NewNodeInstaller(storeRoot string) dshmanager.NodeInstaller {

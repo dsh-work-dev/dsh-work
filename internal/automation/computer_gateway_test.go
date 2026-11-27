@@ -13,10 +13,11 @@ import (
 )
 
 type computerFixture struct {
-	mu     sync.Mutex
-	calls  []string
-	closed bool
-	block  chan struct{}
+	mu      sync.Mutex
+	calls   []string
+	closed  bool
+	block   chan struct{}
+	observe func()
 }
 
 func (f *computerFixture) Execute(ctx context.Context, tool string, args map[string]any) (any, error) {
@@ -27,6 +28,9 @@ func (f *computerFixture) Execute(ctx context.Context, tool string, args map[str
 	case "list_windows":
 		return map[string]any{"structuredContent": map[string]any{"windows": []any{map[string]any{"pid": float64(10), "window_id": float64(20)}, map[string]any{"pid": float64(11), "window_id": float64(21)}}}}, nil
 	case "get_window_state":
+		if f.observe != nil {
+			f.observe()
+		}
 		return map[string]any{"structuredContent": map[string]any{"snapshot_id": "s00000001", "elements": []any{map[string]any{"element_index": float64(0), "label": "Editor", "role": "Document", "frame": map[string]any{"x": 10.0, "y": 20.0}}}}}, nil
 	}
 	if f.block != nil {
@@ -71,6 +75,30 @@ func computerRequest(s *Service, tool string) Request {
 		args["window_id"] = float64(20)
 	}
 	return Request{Generation: "g", Epoch: s.Snapshot().Computer.Epoch, Capability: Computer, Session: "a", Lifetime: "life", Turn: "turn", Operation: "computer", Tool: tool, Arguments: args, Title: "Fixture conversation"}
+}
+
+func TestPreparedAUVPackageDoesNotAuthorizeAnUnavailableBackend(t *testing.T) {
+	s := New(nil, nil)
+	t.Cleanup(s.Close)
+	s.Worker("g", true, true)
+	s.Gateway("g", true)
+	s.state.ComputerEngine = "auv"
+	s.slots[Computer].state.Enabled = true
+	s.slots[AUV].state.Dependency = "prepared"
+	s.ConfigureComputerGateway(ComputerGatewayConfig{
+		Inspect: func(uint32, uint64) (ComputerTarget, error) {
+			t.Fatal("attempted inspection with no runtime")
+			return ComputerTarget{}, nil
+		},
+	})
+	view := s.Snapshot()
+	if view.Computer.Dependency != "prepared" || view.Computer.Availability != "unavailable" || len(view.ComputerTools) != 0 {
+		t.Fatalf("installed dependency released runtime access: %+v", view.Computer)
+	}
+	request := computerRequest(s, "computer_observe")
+	if decision, err := s.AuthorizeComputer(context.Background(), request); !errors.Is(err, ErrRevoked) || decision.Permit != "" {
+		t.Fatalf("unavailable backend issued a permit: %+v %v", decision, err)
+	}
 }
 func computerAuthorize(t *testing.T, s *Service, r Request) BrowserDecision {
 	t.Helper()
@@ -186,6 +214,41 @@ func TestComputerActionConsumesObservationAndStopRevokes(t *testing.T) {
 		t.Fatal("engine not closed")
 	}
 }
+
+func TestComputerRejectsReplacementDuringObservation(t *testing.T) {
+	s, engine, target := computerTestService(t)
+	engine.observe = func() { target.WindowIdentity = "replacement" }
+	request := computerRequest(s, "computer_observe")
+	request.Permit = computerGrant(t, s, request).Permit
+	value, err := s.Execute(context.Background(), request)
+	if err == nil || !strings.HasPrefix(err.Error(), "COMPUTER_TARGET_CHANGED") || value != nil || s.computer.observation != nil {
+		t.Fatalf("engine snapshot escaped after replacement: %+v %v", value, err)
+	}
+}
+
+func TestComputerRejectsReplacementDuringFinalElementProbe(t *testing.T) {
+	s, engine, target := computerTestService(t)
+	observation := computerRequest(s, "computer_observe")
+	computerExecute(t, s, observation, computerGrant(t, s, observation))
+	request := computerRequest(s, "computer_type")
+	request.Arguments["snapshot_id"] = "s00000001"
+	request.Arguments["element_index"] = float64(0)
+	request.Arguments["text"] = "marker"
+	request.Permit = computerAuthorize(t, s, request).Permit
+	s.computer.config.Probe = func(context.Context, ComputerTarget, map[string]any) (ComputerElementIdentity, error) {
+		target.WindowIdentity = "replacement"
+		return ComputerElementIdentity{RuntimeID: "fixture"}, nil
+	}
+	if _, err := s.Execute(context.Background(), request); err == nil || !strings.HasPrefix(err.Error(), "COMPUTER_TARGET_CHANGED") {
+		t.Fatalf("input permit survived window replacement: %v", err)
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if len(engine.calls) != 2 {
+		t.Fatalf("engine received input after replacement: %v", engine.calls)
+	}
+}
+
 func TestComputerDesktopLeaseAndStrictArguments(t *testing.T) {
 	s, _, _ := computerTestService(t)
 	r := computerRequest(s, "computer_windows")

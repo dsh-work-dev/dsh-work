@@ -12,7 +12,7 @@ import {createRefScope} from './refs.mjs';
 import {inspectBrowser} from './inspect.mjs';
 import {openPrivateSocket} from './native-socket.mjs';
 // Trusted launch-only diagnostics: fixed, once-per-process metadata only.
-const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','inspect-start','inspect-complete','inspect-error','private-end','private-finish','cdp-upgrade','cdp-connected','uncaught-exception','unhandled-rejection','process-exit-zero','process-exit-nonzero','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
+const diagnosticStages=new Set(['entry','private-connected','hmac-authenticated','init','adapter-ready','route-ready','sdk-connect-start','sdk-connected','tools-ready','call-start','tab-list-start','tab-list-returned','tab-select-returned','private-destroy','call-dispatch','call-result','call-error','inspect-start','inspect-complete','inspect-error','private-end','private-finish','cdp-upgrade','cdp-connected','uncaught-exception','unhandled-rejection','process-exit-zero','process-exit-nonzero','stop-private-error','stop-private-close','stop-private-timeout','stop-hmac-rejected','stop-frame-rejected','stop-protocol-error','stop-cdp-error','stop-cdp-close','stop-wire-timeout','stop-call-fatal']);
 const diagnosticSeen=new Set();
 let diagnosticStop;
 const diagnostic=stage=>{
@@ -32,6 +32,10 @@ const connection=JSON.parse(fs.readFileSync(new URL('./native-connection.json',i
 const socket=await openPrivateSocket(connection,()=>stopping);
 if(!socket)throw Error('BROWSER_PRIVATE_CONNECTION_CANCELLED');
 diagnostic('private-connected');
+if(process.env.DSH_WORK_BROWSER_DIAGNOSTICS==='1'){
+ const destroy=socket.destroy;
+ socket.destroy=function(error){diagnostic('private-destroy');return destroy.call(this,error)};
+}
 const token=process.env.DSH_WORK_BRIDGE_TOKEN;
 delete process.env.DSH_WORK_BRIDGE_PIPE;delete process.env.DSH_WORK_BRIDGE_TOKEN;
 let buffer=Buffer.alloc(0),nonce,authenticated=false;
@@ -102,7 +106,14 @@ async function receive(m){
   const {StdioClientTransport}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/client/stdio.js')));
   const {AjvJsonSchemaValidator}=await import(pathToFileURL(require.resolve('@modelcontextprotocol/sdk/validation/ajv-provider.js')));
   validator=new AjvJsonSchemaValidator();
-  transport=new StdioClientTransport({cwd:m.workspace || process.cwd(),command:process.execPath,args:[path.join(m.dependencies,'node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint',`ws://127.0.0.1:${server.address().port}${endpointPath}`,'--output-dir',m.output,'--timeout-action','10000','--timeout-navigation','15000',...(protocol==='owned-cef-v1'?['--snapshot-mode','none']:[])],env:process.env,stderr:'pipe'});
+  const cliArgs=[path.join(m.dependencies,'node_modules/@playwright/mcp/cli.js'),'--cdp-endpoint',`ws://127.0.0.1:${server.address().port}${endpointPath}`,'--output-dir',m.output,'--timeout-action','10000','--timeout-navigation','15000'];
+  if(protocol==='owned-cef-v1'){
+   cliArgs.push('--snapshot-mode','none');
+   // A fixed loopback handshake header keeps Playwright from spawning
+   // sw_vers to build its default macOS User-Agent.
+   if(process.platform==='darwin')cliArgs.push('--cdp-header','User-Agent: DSH-Work-Browser-MCP');
+  }
+  transport=new StdioClientTransport({cwd:m.workspace || process.cwd(),command:process.execPath,args:cliArgs,env:process.env,stderr:'pipe'});
   client=new Client({name:'DSH-Work-browser',version:'0.2.0'});diagnostic('sdk-connect-start');const connecting=client.connect(transport);transport.stderr?.resume();await connecting;diagnostic('sdk-connected');
   const all=(await client.listTools()).tools;diagnostic('tools-ready');
   // SDK result is the contract; never invent schemas/descriptions for tools.
@@ -112,6 +123,7 @@ async function receive(m){
   if(v.id!==undefined){const p=commands.get(v.id);if(!p)return;commands.delete(v.id);clearTimeout(p.timer);v.error?p.reject(Error(String(v.error))):p.resolve(v.result)}else model.handleExtensionEvent(v.method,v.params);
  }else if(m.kind==='call'){
   if(m.tool==='__dsh_inspect'){diagnostic('inspect-start');geometry.clear();try{send({kind:'result',id:m.id,result:await inspectBrowser(client,refs,m.arguments??{},(target,rect)=>{if(target!==undefined)geometry.set(refs.argumentsForMCP({target}).target,rect)})});diagnostic('inspect-complete')}catch(e){diagnostic('inspect-error');send({kind:'result',id:m.id,error:e.message})}return;}
+  diagnostic('call-start');
   try{
    const schema=schemas?.find(t=>t.name===m.tool);if(!schema)throw Error('BROWSER_TOOL_UNAVAILABLE');
    const args=m.arguments;if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(schema.inputSchema.properties??{},k)))throw Error('BROWSER_INVALID_ARGUMENT');
@@ -122,11 +134,14 @@ async function receive(m){
   }catch(e){send({kind:'result',id:m.id,error:e.message});return}
   try{
    if(['browser_type','browser_click','browser_hover','browser_drag','browser_fill_form','browser_select_option','browser_press_key'].includes(m.tool)){
+    diagnostic('tab-list-start');
     const tabs=await client.callTool({name:'browser_tabs',arguments:{action:'list'}},undefined,{timeout:5000});
+    diagnostic('tab-list-returned');
     const text=tabs.content?.filter(v=>v.type==='text').map(v=>v.text).join('\n')??'';
     const current=/^- (\d+): \(current\)/m.exec(text);
     if(tabs.isError||!current)throw Error('BROWSER_CURRENT_TAB_UNAVAILABLE');
     const selected=await client.callTool({name:'browser_tabs',arguments:{action:'select',index:Number(current[1])}},undefined,{timeout:5000});
+    diagnostic('tab-select-returned');
     if(selected.isError)throw Error('BROWSER_CURRENT_TAB_UNAVAILABLE');
    }
    // Only Go-admitted calls reach here. Inspections and pending approvals do
@@ -138,9 +153,9 @@ async function receive(m){
    const rect=['browser_type','browser_fill_form','browser_select_option'].includes(m.tool)?geometry.get(target):undefined;geometry.clear();
    await indicator({running:true,rect,action:m.tool});
    let rawResult;
-   try{rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
+   try{diagnostic('call-dispatch');rawResult=await client.callTool({name:m.tool,arguments:m.arguments},undefined,{timeout:25000})}
    finally{indicator({running:false})}
-   send({kind:'result',id:m.id,result:refs.resultForAgent(rawResult),rawResult})
-  }catch(e){send({kind:'result',id:m.id,error:e.message,fatal:true});void stop('call-fatal')}
+   send({kind:'result',id:m.id,result:refs.resultForAgent(rawResult),rawResult});diagnostic('call-result')
+  }catch(e){diagnostic('call-error');send({kind:'result',id:m.id,error:e.message,fatal:true});void stop('call-fatal')}
  }else throw Error('BROWSER_ADAPTER_OPERATION_REJECTED');
 }

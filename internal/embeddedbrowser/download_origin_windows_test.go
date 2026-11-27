@@ -99,7 +99,7 @@ func TestLiveDownloadOriginObserverRouteIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	view, e := reg.Update(ctx, peer, "probe", parent, admission.Lease, "source", server.URL, embeddedbrowser.SlotBounds{Width: 300, Height: 200}, 1, true)
+	view, e := reg.Update(ctx, peer, "probe", parent, admission.Lease, "source", server.URL, embeddedbrowser.SlotBounds{Width: 300, Height: 200}, 1, true, 0)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -400,7 +400,7 @@ func runDownloadFrameOrigin(t *testing.T, mode string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = registry.Update(ctx, peer, "origin-frame", parent, admission.Lease, "source", server.URL, embeddedbrowser.SlotBounds{Width: 300, Height: 200}, 1, true)
+	_, e = registry.Update(ctx, peer, "origin-frame", parent, admission.Lease, "source", server.URL, embeddedbrowser.SlotBounds{Width: 300, Height: 200}, 1, true, 0)
 	if e != nil {
 		t.Fatal(e)
 	}

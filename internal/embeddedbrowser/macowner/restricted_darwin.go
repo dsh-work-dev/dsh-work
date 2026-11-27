@@ -18,26 +18,42 @@ import (
 	"sync"
 	"time"
 
+	"github.com/local/dsh-work/internal/dshadapter"
 	"github.com/local/dsh-work/internal/localipc"
 	"github.com/local/dsh-work/internal/redact"
 	"github.com/local/dsh-work/internal/supervisor"
 )
 
 const restrictedVersion = "restricted-dsh/node-only-v1"
+const profileMaintenanceVersion = "restricted-dsh/profile-maintenance-v1"
+const restrictedProfileRecoveryModule = "profile_recovery.mjs"
 
 //go:embed restricted_bootstrap.mjs
 var restrictedBootstrap []byte
 
+//go:embed profile_recovery.mjs
+var profileRecovery []byte
+
 type restrictedConfig struct {
-	Node       string `json:"node"`
-	Entry      string `json:"entry"`
-	Sandbox    string `json:"sandbox"`
-	Bridge     string `json:"bridge"`
-	NodeDevice uint64 `json:"nodeDevice"`
-	NodeInode  uint64 `json:"nodeInode"`
+	Node           string `json:"node"`
+	Entry          string `json:"entry"`
+	Sandbox        string `json:"sandbox"`
+	Bridge         string `json:"bridge"`
+	NodeDevice     uint64 `json:"nodeDevice"`
+	NodeInode      uint64 `json:"nodeInode"`
+	PackageManager string `json:"packageManager,omitempty"`
+	PackageDevice  uint64 `json:"packageDevice,omitempty"`
+	PackageInode   uint64 `json:"packageInode,omitempty"`
 }
 
-// RestrictedDSHAdapter admits only the pinned DSH CLI and fixed Node probes.
+func (c *restrictedConfig) ownerVersion() string {
+	if c.PackageManager != "" {
+		return profileMaintenanceVersion
+	}
+	return restrictedVersion
+}
+
+// RestrictedDSHAdapter admits only pinned DSH entry points and fixed Node probes.
 // Kernel deny-fork/exec is installed before any DSH/profile module can load.
 // This component grants no CEF, MCP child, arbitrary command, or PTY ability.
 type RestrictedDSHAdapter struct {
@@ -48,9 +64,6 @@ type RestrictedDSHAdapter struct {
 }
 
 func NewRestrictedDSHAdapter(p Publication, node, cli, root string) (*RestrictedDSHAdapter, error) {
-	if !p.verified || !filepath.IsAbs(root) {
-		return nil, errors.New("MAC_PREVIEW_CONFIGURATION_REQUIRED")
-	}
 	var err error
 	node, err = filepath.EvalSymlinks(node)
 	if err != nil {
@@ -71,12 +84,30 @@ func NewRestrictedDSHAdapter(p Publication, node, cli, root string) (*Restricted
 	if json.Unmarshal(data, &manifest) != nil || manifest.Name != "@deepseek-ai/dsh" || manifest.Version != "0.2.2-rc.1" || filepath.Base(cli) != "bin.js" {
 		return nil, errors.New("MAC_PREVIEW_DSH_PUBLICATION_REJECTED")
 	}
+	if _, _, err = fileIdentity(node); err != nil {
+		return nil, err
+	}
+	owner, err := NewManagedDSHAdapter(p, root)
+	if err != nil {
+		return nil, err
+	}
+	owner.node, owner.cli = node, cli
+	return owner, nil
+}
+
+// NewManagedDSHAdapter opens the application-owned execution boundary before
+// a runtime is installed. The Host verifies and supplies managed components
+// when it calls StartWithComponent.
+func NewManagedDSHAdapter(p Publication, root string) (*RestrictedDSHAdapter, error) {
+	if !p.verified || !filepath.IsAbs(root) {
+		return nil, errors.New("MAC_PREVIEW_CONFIGURATION_REQUIRED")
+	}
 	host, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 	sandbox, bridge := filepath.Join(filepath.Dir(host), "dsh-preview-sandbox.node"), filepath.Join(filepath.Dir(host), "workeripc-mac.node")
-	for _, asset := range []string{node, sandbox, bridge} {
+	for _, asset := range []string{sandbox, bridge} {
 		if _, _, err = fileIdentity(asset); err != nil {
 			return nil, err
 		}
@@ -122,9 +153,46 @@ func NewRestrictedDSHAdapter(p Publication, node, cli, root string) (*Restricted
 	if err = writePrivate(probe, []byte("if(process.argv[2]==='path')console.log(process.execPath);else if(process.argv[2]==='version')console.log(process.version);else throw Error('MAC_PREVIEW_PROBE_REJECTED');\n")); err != nil {
 		return nil, err
 	}
-	return &RestrictedDSHAdapter{publication: p, node: node, cli: cli, root: root, sandbox: sandbox, bridge: bridge, probe: probe}, nil
+	return &RestrictedDSHAdapter{publication: p, root: root, sandbox: sandbox, bridge: bridge, probe: probe}, nil
 }
 func (a *RestrictedDSHAdapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	return a.StartWithNode(ctx, a.node, plan, raw)
+}
+
+// StartWithNode uses the Node executable resolved by the trusted runtime owner
+// while retaining a single lock and cleanup boundary across all generations.
+func (a *RestrictedDSHAdapter) StartWithNode(ctx context.Context, node string, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	return a.StartWithComponent(ctx, node, a.cli, plan, raw)
+}
+
+// StartWithComponent receives the native paths verified by the trusted runtime
+// store. It keeps the restricted Worker and the same supervision boundary.
+func (a *RestrictedDSHAdapter) StartWithComponent(ctx context.Context, node, cli string, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	return a.startWithComponent(ctx, node, cli, plan, raw, false, "")
+}
+
+// StartProfileVersionApproval runs DSH's own compatibility write with the
+// Worker process restrictions. The approval has no package manager step.
+func (a *RestrictedDSHAdapter) StartProfileVersionApproval(ctx context.Context, node, cli string, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	if !profileCommandTarget(cli, plan) || !dshadapter.NewPluginCommands().IsVersionApproval(plan.Args) {
+		return nil, errors.New("Mac DSH plugin version approval is invalid")
+	}
+	return a.startWithComponent(ctx, node, cli, plan, raw, true, "")
+}
+
+func (a *RestrictedDSHAdapter) StartProfileMaintenance(ctx context.Context, node, cli, pnpm string, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler) (supervisor.Worker, error) {
+	if !profileCommandTarget(cli, plan) || !dshadapter.NewPluginCommands().IsPackageMaintenance(plan.Args) || !filepath.IsAbs(pnpm) {
+		return nil, errors.New("Mac DSH profile maintenance command is invalid")
+	}
+	return a.startWithComponent(ctx, node, cli, plan, raw, true, pnpm)
+}
+
+func profileCommandTarget(cli string, plan supervisor.LaunchPlan) bool {
+	home := plan.Env["DSH_HOME"]
+	return filepath.IsAbs(home) && filepath.Clean(home) == filepath.Clean(plan.WorkingDirectory) && sameJobFile(plan.Executable, cli)
+}
+
+func (a *RestrictedDSHAdapter) startWithComponent(ctx context.Context, node, cli string, plan supervisor.LaunchPlan, raw supervisor.RawOutputHandler, maintenance bool, pnpm string) (supervisor.Worker, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// A same-Runtime retry cannot evade an uncertain earlier owner by allocating
@@ -139,8 +207,8 @@ func (a *RestrictedDSHAdapter) Start(ctx context.Context, plan supervisor.Launch
 		return nil, err
 	}
 	args := append([]string{}, plan.Args...)
-	entry := a.cli
-	if sameJobFile(plan.Executable, a.node) {
+	entry := cli
+	if sameJobFile(plan.Executable, node) {
 		if len(args) == 1 && args[0] == "--version" {
 			entry = a.probe
 			args = []string{"version"}
@@ -150,11 +218,12 @@ func (a *RestrictedDSHAdapter) Start(ctx context.Context, plan supervisor.Launch
 		} else {
 			return nil, errors.New("MAC_PREVIEW_PROCESS_UNAVAILABLE: only the selected DSH runtime is available")
 		}
-	} else if !sameJobFile(plan.Executable, a.cli) {
+	} else if !sameJobFile(plan.Executable, cli) {
 		return nil, errors.New("MAC_PREVIEW_PROCESS_UNAVAILABLE: local commands are unavailable in this Mac preview")
 	}
 	// Never let an option select a different Node entry point, loader, or profile.
-	if entry == a.cli && !(len(args) == 1 && args[0] == "--version") {
+	profileStart := entry == cli && !maintenance && !(len(args) == 1 && args[0] == "--version")
+	if profileStart {
 		if len(args) < 4 || args[0] != "--patch" {
 			return nil, errors.New("MAC_PREVIEW_DSH_LAUNCH_REJECTED")
 		}
@@ -164,24 +233,30 @@ func (a *RestrictedDSHAdapter) Start(ctx context.Context, plan supervisor.Launch
 			}
 		}
 	}
-	dev, ino, err := fileIdentity(a.node)
+	dev, ino, err := fileIdentity(node)
 	if err != nil {
 		return nil, err
+	}
+	cfg := &restrictedConfig{Node: node, Entry: entry, Sandbox: a.sandbox, Bridge: a.bridge, NodeDevice: dev, NodeInode: ino, PackageManager: pnpm}
+	if pnpm != "" {
+		cfg.PackageDevice, cfg.PackageInode, err = fileIdentity(pnpm)
+		if err != nil {
+			return nil, err
+		}
 	}
 	dir := filepath.Join(a.root, "generation-"+rand.Text())
 	if err = privateDir(dir); err != nil {
 		return nil, err
 	}
-	if entry == a.cli && !(len(args) == 1 && args[0] == "--version") {
+	if profileStart {
 		patch := filepath.Join(dir, "restricted.patch.yml")
 		if err = writePrivate(patch, []byte("- id: tool-bash\n  disabled: true\n- id: tool-pwsh\n  disabled: true\n- id: tool-jobs\n  disabled: true\n- id: tool-fs-search\n  disabled: true\n")); err != nil {
 			return nil, err
 		}
 		args = append([]string{"--patch", patch}, args...)
 	}
-	cfg := &restrictedConfig{Node: a.node, Entry: entry, Sandbox: a.sandbox, Bridge: a.bridge, NodeDevice: dev, NodeInode: ino}
 	inner := &Adapter{publication: a.publication, profile: dir, directory: dir, restricted: cfg}
-	plan.Executable = a.node
+	plan.Executable = node
 	plan.Args = append([]string{entry}, args...)
 	plan.GenerationID = "cef-DSH" + rand.Text()
 	w, err := inner.Start(ctx, plan, raw)
@@ -240,30 +315,48 @@ func (g *guard) startRestrictedDSH() error {
 	if cfg == nil || !pinnedJobFile(g.cfg.Plan.Executable, cfg.Node, cfg.NodeDevice, cfg.NodeInode) || len(g.cfg.Plan.Args) == 0 || !sameJobFile(g.cfg.Plan.Args[0], cfg.Entry) {
 		return errors.New("MAC_PREVIEW_COMPONENT_REJECTED")
 	}
+	if cfg.PackageManager != "" && !pinnedJobFile(cfg.PackageManager, cfg.PackageManager, cfg.PackageDevice, cfg.PackageInode) {
+		return errors.New("MAC_PROFILE_PACKAGE_MANAGER_REJECTED")
+	}
 	run := filepath.Dir(g.cfg.Socket)
 	module, config := filepath.Join(run, "restricted-bootstrap.mjs"), filepath.Join(run, "restricted-bootstrap.json")
 	if err := writePrivate(module, restrictedBootstrap); err != nil {
 		return err
 	}
+	bootstrap := *cfg
+	args := append([]string{}, g.cfg.Plan.Args...)
+	if cfg.PackageManager != "" {
+		if err := writePrivate(filepath.Join(run, restrictedProfileRecoveryModule), profileRecovery); err != nil {
+			return err
+		}
+		// An import of Node's designated main file runs DSH's default CLI
+		// before the owner can supply its fixed package manager.
+		bootstrap.Entry = filepath.Join(run, "restricted-profile-command.mjs")
+		if err := writePrivate(bootstrap.Entry, []byte("throw Error('MAC_PROFILE_MAINTENANCE_BOOTSTRAP_REQUIRED');\n")); err != nil {
+			return err
+		}
+		args[0] = bootstrap.Entry
+	}
 	body, err := json.Marshal(struct {
-		Entry        string `json:"entry"`
-		Sandbox      string `json:"sandbox"`
-		Bridge       string `json:"bridge"`
+		restrictedConfig
+		DSHEntry     string `json:"dshEntry"`
+		Version      string `json:"version"`
 		Socket       string `json:"socket"`
 		Generation   string `json:"generation"`
 		OwnerPID     uint32 `json:"ownerPID"`
 		OwnerStarted string `json:"ownerStarted"`
-	}{cfg.Entry, cfg.Sandbox, cfg.Bridge, g.cfg.Socket, g.cfg.Plan.GenerationID, g.state.Owner.PID, strconv.FormatUint(g.state.Owner.Started, 10)})
+	}{bootstrap, cfg.Entry, cfg.ownerVersion(), g.cfg.Socket, g.cfg.Plan.GenerationID, g.state.Owner.PID, strconv.FormatUint(g.state.Owner.Started, 10)})
 	if err != nil {
 		return err
 	}
 	if err = writePrivate(config, body); err != nil {
 		return err
 	}
-	cmd := exec.Command(cfg.Node, append([]string{"--import", (&url.URL{Scheme: "file", Path: module}).String()}, g.cfg.Plan.Args...)...)
+	cmd := exec.Command(cfg.Node, append([]string{"--import", (&url.URL{Scheme: "file", Path: module}).String()}, args...)...)
 	cmd.Dir = g.cfg.Plan.WorkingDirectory
 	for key, value := range g.cfg.Plan.Env {
-		if !strings.HasPrefix(key, "DYLD_") && key != "NODE_OPTIONS" && key != "NODE_REPL_EXTERNAL_MODULE" && key != "DSH_WORK_RESTRICTED_BOOTSTRAP" {
+		if !strings.HasPrefix(key, "DYLD_") && key != "NODE_OPTIONS" && key != "NODE_REPL_EXTERNAL_MODULE" &&
+			key != "DSH_WORK_RESTRICTED_BOOTSTRAP" && key != "DSH_WORK_MAC_PACKAGE_OPERATION" {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
@@ -287,10 +380,12 @@ func (g *guard) startRestrictedDSH() error {
 	return err
 }
 func (g *guard) registerRestrictedDSH(c net.Conn, hello message, target localipc.ProcessTarget) {
-	if hello.Kind != "restricted-dsh" || hello.Version != restrictedVersion {
+	cfg := g.cfg.Restricted
+	version := cfg.ownerVersion()
+	if hello.Kind != "restricted-dsh" || hello.Version != version {
 		return
 	}
-	g.registerNode(c, hello, target, g.cfg.Restricted.Node, g.cfg.Restricted.NodeDevice, g.cfg.Restricted.NodeInode, true, restrictedVersion)
+	g.registerNode(c, hello, target, cfg.Node, cfg.NodeDevice, cfg.NodeInode, cfg.PackageManager == "", version)
 }
 func (g *guard) admitRestrictedGroupLocked(c Census) error {
 	if c.Error != 0 || c.Truncated {
@@ -306,9 +401,15 @@ func (g *guard) admitRestrictedGroupLocked(c Census) error {
 		if p.PID == g.state.Owner.PID && p.Started == g.state.Owner.Started {
 			continue
 		}
-		if p.PID != g.state.Broker.PID || p.Started != g.state.Broker.Started {
+		if _, ok := g.state.Owned[processKey(p)]; ok {
+			continue
+		}
+		cfg := g.cfg.Restricted
+		if cfg.PackageManager == "" || p.PGID != g.state.Owner.PGID || p.PPID != g.state.Broker.PID ||
+			!pinnedJobFile(p.Path, cfg.Node, cfg.NodeDevice, cfg.NodeInode) {
 			return ErrCleanupPending
 		}
+		g.state.Owned[processKey(p)] = owned{Process: p, Role: "profile-pnpm-preentry"}
 	}
 	return nil
 }
@@ -325,11 +426,7 @@ type restrictedOutput struct {
 func (w *restrictedOutput) Write(data []byte) (int, error) {
 	for _, b := range data {
 		if b == '\n' {
-			if !w.oversized {
-				w.emit(string(w.line))
-			}
-			w.line = w.line[:0]
-			w.oversized = false
+			w.flush()
 		} else if len(w.line) < 65536 && !w.oversized {
 			w.line = append(w.line, b)
 		} else {
@@ -338,6 +435,13 @@ func (w *restrictedOutput) Write(data []byte) (int, error) {
 		}
 	}
 	return len(data), nil
+}
+func (w *restrictedOutput) flush() {
+	if !w.oversized && len(w.line) > 0 {
+		w.emit(string(w.line))
+	}
+	w.line = w.line[:0]
+	w.oversized = false
 }
 func (w *restrictedOutput) emit(line string) {
 	w.g.mu.Lock()

@@ -1,6 +1,25 @@
 package nativeui
 
-import "github.com/wailsapp/wails/v3/pkg/application"
+import (
+	"math"
+	"runtime"
+
+	"github.com/local/dsh-work/internal/pet"
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// PetScreenWorkArea uses the coordinate space of Window.Position and
+// Window.SetPosition. Wails' Darwin Window.GetScreen returns the raw screen
+// snapshot, while ScreenManager returns a layout with adjusted logical bounds.
+func PetScreenWorkArea(screen *application.Screen) pet.WorkArea {
+	area := screen.WorkArea
+	if runtime.GOOS == "darwin" && screen.ScaleFactor > 0 && screen.PhysicalWorkArea.Width > 0 && screen.PhysicalWorkArea.Height > 0 {
+		physical := screen.PhysicalWorkArea
+		points := func(pixels int) int { return int(math.Round(float64(pixels) / float64(screen.ScaleFactor))) }
+		area = application.Rect{X: points(physical.X), Y: points(physical.Y), Width: points(physical.Width), Height: points(physical.Height)}
+	}
+	return pet.WorkArea{X: area.X, Y: area.Y, Width: area.Width, Height: area.Height}
+}
 
 // Sprite preferences retain their canonical dimensions. Text remains legible
 // even when the pet is set to 50%; the activity region never scales with sprites.

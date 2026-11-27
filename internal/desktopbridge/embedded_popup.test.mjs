@@ -6,8 +6,8 @@ const tick=async()=>{for(let i=0;i<15;i++)await new Promise(r=>setImmediate(r))}
 
 // Only the DOM/IPC boundary is simulated here. Actual DSH tab creation is an
 // integration acceptance item, not established by these provider guard tests.
-async function fixture(session='source-session'){
- const listeners=new Map(),calls=[],opens=[],elements=[],intervals=[];let visible=true,holdAllow=false,held;
+async function fixture(session='source-session',{holdPaint=false}={}){
+ const listeners=new Map(),calls=[],opens=[],elements=[],intervals=[],paints=[];let visible=true,holdAllow=false,held;
  const node=(tag='div')=>{const n={tag,style:{},dataset:{},children:[],isConnected:true,offsetHeight:0,
   setAttribute(k,v){this[k]=v},removeAttribute(k){delete this[k]},addEventListener(){},append(...items){for(const i of items){i.parent=this;this.children.push(i)}},
   remove(){this.isConnected=false;if(this.parent)this.parent.children=this.parent.children.filter(n=>n!==this)},closest(){return null},getClientRects(){return visible?[{}]:[]},getBoundingClientRect(){return{x:0,y:0,left:0,top:0,right:700,bottom:450,width:700,height:450}}};elements.push(n);return n};
@@ -18,18 +18,46 @@ async function fixture(session='source-session'){
  const respond=m=>{let value=true;if(m.action==='state'||m.action==='update')value=structuredClone(state);else if(m.action==='popup'){
   if(m.command==='ready')state.popupVisible=true;
   if(['allow','deny'].includes(m.command)){delete state.popup;state.popupVisible=false;value=m.command==='allow'?popup.url:''}else value='';
- }reply(m,value)};
+ }else if(m.action==='dialog-ready')state.dialogVisible=true;
+ reply(m,value)};
  const context=vm.createContext({window:{},console,URL,location:{ancestorOrigins:['http://shell'],hash:''},parent,crypto:{randomUUID:()=>String(calls.length+1)},innerWidth:900,innerHeight:700,
-  setTimeout:()=>1,clearTimeout(){},setInterval:fn=>{intervals.push(fn);return intervals.length},clearInterval(){},requestAnimationFrame:fn=>queueMicrotask(fn),
+  setTimeout:()=>1,clearTimeout(){},setInterval:fn=>{intervals.push(fn);return intervals.length},clearInterval(){},requestAnimationFrame:fn=>holdPaint?paints.push(fn):queueMicrotask(fn),
   ResizeObserver:class{observe(){}disconnect(){}},IntersectionObserver:class{constructor(fn){this.fn=fn}observe(target){this.fn([{target,isIntersecting:true,intersectionRatio:1}])}disconnect(){}},MutationObserver:class{observe(){}},
   getComputedStyle:()=>({visibility:visible?'visible':'hidden',position:'relative'}),document:{head:{append(){}},documentElement:{},createElement:node,querySelectorAll:()=>[],getElementById:()=>container},
   addEventListener(type,fn){listeners.set(type,[...(listeners.get(type)||[]),fn])},removeEventListener(){}});
  vm.runInContext(readFileSync(new URL('./embedded_browser.js',import.meta.url),'utf8'),context);
  const page=context.__DSH_WORK_BROWSER_PROVIDER__.createPage(session,{key:'source-tab',persist(){},openRequested:url=>opens.push({session,url})});
  const unmount=page.presentation.mount('viewport');await tick();
- const button=text=>elements.findLast(e=>e.tag==='button'&&e.textContent===text&&e.isConnected);
- return{calls,opens,popup,page,button,unmount,hide(){visible=false;unmount()},setState(v){state={...state,...v}},hold(){holdAllow=true},release(){respond(held)},replay(){reply(held,popup.url)},poll:async()=>{for(const fn of intervals)fn();await tick()}};
+ const connected=node=>node.isConnected&&(!node.parent||connected(node.parent));
+ const button=text=>elements.findLast(e=>e.tag==='button'&&e.textContent===text&&connected(e));
+ return{calls,opens,popup,page,button,unmount,hide(){visible=false;unmount()},setState(v){state={...state,...v}},hold(){holdAllow=true},release(){respond(held)},replay(){reply(held,popup.url)},flushPaint(){for(const fn of paints.splice(0))fn()},poll:async()=>{for(const fn of intervals)fn();await tick()}};
 }
+
+test('a slot hides and retires while its pending overlay paint is held',async()=>{
+ const f=await fixture('held-paint',{holdPaint:true});
+ assert.deepEqual(f.calls.filter(c=>c.action==='popup').map(c=>c.command),['suspend']);
+ assert.equal(f.button('打开新标签页')?.disabled,true);
+ f.hide();await tick();
+ assert.ok(f.calls.some(c=>c.action==='update'&&c.visible===false),'hidden workspace must reach native before the next paint');
+ const disposal=f.page.frame.dispose();await tick();
+ assert.ok(f.calls.some(c=>c.action==='detach'),'retirement must reach native before the next paint');
+ f.flushPaint();await disposal;await tick();
+ assert.equal(f.calls.some(c=>c.command==='ready'),false);
+});
+
+test('a webpage dialog supersedes a popup that is still waiting for paint',async()=>{
+ const f=await fixture('dialog-over-popup',{holdPaint:true});
+ f.setState({dialog:{epoch:'1',document:f.popup.document,view:f.popup.view,presentation:'3',origin:f.popup.origin,kind:'confirm',message:'Fixture confirm'},dialogVisible:false});
+ await f.poll();
+ assert.ok(f.calls.some(c=>c.action==='dialog-suspend'));
+ assert.equal(f.button('打开新标签页'),undefined);
+ assert.equal(f.button('确定')?.disabled,true);
+ f.flushPaint();await tick();
+ assert.equal(f.calls.some(c=>c.action==='popup'&&c.command==='ready'),false);
+ assert.equal(f.calls.filter(c=>c.action==='dialog-ready').length,1);
+ assert.equal(f.button('确定')?.disabled,false);
+ await f.page.frame.dispose();
+});
 
 test('popup uses its source-session callback once, after native suspension and source recheck',async()=>{
  const a=await fixture('A'),b=await fixture('B');

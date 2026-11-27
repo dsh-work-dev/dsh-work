@@ -62,12 +62,12 @@ func (s *embeddedBrowserService) nativePeer(ctx context.Context) (embeddedbrowse
 	}
 	return embeddedbrowser.PresenterPeer{PID: p.PID, Started: p.Started}, surface, nil
 }
-func (s *embeddedBrowserService) Update(ctx context.Context, parent uint64, windowLease, slot, address string, bounds embeddedbrowser.SlotBounds, zoom float64, visible bool) (embeddedbrowser.ViewState, error) {
+func (s *embeddedBrowserService) Update(ctx context.Context, parent uint64, windowLease, slot, address string, bounds embeddedbrowser.SlotBounds, zoom float64, visible bool, displayRevision uint64) (embeddedbrowser.ViewState, error) {
 	peer, surface, err := s.peer(ctx)
 	if err != nil {
 		return embeddedbrowser.ViewState{}, err
 	}
-	return s.Registry.Update(ctx, peer, surface, uintptr(parent), windowLease, slot, address, bounds, zoom, visible)
+	return s.Registry.Update(ctx, peer, surface, uintptr(parent), windowLease, slot, address, bounds, zoom, visible, displayRevision)
 }
 func (s *embeddedBrowserService) State(ctx context.Context, slot string) (embeddedbrowser.ViewState, error) {
 	peer, surface, err := s.peer(ctx)

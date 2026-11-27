@@ -1,5 +1,5 @@
 // Package downloads owns approved embedded-browser download transactions.
-// Its file capability is Windows-only; no browser/network stack is implemented here.
+// Platform adapters own filesystem capabilities. This package has no network stack.
 package downloads
 
 import (
@@ -19,6 +19,12 @@ var (
 	ErrRisk               = errors.New("DOWNLOAD_RISK_CHECK_FAILED")
 )
 
+type DialogOwner struct {
+	Window  uintptr
+	PID     uint32
+	Started uint64
+}
+
 type FileIdentity struct {
 	Volume uint32 `json:"volume"`
 	Index  uint64 `json:"index"`
@@ -29,15 +35,16 @@ type FileVersion struct {
 	Modified uint64       `json:"modified"`
 }
 type FileRecord struct {
-	Parent         string       `json:"parent"`
-	ParentIdentity FileIdentity `json:"parentIdentity"`
-	Name           string       `json:"name"`
-	Stage          string       `json:"stage"`
-	StageIdentity  FileIdentity `json:"stageIdentity"`
-	Previous       *FileVersion `json:"previous,omitempty"`
-	Recovery       string       `json:"recovery,omitempty"`
-	Published      bool         `json:"published,omitempty"`
-	Phase          string       `json:"phase,omitempty"`
+	Parent         string        `json:"parent"`
+	ParentIdentity FileIdentity  `json:"parentIdentity"`
+	Name           string        `json:"name"`
+	Stage          string        `json:"stage"`
+	StageIdentity  FileIdentity  `json:"stageIdentity"`
+	StageDirectory *FileIdentity `json:"stageDirectory,omitempty"`
+	Previous       *FileVersion  `json:"previous,omitempty"`
+	Recovery       string        `json:"recovery,omitempty"`
+	Published      bool          `json:"published,omitempty"`
+	Phase          string        `json:"phase,omitempty"`
 }
 
 // SuggestedName never accepts a website-supplied directory or ADS.

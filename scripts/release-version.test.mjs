@@ -140,11 +140,16 @@ for (const [name, argv] of accepted) {
 // cannot be answered by a stale binary.
 {
   const options = parseArgs(['--channel', 'stable']);
-  const first = helperBinary(options, { LOCALAPPDATA: 'C:\\cache' }, 'win32');
-  const second = helperBinary(options, { LOCALAPPDATA: 'C:\\cache' }, 'win32');
+  const userCache = path.join(REPO_ROOT, 'test-user-cache');
+  const explicitCache = path.join(REPO_ROOT, 'test-explicit-cache');
+  const first = helperBinary(options, { LOCALAPPDATA: userCache }, 'win32');
+  const second = helperBinary(options, { LOCALAPPDATA: userCache }, 'win32');
+  const candidates = cacheCandidates({ DSH_RELEASE_CACHE: explicitCache, LOCALAPPDATA: userCache }, 'win32');
   check('the helper path is stable for unchanged sources', first.path === second.path, `${first.path} vs ${second.path}`);
-  check('the helper path lives under the caller cache root', first.path.startsWith(path.join('C:\\cache', 'dsh-work', 'release-version')), first.path);
-  check('an explicit cache root wins over the user cache', cacheCandidates({ DSH_RELEASE_CACHE: 'D:\\rel', LOCALAPPDATA: 'C:\\cache' }, 'win32')[0] === 'D:\\rel', cacheCandidates({ DSH_RELEASE_CACHE: 'D:\\rel', LOCALAPPDATA: 'C:\\cache' }, 'win32')[0]);
+  check('the helper path lives under the caller cache root', path.dirname(first.path) === path.join(userCache, 'dsh-work', 'release-version'), first.path);
+  check('an explicit cache root wins over the user cache', candidates[0] === explicitCache, candidates[0]);
+  const macHelper = helperBinary(options, { XDG_CACHE_HOME: userCache }, 'darwin');
+  check('the macOS helper uses the caller cache and a native executable name', path.dirname(macHelper.path) === path.join(userCache, 'dsh-work', 'release-version') && !macHelper.path.endsWith('.exe'), macHelper.path);
 }
 
 // A session that cannot write the preferred cache directory must still get a

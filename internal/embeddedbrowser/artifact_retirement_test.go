@@ -10,6 +10,31 @@ import (
 
 type retiredArtifactCensus struct{}
 
+type rendererExitObservation struct {
+	supervisor.ProcessLease
+	alive bool
+}
+
+func (p *rendererExitObservation) Alive() (bool, error) { return p.alive, nil }
+
+func TestLiveJoinExcludesExitedRendererBeforeFault(t *testing.T) {
+	process := &rendererExitObservation{alive: true}
+	tracker := &rendererTracker{
+		revision: 4, complete: true, frames: []FrameRecord{{Child: 7}},
+		held: map[uint32]*rendererLease{
+			7: {process: process, identity: RendererInstance{Child: 7, PID: 21, Started: 1}},
+		},
+	}
+	if _, _, complete := tracker.snapshot(4, 0); !complete {
+		t.Fatal("live renderer should establish the join")
+	}
+	process.alive = false
+	instances, _, complete := tracker.snapshot(4, 0)
+	if complete || len(instances) != 1 || !instances[0].Exited || tracker.held[7] == nil {
+		t.Fatalf("expected an incomplete live join with retained exit evidence, got %v, %+v", complete, instances)
+	}
+}
+
 func (retiredArtifactCensus) OwnedProcesses(context.Context) ([]supervisor.ProcessLease, error) {
 	return nil, errors.New("owned terminating process image unavailable")
 }

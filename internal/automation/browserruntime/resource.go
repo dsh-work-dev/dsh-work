@@ -417,36 +417,44 @@ func (r *resource) Execute(ctx context.Context, tool string, args map[string]any
 	// cancellation closes the Job and route independently, interrupting this wait.
 	timer := time.NewTimer(40 * time.Second)
 	defer timer.Stop()
-	for {
+	var m envelope
+	select {
+	case m = <-ch:
+	case <-r.done:
+		// A terminal adapter reply and EOF can arrive in the same turn.
+		// Preserve the framed action error when the reader already queued it.
 		select {
-		case m := <-ch:
-			if r.observe != nil && len(m.RawResult) > 0 {
-				owner := r.owner
-				owner.Tool = tool
-				owner.Arguments = args
-				r.observe(owner, Observation{Tool: tool, RawResult: append(json.RawMessage(nil), m.RawResult...), ProjectedResult: append(json.RawMessage(nil), m.Result...)})
+		case m = <-ch:
+			if m.Error == "" {
+				return nil, r.failure()
 			}
-			if m.Fatal {
-				r.fail(errors.New(m.Error))
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if m.Error != "" {
-				return nil, errors.New(m.Error)
-			}
-			var result any
-			if err := json.Unmarshal(m.Result, &result); err != nil {
-				return nil, err
-			}
-			return result, nil
-		case <-r.done:
-			return nil, r.failure()
-		case <-timer.C:
-			r.fail(errors.New("BROWSER_ACTION_DRAIN_TIMEOUT"))
+		default:
 			return nil, r.failure()
 		}
+	case <-timer.C:
+		r.fail(errors.New("BROWSER_ACTION_DRAIN_TIMEOUT"))
+		return nil, r.failure()
 	}
+	if r.observe != nil && len(m.RawResult) > 0 {
+		owner := r.owner
+		owner.Tool = tool
+		owner.Arguments = args
+		r.observe(owner, Observation{Tool: tool, RawResult: append(json.RawMessage(nil), m.RawResult...), ProjectedResult: append(json.RawMessage(nil), m.Result...)})
+	}
+	if m.Fatal {
+		r.fail(errors.New(m.Error))
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if m.Error != "" {
+		return nil, errors.New(m.Error)
+	}
+	var result any
+	if err := json.Unmarshal(m.Result, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 func (r *resource) failure() error {
 	r.mu.Lock()

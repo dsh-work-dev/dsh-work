@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/local/dsh-work/internal/embeddedbrowser/distribution"
 	"github.com/local/dsh-work/internal/localipc"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
@@ -30,6 +31,9 @@ import (
 )
 
 const Version = "156.0.15+gcf671c0+chromium-156.0.8078.80"
+const browserExecutable = "DSHWorkBrowser"
+
+var ErrUnsupportedPlatform = errors.New("MAC_CEF_PLATFORM_UNAVAILABLE")
 
 type Publication struct {
 	Kind       string   `json:"kind"`
@@ -46,30 +50,43 @@ type Publication struct {
 // configuration, never a page/tool/DSH-supplied executable or addon path.
 func OpenPublication(ctx context.Context, path string) (Publication, error) {
 	var p Publication
-	version, err := unix.Sysctl("kern.osproductversion")
-	major, _ := strconv.Atoi(strings.Split(version, ".")[0])
-	if err != nil || runtime.GOARCH != "arm64" || major < 15 {
-		return p, errors.New("MAC_CEF_PLATFORM_UNAVAILABLE")
-	}
 	if !filepath.IsAbs(path) {
 		return p, errors.New("absolute CEF publication required")
 	}
+	if err := readPublication(path, &p); err != nil {
+		return p, err
+	}
+	return verifyPublication(ctx, p)
+}
+
+func readPublication(path string, p *Publication) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return p, err
+		return err
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, 65537))
 	if err != nil || len(data) > 65536 {
-		return p, errors.New("CEF publication manifest rejected")
+		return errors.New("CEF publication manifest rejected")
 	}
-	if err = json.Unmarshal(data, &p); err != nil {
-		return p, err
+	return json.Unmarshal(data, p)
+}
+
+func verifyPublication(ctx context.Context, p Publication) (Publication, error) {
+	version, err := unix.Sysctl("kern.osproductversion")
+	major, _ := strconv.Atoi(strings.Split(version, ".")[0])
+	if err != nil || runtime.GOARCH != "arm64" || major < 15 {
+		return p, ErrUnsupportedPlatform
 	}
 	if p.Kind != "dsh-owned-cef-mac" || p.Version != Version || !p.Sandbox || len(p.Helpers) == 0 {
 		return p, errors.New("CEF publication identity rejected")
 	}
-	if p.Executable != filepath.Join(p.App, "Contents", "MacOS", "cefsimple") || p.Owner != filepath.Join(p.App, "Contents", "MacOS", "dsh-cef-owner") {
+	brokerOK := p.Executable == filepath.Join(p.App, "Contents", "MacOS", browserExecutable)
+	if filepath.Base(p.App) == "broker.app" {
+		// Existing signed development publications retain their entry point.
+		brokerOK = p.Executable == filepath.Join(p.App, "Contents", "MacOS", "cefsimple")
+	}
+	if !brokerOK || p.Owner != filepath.Join(p.App, "Contents", "MacOS", "dsh-cef-owner") {
 		return p, errors.New("CEF publication entry points rejected")
 	}
 	for _, exe := range append([]string{p.Executable, p.Owner}, p.Helpers...) {
@@ -152,10 +169,7 @@ func recoverState(ctx context.Context, dir string, key []byte, original journal)
 		if err != nil {
 			return err
 		}
-		// Only the pinned CDP-attached Node/stdio component keeps all spawn paths
-		// in the LaunchAgent's inherited PGID. CEF retains its quiescent barrier.
-		mcpRecoverable := nodeComponentRecoverable(s)
-		if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
+		if !ownerStateRecoverable(s) {
 			return ErrCleanupPending
 		}
 		owner, e := instance(s.Owner)
@@ -170,8 +184,7 @@ func recoverState(ctx context.Context, dir string, key []byte, original journal)
 			if e != nil {
 				return e
 			}
-			mcpRecoverable = nodeComponentRecoverable(s)
-			if !mcpRecoverable && s.Phase != "empty" && s.Phase != "quiescent" && s.Phase != "starting" {
+			if !ownerStateRecoverable(s) {
 				return ErrCleanupPending
 			}
 			if s.Phase == "empty" {
@@ -259,8 +272,35 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 		return nil, errors.New("MAC_CEF_LAUNCH_PLAN_REJECTED")
 	}
 	plan.Env = maps.Clone(plan.Env)
+	var rendererPath string
+	var rendererImage os.FileInfo
 	if a.mcp == nil && a.restricted == nil {
+		name := filepath.Base(a.publication.Executable) + " Helper (Renderer)"
+		for _, helper := range a.publication.Helpers {
+			if filepath.Base(helper) != name {
+				continue
+			}
+			if rendererPath != "" {
+				return nil, errors.New("MAC_CEF_RENDERER_IMAGE_AMBIGUOUS")
+			}
+			info, err := os.Stat(helper)
+			if err != nil || !info.Mode().IsRegular() {
+				return nil, errors.Join(errors.New("MAC_CEF_RENDERER_IMAGE_UNAVAILABLE"), err)
+			}
+			rendererPath, rendererImage = helper, info
+		}
+		if rendererPath == "" {
+			return nil, errors.New("MAC_CEF_RENDERER_IMAGE_UNAVAILABLE")
+		}
 		plan.Env["DSH_WORK_CEF_PROFILE"] = a.profile
+		delete(plan.Env, "DSH_WORK_CEF_KEYCHAIN_SCOPE")
+		usesAppKeychain, err := distribution.UsesAppMacKeychain(a.profile)
+		if err != nil {
+			return nil, err
+		}
+		if usesAppKeychain {
+			plan.Env["DSH_WORK_CEF_KEYCHAIN_SCOPE"] = "app"
+		}
 	}
 	if a.worker != nil {
 		if err := a.worker.Close(); err != nil {
@@ -284,6 +324,8 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	}
 	job := "dev.dsh.cef." + strings.ToLower(rand.Text())
 	w := &Worker{directory: a.directory, key: key, job: job, run: run, exited: make(chan struct{}), empty: make(chan struct{}), events: make(chan supervisor.OutputEvent, 16), raw: raw, readDone: make(chan struct{}), state: journal{Generation: plan.GenerationID}}
+	w.rendererImage = rendererImage
+	w.helperPaths = append([]string(nil), a.publication.Helpers...)
 	if a.restricted != nil {
 		w.state.Component = "restricted-dsh"
 	}
@@ -319,7 +361,7 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 	if err != nil {
 		return nil, err
 	}
-	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Plan: plan, Job: job, MCP: a.mcp, Restricted: a.restricted}
+	cfg := launchConfig{Directory: a.directory, Profile: a.profile, Socket: filepath.Join(run, "owner.sock"), Secret: rand.Text(), Host: host, Helpers: a.publication.Helpers, Renderer: rendererPath, Plan: plan, Job: job, MCP: a.mcp, Restricted: a.restricted}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -418,9 +460,12 @@ func (a *Adapter) Start(ctx context.Context, plan supervisor.LaunchPlan, raw sup
 		expectedVersion := Version
 		if a.mcp != nil {
 			expectedVersion = mcpVersion
+			if a.mcp.AUVDriver != "" {
+				expectedVersion = auvOwnerVersion
+			}
 		}
 		if a.restricted != nil {
-			expectedVersion = restrictedVersion
+			expectedVersion = a.restricted.ownerVersion()
 		}
 		if m.Kind == "runtime" && m.State.RuntimeReady && m.State.RuntimeVersion == expectedVersion {
 			durable, e := loadGeneration(w.directory, w.key, plan.GenerationID)
@@ -461,6 +506,8 @@ type Worker struct {
 	attempt             *launchAttempt
 	handedOff           bool
 	jobMeasurement      jobMeasurement
+	rendererImage       os.FileInfo
+	helperPaths         []string
 }
 
 func (w *Worker) receive() {
@@ -479,6 +526,7 @@ func (w *Worker) receive() {
 			continue
 		}
 		w.mu.Lock()
+		restricted := w.state.Component == "restricted-dsh"
 		valid := m.State != nil && m.State.Generation == w.state.Generation && m.State.Owner.PID == w.owner.PID && m.State.Owner.Started == w.owner.Started
 		if valid {
 			w.state = *m.State
@@ -495,7 +543,7 @@ func (w *Worker) receive() {
 			w.observeFailure()
 			return
 		}
-		if w.raw != nil {
+		if w.raw != nil && !restricted {
 			w.raw(supervisor.StreamStdout, "MAC_CEF_OWNER_"+m.Kind)
 		}
 		select {
@@ -657,6 +705,22 @@ func (w *Worker) Close() error {
 }
 
 func (w *Worker) removeRun() error {
+	w.mu.Lock()
+	auv := w.state.Component == "owned-auv"
+	w.mu.Unlock()
+	if auv {
+		endpoint := filepath.Join(w.run, "auv.sock")
+		if info, err := os.Lstat(endpoint); err == nil {
+			if info.Mode()&os.ModeSocket == 0 {
+				return errors.New("MAC_AUV_ENDPOINT_REPLACED")
+			}
+			if err := os.Remove(endpoint); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
 	if current, err := os.Lstat(filepath.Join(w.run, "owner.sock")); err == nil {
 		if w.socketInfo == nil || !os.SameFile(w.socketInfo, current) {
 			return errors.New("MAC_CEF_OWNER_ENDPOINT_REPLACED")
@@ -667,7 +731,7 @@ func (w *Worker) removeRun() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock", "mcp-bootstrap.json", "mcp-bootstrap.mjs", "restricted-bootstrap.json", "restricted-bootstrap.mjs"} {
+	for _, name := range []string{"launch.json", "owner.plist", "owner.sock.lock", "mcp-bootstrap.json", "mcp-bootstrap.mjs", "restricted-bootstrap.json", "restricted-bootstrap.mjs", "restricted-profile-command.mjs", restrictedProfileRecoveryModule} {
 		if err := os.Remove(filepath.Join(w.run, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -680,5 +744,21 @@ func (w *Worker) removeRun() error {
 }
 
 func nodeComponentRecoverable(s journal) bool {
-	return (s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")) || (s.Component == "restricted-dsh" && (s.Phase == "restricted-running" || s.Phase == "restricted-retiring"))
+	return (s.Component == "owned-cef-mcp" && (s.Phase == "mcp-running" || s.Phase == "mcp-retiring")) || (s.Component == "restricted-dsh" && (s.Phase == "restricted-running" || s.Phase == "restricted-retiring")) ||
+		(s.Component == "owned-auv" && (s.Phase == "auv-running" || s.Phase == "auv-retiring"))
+}
+
+func ownerStateRecoverable(s journal) bool {
+	switch s.Phase {
+	case "empty", "quiescent", "starting":
+		return true
+	case "broker-exited":
+		recorded := s.Owned[processKey(s.Broker)].Process
+		return s.Component == "" && s.Exit.Started && s.Owner.PID != 0 && s.Owner.Started != 0 &&
+			s.Owner.PGID == s.Owner.PID && s.Broker.PID != 0 && s.Broker.Started != 0 &&
+			s.Broker.PPID == s.Owner.PID && s.Broker.PGID == s.Owner.PGID &&
+			recorded.PID == s.Broker.PID && recorded.Started == s.Broker.Started
+	default:
+		return nodeComponentRecoverable(s)
+	}
 }

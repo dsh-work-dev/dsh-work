@@ -19,7 +19,7 @@ import (
 
 func TestShellWorkerPlatformURL(t *testing.T) {
 	want := "http://wails.localhost:48217/path?generation=g"
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 		want = "wails://wails.localhost:48217/path?generation=g"
 	}
 	if got := shellWorkerURL("/path?generation=g"); got != want {

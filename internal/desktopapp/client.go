@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,6 +161,7 @@ func runDesktopClient(identity string, resources Resources) error {
 			SaveSessionExport: func(ctx context.Context, filename string, write func(io.Writer) error) (bool, error) {
 				return nativeui.SaveSessionLogArchive(desktop, filename, write)
 			},
+			PickWorkspaceDirectory: desktopclient.WorkspaceDirectoryPicker(workerSurface.Window),
 		}
 	}}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
@@ -222,7 +224,11 @@ func runDesktopClient(identity string, resources Resources) error {
 		defer mu.Unlock()
 		return current.Update
 	}}
-	embeddedClient := &desktopclient.EmbeddedBrowserService{Client: client, Enabled: embeddedRuntimeReady(), InstanceKey: embeddedInstanceKey, QuitUI: func() { desktop.Quit() }}
+	browserExecutable := embeddedExecutable()
+	embeddedClient := &desktopclient.EmbeddedBrowserService{
+		Client: client, Enabled: browserExecutable != "", InstanceKey: embeddedInstanceKey,
+		PresenterExecutable: browserExecutable, QuitUI: func() { desktop.Quit() },
+	}
 	desktop = application.New(application.Options{Name: appName, Icon: resources.AppIcon, Logger: logging.WailsLogger(), ErrorHandler: logging.WailsErrorHandler(),
 		Windows: application.WindowsOptions{WebviewUserDataPath: webviewDataPath, DisableQuitOnLastWindowClosed: true, AdditionalBrowserArgs: webviewDebugArgs()},
 		Mac:     application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: false},
@@ -232,11 +238,11 @@ func runDesktopClient(identity string, resources Resources) error {
 			application.NewService(&desktopclient.DiagnosticsService{Client: client}),
 			application.NewService(shellService), application.NewService(embeddedClient),
 			application.NewService(&desktopclient.LogService{}),
-		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: shellState(func() string {
+		}, Assets: application.AssetOptions{Middleware: workerSurface.Middleware, Handler: embeddedPreviewShellAssets(shellState(func() string {
 			mu.Lock()
 			defer mu.Unlock()
 			return shellWorkerURL(current.URL)
-		}, uiAssets(client, application.AssetFileServerFS(resources.Assets)))},
+		}, uiAssets(client, application.AssetFileServerFS(resources.Assets))))},
 	})
 	desktop.HandleStream("worker-fetch", workerSurface.Fetch)
 	desktop.HandleStream("worker-websocket", workerSurface.WebSocket)
@@ -362,14 +368,14 @@ func runDesktopClient(identity string, resources Resources) error {
 		workspaceWindow := desktop.Window.NewWithOptions(workOptions)
 		workspace = workspaceWindow
 		registerWorkspaceWindow(primarySurface, workspaceWindow)
-		installEmbeddedPreviewConsumer(desktop, workspaceWindow, embeddedClient)
+		installEmbeddedPreviewConsumer(desktop, workspaceWindow, embeddedClient, ledger.VisibleCount)
 		remember(workspace, workOptions)
 		if report := os.Getenv("DSH_WORK_DESKTOP_REPORT"); report != "" && os.Getenv("DSH_WORK_UI_HOLD") != "1" {
 			desktopprobe.InstallClient(desktop, workspace, report)
 		}
 		workspace.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) { closeWindow(primarySurface, workspaceWindow, event) })
 	}
-	open = func(section, requestedWindow string) string {
+	showWindow := func(section, requestedWindow string, navigate bool) string {
 		if section == "__boot" {
 			return primarySurface
 		}
@@ -402,7 +408,7 @@ func runDesktopClient(identity string, resources Resources) error {
 		}
 		target.Show().Focus()
 		// A new workbench reads its section from the URL; a live one switches panels.
-		if !created {
+		if navigate && !created {
 			if section == "" {
 				desktop.Event.Emit("settings-close", struct{}{})
 			} else {
@@ -410,6 +416,18 @@ func runDesktopClient(identity string, resources Resources) error {
 			}
 		}
 		return windowName
+	}
+	open = func(section, requestedWindow string) string {
+		return showWindow(section, requestedWindow, true)
+	}
+	if runtime.GOOS == "darwin" {
+		desktop.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
+			// Wails would show every hidden window outside the workbench ledger.
+			event.Cancel()
+			if !event.Context().HasVisibleWindows() {
+				showWindow("", primarySurface, false)
+			}
+		})
 	}
 	desktop.Event.OnApplicationEvent(events.Common.ApplicationLaunchedWithUrl, func(event *application.ApplicationEvent) {
 		if !isWorkspaceOpenURL(event.Context().URL()) {

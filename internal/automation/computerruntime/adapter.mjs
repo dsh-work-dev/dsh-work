@@ -1,4 +1,3 @@
-import net from 'node:net';
 import path from 'node:path';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
@@ -6,7 +5,9 @@ import {pathToFileURL} from 'node:url';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {createAuvBackend} from './auv.mjs';
-const socket=net.connect(process.env.DSH_WORK_BRIDGE_PIPE),token=process.env.DSH_WORK_BRIDGE_TOKEN;
+import {openPrivateSocket} from './native-socket.mjs';
+const connection=JSON.parse(readFileSync(new URL('./native-connection.json',import.meta.url),'utf8'));
+const socket=await openPrivateSocket(connection),token=process.env.DSH_WORK_BRIDGE_TOKEN;
 delete process.env.DSH_WORK_BRIDGE_PIPE;delete process.env.DSH_WORK_BRIDGE_TOKEN;
 let buffer=Buffer.alloc(0),nonce,authenticated=false,stopping=false,client,transport,schemas,backend;
 let serial=Promise.resolve();
@@ -26,7 +27,13 @@ async function receive(m){
  if(m.kind==='init'){
   try{
    if(client||backend)throw Error('COMPUTER_ENGINE_ALREADY_INITIALIZED');
-   if(m.engine==='auv'){backend=await createAuvBackend(m);send({kind:'ready'});return}
+   if(process.platform==='darwin'&&(m.engine!=='auv'||m.driver!==process.env.DSH_WORK_OWNED_AUV_DRIVER||m.dependencies!==process.env.DSH_WORK_OWNED_AUV_DEPENDENCIES))
+    throw Error('MAC_COMPUTER_OWNER_REQUIRED');
+   if(m.engine==='auv'){
+    const candidate=await createAuvBackend({...m,localSocket:process.env.DSH_WORK_OWNED_AUV_SOCKET});
+    if(stopping){await candidate.close();return}
+    backend=candidate;send({kind:'ready'});return
+   }
    if(m.engine!=='cua-driver')throw Error('COMPUTER_ENGINE_UNAVAILABLE');
    const require=createRequire(path.join(m.dependencies,'package.json'));
    if(JSON.parse(readFileSync(path.join(m.dependencies,'node_modules/@modelcontextprotocol/client/package.json'),'utf8')).version!=='2.2.0')throw Error('COMPUTER_SDK_VERSION_MISMATCH');

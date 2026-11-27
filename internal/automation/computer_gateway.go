@@ -781,6 +781,12 @@ func (s *Service) executeComputerPermit(ctx context.Context, r Request) (any, er
 		if fresh.RuntimeID != p.identity.RuntimeID {
 			return nil, errors.New("COMPUTER_ELEMENT_CHANGED: observe the target again")
 		}
+		// The element probe can wait on another process. Check the window
+		// again before sending input to the engine.
+		target, err := s.inspectComputerTarget(p.target.PID, p.target.WindowID)
+		if err != nil || target != p.target {
+			return nil, errors.New("COMPUTER_TARGET_CHANGED: observe the target again")
+		}
 	}
 	args := cloneArguments(r.Arguments)
 	if p.actionArgs != nil {
@@ -889,6 +895,11 @@ func (s *Service) executeComputerPermit(ctx context.Context, r Request) (any, er
 		return map[string]any{"content": []any{map[string]any{"type": "text", "text": mustJSON(map[string]any{"windows": out})}}, "structuredContent": map[string]any{"windows": out}}, nil
 	}
 	if r.Tool == "computer_observe" {
+		// A completed engine snapshot can outlive the window it describes.
+		target, err := s.inspectComputerTarget(p.target.PID, p.target.WindowID)
+		if err != nil || target != p.target {
+			return nil, errors.New("COMPUTER_TARGET_CHANGED: observe the target again")
+		}
 		sid, _ := content["snapshot_id"].(string)
 		if sid == "" {
 			return nil, errors.New("COMPUTER_SNAPSHOT_REQUIRED")

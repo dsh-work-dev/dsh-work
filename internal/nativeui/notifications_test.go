@@ -4,12 +4,83 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/notifications"
 	"github.com/local/dsh-work/internal/settings"
 	wailsnotifications "github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
+
+func TestNotificationAuthorizationStartsOnceAfterEnabling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		requests, grants, failures := 0, 0, 0
+		answer := make(chan struct{})
+		host := &NotificationService{requestPermission: func() (bool, error) {
+			requests++
+			<-answer
+			return false, nil
+		}}
+		onGranted, onFailure := func() { grants++ }, func() { failures++ }
+		RequestNotificationAuthorization(host, false, onGranted, onFailure)
+		host.startupFailed.Store(true)
+		RequestNotificationAuthorization(host, true, onGranted, onFailure)
+		synctest.Wait()
+		if requests != 0 {
+			t.Error("disabled or unavailable notifications requested permission")
+		}
+		host.startupFailed.Store(false)
+		RequestNotificationAuthorization(host, true, onGranted, onFailure)
+		RequestNotificationAuthorization(host, true, onGranted, onFailure)
+		synctest.Wait()
+		if requests != 1 || failures != 0 {
+			t.Errorf("pending permission: requests = %d, failures = %d", requests, failures)
+		}
+		close(answer)
+		synctest.Wait()
+		RequestNotificationAuthorization(host, true, onGranted, onFailure)
+		synctest.Wait()
+		if requests != 1 || grants != 0 || failures != 1 {
+			t.Errorf("denied permission: requests = %d, grants = %d, failures = %d", requests, grants, failures)
+		}
+	})
+}
+
+func TestNotificationAuthorizationReportsSuccessfulGrant(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		err         error
+		wantGranted bool
+	}{
+		{name: "granted", wantGranted: true},
+		{name: "system error", err: errors.New("notification center unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				answer := make(chan struct{})
+				host := &NotificationService{requestPermission: func() (bool, error) {
+					<-answer
+					return true, test.err
+				}}
+				var results []bool
+				onGranted := func() { results = append(results, true) }
+				onFailure := func() { results = append(results, false) }
+				RequestNotificationAuthorization(host, true, onGranted, onFailure)
+				synctest.Wait()
+				if len(results) != 0 {
+					t.Fatal("reported an authorization result before the system reply")
+				}
+				close(answer)
+				synctest.Wait()
+				RequestNotificationAuthorization(host, true, onGranted, onFailure)
+				synctest.Wait()
+				if len(results) != 1 || results[0] != test.wantGranted {
+					t.Fatalf("authorization results = %v, want one result with granted=%t", results, test.wantGranted)
+				}
+			})
+		})
+	}
+}
 
 func TestNotificationDeliveryUsesStableFailure(t *testing.T) {
 	err := NewNotificationDelivery(nil, nil).Send(context.Background(), notifications.Event{

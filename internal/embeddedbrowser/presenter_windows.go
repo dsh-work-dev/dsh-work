@@ -5,7 +5,6 @@ package embeddedbrowser
 import (
 	"errors"
 	"golang.org/x/sys/windows"
-	"math"
 	"os"
 	"sync"
 	"unsafe"
@@ -103,27 +102,21 @@ func presenterBounds(peer PresenterPeer, parent uintptr, b SlotBounds, zoom floa
 	if err := verifyPresenterWindow(peer, parent); err != nil {
 		return PixelBounds{}, err
 	}
-	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom < 0.25 || zoom > 5 {
-		return PixelBounds{}, errors.New("CEF_ZOOM_REJECTED")
+	if err := validatePresenterZoom(zoom, 5); err != nil {
+		return PixelBounds{}, err
 	}
 	dpi, _, _ := presenterUser32.NewProc("GetDpiForWindow").Call(parent)
 	if dpi == 0 {
 		return PixelBounds{}, errors.New("CEF_DPI_UNAVAILABLE")
 	}
 	scale := float64(dpi) / 96 * zoom
-	for _, v := range []float64{b.X, b.Y, b.Width, b.Height} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 1e6 {
-			return PixelBounds{}, errors.New("CEF_SLOT_BOUNDS_REJECTED")
-		}
+	if err := b.validate(); err != nil {
+		return PixelBounds{}, err
 	}
 	var client presenterRECT
 	ok, _, _ := presenterUser32.NewProc("GetClientRect").Call(parent, uintptr(unsafe.Pointer(&client)))
 	if ok == 0 {
 		return PixelBounds{}, errors.New("CEF_NATIVE_BOUNDS_UNAVAILABLE")
 	}
-	left := math.Min(float64(client.right), math.Max(0, b.X*scale))
-	top := math.Min(float64(client.bottom), math.Max(40*scale, b.Y*scale))
-	right := math.Min(float64(client.right), (b.X+b.Width)*scale)
-	bottom := math.Min(float64(client.bottom), (b.Y+b.Height)*scale)
-	return PixelBounds{X: int(math.Ceil(left)), Y: int(math.Ceil(top)), Width: max(0, int(math.Floor(right)-math.Ceil(left))), Height: max(0, int(math.Floor(bottom)-math.Ceil(top)))}, nil
+	return clipPresenterBounds(b, int(client.right), int(client.bottom), scale, presenterChromeHeight*scale), nil
 }

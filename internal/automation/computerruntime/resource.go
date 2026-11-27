@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -96,6 +97,9 @@ func NewFactory(c Config) automation.ComputerFactory {
 		if err != nil {
 			return nil, err
 		}
+		if err = r.ipc.PrepareNativeClient(r.dir); err != nil {
+			return nil, err
+		}
 		env := map[string]string{}
 		for _, kv := range os.Environ() {
 			k, v, ok := strings.Cut(kv, "=")
@@ -120,7 +124,7 @@ func NewFactory(c Config) automation.ComputerFactory {
 		}()
 		bounded, stop := context.WithTimeout(ctx, 20*time.Second)
 		defer stop()
-		r.conn, err = r.ipc.Connect(bounded)
+		r.conn, err = connectComputerProcess(bounded, r.ipc, r.worker)
 		if err != nil {
 			return nil, err
 		}
@@ -150,6 +154,18 @@ func NewFactory(c Config) automation.ComputerFactory {
 		}()
 		return r, nil
 	}
+}
+
+func connectComputerProcess(ctx context.Context, ipc *workeripc.Transport, worker supervisor.Worker) (net.Conn, error) {
+	if runtime.GOOS != "darwin" {
+		return ipc.Connect(ctx)
+	}
+	pinned, ok := worker.(interface{ PrivateConnectionProcess() (uint32, uint64) })
+	if !ok {
+		return nil, errors.New("MAC_COMPUTER_OWNER_REQUIRED")
+	}
+	pid, started := pinned.PrivateConnectionProcess()
+	return ipc.ConnectProcessInstance(ctx, pid, started)
 }
 func (r *resource) write(v any) error {
 	r.writeMu.Lock()
@@ -267,15 +283,34 @@ func (r *resource) Close() error {
 			_ = r.ipc.Close()
 		}
 		if r.worker != nil {
-			ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-			defer stop()
-			r.closeErr = errors.Join(r.worker.ForceStop(ctx), r.worker.WaitEmpty(ctx), r.worker.Close())
+			if runtime.GOOS == "darwin" {
+				r.closeErr = joinMacComputerWorker(r.worker)
+			} else {
+				ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				r.closeErr = errors.Join(r.worker.ForceStop(ctx), r.worker.WaitEmpty(ctx), r.worker.Close())
+			}
 		}
 		if r.closeErr == nil && r.dir != "" {
 			r.closeErr = os.RemoveAll(r.dir)
 		}
 	})
 	return r.closeErr
+}
+
+func joinMacComputerWorker(worker supervisor.Worker) error {
+	wait, stop := context.WithTimeout(context.Background(), 2*time.Second)
+	err := worker.WaitEmpty(wait)
+	stop()
+	if err != nil {
+		force, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		signalErr := worker.ForceStop(force)
+		if err := worker.WaitEmpty(force); err != nil {
+			return errors.Join(signalErr, err)
+		}
+	}
+	return worker.Close()
 }
 
 func (r *resource) AutomationTerminal() bool {

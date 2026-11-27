@@ -64,8 +64,8 @@ if ($Sign) {
     }
 }
 if ($Arch -eq 'amd64') {
-    & $appPath cef-package-verify
-    if ($LASTEXITCODE -ne 0) { throw 'Application rejected the bound CEF publication; rebuild application and component together' }
+    $verification = Start-Process -FilePath $appPath -ArgumentList 'cef-package-verify' -WindowStyle Hidden -Wait -PassThru
+    if ($verification.ExitCode -ne 0) { throw 'Application rejected the bound CEF publication; rebuild application and component together' }
     & $cliPath cef-package-verify
     if ($LASTEXITCODE -ne 0) { throw 'CLI rejected the bound CEF publication; rebuild application and component together' }
 }

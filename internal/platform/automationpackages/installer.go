@@ -34,6 +34,8 @@ type Installer struct {
 	Replacer   settings.FileReplacer
 	Resolve    func(context.Context) (dshmanager.ResolvedNode, error)
 	NPMCommand string
+	Stage      func(context.Context, string, automation.Capability, func(automation.Progress)) error
+	Verify     func(context.Context, string, automation.Capability) error
 }
 
 func containsAny(text string, values ...string) bool {
@@ -66,6 +68,9 @@ func (i *Installer) Ready(c automation.Capability) bool {
 	return true
 }
 func (i *Installer) Prepare(ctx context.Context, c automation.Capability, report func(automation.Progress), force bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	files, err := automation.DependencyFiles(c)
 	if err != nil {
 		return err
@@ -77,9 +82,12 @@ func (i *Installer) Prepare(ctx context.Context, c automation.Capability, report
 				return false
 			}
 		}
-		return Validate(dir, c) == nil
+		return i.verify(ctx, dir, c) == nil
 	}
 	publish := func(dir string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		root := automation.PackageRoot(i.Root, c)
 		if err := os.MkdirAll(root, 0700); err != nil {
 			return err
@@ -156,8 +164,13 @@ func (i *Installer) Prepare(ctx context.Context, c automation.Capability, report
 		return PreparationError(err)
 	}
 	defer os.RemoveAll(result.StagingPath)
+	if i.Stage != nil {
+		if err := i.Stage(ctx, result.PayloadPath, c, report); err != nil {
+			return err
+		}
+	}
 	report(automation.Progress{Step: "verify"})
-	if err = Validate(result.PayloadPath, c); err != nil {
+	if err = i.verify(ctx, result.PayloadPath, c); err != nil {
 		return Failure{"verify", err}
 	}
 	if err = ctx.Err(); err != nil {
@@ -180,6 +193,16 @@ func (i *Installer) Prepare(ctx context.Context, c automation.Capability, report
 	}
 	// A failed pointer replacement leaves the previous complete set selected.
 	return publish(destination)
+}
+
+func (i *Installer) verify(ctx context.Context, dir string, c automation.Capability) error {
+	if err := Validate(dir, c); err != nil {
+		return err
+	}
+	if i.Verify != nil {
+		return i.Verify(ctx, dir, c)
+	}
+	return nil
 }
 
 func PreparationError(err error) error {
@@ -213,6 +236,10 @@ func (a automationPackageAdapter) Attempt(ctx context.Context, r acquisition.Att
 	args := append(append([]string{}, a.args...), "ci", "--ignore-scripts", "--no-audit", "--no-fund")
 	result, err := a.executor.Run(ctx, command, args, a.environment, r.StagingPath)
 	if err != nil {
+		var failure acquisition.Failure
+		if errors.As(err, &failure) {
+			return acquisition.AttemptResult{}, failure
+		}
 		return acquisition.AttemptResult{}, ClassifyPackageManagerFailure(result, err)
 	}
 	payload := filepath.Join(r.StagingPath, "payload")
@@ -227,18 +254,24 @@ func (a automationPackageAdapter) Attempt(ctx context.Context, r acquisition.Att
 	return acquisition.AttemptResult{ResolvedIdentity: r.Identity, PayloadPath: payload}, nil
 }
 func Validate(root string, c automation.Capability) error {
+	expected := map[string]string{"@modelcontextprotocol/sdk": automation.SDKVersion, "@playwright/mcp": automation.MCPVersion, "ws": automation.BrowserWebSocketVersion}
 	if c == automation.AUV {
-		info, err := os.Stat(filepath.Join(root, "node_modules", "@auv-js", "cli-win32-x64-msvc", "bin", "auv.exe"))
+		name, _, err := automation.AUVNativePackage()
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || info.Size() == 0 {
+		driver, err := automation.AUVExecutable(root)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(driver)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
 			return errors.New("AUV executable missing")
 		}
-	}
-	expected := map[string]string{"@modelcontextprotocol/sdk": automation.SDKVersion, "@playwright/mcp": automation.MCPVersion, "ws": automation.BrowserWebSocketVersion}
-	if c == automation.AUV {
-		expected = map[string]string{"@auv-js/sdk": automation.AUVVersion, "@auv-js/cli-win32-x64-msvc": automation.AUVVersion}
+		expected = map[string]string{"@auv-js/sdk": automation.AUVVersion, name: automation.AUVVersion}
 	}
 	if c == automation.Computer {
 		expected = map[string]string{"@deepseek-ai/dsh-computer-use": automation.DSHVersion, "@deepseek-ai/dsh-experimental-computer-use-cua-driver-mcp": automation.DSHVersion}

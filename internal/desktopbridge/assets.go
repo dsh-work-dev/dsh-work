@@ -22,6 +22,9 @@ var embeddedBrowserScript string
 //go:embed origin.js
 var originScript string
 
+//go:embed workspace_picker.js
+var workspacePickerScript string
+
 // Assets serves a dedicated Worker-only WebView. Do not attach management
 // bindings to this surface: DSH plugins share its origin.
 func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
@@ -51,8 +54,12 @@ func (b *Bridge) Assets(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/__work/origin.js" {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != "HEAD" {
 			io.WriteString(w, originScript)
+			if b.PickWorkspaceDirectory != nil {
+				io.WriteString(w, "\n"+workspacePickerScript)
+			}
 		}
 		return
 	}

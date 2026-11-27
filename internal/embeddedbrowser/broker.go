@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/automation/browsernative"
 	"github.com/local/dsh-work/internal/automation/browserruntime"
+	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
 )
@@ -43,6 +45,7 @@ type Config struct {
 	ObserveProtocol func(direction, method string)
 	ObserveCommand  func(ProtocolObservation)
 	DownloadConsent DownloadConsent
+	DownloadLocale  func() settings.Locale
 }
 
 type Broker struct {
@@ -178,6 +181,11 @@ func Start(ctx context.Context, c Config) (*Broker, error) {
 	}
 	if err != nil {
 		return nil, errors.Join(err, b.Close())
+	}
+	if runtime.GOOS == "darwin" && b.downloads != nil {
+		if _, err = b.controlCall(bounded, "download.enable", "", nil); err != nil {
+			return nil, errors.Join(err, b.Close())
+		}
 	}
 	// The launch context owns the whole running broker, not just startup. A
 	// renderer pause keeps this owner alive; cancellation joins bounded cleanup.
@@ -490,6 +498,12 @@ func (b *Broker) Close() error {
 
 	if !b.workerNeedsClose && !b.treeNeedsJoin && !b.rendererNeedsClose && b.downloads != nil {
 		b.closeErr = errors.Join(b.closeErr, b.downloads.afterJoin())
+	} else if stages, ok := b.downloads.(interface{ discardAbandonedStages() error }); ok && b.worker != nil {
+		select {
+		case <-b.worker.Exited():
+			b.closeErr = errors.Join(b.closeErr, stages.discardAbandonedStages())
+		default:
+		}
 	}
 	return b.closeErr
 }
@@ -668,6 +682,9 @@ func (b *Broker) pauseFrameGraph(cause error)    { b.pauseGraph(cause, true) }
 func (b *Broker) pauseRendererGraph(cause error) { b.pauseGraph(cause, false) }
 func (b *Broker) pauseGraph(cause error, invalidSequence bool) {
 	b.framePauseOnce.Do(func() {
+		if census, ok := cause.(rendererCensusFailure); ok {
+			census.log()
+		}
 		b.mu.Lock()
 		if b.frames == nil {
 			b.frames = &frameGraph{}

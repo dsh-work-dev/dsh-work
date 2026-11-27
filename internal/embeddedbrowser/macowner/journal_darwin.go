@@ -27,9 +27,10 @@ import (
 var ErrCleanupPending = errors.New("MAC_CEF_CLEANUP_PENDING")
 
 type owned struct {
-	Process Process                 `json:"process"`
-	Target  *localipc.ProcessTarget `json:"target,omitempty"`
-	Role    string                  `json:"role"`
+	Process       Process                 `json:"process"`
+	Target        *localipc.ProcessTarget `json:"target,omitempty"`
+	Role          string                  `json:"role"`
+	RendererChild uint32                  `json:"rendererChild,omitempty"`
 }
 
 type nativeEvent struct {

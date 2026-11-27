@@ -1,4 +1,4 @@
-//go:build !darwin || !cgo || !e67presenter
+//go:build !darwin || !cgo || server
 
 package embeddedbrowser
 

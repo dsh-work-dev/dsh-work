@@ -10,7 +10,7 @@ export interface MenuBar {
 }
 
 /** ARIA menu bar drawn in the shell document; its menus overlay the DSH frame. */
-export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId, bounds: DOMRect) => void | Promise<void>, onLeave: () => void, onClosed: () => void = () => {}): MenuBar {
+export function createMenuBar(t: (key: string) => string, run: (action: MenuAction) => void, onOpen: (id: MenuId, bounds: DOMRect, refresh: boolean) => void | Promise<void>, onLeave: () => void, onClosed: () => void = () => {}): MenuBar {
   const bar = document.createElement("div");
   bar.className = "shell-menubar";
   bar.setAttribute("role", "menubar");
@@ -90,8 +90,7 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     } else return;
     event.preventDefault();
   };
-  const open = (index: number, focusFirst: boolean) => {
-    const keep = openIndex === index ? focusedRow() : -1;
+  const open = (index: number, focusFirst: boolean, keep: number) => {
     popup?.remove();
     openIndex = index;
     const menu = menus[index];
@@ -110,7 +109,8 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     if (keep >= 0) focusRow(keep);
     else if (focusFirst) focusRow(stepItem(menu.items, -1, 1));
   };
-  const show = (index: number, focusFirst: boolean) => {
+  const show = (index: number, focusFirst: boolean, refresh = true) => {
+    const keep = openIndex === index ? focusedRow() : -1;
     const round=++openRound;opening=true;
     // A previous popup must leave the screen before releasing native Hide.
     popup?.remove();popup=null;
@@ -121,8 +121,8 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
     menus[index].items.forEach((entry,i)=>probe.append(row(entry,i)));
     const rect=buttons()[index].getBoundingClientRect();probe.style.left=`${rect.left}px`;probe.style.top=`${rect.bottom}px`;
     document.body.append(probe);const bounds=probe.getBoundingClientRect();probe.remove();
-    const ready=onOpen(menus[index].id,bounds);
-    if(ready instanceof Promise){void ready.then(()=>{if(round===openRound){opening=false;open(index,focusFirst)}},()=>{if(round===openRound)close(false)})}else{opening=false;open(index,focusFirst)}
+    const ready=onOpen(menus[index].id,bounds,refresh);
+    if(ready instanceof Promise){void ready.then(()=>{if(round===openRound){opening=false;open(index,focusFirst,keep)}},()=>{if(round===openRound)close(false)})}else{opening=false;open(index,focusFirst,keep)}
   };
 
   bar.addEventListener("keydown", event => {
@@ -167,7 +167,7 @@ export function createMenuBar(t: (key: string) => string, run: (action: MenuActi
       button.textContent = menus[index].label;
       button.classList.toggle("shell-menu-badge", menus[index].badge);
     });
-    if (openIndex >= 0) open(openIndex, false);
+    if (openIndex >= 0 && !opening) show(openIndex, false, false);
   };
 
   return {element: bar, render, close: () => close(false), focus: () => buttons()[0]?.focus()};

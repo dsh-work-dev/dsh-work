@@ -25,6 +25,9 @@ func (g *guard) startMCPBroker() error {
 	if !sameJobFile(g.cfg.Plan.Executable, cfg.Node) || len(g.cfg.Plan.Args) != 1 || !sameJobFile(g.cfg.Plan.Args[0], cfg.Adapter) || !pinnedJobFile(cfg.Node, cfg.Node, cfg.NodeDevice, cfg.NodeInode) {
 		return errors.New("MAC_MCP_COMPONENT_REJECTED")
 	}
+	if cfg.AUVDriver != "" && !pinnedJobFile(cfg.AUVDriver, cfg.AUVDriver, cfg.AUVDevice, cfg.AUVInode) {
+		return errors.New("MAC_AUV_COMPONENT_REJECTED")
+	}
 	run := filepath.Dir(g.cfg.Socket)
 	module := filepath.Join(run, "mcp-bootstrap.mjs")
 	config := filepath.Join(run, "mcp-bootstrap.json")
@@ -35,12 +38,13 @@ func (g *guard) startMCPBroker() error {
 		Adapter      string `json:"adapter"`
 		CLI          string `json:"cli"`
 		Dependencies string `json:"dependencies"`
+		AUVDriver    string `json:"auvDriver,omitempty"`
 		Bridge       string `json:"bridge"`
 		Socket       string `json:"socket"`
 		Generation   string `json:"generation"`
 		OwnerPID     uint32 `json:"ownerPID"`
 		OwnerStarted string `json:"ownerStarted"`
-	}{cfg.Adapter, cfg.CLI, cfg.Dependencies, cfg.Bridge, g.cfg.Socket, g.cfg.Plan.GenerationID, g.state.Owner.PID, strconv.FormatUint(g.state.Owner.Started, 10)})
+	}{cfg.Adapter, cfg.CLI, cfg.Dependencies, cfg.AUVDriver, cfg.Bridge, g.cfg.Socket, g.cfg.Plan.GenerationID, g.state.Owner.PID, strconv.FormatUint(g.state.Owner.Started, 10)})
 	if err != nil {
 		return err
 	}
@@ -67,7 +71,11 @@ func (g *guard) startMCPBroker() error {
 	}
 	g.mu.Lock()
 	g.state.Broker = p
-	g.state.Owned[processKey(p)] = owned{Process: p, Role: "mcp-adapter-preentry"}
+	role := "mcp-adapter-preentry"
+	if cfg.AUVDriver != "" {
+		role = "auv-adapter-preentry"
+	}
+	g.state.Owned[processKey(p)] = owned{Process: p, Role: role}
 	err = g.persist()
 	g.mu.Unlock()
 	close(g.brokerReady)
@@ -78,7 +86,12 @@ func (g *guard) registerMCP(c net.Conn, hello message, target localipc.ProcessTa
 	if hello.Kind != "mcp" {
 		return
 	}
-	g.registerNode(c, hello, target, g.cfg.MCP.Node, g.cfg.MCP.NodeDevice, g.cfg.MCP.NodeInode, false, mcpVersion)
+	cfg := g.cfg.MCP
+	version := mcpVersion
+	if cfg.AUVDriver != "" {
+		version = auvOwnerVersion
+	}
+	g.registerNode(c, hello, target, cfg.Node, cfg.NodeDevice, cfg.NodeInode, cfg.AUVDriver != "", version)
 }
 func (g *guard) registerNode(c net.Conn, hello message, target localipc.ProcessTarget, node string, device, inode uint64, rootOnly bool, version string) {
 	select {
@@ -97,6 +110,7 @@ func (g *guard) registerNode(c net.Conn, hello message, target localipc.ProcessT
 		return
 	}
 	role := ""
+	restricted := version == restrictedVersion || version == profileMaintenanceVersion
 	isRoot := p.PID == root.PID && p.Started == root.Started && p.PPID == g.state.Owner.PID
 	if isRoot {
 		role = "mcp-adapter"
@@ -106,8 +120,12 @@ func (g *guard) registerNode(c net.Conn, hello message, target localipc.ProcessT
 			role = "mcp-stdio-child"
 		}
 	}
-	if rootOnly && isRoot {
+	if isRoot && restricted {
 		role = "restricted-dsh"
+	} else if isRoot && version == auvOwnerVersion {
+		role = "auv-adapter"
+	} else if !isRoot && role != "" && restricted {
+		role = "profile-pnpm"
 	}
 	if role == "" {
 		g.mu.Unlock()
@@ -122,7 +140,9 @@ func (g *guard) registerNode(c net.Conn, hello message, target localipc.ProcessT
 		g.state.RuntimeReady = true
 		g.state.RuntimeVersion = version
 		g.state.Phase = "mcp-running"
-		if rootOnly {
+		if version == auvOwnerVersion {
+			g.state.Phase = "auv-running"
+		} else if restricted {
 			g.state.Phase = "restricted-running"
 		}
 	}
@@ -151,6 +171,9 @@ func (g *guard) stopMCP(force bool) {
 	g.state.ForceRequested = g.state.ForceRequested || force
 	if g.mcpStopAt.IsZero() {
 		g.mcpStopAt = time.Now()
+	}
+	if force && g.mcpForceAt.IsZero() {
+		g.mcpForceAt = time.Now()
 	}
 	targets := []localipc.ProcessTarget{}
 	for _, r := range g.state.Owned {
@@ -192,10 +215,15 @@ func (g *guard) admitMCPGroupLocked(c Census) error {
 		}
 		// The fixed SDK child is non-detached and registers before its entry.
 		// Keep its real pre-registration instance too; map-empty never means empty.
-		if p.PGID != g.state.Owner.PGID || p.PPID != root.PID || !pinnedJobFile(p.Path, g.cfg.MCP.Node, g.cfg.MCP.NodeDevice, g.cfg.MCP.NodeInode) {
+		cfg := g.cfg.MCP
+		path, device, inode, role := cfg.Node, cfg.NodeDevice, cfg.NodeInode, "mcp-stdio-preentry"
+		if cfg.AUVDriver != "" {
+			path, device, inode, role = cfg.AUVDriver, cfg.AUVDevice, cfg.AUVInode, "auv-native"
+		}
+		if p.PGID != g.state.Owner.PGID || p.PPID != root.PID || !pinnedJobFile(p.Path, path, device, inode) {
 			return ErrCleanupPending
 		}
-		g.state.Owned[processKey(p)] = owned{Process: p, Role: "mcp-stdio-preentry"}
+		g.state.Owned[processKey(p)] = owned{Process: p, Role: role}
 	}
 	return nil
 }

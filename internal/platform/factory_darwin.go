@@ -26,17 +26,29 @@ func newDependencies() Dependencies {
 	}
 	return Dependencies{Supervisor: runtime, CommandExecutor: runtime, FileReplacer: macplatform.FileReplacer{}}
 }
-func NewRuntimeInstaller(string) dshmanager.RuntimeInstaller     { return nil }
-func NewNodeReleaseCatalog(string) dshmanager.NodeReleaseCatalog { return nil }
-func NewDSHReleaseCatalog(string) dshmanager.DSHReleaseCatalog   { return nil }
-func NewNodeInstaller(string) dshmanager.NodeInstaller           { return nil }
-func NewNodeResolver(string) dshmanager.NodeResolver {
+func NewRuntimeInstaller(storeRoot string) dshmanager.RuntimeInstaller {
 	r, err := selectedMacRuntime()
 	if err != nil {
 		return nil
 	}
-	return r
+	return r.DSHInstaller(storeRoot)
+}
+func NewNodeReleaseCatalog(storeRoot string) dshmanager.NodeReleaseCatalog {
+	return nodeReleaseCatalogFor(storeRoot, "darwin")
+}
+func NewDSHReleaseCatalog(storeRoot string) dshmanager.DSHReleaseCatalog {
+	return dshReleaseCatalogFor(storeRoot)
+}
+func NewNodeInstaller(storeRoot string) dshmanager.NodeInstaller {
+	return macplatform.NewManagedNodeInstaller(storeRoot)
+}
+func NewNodeResolver(storeRoot string) dshmanager.NodeResolver {
+	r, err := selectedMacRuntime()
+	if err != nil {
+		return nil
+	}
+	return r.NodeResolver(storeRoot)
 }
 func NewAutomationPreparer(root string) automation.Preparer {
-	return macplatform.FixedBrowserPreparer{Root: root}
+	return macplatform.NewAutomationPreparer(root)
 }

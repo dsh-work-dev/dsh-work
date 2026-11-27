@@ -27,7 +27,7 @@ func TestInstancePausedBrokerCannotRestartFromNewTabOrRecovery(t *testing.T) {
 	}}}
 	for _, call := range []func() error{
 		func() error {
-			_, e := r.Update(context.Background(), i.peer, "workspace", 1, "lease", "new-slot", "https://example.test", SlotBounds{}, 1, true)
+			_, e := r.Update(context.Background(), i.peer, "workspace", 1, "lease", "new-slot", "https://example.test", SlotBounds{}, 1, true, 0)
 			return e
 		},
 		func() error {

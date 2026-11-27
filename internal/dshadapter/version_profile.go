@@ -200,22 +200,35 @@ func (PluginCommands) CaptureVersions(ctx context.Context, path string) (dshmana
 	if strings.Contains(lower, "patcheddependencies") || strings.Contains(lower, "configdependencies") || strings.Contains(lower, "pnpmfile") {
 		out.Unavailable = "This profile needs additional dependency configuration files"
 	}
-	modules, err := readVersionFile(root, "node_modules/.modules.yaml", true)
+	out.PackageManager, err = readProfilePackageManager(root)
 	if err != nil {
 		return out, err
+	}
+	if len(out.Plugins) == 0 || out.PackageManager == "" {
+		out.PackageManager = "pnpm"
+	}
+	return out, nil
+}
+
+func ReadProfilePackageManager(path string) (string, error) {
+	root, err := openVersionProfile(path)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return readProfilePackageManager(root)
+}
+
+func readProfilePackageManager(root *os.Root) (string, error) {
+	modules, err := readVersionFile(root, "node_modules/.modules.yaml", true)
+	if err != nil {
+		return "", err
 	}
 	var meta struct {
 		PackageManager string `yaml:"packageManager"`
 	}
 	_ = yaml.Unmarshal(modules, &meta)
-	out.PackageManager = meta.PackageManager
-	if len(out.Plugins) == 0 {
-		out.PackageManager = "pnpm"
-	}
-	if out.PackageManager == "" {
-		out.PackageManager = "pnpm"
-	}
-	return out, nil
+	return meta.PackageManager, nil
 }
 
 func (PluginCommands) CheckVersionProfile(ctx context.Context, path string) error {

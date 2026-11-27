@@ -4,7 +4,7 @@ package desktopclient
 
 /*
 #cgo CXXFLAGS: -std=c++20 -x objective-c++
-#cgo LDFLAGS: -framework Cocoa -framework QuartzCore
+#cgo LDFLAGS: -framework Cocoa -framework QuartzCore -framework UniformTypeIdentifiers
 #include <stdlib.h>
 #include "presenter_view_darwin.h"
 */
@@ -24,14 +24,16 @@ import (
 	"path/filepath"
 	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/local/dsh-work/internal/embeddedbrowser"
-	"github.com/local/dsh-work/internal/embeddedbrowser/macowner"
 	"github.com/local/dsh-work/internal/localipc"
+	"github.com/local/dsh-work/internal/settings"
 	"github.com/local/dsh-work/internal/workeripc"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 const macFrameHeaderBytes = 32
@@ -50,9 +52,12 @@ type macWindowHost struct {
 	handle                                 cgo.Handle
 	listener                               net.Listener
 	directory, endpoint, token, executable string
+	fixtureDownloadTarget                  string
 	sessions                               map[*macViewSession]bool
 	closed                                 bool
 	once                                   sync.Once
+	displayRevision                        atomic.Uint64
+	stopDisplayWatch                       func()
 }
 type macViewMessage struct {
 	Op                  string                      `json:"op"`
@@ -62,10 +67,24 @@ type macViewMessage struct {
 	Browser             int                         `json:"browser,omitempty"`
 	Bounds              embeddedbrowser.PixelBounds `json:"bounds"`
 	Visible             bool                        `json:"visible"`
+	HostVisible         bool                        `json:"hostVisible,omitempty"`
+	Focused             bool                        `json:"focused,omitempty"`
 	Path                string                      `json:"path,omitempty"`
 	Bytes               int                         `json:"bytes,omitempty"`
 	Scale               float64                     `json:"scale,omitempty"`
 	Error               string                      `json:"error,omitempty"`
+	Locale              settings.Locale             `json:"locale,omitempty"`
+	Filename            string                      `json:"filename,omitempty"`
+	Overwrite           bool                        `json:"overwrite,omitempty"`
+	Risk                bool                        `json:"risk,omitempty"`
+	Accepted            bool                        `json:"accepted,omitempty"`
+	Picker              string                      `json:"picker,omitempty"`
+	Origin              string                      `json:"origin,omitempty"`
+	Extensions          []string                    `json:"extensions,omitempty"`
+	Paths               []string                    `json:"paths,omitempty"`
+	Multiple            bool                        `json:"multiple,omitempty"`
+	Folder              bool                        `json:"folder,omitempty"`
+	Opened              bool                        `json:"opened,omitempty"`
 	From, To            int
 	X, Y, Width, Height float64
 }
@@ -78,8 +97,11 @@ type macViewSession struct {
 	handle                    cgo.Handle
 	view, epoch, path         string
 	attached, visible, closed bool
+	picker                    *macFilePicker
+	pickerID                  string
 	writeMu                   sync.Mutex
 	inputs                    chan []byte
+	inputTrace                macViewInputTrace
 	done                      chan struct{}
 	once                      sync.Once
 }
@@ -111,7 +133,7 @@ func preparePresenterWindow(ctx context.Context, service *EmbeddedBrowserService
 	macWindows.Lock()
 	host := macWindows.hosts[id]
 	if host == nil {
-		host, err = newMacWindowHost(ctx, window, id)
+		host, err = newMacWindowHost(window, id, service.PresenterExecutable)
 		if err == nil {
 			macWindows.hosts[id] = host
 		}
@@ -120,25 +142,44 @@ func preparePresenterWindow(ctx context.Context, service *EmbeddedBrowserService
 	if err != nil {
 		return err
 	}
-	return call(ctx, service.Client, "EmbeddedBrowserService", "ConfigureMacPresenter", []any{id, host.endpoint, host.token}, nil)
+	// AppKit can assign a window number before WindowServer exposes its owner.
+	// Retry only that rejection and require the daemon's full admission each time.
+	retryUntil := time.Now().Add(time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err = call(ctx, service.Client, "EmbeddedBrowserService", "ConfigureMacPresenter", []any{id, host.endpoint, host.token}, nil)
+		if err == nil || err.Error() != "CEF_MAC_WINDOW_OWNER_REJECTED" || !time.Now().Before(retryUntil) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
-func newMacWindowHost(ctx context.Context, window application.Window, id uint64) (*macWindowHost, error) {
-	publication, err := macowner.OpenPublication(ctx, os.Getenv("DSH_WORK_CEF_MAC_PUBLICATION"))
-	if err != nil {
-		return nil, err
+func newMacWindowHost(window application.Window, id uint64, executable string) (*macWindowHost, error) {
+	if !filepath.IsAbs(executable) {
+		return nil, errors.New("CEF_MAC_PRESENTER_EXECUTABLE_REQUIRED")
 	}
 	directory, err := os.MkdirTemp(localipc.SocketTempRoot(), "dsh-mac-view-")
 	if err != nil {
 		return nil, err
 	}
-	host := &macWindowHost{id: id, native: unsafe.Pointer(window.NativeWindow()), directory: directory, endpoint: filepath.Join(directory, "ui.sock"), token: rand.Text() + rand.Text(), executable: publication.Executable, sessions: map[*macViewSession]bool{}}
+	host := &macWindowHost{id: id, native: unsafe.Pointer(window.NativeWindow()), directory: directory, endpoint: filepath.Join(directory, "ui.sock"), token: rand.Text() + rand.Text(), executable: executable, sessions: map[*macViewSession]bool{}}
 	host.listener, err = localipc.Listen(host.endpoint, true)
 	if err != nil {
 		os.Remove(directory)
 		return nil, err
 	}
 	host.handle = cgo.NewHandle(host)
+	host.stopDisplayWatch = window.OnWindowEvent(events.Mac.WindowDidChangeBackingProperties, func(*application.WindowEvent) {
+		host.displayRevision.Add(1)
+		window.DispatchWailsEvent(&application.CustomEvent{Name: "browser-display-changed", Sender: window.Name(), Data: struct{}{}})
+	})
 	if C.dsh_mac_window_watch(host.native, C.uintptr_t(host.handle)) != 1 {
+		host.stopDisplayWatch()
 		host.listener.Close()
 		host.handle.Delete()
 		os.Remove(directory)
@@ -147,6 +188,18 @@ func newMacWindowHost(ctx context.Context, window application.Window, id uint64)
 	go host.accept()
 	return host, nil
 }
+
+// A backing-scale change can invalidate CEF geometry even when the CSS rect is unchanged.
+func presenterDisplayRevision(parent uint64) uint64 {
+	macWindows.Lock()
+	host := macWindows.hosts[parent]
+	macWindows.Unlock()
+	if host == nil {
+		return 0
+	}
+	return host.displayRevision.Load()
+}
+
 func (h *macWindowHost) accept() {
 	for {
 		connection, err := h.listener.Accept()
@@ -174,6 +227,7 @@ func (h *macWindowHost) close() {
 			sessions = append(sessions, session)
 		}
 		h.mu.Unlock()
+		h.stopDisplayWatch()
 		for _, session := range sessions {
 			session.close()
 		}
@@ -198,6 +252,7 @@ func (s *macViewSession) close() {
 		s.mu.Unlock()
 		close(s.done)
 		s.conn.Close()
+		s.picker.cancel()
 		if s.handle != 0 {
 			C.dsh_mac_view_close(C.uintptr_t(s.handle))
 			s.handle.Delete()
@@ -211,6 +266,10 @@ func (s *macViewSession) close() {
 	})
 }
 func (s *macViewSession) write(value any) error {
+	return s.writeTraced(value, "", "")
+}
+
+func (s *macViewSession) writeTraced(value any, stage, epoch string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	data, err := json.Marshal(value)
@@ -233,6 +292,13 @@ func (s *macViewSession) write(value any) error {
 			part = part[n:]
 		}
 	}
+	// Record under the write lock so the trace preserves wire order.
+	if stage != "" {
+		if epoch != "" {
+			data = nil
+		}
+		s.inputTrace.record(stage, data, epoch)
+	}
 	return nil
 }
 func (s *macViewSession) read() (macViewMessage, error) {
@@ -249,7 +315,8 @@ func (s *macViewSession) read() (macViewMessage, error) {
 	if _, err := io.ReadFull(s.conn, data); err != nil {
 		return value, err
 	}
-	return value, json.Unmarshal(data, &value)
+	err := json.Unmarshal(data, &value)
+	return value, err
 }
 func (s *macViewSession) run() {
 	defer s.close()
@@ -261,8 +328,8 @@ func (s *macViewSession) run() {
 	matched := C.dsh_mac_process_matches(C.uint32_t(peer.PID), executable) == 1
 	C.free(unsafe.Pointer(executable))
 	if !matched {
-		// A same-app daemon may subscribe only to this NSWindow's lifetime. It
-		// cannot attach a frame or send input, and receives no presenter credential.
+		// A same-app daemon can watch this window or request a native sheet.
+		// This branch never attaches browser frames or sends browser input.
 		own, err := os.Executable()
 		if err != nil {
 			return
@@ -275,7 +342,22 @@ func (s *macViewSession) run() {
 		}
 		s.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 		message, err := s.read()
-		if err != nil || message.Op != "watch" || message.ID != fmt.Sprint(s.host.id) {
+		if err != nil || message.ID != fmt.Sprint(s.host.id) {
+			return
+		}
+		if message.Op == "artifact-picker" {
+			if workeripc.AuthenticateServer(s.conn, s.host.token) == nil {
+				s.runMacArtifactPicker(message.ID)
+			}
+			return
+		}
+		if message.Op == "download-save" || message.Op == "download-confirm" || message.Op == "download-content-risk" {
+			if workeripc.AuthenticateServer(s.conn, s.host.token) == nil {
+				s.runMacDownloadSheet(message.Op, message.ID)
+			}
+			return
+		}
+		if message.Op != "watch" {
 			return
 		}
 		if s.write(macViewMessage{Op: "ack", ID: message.ID}) != nil {
@@ -296,7 +378,8 @@ func (s *macViewSession) run() {
 		for {
 			select {
 			case data := <-s.inputs:
-				if err := s.write(json.RawMessage(data)); err != nil {
+				if err := s.writeTraced(json.RawMessage(data), "written", ""); err != nil {
+					s.inputTrace.record("write-failed", data, "")
 					s.close()
 					return
 				}
@@ -323,9 +406,12 @@ func (s *macViewSession) run() {
 		s.operations.Lock()
 		switch message.Op {
 		case "present":
+			s.picker.cancel()
 			response.Path, response.Bytes, response.Scale, err = s.present(message)
 			if err == nil {
-				response.Visible = C.dsh_mac_view_visible(C.uintptr_t(s.handle)) == 1
+				var focused C.int
+				response.Visible = C.dsh_mac_view_status(C.uintptr_t(s.handle), &focused) == 1
+				response.Focused = focused == 1
 			}
 		case "state":
 			s.mu.Lock()
@@ -334,19 +420,28 @@ func (s *macViewSession) run() {
 			if !valid {
 				err = errors.New("CEF_MAC_VIEW_RETIRED")
 			} else {
-				response.Visible = C.dsh_mac_view_visible(C.uintptr_t(s.handle)) == 1
+				var focused C.int
+				visibility := C.dsh_mac_view_status(C.uintptr_t(s.handle), &focused)
+				response.Visible = visibility == 1
+				response.HostVisible = visibility != 0
+				response.Focused = focused == 1
 			}
 		case "hide":
-			s.mu.Lock()
-			s.epoch = message.Epoch
-			s.visible = false
-			s.mu.Unlock()
-			if !s.attached || C.dsh_mac_view_update(C.uintptr_t(s.handle), 0, 0, 0, 0, 0) != 1 {
+			s.picker.cancel()
+			message.Bounds = embeddedbrowser.PixelBounds{}
+			message.Visible = false
+			if !s.attached || !s.updateMacView(message) {
 				err = errors.New("CEF_MAC_VIEW_UNAVAILABLE")
 			}
 		case "ime":
 			if s.attached {
 				C.dsh_mac_view_ime(C.uintptr_t(s.handle), C.int(message.From), C.int(message.To), C.double(message.X), C.double(message.Y), C.double(message.Width), C.double(message.Height))
+			}
+		case "picker-open":
+			response.Opened = s.openBrowserFilePicker(message)
+		case "picker-cancel":
+			if s.pickerID == message.Picker {
+				s.picker.cancel()
 			}
 		default:
 			s.operations.Unlock()
@@ -356,7 +451,11 @@ func (s *macViewSession) run() {
 		if err != nil {
 			response.Error = "CEF_MAC_VIEW_UNAVAILABLE"
 		}
-		if s.write(response) != nil {
+		var traceStage string
+		if err == nil && (message.Op == "present" || message.Op == "hide") {
+			traceStage = message.Op + "-ack"
+		}
+		if s.writeTraced(response, traceStage, message.Epoch) != nil {
 			return
 		}
 		if err != nil {
@@ -386,12 +485,9 @@ func (s *macViewSession) present(message macViewMessage) (string, int, float64, 
 		s.mu.Unlock()
 		return "", 0, 0, errors.New("CEF_MAC_VIEW_CLOSED")
 	}
-	s.view = message.View
-	s.epoch = message.Epoch
-	s.visible = message.Visible
 	s.mu.Unlock()
 	if s.attached && size <= s.capacity {
-		if C.dsh_mac_view_update(C.uintptr_t(s.handle), C.double(b.X), C.double(b.Y), C.double(b.Width), C.double(b.Height), C.int(boolInt(message.Visible))) != 1 {
+		if !s.updateMacView(message) {
 			return "", 0, 0, errors.New("CEF_MAC_VIEW_UNAVAILABLE")
 		}
 		return s.path, s.capacity, dpr, nil
@@ -423,13 +519,15 @@ func (s *macViewSession) present(message macViewMessage) (string, int, float64, 
 		if C.dsh_mac_view_replace_frame(C.uintptr_t(s.handle), path, C.size_t(size)) != 1 {
 			return "", 0, 0, errors.New("CEF_MAC_VIEW_UNAVAILABLE")
 		}
-		if C.dsh_mac_view_update(C.uintptr_t(s.handle), C.double(b.X), C.double(b.Y), C.double(b.Width), C.double(b.Height), C.int(boolInt(message.Visible))) != 1 {
+		if !s.updateMacView(message) {
 			return "", 0, 0, errors.New("CEF_MAC_VIEW_UNAVAILABLE")
 		}
 		os.Remove(s.path)
 	} else {
 		s.handle = cgo.NewHandle(s)
-		if C.dsh_mac_view_attach(s.host.native, C.uintptr_t(s.handle), path, C.size_t(size), C.double(b.X), C.double(b.Y), C.double(b.Width), C.double(b.Height), C.int(boolInt(message.Visible))) != 1 {
+		layout := cgo.NewHandle(message)
+		defer layout.Delete()
+		if C.dsh_mac_view_attach(s.host.native, C.uintptr_t(s.handle), path, C.size_t(size), C.double(b.X), C.double(b.Y), C.double(b.Width), C.double(b.Height), C.int(boolInt(message.Visible)), C.uintptr_t(layout)) != 1 {
 			return "", 0, 0, errors.New("CEF_MAC_VIEW_UNAVAILABLE")
 		}
 		s.attached = true
@@ -440,6 +538,25 @@ func (s *macViewSession) present(message macViewMessage) (string, int, float64, 
 
 	return s.path, size, dpr, nil
 }
+
+func (s *macViewSession) updateMacView(message macViewMessage) bool {
+	layout := cgo.NewHandle(message)
+	defer layout.Delete()
+	b := message.Bounds
+	return C.dsh_mac_view_update(C.uintptr_t(s.handle), C.double(b.X), C.double(b.Y), C.double(b.Width), C.double(b.Height), C.int(boolInt(message.Visible)), C.uintptr_t(layout)) == 1
+}
+
+//export goMacPresenterCommitLayout
+func goMacPresenterCommitLayout(handle, layout C.uintptr_t, visible C.int) {
+	s := cgo.Handle(handle).Value().(*macViewSession)
+	message := cgo.Handle(layout).Value().(macViewMessage)
+	s.mu.Lock()
+	previous := s.epoch
+	s.view, s.epoch, s.visible = message.View, message.Epoch, visible == 1
+	s.mu.Unlock()
+	s.inputTrace.recordLayout(previous, message.Epoch)
+}
+
 func boolInt(value bool) int {
 	if value {
 		return 1
@@ -458,7 +575,9 @@ func goMacPresenterInput(handle C.uintptr_t, data *C.char, size C.int) {
 	}
 	s.mu.Lock()
 	if s.closed || !s.visible {
+		epoch := s.epoch
 		s.mu.Unlock()
+		s.inputTrace.record("view-unavailable", unsafe.Slice((*byte)(unsafe.Pointer(data)), int(size)), epoch)
 		return
 	}
 	view, epoch := s.view, s.epoch
@@ -473,9 +592,11 @@ func goMacPresenterInput(handle C.uintptr_t, data *C.char, size C.int) {
 	if err != nil {
 		return
 	}
+	s.inputTrace.record("queued", payload, "")
 	select {
 	case s.inputs <- payload:
 	default:
+		s.inputTrace.record("queue-overflow", payload, "")
 		go s.close()
 	}
 }

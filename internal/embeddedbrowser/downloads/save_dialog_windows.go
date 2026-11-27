@@ -16,12 +16,6 @@ import (
 )
 
 // DialogOwner must come from the admitted native presenter, never page fields.
-type DialogOwner struct {
-	Window  uintptr
-	PID     uint32
-	Started uint64
-}
-
 var uiDLL = win.NewLazySystemDLL("user32.dll")
 var setTimer = uiDLL.NewProc("SetTimer")
 var killTimer = uiDLL.NewProc("KillTimer")

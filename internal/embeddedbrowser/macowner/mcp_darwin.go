@@ -28,6 +28,9 @@ type mcpConfig struct {
 	CLI          string `json:"cli"`
 	Dependencies string `json:"dependencies"`
 	Bridge       string `json:"bridge"`
+	AUVDriver    string `json:"auvDriver,omitempty"`
+	AUVDevice    uint64 `json:"auvDevice,omitempty"`
+	AUVInode     uint64 `json:"auvInode,omitempty"`
 }
 
 // MCPAdapter admits only this application's generated browser adapter and the

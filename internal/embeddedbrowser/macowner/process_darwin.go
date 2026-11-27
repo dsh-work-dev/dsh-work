@@ -12,11 +12,32 @@ static int cef_process(unsigned int pid, struct proc_bsdinfo *info, char *path, 
   int n=0,e=0;
   for(int i=0;i<3;i++) { errno=0;n=proc_pidinfo(pid,PROC_PIDTBSDINFO,0,info,sizeof(*info));e=errno;if(n==sizeof(*info)||e!=EINTR)break; }
   if(n!=sizeof(*info))return e?e:EIO;
-  if(path && proc_pidpath(pid,path,length)<=0)path[0]=0;
+  if(path) {
+    for(int i=0;i<3;i++) {
+      errno=0;
+      n=proc_pidpath(pid,path,length);
+      if(n>0||errno!=EINTR) break;
+    }
+    if(n<=0)path[0]=0;
+  }
   return 0;
 }
 static int cef_group(unsigned int group, int *pids, int bytes, int *error) {
   errno=0;int n=proc_listpgrppids(group,pids,bytes);*error=errno;return n;
+}
+static int cef_children(unsigned int pid, int *pids, int bytes, int *error) {
+  errno=0;int n=proc_listchildpids(pid,pids,bytes);*error=errno;return n;
+}
+static int cef_target_path(const uint32_t *words, char *path, uint32_t length) {
+  audit_token_t token;
+  for(int i=0;i<8;i++) token.val[i]=words[i];
+  int n=0;
+  for(int i=0;i<3;i++) {
+    errno=0;
+    n=proc_pidpath_audittoken(&token,path,length);
+    if(n>0||errno!=EINTR)break;
+  }
+  return n;
 }
 */
 import "C"
@@ -26,6 +47,8 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	"github.com/local/dsh-work/internal/localipc"
 )
 
 type Process struct {
@@ -80,10 +103,19 @@ func instance(original Process) (Process, error) {
 }
 
 func group(pgid uint32) (Census, error) {
+	return processCensus(pgid, false)
+}
+
+func processCensus(id uint32, children bool) (Census, error) {
 	var values [4096]C.int
 	n, err := groupCount(func() (int, syscall.Errno) {
 		var code C.int
-		n := C.cef_group(C.uint(pgid), &values[0], C.int(unsafe.Sizeof(values)), &code)
+		var n C.int
+		if children {
+			n = C.cef_children(C.uint(id), &values[0], C.int(unsafe.Sizeof(values)), &code)
+		} else {
+			n = C.cef_group(C.uint(id), &values[0], C.int(unsafe.Sizeof(values)), &code)
+		}
 		return int(n), syscall.Errno(code)
 	}, len(values))
 	if err != nil {
@@ -101,6 +133,15 @@ func group(pgid uint32) (Census, error) {
 		c.Members = append(c.Members, p)
 	}
 	return c, nil
+}
+
+func targetPath(target localipc.ProcessTarget) (string, error) {
+	var path [C.PROC_PIDPATHINFO_MAXSIZE]C.char
+	n, err := C.cef_target_path((*C.uint32_t)(unsafe.Pointer(&target.AuditToken[0])), &path[0], C.uint32_t(len(path)))
+	if n <= 0 {
+		return "", errors.Join(errors.New("MAC_CEF_RENDERER_TARGET_PATH_UNAVAILABLE"), err)
+	}
+	return C.GoString(&path[0]), nil
 }
 
 // proc_listpgrppids may return zero on failure, preserving errno. A missing

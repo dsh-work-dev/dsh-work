@@ -141,8 +141,8 @@ try {
         Invoke-AuthenticodeSign -Path @($appPath, $cliPath) -Publisher $identity.Publisher
     }
     if ($Arch -eq 'amd64') {
-        & $appPath cef-package-verify
-        if ($LASTEXITCODE -ne 0) { throw 'Built application rejected its bound CEF publication' }
+        $verification = Start-Process -FilePath $appPath -ArgumentList 'cef-package-verify' -WindowStyle Hidden -Wait -PassThru
+        if ($verification.ExitCode -ne 0) { throw 'Built application rejected its bound CEF publication' }
     }
 
     $summary = "version $version, file version $($release.FileVersion)"

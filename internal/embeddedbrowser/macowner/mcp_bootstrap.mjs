@@ -1,16 +1,27 @@
-// Trusted --import asset for only the fixed owned-CEF MCP adapter and its
-// locked SDK stdio child. Runs in each actual Node process before its entry.
+// Trusted --import asset for the fixed browser MCP and desktop AUV adapters.
+// Only browser MCP has a Node stdio child that also registers before entry.
 import fs from 'node:fs';
+import path from 'node:path';
 import {createRequire} from 'node:module';
 import {Socket} from 'node:net';
 const config=JSON.parse(fs.readFileSync(process.env.DSH_WORK_MCP_OWNER_BOOTSTRAP,'utf8'));
 const entry=fs.realpathSync(process.argv[1]);
-if(entry!==config.adapter&&entry!==config.cli)throw Error('MAC_MCP_ENTRY_REJECTED');
+if(entry!==config.adapter&&(config.auvDriver||entry!==config.cli))throw Error('MAC_MCP_ENTRY_REJECTED');
+if(config.auvDriver){
+ process.env.DSH_WORK_OWNED_AUV_DRIVER=config.auvDriver;
+ process.env.DSH_WORK_OWNED_AUV_DEPENDENCIES=config.dependencies;
+ process.env.DSH_WORK_OWNED_AUV_SOCKET=path.join(path.dirname(config.socket),'auv.sock');
+ delete process.env.NODE_OPTIONS;
+ delete process.env.DSH_WORK_MCP_OWNER_BOOTSTRAP;
+}
 if(entry===config.cli){
  const a=process.argv.slice(2);
- if(a.length!==10||a[0]!=='--cdp-endpoint'||!/^ws:\/\/127\.0\.0\.1:[0-9]+\/cdp\/[a-f0-9]{48}$/.test(a[1])||a[2]!=='--output-dir'||!a[3].startsWith('/')||a[4]!=='--timeout-action'||a[5]!=='10000'||a[6]!=='--timeout-navigation'||a[7]!=='15000'||a[8]!=='--snapshot-mode'||a[9]!=='none')throw Error('MAC_MCP_CONFIG_REJECTED');
+ if(a.length!==12||a[0]!=='--cdp-endpoint'||!/^ws:\/\/127\.0\.0\.1:[0-9]+\/cdp\/[a-f0-9]{48}$/.test(a[1])||
+    a[2]!=='--output-dir'||!a[3].startsWith('/')||a[4]!=='--timeout-action'||a[5]!=='10000'||
+    a[6]!=='--timeout-navigation'||a[7]!=='15000'||a[8]!=='--snapshot-mode'||a[9]!=='none'||
+    a[10]!=='--cdp-header'||a[11]!=='User-Agent: DSH-Work-Browser-MCP')throw Error('MAC_MCP_CONFIG_REJECTED');
 }
-for(const [name,version]of[['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1'],['playwright-core','1.64.0-alpha-1790635538000'],['playwright','1.64.0-alpha-1790635538000']]){
+if(!config.auvDriver) for(const [name,version]of[['@playwright/mcp','0.0.83'],['@modelcontextprotocol/sdk','1.32.2'],['ws','8.22.1'],['playwright-core','1.64.0-alpha-1790635538000'],['playwright','1.64.0-alpha-1790635538000']]){
  if(JSON.parse(fs.readFileSync(`${config.dependencies}/node_modules/${name}/package.json`,'utf8')).version!==version)throw Error('MAC_MCP_PUBLICATION_REJECTED');
 }
 const bridge=createRequire(import.meta.url)(config.bridge);

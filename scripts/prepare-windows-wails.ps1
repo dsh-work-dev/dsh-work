@@ -8,8 +8,11 @@ Push-Location $root
 try {
     $version = & go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3
     if ($LASTEXITCODE -ne 0 -or $version -ne [string]$lock.wails.module) { throw 'Wails module lock mismatch' }
-    $module = & go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v3
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $module)) { throw 'Pinned Wails module is unavailable' }
+    # A cached go.mod gives go list the version before the module source is unpacked.
+    $download = & go mod download -json "github.com/wailsapp/wails/v3@$version"
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned Wails module download failed' }
+    $module = [string](($download -join "`n" | ConvertFrom-Json).Dir)
+    if (-not $module -or -not (Test-Path -LiteralPath $module -PathType Container)) { throw 'Pinned Wails module is unavailable' }
     $copy = Join-Path $root 'bin/windows-wails-patched'
     if (-not (Test-Path -LiteralPath $copy)) { Copy-Item -LiteralPath $module -Destination $copy -Recurse }
     function Patch([string]$relative, [string]$before, [string]$after) {

@@ -39,3 +39,28 @@ func TestRecoveryRefreshPreservesGuardTerminalFacts(t *testing.T) {
 		t.Fatal("foreign broker instance accepted", err)
 	}
 }
+
+func TestBrokerExitRecoveryRequiresAnObservedNativeBroker(t *testing.T) {
+	state := journal{
+		Phase:  "broker-exited",
+		Owner:  Process{PID: 101, Started: 111, PGID: 101},
+		Broker: Process{PID: 102, Started: 222, PPID: 101, PGID: 101},
+	}
+	state.Owned = map[string]owned{processKey(state.Broker): {Process: state.Broker}}
+	if ownerStateRecoverable(state) {
+		t.Fatal("exit without a wait result was accepted")
+	}
+	state.Exit.Started = true
+	if !ownerStateRecoverable(state) {
+		t.Fatal("authenticated broker exit was rejected")
+	}
+	delete(state.Owned, processKey(state.Broker))
+	if ownerStateRecoverable(state) {
+		t.Fatal("exit without the tracked broker identity was accepted")
+	}
+	state.Owned[processKey(state.Broker)] = owned{Process: state.Broker}
+	state.Component = "owned-auv"
+	if ownerStateRecoverable(state) {
+		t.Fatal("native broker exit phase was accepted for another component")
+	}
+}

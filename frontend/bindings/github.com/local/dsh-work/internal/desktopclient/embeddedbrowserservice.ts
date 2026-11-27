@@ -43,10 +43,6 @@ export function Capability(): $CancellablePromise<boolean> {
     return $Call.ByID(3254308590);
 }
 
-export function Cover(): $CancellablePromise<embeddedbrowser$0.Preview[] | null> {
-    return $Call.ByID(2111677083);
-}
-
 export function Detach(document: string, slot: string): $CancellablePromise<void> {
     return $Call.ByID(3944625447, document, slot);
 }
@@ -64,15 +60,11 @@ export function Hide(): $CancellablePromise<void> {
 }
 
 /**
- * OpenArtifact carries user intent only. The daemon owns the native file picker
- * and receives no page-selected path or root capability.
+ * OpenArtifact carries user intent only. The daemon coordinates the owned
+ * native picker and receives no page-selected path or root capability.
  */
 export function OpenArtifact(document: string, slot: string): $CancellablePromise<embeddedbrowser$0.ViewState> {
     return $Call.ByID(1079395994, document, slot);
-}
-
-export function Overlay(blocked: boolean): $CancellablePromise<void> {
-    return $Call.ByID(1081105216, blocked);
 }
 
 export function Popup(document: string, slot: string, popup: embeddedbrowser$0.WebPopup, action: string): $CancellablePromise<string> {
@@ -93,6 +85,14 @@ export function RegisterWindow(): $CancellablePromise<embeddedbrowser$0.WindowAd
 
 export function SelectControl(document: string, generation: string, session: string, slot: string, viewLease: string): $CancellablePromise<automation$0.OwnedSelectionState> {
     return $Call.ByID(2307934925, document, generation, session, slot, viewLease);
+}
+
+/**
+ * SetOcclusion reconciles the shell's current occlusion intent for one document.
+ * A blocked document cannot make a new slot visible while native hide is pending.
+ */
+export function SetOcclusion(document: string, blocked: boolean): $CancellablePromise<embeddedbrowser$0.Preview[] | null> {
+    return $Call.ByID(28883977, document, blocked);
 }
 
 export function State(document: string, slot: string): $CancellablePromise<embeddedbrowser$0.ViewState> {

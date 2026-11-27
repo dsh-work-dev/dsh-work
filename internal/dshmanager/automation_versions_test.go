@@ -77,6 +77,34 @@ func TestLegacyRestoreComparisonDoesNotRequireNewHostMetadata(t *testing.T) {
 	}
 }
 
+func TestRestoreComparisonChecksTheRecordedPackageManagerVersion(t *testing.T) {
+	expected := &storedRestorePoint{
+		RestorePoint: RestorePoint{DSHVersion: "0.2.2-rc.1", NodeVersion: "24.9.0", PackageManager: "pnpm"},
+		Input:        ProfileVersionInput{PackageManager: "pnpm", Lock: "frozen"},
+	}
+	finishVersionPoint(expected)
+	actual := *expected
+	actual.PackageManager = "pnpm@11.25.0"
+	actual.Input.PackageManager = actual.PackageManager
+	finishVersionPoint(&actual)
+	if !matchesRestoredVersions(expected, &actual) {
+		t.Fatal("snapshot with an unrecorded pnpm version rejected its reconstructed installation")
+	}
+	actual.Input.Lock = "different"
+	finishVersionPoint(&actual)
+	if matchesRestoredVersions(expected, &actual) {
+		t.Fatal("unspecified pnpm version hid a changed lock")
+	}
+	actual.Input.Lock = expected.Input.Lock
+	expected.PackageManager = "pnpm@11.19.0"
+	expected.Input.PackageManager = expected.PackageManager
+	finishVersionPoint(expected)
+	finishVersionPoint(&actual)
+	if matchesRestoredVersions(expected, &actual) {
+		t.Fatal("snapshot accepted a different exact pnpm version")
+	}
+}
+
 func TestSetupOnlyHostRecoverySourceIsNotSilentlyUpgraded(t *testing.T) {
 	input := automation.CurrentVersionInputs()
 	if input.ExtensionSource == "not-integrated" {

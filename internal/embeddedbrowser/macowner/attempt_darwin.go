@@ -208,6 +208,26 @@ func ownedRunParent(run string) bool {
 	canonical, err := filepath.EvalSymlinks(root)
 	return parent == root || (err == nil && parent == canonical)
 }
+
+func (a *Adapter) recoverableAttemptProgram(attempt launchAttempt) bool {
+	if attempt.Program == a.publication.Owner {
+		return true
+	}
+	// A new application bundle can retire an earlier publication's attempt.
+	// Its authenticated record, submitted plist and old program instance must
+	// still identify the original job before any launchctl retirement.
+	if !a.publication.verified || !filepath.IsAbs(attempt.Program) || filepath.Clean(attempt.Program) != attempt.Program {
+		return false
+	}
+	macOS := filepath.Dir(attempt.Program)
+	contents := filepath.Dir(macOS)
+	if filepath.Base(attempt.Program) != "dsh-cef-owner" || filepath.Base(macOS) != "MacOS" ||
+		filepath.Base(contents) != "Contents" || filepath.Ext(filepath.Dir(contents)) != ".app" {
+		return false
+	}
+	return !attempt.Submitted || (attempt.FileIdentityVersion == 1 && attempt.PlistInode != 0 && attempt.ProgramInode != 0)
+}
+
 func (a *Adapter) recoverAttempts(ctx context.Context, key []byte) error {
 	_, err := a.recoverOwnedAttempts(ctx, key)
 	return err
@@ -231,7 +251,7 @@ func (a *Adapter) recoverOwnedAttempts(ctx context.Context, key []byte) (retired
 			return retired, errors.Join(ErrCleanupPending, err)
 		}
 		expected, err := attemptName(attempt.Generation)
-		if err != nil || name != expected || attempt.Program != a.publication.Owner || !strings.HasPrefix(attempt.Job, "dev.dsh.cef.") || !ownedRunParent(attempt.Run) || !strings.HasPrefix(filepath.Base(attempt.Run), "dsh-cef-") {
+		if err != nil || name != expected || !a.recoverableAttemptProgram(attempt) || !strings.HasPrefix(attempt.Job, "dev.dsh.cef.") || !ownedRunParent(attempt.Run) || !strings.HasPrefix(filepath.Base(attempt.Run), "dsh-cef-") {
 			return retired, ErrCleanupPending
 		}
 		w := &Worker{directory: a.directory, key: key, job: attempt.Job, run: attempt.Run, attempt: &attempt, state: journal{Generation: attempt.Generation}}

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -33,4 +33,24 @@ if (!(currentNpmMajor >= minimumNpmMajor)) {
   throw new Error(`npm mismatch: expected >=${minimumNpmMajor}, got ${npmVersion}`);
 }
 
+if (process.argv.includes("--desktop-toolchain")) {
+  const go = execFileSync("go", ["version"], { encoding: "utf8" }).trim();
+  if (go.split(/\s+/)[2] !== `go${manifest.go.version}`) {
+    throw new Error(`Go mismatch: expected go${manifest.go.version}, got ${go}`);
+  }
+  const result = spawnSync("wails3", ["version"], { encoding: "utf8" });
+  if (result.error) throw result.error;
+  const wails = (result.stdout + "\n" + result.stderr).trim();
+  if (result.status !== 0) throw new Error(`wails3 version failed: ${wails}`);
+  if (wails.match(/v\d+\.\d+\.\d+(?:-[\w.-]+)?/)?.[0] !== manifest.wails.cli) {
+    throw new Error(`Wails mismatch: expected ${manifest.wails.cli}, got ${wails}`);
+  }
+  const dsh = manifest.dsh;
+  const fixture = JSON.parse(readFileSync(join(root, "tools/dsh/package.json"), "utf8"));
+  const lock = JSON.parse(readFileSync(join(root, "tools/dsh/package-lock.json"), "utf8"));
+  if (fixture.dependencies[dsh.package] !== dsh.version || lock.packages[`node_modules/${dsh.package}`]?.version !== dsh.version) {
+    throw new Error(`DSH development fixture mismatch: expected ${dsh.package}@${dsh.version}`);
+  }
+  console.log(`toolchain: go=${manifest.go.version} wails=${manifest.wails.cli} dsh=${dsh.version}`);
+}
 console.log(`node=${process.version} npm=${npmVersion}`);

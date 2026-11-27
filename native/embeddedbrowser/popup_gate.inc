@@ -13,6 +13,9 @@ std::map<std::string,uint64_t> popup_frame_epochs_;
 bool popup_suspended_=false,popup_overlay_visible_=false;
 bool PopupOwnerVisible(){
  if(closing_||control_blocked||!view_visible_||!managed_||artifact_||!last_present_args_||!tabs.contains(tab_))return false;
+#ifdef __APPLE__
+ return popup_suspended_?DialogHostVisible():ViewVisible();
+#else
  auto guest=tabs.at(tab_).browser->GetHost()->GetWindowHandle();auto root=GetAncestor(guest,GA_ROOT);
  if(!root||root==guest)return false;
  dsh_file_picker::Owner peer{root,GetParent(guest),guest,static_cast<DWORD>(last_present_args_->GetInt("pid")),0};
@@ -21,6 +24,7 @@ bool PopupOwnerVisible(){
  bool ok=dsh_file_picker::SameOwner(peer,process)&&dsh_platform::Visible(peer.parent)&&
    (popup_suspended_?!dsh_platform::Visible(guest):dsh_platform::Visible(guest));
  if(process)CloseHandle(process);return ok;
+#endif
 }
 bool PopupSourceValid(const PopupPending& p){
  return PopupOwnerVisible()&&p.frame&&p.frame->IsValid()&&p.document==document_epoch_&&p.frame_document==popup_frame_epochs_[p.identity->GetString("frame").ToString()]&&
@@ -30,7 +34,7 @@ bool PopupSourceValid(const PopupPending& p){
 bool RestorePopup(){
  bool ok=true;
  if(popup_suspended_&&view_visible_&&!closing_&&tabs.contains(tab_)&&last_present_args_){
-  auto error=dsh_platform::Present(tabs.at(tab_).browser->GetHost()->GetWindowHandle(),last_present_args_);
+  auto error=RestoreCoveredView();
   dialog_restore_error_=error;ok=error.empty();
  }
  popup_suspended_=false;popup_overlay_visible_=false;return ok;
@@ -49,7 +53,7 @@ void QueuePopup(CefRefPtr<CefBrowser> browser,CefRefPtr<CefFrame> frame,int popu
  // No Host window is created for a rejected request. Source origin comes only
  // from CEF's initiating frame, not the target name, referrer, or page script.
  if(!gesture||!frame||!frame->IsValid()||!browser||!tabs.contains(tab_)||browser->GetIdentifier()!=tabs.at(tab_).browser->GetIdentifier()||
-  !ViewVisible()||!loaded_||artifact_||dialog_pending_||file_picker_||url.size()>8192)return;
+  !ViewVisible()||!loaded_||artifact_||dialog_pending_||FilePickerActive()||url.size()>8192)return;
  CefURLParts parts;if(!CefParseURL(url,parts))return;
  auto scheme=CefString(&parts.scheme).ToString();
  if((scheme!="http"&&scheme!="https")||CefString(&parts.host).empty()||!CefString(&parts.username).empty()||!CefString(&parts.password).empty())return;
@@ -104,9 +108,8 @@ Dict PopupAction(Dict args){
  auto expected=args?args->GetDictionary("popup"):nullptr,actual=PendingPopup();
  if(!actual||!expected||!actual->IsEqual(expected))return nullptr;
  const auto action=args->GetString("action").ToString();auto result=CefDictionaryValue::Create();
- auto guest=tabs.at(tab_).browser->GetHost()->GetWindowHandle();
  if(action=="suspend"){
-  if(!dsh_platform::Hide(guest).empty())return nullptr;
+  if(!SuspendCoveredView().empty())return nullptr;
   popup_suspended_=true;popup_overlay_visible_=false;return result;
  }
  if(action=="ready"){

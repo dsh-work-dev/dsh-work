@@ -4,7 +4,7 @@ package version
 
 import "strings"
 
-// Value is replaced by the Windows release task through -ldflags. Development
+// Value is replaced by the platform packaging tasks through -ldflags. Development
 // builds keep the explicit fallback so the CLI remains useful without a
 // packaging step.
 var Value = "development"

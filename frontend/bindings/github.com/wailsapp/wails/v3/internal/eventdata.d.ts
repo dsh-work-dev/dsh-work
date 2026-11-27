@@ -37,6 +37,7 @@ declare module "@wailsio/runtime" {
             "appearance": settings$0.Appearance;
             "automation": automation$0.Snapshot;
             "background-stopping": boolean;
+            "browser-display-changed": {};
             "builtin-components": desktopclient$0.BuiltinComponentStatus[] | null;
             "dsh-answer-approval": desktopapp$0.AnswerApprovalCommand;
             "dsh-open-session": desktopapp$0.OpenSessionCommand;

@@ -43,8 +43,8 @@ func (r *InstancePresenterRegistry) OpenArtifact(ctx context.Context, peer Prese
 	}()
 	w.serial.Unlock()
 	i.serial.Unlock()
-	// The system picker checks the actual process instance/window and drains its
-	// STA on cancellation. No UI string is used as a filesystem location.
+	// The system picker checks the actual process instance/window and drains
+	// on cancellation. No UI string is used as a filesystem location.
 	locale := settings.DefaultLocale
 	if r.config.ArtifactLocale != nil {
 		locale = r.config.ArtifactLocale()
@@ -96,7 +96,7 @@ func (r *InstancePresenterRegistry) OpenArtifact(ctx context.Context, peer Prese
 	i.views.mu.Lock()
 	i.views.views[presentationKey(surface, slot)] = p
 	i.views.mu.Unlock()
-	v, err := i.views.updateLocked(ctx, peer, surface, parent, slot, "", SlotBounds{}, 1, false)
+	v, err := i.views.updateLocked(ctx, peer, surface, parent, slot, "", SlotBounds{}, 1, false, 0)
 	if err != nil {
 		p.serial.Lock()
 		err = errors.Join(err, i.views.loseLocked(p))

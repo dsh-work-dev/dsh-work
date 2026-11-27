@@ -1,4 +1,4 @@
-//go:build darwin && cgo && e67presenter
+//go:build darwin && cgo && !server
 
 package embeddedbrowser
 
@@ -43,15 +43,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/local/dsh-work/internal/localipc"
 	"io"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/local/dsh-work/internal/localipc"
+	"github.com/local/dsh-work/internal/settings"
 )
 
 type macPresenterLink struct {
@@ -196,34 +197,12 @@ func openMacWindowLease(key macPresenterKey, endpoint, token string) (*macPresen
 	}
 	c.SetDeadline(time.Now().Add(3 * time.Second))
 	defer c.SetDeadline(time.Time{})
-	body, _ := json.Marshal(map[string]string{"op": "watch", "id": fmt.Sprint(key.parent)})
-	var header [4]byte
-	binary.LittleEndian.PutUint32(header[:], uint32(len(body)))
-	for _, part := range [][]byte{header[:], body} {
-		for len(part) > 0 {
-			n, e := c.Write(part)
-			if e != nil {
-				return nil, e
-			}
-			if n == 0 {
-				return nil, io.ErrShortWrite
-			}
-			part = part[n:]
-		}
-	}
-	if _, err = io.ReadFull(c, header[:]); err != nil {
+	id := fmt.Sprint(key.parent)
+	if err = writeMacWindowFrame(c, macWindowFrame{Op: "watch", ID: id}); err != nil {
 		return nil, err
 	}
-	n := binary.LittleEndian.Uint32(header[:])
-	if n == 0 || n > 16384 {
-		return nil, errors.New("CEF_MAC_WINDOW_LEASE_REJECTED")
-	}
-	data := make([]byte, n)
-	if _, err = io.ReadFull(c, data); err != nil {
-		return nil, err
-	}
-	var reply struct{ Op, ID string }
-	if json.Unmarshal(data, &reply) != nil || reply.Op != "ack" || reply.ID != fmt.Sprint(key.parent) {
+	reply, err := readMacWindowFrame(c)
+	if err != nil || reply.Op != "ack" || reply.ID != id {
 		return nil, errors.New("CEF_MAC_WINDOW_LEASE_REJECTED")
 	}
 	if _, err = localipc.Peer(c); err != nil {
@@ -231,6 +210,59 @@ func openMacWindowLease(key macPresenterKey, endpoint, token string) (*macPresen
 	}
 	ok = true
 	return &macPresenterLink{endpoint: endpoint, token: token, done: make(chan struct{}), conn: c}, nil
+}
+
+type macWindowFrame struct {
+	Op        string          `json:"op"`
+	ID        string          `json:"id"`
+	Path      string          `json:"path,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Locale    settings.Locale `json:"locale,omitempty"`
+	Filename  string          `json:"filename,omitempty"`
+	Origin    string          `json:"origin,omitempty"`
+	Overwrite bool            `json:"overwrite,omitempty"`
+	Risk      bool            `json:"risk,omitempty"`
+	Accepted  bool            `json:"accepted,omitempty"`
+}
+
+func writeMacWindowFrame(c net.Conn, value macWindowFrame) error {
+	body, err := json.Marshal(value)
+	if err != nil || len(body) > 16384 {
+		return errors.New("CEF_MAC_WINDOW_FRAME_REJECTED")
+	}
+	var header [4]byte
+	binary.LittleEndian.PutUint32(header[:], uint32(len(body)))
+	for _, part := range [][]byte{header[:], body} {
+		for len(part) > 0 {
+			n, err := c.Write(part)
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return io.ErrShortWrite
+			}
+			part = part[n:]
+		}
+	}
+	return nil
+}
+
+func readMacWindowFrame(c net.Conn) (macWindowFrame, error) {
+	var reply macWindowFrame
+	var header [4]byte
+	if _, err := io.ReadFull(c, header[:]); err != nil {
+		return reply, err
+	}
+	n := binary.LittleEndian.Uint32(header[:])
+	if n == 0 || n > 16384 {
+		return reply, errors.New("CEF_MAC_WINDOW_FRAME_REJECTED")
+	}
+	body := make([]byte, n)
+	if _, err := io.ReadFull(c, body); err != nil {
+		return reply, err
+	}
+	err := json.Unmarshal(body, &reply)
+	return reply, err
 }
 
 type macPresenterOwner struct {
@@ -271,21 +303,15 @@ func admitPresenter(peer PresenterPeer, parent uintptr) (presenterOwner, error) 
 	return p, nil
 }
 func presenterBounds(peer PresenterPeer, parent uintptr, b SlotBounds, zoom float64) (PixelBounds, error) {
-	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom < 0.25 || zoom > 5 {
-		return PixelBounds{}, errors.New("CEF_ZOOM_REJECTED")
+	if err := validatePresenterZoom(zoom, 5); err != nil {
+		return PixelBounds{}, err
 	}
-	for _, v := range []float64{b.X, b.Y, b.Width, b.Height} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 1e6 {
-			return PixelBounds{}, errors.New("CEF_SLOT_BOUNDS_REJECTED")
-		}
+	if err := b.validate(); err != nil {
+		return PixelBounds{}, err
 	}
 	width, height, err := macParentBounds(peer, parent)
 	if err != nil {
 		return PixelBounds{}, err
 	}
-	left := math.Min(float64(width), math.Max(0, b.X*zoom))
-	top := math.Min(float64(height), math.Max(40, b.Y*zoom))
-	right := math.Min(float64(width), (b.X+b.Width)*zoom)
-	bottom := math.Min(float64(height), (b.Y+b.Height)*zoom)
-	return PixelBounds{X: int(math.Ceil(left)), Y: int(math.Ceil(top)), Width: max(0, int(math.Floor(right)-math.Ceil(left))), Height: max(0, int(math.Floor(bottom)-math.Ceil(top)))}, nil
+	return clipPresenterBounds(b, width, height, zoom, presenterChromeHeight), nil
 }

@@ -1,10 +1,27 @@
 package nativeui
 
 import (
+	"runtime"
 	"testing"
 
+	"github.com/local/dsh-work/internal/pet"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+func TestPetScreenWorkAreaMatchesWindowCoordinates(t *testing.T) {
+	screen := &application.Screen{
+		ScaleFactor:      2,
+		WorkArea:         application.Rect{X: -1500, Y: 24, Width: 1440, Height: 876},
+		PhysicalWorkArea: application.Rect{X: -2880, Y: -150, Width: 2880, Height: 1752},
+	}
+	want := pet.WorkArea{X: -1500, Y: 24, Width: 1440, Height: 876}
+	if runtime.GOOS == "darwin" {
+		want = pet.WorkArea{X: -1440, Y: -75, Width: 1440, Height: 876}
+	}
+	if got := PetScreenWorkArea(screen); got != want {
+		t.Fatalf("Pet screen work area = %+v, want %+v", got, want)
+	}
+}
 
 func TestPetWindowOptionsUseTransparentWindowAndSliderResize(t *testing.T) {
 	options := PetWindowOptions()

@@ -21,6 +21,9 @@ func embeddedPublication() distribution.Result {
 }
 
 func inspectEmbeddedPublication() distribution.Result {
+	if runtime.GOOS == "darwin" {
+		return inspectDarwinPublication()
+	}
 	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
 		return distribution.Result{State: distribution.UnsupportedPlatform}
 	}
@@ -33,7 +36,7 @@ func inspectEmbeddedPublication() distribution.Result {
 
 func embeddedExecutable() string {
 	if embeddedDevelopmentRoot() != "" {
-		return os.Getenv("DSH_WORK_CEF_EXECUTABLE")
+		return embeddedDevelopmentExecutable()
 	}
 	result := embeddedPublication()
 	if result.State != distribution.Ready {

@@ -20,6 +20,7 @@ import (
 const profileRecordsFolder = ".dsh-work"
 
 var profileBackupFolder = filepath.Join(profileRecordsFolder, "backups")
+var errBackupProfileMissing = errors.New("backup profile does not exist")
 
 const maxBackupBytes = 512 << 20
 const maxBackupEntries = 100000
@@ -74,6 +75,10 @@ func (m *Manager) ProfileBackupDirectory(ctx context.Context, ref ProfileRef) (r
 	defer func() {
 		resultErr = recoveryFailure(resultErr, lifecycle.ErrorProfileBackupFailed, "The backup directory is unavailable.")
 	}()
+	return m.profileBackupDirectory(ctx, ref)
+}
+
+func (m *Manager) profileBackupDirectory(ctx context.Context, ref ProfileRef) (string, error) {
 	release, err := m.acquireOperation(ctx)
 	if err != nil {
 		return "", err
@@ -105,6 +110,9 @@ func (m *Manager) prepareProfileBackups(ctx context.Context, ref ProfileRef) (st
 	defer home.Close()
 	relative := filepath.Join("profiles", ref.Name)
 	info, err := home.Lstat(relative)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("%w: %w", errBackupProfileMissing, err)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -181,7 +189,11 @@ func (m *Manager) ListProfileBackups(ctx context.Context, ref ProfileRef) (backu
 		resultErr = recoveryFailure(resultErr, lifecycle.ErrorProfileBackupFailed, "Profile backups could not be listed.")
 	}()
 	result := []ProfileBackupResult{}
-	directory, err := m.ProfileBackupDirectory(ctx, ref)
+	directory, err := m.profileBackupDirectory(ctx, ref)
+	if errors.Is(err, errBackupProfileMissing) {
+		// Settings may request the list while first-run profile creation is in progress.
+		return result, nil
+	}
 	if err != nil {
 		return nil, err
 	}

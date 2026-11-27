@@ -32,8 +32,10 @@ type EmbeddedBrowserService struct {
 	Enabled     bool
 	InstanceKey string
 	QuitUI      func()
-	gatesMu     sync.Mutex
-	gates       map[string]*embeddedGate
+	// PresenterExecutable comes from the host's verified browser publication.
+	PresenterExecutable string
+	gatesMu             sync.Mutex
+	gates               map[string]*embeddedGate
 }
 
 func (s *EmbeddedBrowserService) Capability(ctx context.Context) (bool, error) {
@@ -81,7 +83,7 @@ func (s *EmbeddedBrowserService) Update(ctx context.Context, document, slot, add
 	if gate.parent != parent || gate.admission.Lease == "" {
 		return state, errors.New("CEF_PRESENTER_WINDOW_CHANGED")
 	}
-	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, gate.admission.Lease, slot, address, bounds, zoom, visible}, &state)
+	err = call(ctx, s.Client, "EmbeddedBrowserService", "Update", []any{parent, gate.admission.Lease, slot, address, bounds, zoom, visible, presenterDisplayRevision(parent)}, &state)
 	// Native Present can succeed while the document is still loading. Protect
 	// that guest now: later State polling alone does not issue another Update.
 	if err == nil && state.Visible {
@@ -198,45 +200,27 @@ func (s *EmbeddedBrowserService) gate(surface string) *embeddedGate {
 	}
 	return s.gates[surface]
 }
-func (s *EmbeddedBrowserService) Overlay(ctx context.Context, blocked bool) error {
+
+// SetOcclusion reconciles the shell's current occlusion intent for one document.
+// A blocked document cannot make a new slot visible while native hide is pending.
+func (s *EmbeddedBrowserService) SetOcclusion(ctx context.Context, document string, blocked bool) ([]embeddedbrowser.Preview, error) {
 	if !s.Enabled {
-		return nil
+		return nil, nil
 	}
-	window, err := trustedWindow(ctx)
-	if err != nil {
-		return err
-	}
-	gate := s.gate(window.Name())
-	gate.Lock()
-	defer gate.Unlock()
-	gate.blocked = blocked
-	if blocked {
-		for _, pending := range gate.artifacts {
-			pending.cancel()
-		}
-	}
-	if blocked {
-		return call(ctx, s.Client, "EmbeddedBrowserService", "Hide", nil, nil)
-	}
-	return nil
-}
-func (s *EmbeddedBrowserService) Cover(ctx context.Context) ([]embeddedbrowser.Preview, error) {
-	if !s.Enabled || runtime.GOOS != "windows" {
-		return nil, errors.New("CEF_PREVIEW_UNAVAILABLE")
-	}
-	window, err := trustedWindow(ctx)
+	gate, err := s.lockDocument(ctx, document)
 	if err != nil {
 		return nil, err
 	}
-	gate := s.gate(window.Name())
-	gate.Lock()
 	defer gate.Unlock()
-	if gate.document == "" {
-		return nil, errors.New("CEF_PRESENTER_DOCUMENT_RETIRED")
+	gate.blocked = blocked
+	if !blocked {
+		return nil, nil
 	}
-	gate.blocked = true
 	for _, pending := range gate.artifacts {
 		pending.cancel()
+	}
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		return nil, call(ctx, s.Client, "EmbeddedBrowserService", "Hide", nil, nil)
 	}
 	var previews []embeddedbrowser.Preview
 	err = call(ctx, s.Client, "EmbeddedBrowserService", "Cover", nil, &previews)
@@ -312,6 +296,7 @@ func (s *EmbeddedBrowserService) BeginDocument(ctx context.Context, document str
 		gate.document = document
 		gate.admission = admission
 		gate.parent = parent
+		gate.blocked = false
 	}
 	return true, err
 }
@@ -365,6 +350,9 @@ func (s *EmbeddedBrowserService) PresentDialog(ctx context.Context, document, sl
 		return err
 	}
 	defer gate.Unlock()
+	if gate.blocked {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
 	if !s.Enabled {
 		return errors.New("CEF_PRESENTER_UNAVAILABLE")
 	}
@@ -376,6 +364,9 @@ func (s *EmbeddedBrowserService) AnswerDialog(ctx context.Context, document, slo
 		return err
 	}
 	defer gate.Unlock()
+	if gate.blocked {
+		return errors.New("CEF_DIALOG_AUTHORIZATION_CHANGED")
+	}
 	if !s.Enabled || len(text) > 256*1024 {
 		return errors.New("CEF_DIALOG_ARGUMENT_REJECTED")
 	}
@@ -400,6 +391,9 @@ func (s *EmbeddedBrowserService) Popup(ctx context.Context, document, slot strin
 		return "", err
 	}
 	defer gate.Unlock()
+	if gate.blocked {
+		return "", errors.New("CEF_POPUP_AUTHORIZATION_CHANGED")
+	}
 	if !s.Enabled || len(popup.ID) > 256 || len(popup.URL) > 8192 || len(popup.SourceURL) > 8192 ||
 		(action != "suspend" && action != "ready" && action != "allow" && action != "deny") {
 		return "", errors.New("CEF_POPUP_ARGUMENT_REJECTED")
@@ -409,8 +403,8 @@ func (s *EmbeddedBrowserService) Popup(ctx context.Context, document, slot strin
 	return url, err
 }
 
-// OpenArtifact carries user intent only. The daemon owns the native file picker
-// and receives no page-selected path or root capability.
+// OpenArtifact carries user intent only. The daemon coordinates the owned
+// native picker and receives no page-selected path or root capability.
 func (s *EmbeddedBrowserService) OpenArtifact(ctx context.Context, document, slot string) (embeddedbrowser.ViewState, error) {
 	gate, err := s.lockDocument(ctx, document)
 	if err != nil {

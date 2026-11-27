@@ -170,15 +170,11 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	dsh.SetCoreOverlayPatch(coreOverlay)
-	var managerRunner dshmanager.CommandRunner
-	if dependencies.CommandExecutor != nil {
-		managerRunner = managerCommandRunner{executor: dependencies.CommandExecutor}
-	}
 	managerConfig := dshmanager.Config{
 		StatePath:          statePath,
 		AutomationVersions: automation.CurrentVersionInputs,
 		MinimumDSHVersion:  dshadapter.MinimumVersion,
-		CommandRunner:      managerRunner,
+		CommandRunner:      dependencies.CommandExecutor,
 		PluginCommands:     dshadapter.NewPluginCommands(),
 		RuntimeInstaller:   platform.NewRuntimeInstaller(runtimeStore),
 		DSHCatalog:         platform.NewDSHReleaseCatalog(runtimeStore),
@@ -191,6 +187,9 @@ func runDaemon(identity string, resources Resources) {
 		DataDirectories: []dshmanager.DataDirectoryInfo{{
 			ID: "dsh-work", Name: "DSH Work", Path: config.DSHDataDirectory, Ownership: dshmanager.DataDirectoryOwnershipDSHWork,
 		}},
+	}
+	if runtime.GOOS == "darwin" {
+		managerConfig.BootstrapDSHVersion = desktopbridge.EmbeddedBrowserRuntime
 	}
 	desktopprobe.Configure(&managerConfig, dsh, storage.Root)
 	if err := embeddedConfigureManager(&managerConfig, dsh); err != nil {
@@ -246,6 +245,7 @@ func runDaemon(identity string, resources Resources) {
 		}
 	}
 	var petCatalog dshworkpet.PetCatalog
+	petOverlayCapabilities := dshworkpet.CurrentOverlayCapabilities()
 	petCatalogRoot := filepath.Join(config.CacheDirectory, "pets")
 	petCatalogConfig := dshworkpet.CatalogConfig{CacheRoot: petCatalogRoot, CommunityHome: dshworkpet.CommunityHome()}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {
@@ -253,6 +253,7 @@ func runDaemon(identity string, resources Resources) {
 		petCatalogConfig.Env = func(string) string { return "" }
 		petCatalogConfig.CommunityHome = ""
 	}
+	previewPetPointer := configureEmbeddedPreviewPet(&petCatalogConfig, &petOverlayCapabilities, storage.Root)
 	if catalog, err := dshworkpet.NewPetCatalog(petCatalogConfig); err != nil {
 		logging.Module(logging.ModPet).Warn("pet catalog unavailable", logging.ErrAttrs(err, "")...)
 	} else {
@@ -284,6 +285,7 @@ func runDaemon(identity string, resources Resources) {
 	var petWindowCloseAllowed atomic.Bool
 	var petWindowRepositioning atomic.Bool
 	var petWindowPositionRestored atomic.Bool
+	var petWindowPositionMu sync.Mutex
 	nativeNotification := wailsnotifications.New()
 	nativeNotificationHost := nativeui.NewNotificationService(nativeNotification)
 	backgroundFocused := func() bool { return false }
@@ -389,7 +391,7 @@ func runDaemon(identity string, resources Resources) {
 		},
 	}), browserruntime.ToolSchemas())
 	computerHelperExecutable, _ := os.Executable()
-	automationState.ConfigureComputerGateway(automation.ComputerGatewayConfig{Inspect: automation.InspectComputerTarget, Acquire: automation.AcquireComputerDesktopLease, Probe: computeruia.NewProbe(dependencies.Supervisor, computerHelperExecutable), Factory: computerruntime.NewFactory(computerruntime.Config{
+	computerFactory := computerruntime.NewFactory(computerruntime.Config{
 		Supervisor: dependencies.Supervisor, Root: filepath.Join(config.CacheDirectory, "automation", "computer-sessions"),
 		Resolve: func(ctx context.Context, engine string) (computerruntime.Runtime, error) {
 			if manager == nil || engine != "cua-driver" && engine != "auv" {
@@ -423,11 +425,22 @@ func runDaemon(identity string, resources Resources) {
 			}
 			driver := filepath.Join(config.CacheDirectory, "automation", "cua-driver", automation.DriverVersion, "windows-amd64", "cua-driver.exe")
 			if engine == "auv" {
-				driver = filepath.Join(directory, "node_modules", "@auv-js", "cli-win32-x64-msvc", "bin", "auv.exe")
+				driver, err = automation.AUVExecutable(directory)
+				if err != nil {
+					return computerruntime.Runtime{}, err
+				}
 			}
 			return computerruntime.Runtime{Node: resolved.Node.NodePath, Environment: resolved.Node.ChildEnvironment, Dependencies: directory, Driver: driver}, nil
 		},
-	})})
+	})
+	// Computer resources require native engine ownership and input verification.
+	if runtime.GOOS != "windows" {
+		computerFactory = nil
+	}
+	automationState.ConfigureComputerGateway(automation.ComputerGatewayConfig{
+		Inspect: automation.InspectComputerTarget, Acquire: automation.AcquireComputerDesktopLease,
+		Probe: computeruia.NewProbe(dependencies.Supervisor, computerHelperExecutable), Factory: computerFactory,
+	})
 	automationBridge.Attach(automationState)
 	automationService := dshworkapp.NewAutomationService(automationState)
 	dshworkapp.SetBrowserPermissionLocale(automationService, func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) })
@@ -453,6 +466,29 @@ func runDaemon(identity string, resources Resources) {
 			return desktop.Env.OpenFileManager(browserhost.DevelopmentDirectory(nativeConfig), false)
 		})
 	}
+	hub := hostevents.New()
+	reportNotificationFailure := func() {
+		if applicationShuttingDown.Load() || !notificationRouter.Preferences().Enabled {
+			return
+		}
+		desktop.Event.Emit("notification-failure", true)
+		hub.SendCommand("", "notification-failure", 10*time.Second, true)
+	}
+	var approvalCategoryMu sync.Mutex
+	registerDSHApprovalCategory := func() {
+		approvalCategoryMu.Lock()
+		defer approvalCategoryMu.Unlock()
+		if applicationShuttingDown.Load() {
+			return
+		}
+		if err := nativeNotification.RegisterNotificationCategory(dshApprovalNotificationCategory(loadNativeLocale(&activeLocale))); err != nil {
+			logging.Module(logging.ModNotify).Warn("approval notification category registration failed", logging.ErrAttrs(err, "")...)
+		}
+	}
+	requestNotificationAuthorization := func(enabled bool) {
+		// macOS can discard categories registered before its first permission grant.
+		nativeui.RequestNotificationAuthorization(nativeNotificationHost, enabled, registerDSHApprovalCategory, reportNotificationFailure)
+	}
 	settingsService := dshworkapp.NewSettingsService(
 		settingsManager,
 		func(locale dshworksettings.Locale) {
@@ -460,16 +496,19 @@ func runDaemon(identity string, resources Resources) {
 				publishLocale(locale)
 			}
 		},
-		notificationRouter.SetPreferences,
+		func(preferences dshworknotifications.Preferences) {
+			notificationRouter.SetPreferences(preferences)
+			requestNotificationAuthorization(preferences.Enabled)
+		},
 		automaticRuntimeRollback.Store,
 	)
 	dshworkapp.SetVerboseLoggingChanged(settingsService, logging.SetVerbose)
 	petSettingsService := dshworkapp.NewPetSettingsService(settingsManager, petCatalog)
+	petPointerHit := func(x, y float64) bool { return dshworkapp.PetPointerHit(petSettingsService, x, y) }
 	dshworkapp.SetPetHostMaintenance(petSettingsService, maintenance.InstallerInProgress)
 	dshworkapp.SetPetRendererFactory(petSettingsService, func() dshworkpet.PetRenderer {
 		return dshworkpet.NewRasterRenderer()
 	})
-	petOverlayCapabilities := dshworkpet.CurrentOverlayCapabilities()
 	dshworkapp.SetPetOverlayCapabilities(petSettingsService, petOverlayCapabilities)
 	storageService := dshworkapp.NewStorageService(locations,
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
@@ -518,7 +557,6 @@ func runDaemon(identity string, resources Resources) {
 	diagnosticsService := dshworkapp.NewDiagnosticsService(diag,
 		func(path string) error { return desktop.Env.OpenFileManager(path, false) },
 		func(name string) (string, error) { return nativeui.SaveDiagnosticsBundle(desktop, name) })
-	hub := hostevents.New()
 	var updateBrowserTray atomic.Value
 	var browserAttention atomic.Bool
 	var browserTrayBase atomic.Value
@@ -565,7 +603,7 @@ func runDaemon(identity string, resources Resources) {
 						return nil, err
 					}
 				}
-				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: embeddedExecutable(), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands()})
+				return startEmbeddedBroker(ctx, embeddedbrowser.Config{Executable: embeddedExecutable(), Profile: instance.Profile, Supervisor: dependencies.Supervisor, ObserveCommand: agentDiagnostic.commands(), DownloadLocale: func() dshworksettings.Locale { return loadNativeLocale(&activeLocale) }})
 			},
 			OnFailure: func(instance string, err error) {
 				logging.Module(logging.ModRuntime).Warn("embedded instance cleanup failed", "instance", instance, "error", err)
@@ -665,11 +703,6 @@ func runDaemon(identity string, resources Resources) {
 	}
 	interactions.OnAdded(interactionNotifications.added)
 	interactions.OnRemoved(interactionNotifications.removed)
-	registerDSHApprovalCategory := func(locale dshworksettings.Locale) {
-		if err := nativeNotification.RegisterNotificationCategory(dshApprovalNotificationCategory(locale)); err != nil {
-			logging.Module(logging.ModNotify).Warn("approval notification category registration failed", logging.ErrAttrs(err, "")...)
-		}
-	}
 	dshworkapp.SetPetActivity(petSettingsService, petActivity, tracker.LastFocused)
 	server.Media = dshworkapp.PetMediaHandler(petSettingsService, http.NotFoundHandler())
 	listener, err := daemon.Listen(identity)
@@ -700,6 +733,7 @@ func runDaemon(identity string, resources Resources) {
 		},
 		Assets: application.AssetOptions{Handler: dshworkapp.PetMediaHandler(petSettingsService, application.AssetFileServerFS(resources.Assets))},
 		Mac: application.MacOptions{
+			ActivationPolicy: application.ActivationPolicyAccessory,
 			ApplicationShouldTerminateAfterLastWindowClosed: false,
 		},
 	})
@@ -840,7 +874,7 @@ func runDaemon(identity string, resources Resources) {
 			windowWidth,
 			windowHeight,
 			scale,
-			dshworkpet.WorkArea{X: screen.WorkArea.X, Y: screen.WorkArea.Y, Width: screen.WorkArea.Width, Height: screen.WorkArea.Height},
+			nativeui.PetScreenWorkArea(screen),
 			12,
 		)
 		petWindowRepositioning.Store(true)
@@ -852,6 +886,8 @@ func runDaemon(identity string, resources Resources) {
 		petWindowPositionRestored.Store(true)
 	}
 	persistPetWindowPosition = func() {
+		petWindowPositionMu.Lock()
+		defer petWindowPositionMu.Unlock()
 		if !petWindowPositionRestored.Load() || petWindowRepositioning.Load() {
 			return
 		}
@@ -861,14 +897,23 @@ func runDaemon(identity string, resources Resources) {
 		if window == nil || settingsManager == nil || applicationShuttingDown.Load() {
 			return
 		}
-		screen, err := window.GetScreen()
-		if err != nil || screen == nil {
+		// Read monitor and bounds from the same native turn. On Mac the
+		// window can cross a screen boundary between separate AppKit calls.
+		screen, bounds := application.InvokeSyncWithResultAndOther(func() (*application.Screen, application.Rect) {
+			if petWindowRepositioning.Load() || !window.IsVisible() {
+				return nil, application.Rect{}
+			}
+			screen, err := window.GetScreen()
+			if err != nil || screen == nil || screen.ID == "" {
+				return nil, application.Rect{}
+			}
+			return screen, window.Bounds()
+		})
+		if screen == nil || bounds.Width <= 0 || bounds.Height <= 0 {
 			return
 		}
-		x, y := window.Position()
-		width, height := window.Size()
-		area := dshworkpet.WorkArea{X: screen.WorkArea.X, Y: screen.WorkArea.Y, Width: screen.WorkArea.Width, Height: screen.WorkArea.Height}
-		anchorX, anchorY := dshworkpet.AnchorForPosition(x, y, width, height, area, 12)
+		area := nativeui.PetScreenWorkArea(screen)
+		anchorX, anchorY := dshworkpet.AnchorForPosition(bounds.X, bounds.Y, bounds.Width, bounds.Height, area, 12)
 		scale := float64(screen.ScaleFactor)
 		if scale <= 0 {
 			scale = 1
@@ -877,15 +922,7 @@ func runDaemon(identity string, resources Resources) {
 			MonitorID: screen.ID,
 			AnchorX:   anchorX,
 			AnchorY:   anchorY,
-			Width:     width,
-			Height:    height,
 			Scale:     scale,
-		}
-		// Persist the user's sprite size; activity chrome has a fixed readable area.
-		if values, err := settingsManager.Snapshot(context.Background()); err == nil {
-			position.Width, position.Height = values.Pet.Position.Width, values.Pet.Position.Height
-		} else {
-			return
 		}
 		if err := dshworkapp.PersistPetPosition(context.Background(), petSettingsService, position); err != nil {
 			logging.Module(logging.ModPet).Warn("pet position save failed", logging.ErrAttrs(err, "")...)
@@ -960,28 +997,45 @@ func runDaemon(identity string, resources Resources) {
 			})
 		}
 	}
+	publishPetDisplayChange := func() {
+		_ = dshworkapp.PublishPetEvent(petSettingsService, dshworkpet.PetInputEvent{Type: "display.changed", Source: "host"})
+	}
 	handlePetDisplayChange := func(*application.WindowEvent) {
 		repositionPetWindow()
-		_ = dshworkapp.PublishPetEvent(petSettingsService, dshworkpet.PetInputEvent{Type: "display.changed", Source: "host"})
+		publishPetDisplayChange()
 	}
 	if petWindow != nil {
 		for _, eventType := range []events.WindowEventType{events.Common.WindowDPIChanged, events.Common.WindowFullscreen, events.Common.WindowUnFullscreen} {
 			petWindow.OnWindowEvent(eventType, handlePetDisplayChange)
 		}
+		if runtime.GOOS == "darwin" {
+			observePetDisplay := func() {
+				// A drag may still be crossing the seam. Save AppKit's current
+				// screen and scale without restoring the previous screen.
+				persistPetWindowPosition()
+				publishPetDisplayChange()
+			}
+			for _, eventType := range []events.WindowEventType{events.Mac.WindowDidChangeScreen, events.Mac.WindowDidChangeBackingProperties} {
+				petWindow.OnWindowEvent(eventType, func(*application.WindowEvent) { observePetDisplay() })
+			}
+			desktop.Event.OnApplicationEvent(events.Mac.ApplicationDidChangeScreenParameters, func(*application.ApplicationEvent) { observePetDisplay() })
+		}
 	}
 	notificationRouter.SetDeliveryFailureHandler(func(dshworknotifications.Event) {
-		desktop.Event.Emit("notification-failure", true)
-		hub.SendCommand("", "notification-failure", 10*time.Second, true)
+		reportNotificationFailure()
 	})
 
 	hideBackgroundSurfaces := func() {
 		petWindowMu.Lock()
 		defer petWindowMu.Unlock()
-		if petWindow != nil {
+		if petWindow != nil && !petWindowCloseAllowed.Load() {
 			petWindow.Hide()
 		}
 	}
 	showWorkspace = func() {
+		if applicationShuttingDown.Load() || quitFlow.InProgress() || windowLedger.IsQuitting() {
+			return
+		}
 		if maintenance.InstallerInProgress() {
 			maintenance.ShowInstallerBusy()
 			return
@@ -990,7 +1044,15 @@ func runDaemon(identity string, resources Resources) {
 			logging.Module(logging.ModApp).Error("open window failed", logging.ErrAttrs(err, "")...)
 		}
 	}
+	if runtime.GOOS == "darwin" {
+		desktop.Event.RegisterApplicationEventHook(events.Mac.ApplicationShouldHandleReopen, func(event *application.ApplicationEvent) {
+			// Only the UI process can restore a workbench window.
+			event.Cancel()
+			showWorkspace()
+		})
+	}
 	nativeNotification.OnNotificationResponse(func(result wailsnotifications.NotificationResult) {
+		recordMacPreviewNotificationResponse(result)
 		if interactionNotifications.respond(result) {
 			return
 		}
@@ -1019,7 +1081,10 @@ func runDaemon(identity string, resources Resources) {
 		}
 	})
 
-	tray := desktop.SystemTray.New()
+	tray := &application.SystemTray{}
+	if !previewPetPointer {
+		tray = desktop.SystemTray.New()
+	}
 	if runtime.GOOS == "darwin" {
 		tray.SetTemplateIcon(resources.TrayTemplateIcon)
 	} else {
@@ -1143,6 +1208,7 @@ func runDaemon(identity string, resources Resources) {
 	tray.SetMenu(trayMenu).OnClick(func() {
 		showWorkspace()
 	})
+	configureEmbeddedPreviewServices(server, embeddedService, desktop, initialNative, petPointerHit)
 
 	menu := desktop.NewMenu()
 	actionsMenu := menu.AddSubmenu(initialNative.Actions)
@@ -1299,7 +1365,7 @@ func runDaemon(identity string, resources Resources) {
 	}
 	publishLocale = func(locale dshworksettings.Locale) {
 		updateNativeLocale(locale)
-		registerDSHApprovalCategory(locale)
+		registerDSHApprovalCategory()
 	}
 
 	openSettings = func(section string) {
@@ -1466,11 +1532,11 @@ func runDaemon(identity string, resources Resources) {
 				if err := closeEmbeddedInstances(); err != nil {
 					return err
 				}
-				petWindowCloseAllowed.Store(true)
-				if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
+				if err := host.ShutdownForApp(); err != nil {
 					return err
 				}
-				return host.ShutdownForApp()
+				petWindowCloseAllowed.Store(true)
+				return dshworkapp.ShutdownPetService(context.Background(), petSettingsService)
 			},
 			func() {
 				if !applicationShuttingDown.Load() {
@@ -1494,6 +1560,7 @@ func runDaemon(identity string, resources Resources) {
 	petInputContext, stopPetInput := context.WithCancel(context.Background())
 	desktop.OnShutdown(func() {
 		server.BeginDrain()
+		clearMacPreviewNotification()
 		embeddedCloseErr := closeEmbeddedInstances()
 		if embeddedCloseErr != nil {
 			label := "embedded instance shutdown incomplete"
@@ -1515,7 +1582,11 @@ func runDaemon(identity string, resources Resources) {
 			stopPetMenuRefresh()
 		}
 		windowLedger.BeginQuit()
-		hideBackgroundSurfaces()
+		if runtime.GOOS != "darwin" {
+			hideBackgroundSurfaces()
+		}
+		// Wails closes AppKit windows after the shutdown hooks. The normal
+		// quit flow already hides the Pet before entering AppKit termination.
 		petWindowCloseAllowed.Store(true)
 		if err := dshworkapp.ShutdownPetService(context.Background(), petSettingsService); err != nil {
 			logging.Module(logging.ModPet).Warn("pet shutdown failed", logging.ErrAttrs(err, "")...)
@@ -1528,18 +1599,16 @@ func runDaemon(identity string, resources Resources) {
 		if popup := permissionUI.Load(); popup != nil {
 			popup.update(automationState.Snapshot())
 		}
-		registerDSHApprovalCategory(loadNativeLocale(&activeLocale))
+		registerDSHApprovalCategory()
 		if nativeNotificationHost.Unavailable() {
-			desktop.Event.Emit("notification-failure", true)
-			hub.SendCommand("", "notification-failure", 10*time.Second, true)
+			reportNotificationFailure()
 		}
-		if petWindow != nil {
-			nativeui.StartPetPointer(petInputContext, petWindow, func(x, y float64) bool {
-				return dshworkapp.PetPointerHit(petSettingsService, x, y)
-			})
+		requestNotificationAuthorization(notificationRouter.Preferences().Enabled)
+		if petWindow != nil && !previewPetPointer {
+			nativeui.StartPetPointer(petInputContext, petWindow, petPointerHit)
 		}
 		dshworkapp.StartupPetService(petSettingsService)
-		if !maintenance.InstallerInProgress() {
+		if !previewPetPointer && !maintenance.InstallerInProgress() {
 			host.Start()
 			updates.Start()
 		}
@@ -1611,15 +1680,6 @@ func loadNativeLocale(value *atomic.Value) dshworksettings.Locale {
 		return dshworksettings.DefaultLocale
 	}
 	return locale
-}
-
-type managerCommandRunner struct {
-	executor dshadapter.CommandExecutor
-}
-
-func (r managerCommandRunner) Run(ctx context.Context, executable string, args []string, env map[string]string, dir string) (dshmanager.CommandResult, error) {
-	result, err := r.executor.Run(ctx, executable, args, env, dir)
-	return dshmanager.CommandResult{Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
 func workspaceURL(manager managerSnapshotReader, section string) string {

@@ -166,6 +166,7 @@ func conditionalSystemCrash(state journal) *safeCrash {
 		return &safeCrash{Status: "missing-home"}
 	}
 	dir := filepath.Join(home, "Library", "Logs", "DiagnosticReports")
+	prefix := filepath.Base(state.Broker.Path) + "-"
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		entries, err := os.ReadDir(dir)
@@ -173,7 +174,7 @@ func conditionalSystemCrash(state journal) *safeCrash {
 			// Only this broker's executable reports are candidates; no general log export.
 			names := []string{}
 			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasPrefix(entry.Name(), "cefsimple-") && strings.HasSuffix(entry.Name(), ".ips") {
+				if !entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) && strings.HasSuffix(entry.Name(), ".ips") {
 					names = append(names, entry.Name())
 				}
 			}
@@ -216,10 +217,10 @@ func conditionalSystemCrash(state journal) *safeCrash {
 
 func TestCrashProjectionRequiresGeneration(t *testing.T) {
 	launch := time.Date(2026, 11, 9, 11, 32, 2, 123456000, time.UTC)
-	state := journal{Broker: Process{PID: 101, Started: uint64(launch.UnixMicro()), Path: "/owned/cefsimple"}, Owner: Process{PID: 100}}
+	state := journal{Broker: Process{PID: 101, Started: uint64(launch.UnixMicro()), Path: filepath.Join("/owned", browserExecutable)}, Owner: Process{PID: 100}}
 	var report systemCrash
 	// Apple's report launch timestamp may retain only 100us precision.
-	data := `{"pid":101,"parentPid":100,"procPath":"/owned/cefsimple","procLaunch":"2026-11-09 11:32:02.1234 +0000","captureTime":"2026-11-09 11:32:07.7149 +0000","exception":{"type":"EXC_BAD_ACCESS","signal":"SIGSEGV","codes":"PRIVATE-CANARY"},"termination":{"code":11,"namespace":"SIGNAL"},"faultingThread":0,"threads":[{"frames":[{"symbol":"CloseBrowser","imageIndex":0}],"threadState":{"registers":"PRIVATE-CANARY"}}],"usedImages":[{"name":"Chromium Embedded Framework","path":"/private/PRIVATE-CANARY"}],"environment":"PRIVATE-CANARY"}`
+	data := `{"pid":101,"parentPid":100,"procPath":"/owned/DSHWorkBrowser","procLaunch":"2026-11-09 11:32:02.1234 +0000","captureTime":"2026-11-09 11:32:07.7149 +0000","exception":{"type":"EXC_BAD_ACCESS","signal":"SIGSEGV","codes":"PRIVATE-CANARY"},"termination":{"code":11,"namespace":"SIGNAL"},"faultingThread":0,"threads":[{"frames":[{"symbol":"CloseBrowser","imageIndex":0}],"threadState":{"registers":"PRIVATE-CANARY"}}],"usedImages":[{"name":"Chromium Embedded Framework","path":"/private/PRIVATE-CANARY"}],"environment":"PRIVATE-CANARY"}`
 	if err := json.Unmarshal([]byte(data), &report); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +254,7 @@ func TestCrashProjectionRequiresGeneration(t *testing.T) {
 		t.Fatal("coarse/unknown creation accepted")
 	}
 	changed = report
-	changed.ProcPath = "/foreign/cefsimple"
+	changed.ProcPath = filepath.Join("/foreign", browserExecutable)
 	if projectSystemCrash(changed, state, now) != nil {
 		t.Fatal("foreign executable accepted")
 	}

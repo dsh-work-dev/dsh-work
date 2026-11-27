@@ -5,12 +5,9 @@ package windows
 import (
 	"archive/zip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/local/dsh-work/internal/acquisition"
 	"github.com/local/dsh-work/internal/dshadapter"
@@ -27,14 +23,13 @@ import (
 )
 
 const (
-	defaultOfficialRegistry  = "https://registry.npmjs.org/"
-	defaultMirrorRegistry    = "https://registry.npmmirror.com/"
-	defaultNodeDownloadLimit = int64(512 * 1024 * 1024)
+	defaultOfficialRegistry = "https://registry.npmjs.org/"
+	defaultMirrorRegistry   = "https://registry.npmmirror.com/"
 )
 
 var (
 	errSystemToolchainUnavailable = errors.New("no usable system Node.js toolchain is available")
-	errArtifactIntegrity          = errors.New("downloaded artifact integrity check failed")
+	errArtifactIntegrity          = acquisition.ErrArtifactIntegrity
 )
 
 // RuntimeInstallerOption is a test and distribution seam for the native
@@ -972,82 +967,6 @@ type artifactDownloader interface {
 	Download(context.Context, string, string, string, func(int64, int64, bool)) error
 }
 
-type httpArtifactDownloader struct {
-	client *http.Client
-}
-
-func (d httpArtifactDownloader) Download(ctx context.Context, source, destination, expectedSHA256 string, report func(int64, int64, bool)) error {
-	client := d.client
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Minute}
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
-	if err != nil {
-		return err
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("artifact download returned status %d", response.StatusCode)
-	}
-	if response.ContentLength > defaultNodeDownloadLimit {
-		return errors.New("artifact exceeds the download limit")
-	}
-	part := destination + ".part"
-	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	hash := sha256.New()
-	reader := io.Reader(io.LimitReader(response.Body, defaultNodeDownloadLimit+1))
-	writer := io.MultiWriter(file, hash)
-	received, copyErr := io.Copy(writer, &progressReader{reader: reader, report: report, total: response.ContentLength, hasTotal: response.ContentLength >= 0})
-	closeErr := file.Close()
-	if copyErr != nil {
-		_ = os.Remove(part)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(part)
-		return closeErr
-	}
-	if received > defaultNodeDownloadLimit {
-		_ = os.Remove(part)
-		return errors.New("artifact exceeds the download limit")
-	}
-	actual := hex.EncodeToString(hash.Sum(nil))
-	if !strings.EqualFold(strings.TrimSpace(expectedSHA256), actual) {
-		_ = os.Remove(part)
-		return fmt.Errorf("%w: expected %s", errArtifactIntegrity, strings.TrimSpace(expectedSHA256))
-	}
-	if err := os.Rename(part, destination); err != nil {
-		_ = os.Remove(part)
-		return err
-	}
-	return nil
-}
-
-type progressReader struct {
-	reader   io.Reader
-	report   func(int64, int64, bool)
-	received int64
-	total    int64
-	hasTotal bool
-}
-
-func (r *progressReader) Read(p []byte) (int, error) {
-	n, err := r.reader.Read(p)
-	r.received += int64(n)
-	if r.report != nil {
-		r.report(r.received, r.total, r.hasTotal)
-	}
-	return n, err
-}
+type httpArtifactDownloader = acquisition.VerifiedHTTPDownloader
 
 var runtimeVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)

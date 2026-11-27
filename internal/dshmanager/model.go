@@ -543,17 +543,18 @@ type SwitchAttempt struct {
 }
 
 type Snapshot struct {
-	RestorePoints     *RestorePointsView     `json:"restorePoints,omitempty"`
-	Runtimes          []RuntimeInfo          `json:"runtimes"`
-	DSHReleases       []DSHReleaseInfo       `json:"dshReleases"`
-	Nodes             []NodeInstallationInfo `json:"nodes"`
-	SystemNode        *ResolvedNode          `json:"systemNode,omitempty"`
-	LatestNode        *NodeReleaseInfo       `json:"latestNode,omitempty"`
-	DataDirectories   []DataDirectoryInfo    `json:"dataDirectories"`
-	Profiles          []ProfileInfo          `json:"profiles"`
-	Configured        *RunContext            `json:"configured,omitempty"`
-	Current           *RunContext            `json:"current,omitempty"`
-	KnownGood         *RunContext            `json:"knownGood,omitempty"`
-	LastSwitchAttempt *SwitchAttempt         `json:"lastSwitchAttempt,omitempty"`
-	Theme             ThemePreference        `json:"theme"`
+	BootstrapDSHVersion string                 `json:"bootstrapDshVersion,omitempty"`
+	RestorePoints       *RestorePointsView     `json:"restorePoints,omitempty"`
+	Runtimes            []RuntimeInfo          `json:"runtimes"`
+	DSHReleases         []DSHReleaseInfo       `json:"dshReleases"`
+	Nodes               []NodeInstallationInfo `json:"nodes"`
+	SystemNode          *ResolvedNode          `json:"systemNode,omitempty"`
+	LatestNode          *NodeReleaseInfo       `json:"latestNode,omitempty"`
+	DataDirectories     []DataDirectoryInfo    `json:"dataDirectories"`
+	Profiles            []ProfileInfo          `json:"profiles"`
+	Configured          *RunContext            `json:"configured,omitempty"`
+	Current             *RunContext            `json:"current,omitempty"`
+	KnownGood           *RunContext            `json:"knownGood,omitempty"`
+	LastSwitchAttempt   *SwitchAttempt         `json:"lastSwitchAttempt,omitempty"`
+	Theme               ThemePreference        `json:"theme"`
 }

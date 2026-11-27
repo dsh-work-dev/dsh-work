@@ -63,6 +63,63 @@ func TestPluginCommandsRejectUnsafeOrAmbiguousArguments(t *testing.T) {
 	}
 }
 
+func TestPluginVersionApprovalMatchesOnlyGeneratedArguments(t *testing.T) {
+	commands := NewPluginCommands()
+	approved, err := commands.AllowVersion("web", "@example/plugin@1.2.3", "0.2.2-rc.1")
+	if err != nil || !commands.IsVersionApproval(approved) {
+		t.Fatalf("generated approval rejected: %v (%v)", approved, err)
+	}
+	for _, args := range [][]string{
+		approved[:7],
+		append(append([]string{}, approved...), "--registry=https://example.invalid"),
+		{"plugin", "--profile", "web", "revoke-version", "@example/plugin@1.2.3", "--dsh-version", "0.2.2-rc.1", "--accept-risk"},
+		{"plugin", "--profile", "..", "allow-version", "@example/plugin@1.2.3", "--dsh-version", "0.2.2-rc.1", "--accept-risk"},
+		{"plugin", "--profile", "web", "allow-version", "--help", "--dsh-version", "0.2.2-rc.1", "--accept-risk"},
+	} {
+		if commands.IsVersionApproval(args) {
+			t.Fatalf("invalid approval accepted: %v", args)
+		}
+	}
+}
+
+func TestPackageMaintenanceMatchesManagerOperations(t *testing.T) {
+	commands := NewPluginCommands()
+	for _, build := range []func() ([]string, error){
+		func() ([]string, error) { return commands.Install("web", "is-number@7.0.0") },
+		func() ([]string, error) {
+			return commands.InstallAt("web", "is-number@7.0.0", "https://example.invalid/")
+		},
+		func() ([]string, error) { return commands.List("web") },
+		func() ([]string, error) { return commands.Outdated("web") },
+		func() ([]string, error) { return commands.Update("web", "is-number", "") },
+		func() ([]string, error) { return commands.Update("web", "is-number", "https://example.invalid/") },
+		func() ([]string, error) { return commands.Remove("web", "is-number") },
+		func() ([]string, error) { return commands.RemoveVersions("web", []string{"is-number", "is-odd"}) },
+		func() ([]string, error) { return commands.Prepare("web") },
+		func() ([]string, error) { return commands.ForceInstall("web", false) },
+		func() ([]string, error) { return commands.ForceInstall("web", true) },
+	} {
+		args, err := build()
+		if err != nil || !commands.IsPackageMaintenance(args) {
+			t.Fatalf("generated maintenance command rejected: %v (%v)", args, err)
+		}
+		if commands.IsPackageMaintenance(append(args, "--ignore-scripts=false")) {
+			t.Fatalf("unexpected extra option accepted: %v", args)
+		}
+	}
+	for _, args := range [][]string{
+		{"plugin", "--profile", "web", "exec", "node"},
+		{"plugin", "--profile", "web", "run", "prepare"},
+		{"plugin", "--profile", "web", "add", "is-number", "--dir", "https://example.invalid/"},
+		{"plugin", "--profile", "..", "install"},
+		{"plugin", "--profile", "--help", "list", "--depth", "0", "--json"},
+	} {
+		if commands.IsPackageMaintenance(args) {
+			t.Fatalf("unexpected maintenance command accepted: %v", args)
+		}
+	}
+}
+
 func joinArgs(args []string) string {
 	result := ""
 	for index, arg := range args {

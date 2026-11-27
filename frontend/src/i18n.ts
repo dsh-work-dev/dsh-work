@@ -400,6 +400,8 @@ const messages: Record<Locale, Record<string, string>> = {
     "startup.initializeProfile": "Initialize on startup",
     "startup.profileSettings": "Choose in Settings",
     "startup.fetchingReleases": "Fetching DSH versions…",
+    "startup.downloadingDependencies": "Downloading DSH dependencies…",
+    "startup.noCompatibleDSH": "No compatible DSH version is available.",
 
     "logs.title": "Installation log",
     "logs.copy": "Copy log",
@@ -1354,6 +1356,8 @@ const messages: Record<Locale, Record<string, string>> = {
     "startup.initializeProfile": "启动时初始化",
     "startup.profileSettings": "前往设置选择",
     "startup.fetchingReleases": "正在获取 DSH 版本…",
+    "startup.downloadingDependencies": "正在下载 DSH 依赖…",
+    "startup.noCompatibleDSH": "没有可用的兼容 DSH 版本。",
 
     "logs.title": "安装日志",
     "logs.copy": "复制日志",
@@ -2308,6 +2312,8 @@ const messages: Record<Locale, Record<string, string>> = {
     "startup.initializeProfile": "起動時に初期化",
     "startup.profileSettings": "設定で選択",
     "startup.fetchingReleases": "DSH バージョンを取得中…",
+    "startup.downloadingDependencies": "DSH の依存関係をダウンロード中…",
+    "startup.noCompatibleDSH": "利用できる互換 DSH バージョンがありません。",
 
     "logs.title": "インストールログ",
     "logs.copy": "ログをコピー",

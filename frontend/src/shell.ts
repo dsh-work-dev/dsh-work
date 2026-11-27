@@ -151,10 +151,10 @@ export function mountShell() {
       case "dsh": closeSettingsPanel(); sendCommand(action.id); break;
     }
   };
-  const menuBar = createMenuBar(t, run, (id,bounds) => {
-    if (id === "view") { void refreshPet(); void syncWindow(); }
+  const menuBar = createMenuBar(t, run, (id,bounds,refresh) => {
+    if (refresh && id === "view") { void refreshPet(); void syncWindow(); }
     return embeddedBrowser.menuOverlaps(bounds);
-  }, () => frame.contentWindow?.focus(),()=>{void embeddedBrowser.setOcclusion("shell-menu",false).catch(report("resume browser"))});
+  }, () => frame.contentWindow?.focus(),()=>{void embeddedBrowser.closeMenu().catch(report("resume browser"))});
   menuBar.render(menuState);
   bar.append(brand, menuBar.element, drag, modalMask, controls);
   document.body.prepend(bar);
@@ -162,6 +162,7 @@ export function mountShell() {
   document.body.append(frame);
 
   const embeddedBrowser=embeddedBrowserBridge(frame);
+  Events.On("browser-display-changed", () => embeddedBrowser.layoutChanged(true));
   let settingsOpen = false;
   let settingsRound=0;
   let dshModal = {active: false, background: "", blur: ""};
@@ -366,7 +367,10 @@ export function mountShell() {
     else if (message.type === "interaction-reset") {
       void ShellService.ResetInteractions(message.instance).catch(report("reset pending interactions"));
     }
-    else if (message.type === "sidebar-state") setMenu({sidebarLeftOpen: message.open});
+    else if (message.type === "sidebar-state") {
+      setMenu({sidebarLeftOpen: message.open});
+      embeddedBrowser.layoutChanged();
+    }
     else if (message.type === "modal-mask") {
       if(!embeddedBrowser.acceptsDocument(event.data?.document))return;
       dshModal = {active: message.active, background: message.background, blur: message.blur};
@@ -429,8 +433,10 @@ export function mountShell() {
   // Full screen hides the window buttons; 视图 → 全屏 leaves it.
   const syncWindow = async () => {
     const [fullscreen, zoom] = await Promise.all([Window.IsFullscreen(), Window.GetZoom()]);
+    const layoutChanged = fullscreen !== menuState.window.fullscreen || zoom !== menuState.window.zoom;
     controls.hidden = fullscreen;
     setMenu({window: {fullscreen, zoom}});
+    if (layoutChanged) embeddedBrowser.layoutChanged(true);
   };
   const syncMaximised = async () => {
     void syncWindow().catch(() => {});
@@ -439,6 +445,9 @@ export function mountShell() {
     maximise.dataset.labelKey = maximised ? "shell.window.restore" : "shell.window.maximise";
     maximise.setAttribute("aria-label", t(maximise.dataset.labelKey));
   };
-  window.addEventListener("resize", () => void syncMaximised());
+  window.addEventListener("resize", () => {
+    embeddedBrowser.layoutChanged();
+    void syncMaximised();
+  });
   void syncMaximised();
 }

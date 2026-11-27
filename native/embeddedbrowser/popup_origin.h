@@ -1,5 +1,5 @@
 #pragma once
-// Windows guest popup origin evidence only. Global CEF includes stay outside
+// Guest popup origin evidence only. Global CEF includes stay outside
 // Client/the broker namespace. There is no guest-visible binding or JS reporter.
 #include "include/cef_render_process_handler.h"
 #include "include/cef_v8.h"

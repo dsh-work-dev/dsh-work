@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/local/dsh-work/internal/dshmanager"
 	"github.com/local/dsh-work/internal/lifecycle"
 	"github.com/local/dsh-work/internal/supervisor"
 	"github.com/local/dsh-work/internal/workeripc"
@@ -46,10 +47,7 @@ type Runtime struct {
 	Env map[string]string
 }
 
-type CommandResult struct {
-	Stdout string
-	Stderr string
-}
+type CommandResult = dshmanager.CommandResult
 
 // CommandExecutor is deliberately smaller than os/exec. The Windows
 // implementation owns .cmd/.bat invocation details; tests can use a fake.

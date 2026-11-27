@@ -1,4 +1,4 @@
-//go:build !windows && ((!linux && !darwin) || !cgo || !e67presenter)
+//go:build !windows && !(darwin && cgo && !server) && !(linux && cgo && e67presenter)
 
 package embeddedbrowser
 

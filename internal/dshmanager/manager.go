@@ -40,6 +40,7 @@ type Config struct {
 	// releases and runtimes are marked unsupported in snapshots and cannot be
 	// installed. Empty disables these checks.
 	MinimumDSHVersion      string
+	BootstrapDSHVersion    string
 	Nodes                  []NodeInstallationInfo
 	DefaultRunContext      RunContext
 	CommandRunner          CommandRunner
@@ -920,19 +921,20 @@ func (m *Manager) Snapshot(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	return Snapshot{
-		RestorePoints:     versionPoints,
-		Runtimes:          refreshRuntimes(config.Runtimes, config.MinimumDSHVersion),
-		DSHReleases:       dshReleases,
-		Nodes:             refreshNodes(config.Nodes),
-		SystemNode:        systemNode,
-		LatestNode:        latestNode,
-		DataDirectories:   cloneDataDirectories(config.DataDirectories),
-		Profiles:          profiles,
-		Configured:        configured,
-		Current:           current,
-		KnownGood:         knownGood,
-		LastSwitchAttempt: lastSwitchAttempt,
-		Theme:             selectedTheme(ctx, config.DataDirectories, current, configured, config.ThemeReader),
+		BootstrapDSHVersion: config.BootstrapDSHVersion,
+		RestorePoints:       versionPoints,
+		Runtimes:            refreshRuntimes(config.Runtimes, config.MinimumDSHVersion),
+		DSHReleases:         dshReleases,
+		Nodes:               refreshNodes(config.Nodes),
+		SystemNode:          systemNode,
+		LatestNode:          latestNode,
+		DataDirectories:     cloneDataDirectories(config.DataDirectories),
+		Profiles:            profiles,
+		Configured:          configured,
+		Current:             current,
+		KnownGood:           knownGood,
+		LastSwitchAttempt:   lastSwitchAttempt,
+		Theme:               selectedTheme(ctx, config.DataDirectories, current, configured, config.ThemeReader),
 	}, nil
 }
 
@@ -1218,6 +1220,9 @@ func (m *Manager) runPluginCommand(ctx context.Context, target PluginTarget, pac
 		if cancellation := contextError(ctx); cancellation != nil {
 			return PluginResult{}, cancellation
 		}
+		if failure := ProfilePackageRecoveryFailure(err); failure != nil {
+			return PluginResult{}, failure
+		}
 		if errors.As(err, &incompatible) {
 			return PluginResult{}, failureWithMeta(lifecycle.ErrorPluginIncompatible, "This plugin version does not declare support for the current DSH version", incompatible.Error(), true, true)
 		}
@@ -1423,6 +1428,9 @@ func classifyPluginAttemptFailure(result CommandResult, err error) acquisition.F
 	text := strings.ToLower(result.Stdout + "\n" + result.Stderr + "\n" + err.Error())
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return acquisition.Failure{Kind: acquisition.FailureCanceled, Summary: "plugin operation was canceled", Cause: err}
+	}
+	if errors.Is(err, ErrProfilePackageRecoveryConflict) || errors.Is(err, ErrProfilePackageRecoveryPending) {
+		return acquisition.Failure{Kind: acquisition.FailureSemantic, Summary: "plugin recovery could not finish", Cause: err}
 	}
 	for _, marker := range []string{"econnreset", "econnrefused", "enotfound", "etimedout", "network", "socket hang up", "fetch failed"} {
 		if strings.Contains(text, marker) {

@@ -17,12 +17,13 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement) {
  subscribeLocale(()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-artifact-labels",document:documentToken,value:artifactLabels()},origin)});
 
  let nativeQueue=Promise.resolve();
- let overlayRevision=0;
+ let overlayRevision=0,layoutRevision=0;
  // Cover can fail after Go has already blocked the window. Unknown must be
- // explicitly cleared through Overlay(false), never treated as resumed.
+ // explicitly cleared through SetOcclusion, never treated as resumed.
  let nativeOverlay:"clear"|"blocked"|"unknown"="clear";
  type OcclusionSource = "shell-menu"|"settings"|"dsh-modal"|"provider-modal";
  const occlusions=new Set<OcclusionSource>();
+ let menuBounds:DOMRect|null=null;
  let overlayBarrier=Promise.resolve();
  let coveredPreviews:unknown[]=[];
  let previewAvailable=false;
@@ -31,10 +32,16 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement) {
   if(blocked&&nativeOverlay!=="blocked"){
    visibleSlots.forEach((rect,slot)=>coveredSlots.set(slot,rect));
    nativeOverlay="unknown";
-   try {const previews=await EmbeddedBrowserService.Cover()??[];if(documentToken===token){coveredPreviews=previews;previewAvailable=true}}
-   catch(error){if(!String(error).includes("CEF_PREVIEW_UNAVAILABLE"))throw error;await EmbeddedBrowserService.Overlay(true);previewAvailable=false}
+   const previews=await EmbeddedBrowserService.SetOcclusion(token,true);
+   if(documentToken===token){visibleSlots.clear();coveredPreviews=previews??[];previewAvailable=previews!==null}
    nativeOverlay="blocked";
-  } else if(!blocked&&nativeOverlay!=="clear"){await EmbeddedBrowserService.Overlay(false);nativeOverlay="clear";coveredPreviews=[];previewAvailable=false;coveredSlots.clear()}
+  } else if(!blocked&&nativeOverlay!=="clear"){
+   await EmbeddedBrowserService.SetOcclusion(token,false);
+   // Updates sampled while the overlay was present may still be in flight.
+   // Require a new measurement before allowing a native view to show again.
+   layoutRevision++;
+   nativeOverlay="clear";coveredPreviews=[];previewAvailable=false;coveredSlots.clear();
+  }
  };
  const send=(id:string,value:unknown,error="",errorCode="")=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-result",id,value,error,errorCode},origin)};
  const clamp=(raw:unknown)=>{
@@ -42,24 +49,81 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement) {
   if(!value||![value.x,value.y,value.width,value.height].every(n=>typeof n==="number"&&Number.isFinite(n)&&Math.abs(n)<1e6))throw Error("Invalid browser bounds");
   const viewport=frame.getBoundingClientRect();
   const scaleX=frame.clientWidth?viewport.width/frame.clientWidth:1,scaleY=frame.clientHeight?viewport.height/frame.clientHeight:1;
-  const x=viewport.left+Math.max(0,value.x as number)*scaleX,y=viewport.top+Math.max(0,value.y as number)*scaleY;
-  const right=Math.min(viewport.right,x+Math.max(0,value.width as number)*scaleX),bottom=Math.min(viewport.bottom,y+Math.max(0,value.height as number)*scaleY);
+  const left=viewport.left+(value.x as number)*scaleX;
+  const top=viewport.top+(value.y as number)*scaleY;
+  const right=Math.min(viewport.right,left+Math.max(0,value.width as number)*scaleX);
+  const bottom=Math.min(viewport.bottom,top+Math.max(0,value.height as number)*scaleY);
+  const x=Math.min(viewport.right,Math.max(viewport.left,left));
+  const y=Math.min(viewport.bottom,Math.max(viewport.top,top));
   return {X:x,Y:y,Width:Math.max(0,right-x),Height:Math.max(0,bottom-y)} satisfies SlotBounds;
  };
- const layoutChanged=()=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-layout"},origin)};
- const frameObserver=new ResizeObserver(layoutChanged);frameObserver.observe(frame);
- const applyOcclusion=async(blocked:boolean)=>{if(!enabled&&(blocked||nativeOverlay==="clear"))return;const revision=++overlayRevision,token=documentToken;const post=(type:string,value?:unknown)=>{if(!accepting||documentToken!==token)return;const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type,document:token,blocked,value},origin)};await native(()=>applyNativeOverlay(blocked,token));
+ const layoutChanged=(remeasure=false)=>{const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(accepting&&origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-layout",document:documentToken,remeasure},origin)};
+ let resizeRecheck:ReturnType<typeof setTimeout>|undefined;
+ const frameObserver=new ResizeObserver(()=>{
+  if(!accepting)return;
+  layoutChanged();
+  if(resizeRecheck!==undefined)clearTimeout(resizeRecheck);
+  // WebView layout can reach the presenter before native window geometry settles.
+  // Reconcile the last proposal once without delaying live resize updates.
+  resizeRecheck=setTimeout(()=>{
+   resizeRecheck=undefined;
+   layoutChanged(true);
+  },120);
+ });
+ frameObserver.observe(frame);
+ const applyOcclusion=async(revision:number,token:string)=>{
+  if(!accepting||documentToken!==token||!enabled)return;
+  const blocked=occlusions.size>0;
+  await applyNativeOverlay(blocked,token);
   // Only the latest source set can publish the visible state to this document.
-  if(revision===overlayRevision){if(blocked&&previewAvailable)post("dsh-work/browser-previews",coveredPreviews);post("dsh-work/browser-blocked")}
+  if(!accepting||documentToken!==token||revision!==overlayRevision)return;
+  const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;
+  if(!origin)return;
+  if(blocked&&previewAvailable)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-previews",document:token,blocked,value:coveredPreviews},origin);
+  frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",document:token,blocked,layoutRevision},origin);
+ };
+ const changeSource=(source:OcclusionSource,blocked:boolean)=>{
+  const previous=occlusions.has(source);
+  if(blocked)occlusions.add(source);else occlusions.delete(source);
+  return previous!==blocked||nativeOverlay==="unknown";
+ };
+ const setOcclusion=(source:OcclusionSource,blocked:boolean)=>{
+  if(changeSource(source,blocked)){
+   const revision=++overlayRevision,token=documentToken;
+   overlayBarrier=native(()=>applyOcclusion(revision,token));
+  }
+  return overlayBarrier;
+ };
+ const intersects=(bounds:DOMRect,slot:SlotBounds)=>bounds.left<slot.X+slot.Width&&bounds.right>slot.X&&bounds.top<slot.Y+slot.Height&&bounds.bottom>slot.Y;
+ const overlaps=(bounds:DOMRect)=>{
+  let hit=false;
+  for(const slots of [visibleSlots,coveredSlots])slots.forEach(slot=>{if(intersects(bounds,slot))hit=true});
+  return hit;
  };
  return {
   get enabled(){return enabled},
-  overlaps(bounds:DOMRect){let hit=false;for(const slots of [visibleSlots,coveredSlots])slots.forEach(slot=>{if(bounds.left<slot.X+slot.Width&&bounds.right>slot.X&&bounds.top<slot.Y+slot.Height&&bounds.bottom>slot.Y)hit=true});return hit},
-  async retireDocument(token:string){documentToken=token;accepting=false;announcedDocument="";availability=undefined;visibleSlots.clear();coveredSlots.clear();coveredPreviews=[];previewAvailable=false;++overlayRevision;return native(async()=>{try{candidate=await EmbeddedBrowserService.BeginDocument(token);return candidate}finally{enabled=false}})},
+  layoutChanged,
+  overlaps,
+  async retireDocument(token:string){
+   if(resizeRecheck!==undefined){
+    clearTimeout(resizeRecheck);
+    resizeRecheck=undefined;
+   }
+   documentToken=token;accepting=false;announcedDocument="";availability=undefined;
+   visibleSlots.clear();coveredSlots.clear();coveredPreviews=[];previewAvailable=false;++overlayRevision;
+   return native(async()=>{try{candidate=await EmbeddedBrowserService.BeginDocument(token);nativeOverlay="clear";layoutRevision=0;return candidate}finally{enabled=false}});
+  },
   acceptsDocument(token:unknown){return !candidate||(accepting&&token===documentToken)},
   activateDocument(token:string){if(documentToken===token)accepting=true},
-  menuOverlaps(bounds:DOMRect){const blocked=this.overlaps(bounds);if(!blocked&&!occlusions.has("shell-menu"))return undefined;return this.setOcclusion("shell-menu",blocked)},
-  setOcclusion(source:OcclusionSource,blocked:boolean){const previous=occlusions.has(source);if(blocked)occlusions.add(source);else occlusions.delete(source);if(previous===blocked&&nativeOverlay!=="unknown")return overlayBarrier;overlayBarrier=applyOcclusion(occlusions.size>0);return overlayBarrier},
+  menuOverlaps(bounds:DOMRect){
+   menuBounds=bounds;
+   return native(async()=>{
+    // An in-flight native update may acknowledge new bounds before the menu opens.
+    if(menuBounds===bounds&&changeSource("shell-menu",overlaps(bounds)))await applyOcclusion(++overlayRevision,documentToken);
+   });
+  },
+  closeMenu(){menuBounds=null;return setOcclusion("shell-menu",false)},
+  setOcclusion,
   handle(event:MessageEvent){
    const m=event.data as Record<string,unknown>;
    if(m?.version!==1||m.type!=="dsh-work/browser")return false;
@@ -69,14 +133,45 @@ export function embeddedBrowserBridge(frame: HTMLIFrameElement) {
    const execute=async()=>{
     if(!accepting||documentToken!==token)throw Error("Browser document retired");
     if(m.action==="artifact-labels")return artifactLabels();
-    if(!enabled){await ensureAvailability();if(!accepting||documentToken!==token)throw Error("Browser document retired");enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable")}
-    if(nativeOverlay==="unknown" || (nativeOverlay==="clear")!== (occlusions.size===0))await applyNativeOverlay(occlusions.size>0,token);
+    const prepare=async()=>{
+     if(!accepting||documentToken!==token)throw Error("Browser document retired");
+     if(!enabled){await ensureAvailability();if(!accepting||documentToken!==token)throw Error("Browser document retired");enabled=await EmbeddedBrowserService.Capability();if(!accepting||documentToken!==token)throw Error("Browser document retired");if(!enabled)throw Error("Embedded browser is unavailable")}
+     if(nativeOverlay==="unknown" || (nativeOverlay==="clear")!== (occlusions.size===0))await applyNativeOverlay(occlusions.size>0,token);
+     if(!accepting||documentToken!==token)throw Error("Browser document retired");
+     if(announcedDocument!==token){announcedDocument=token;const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",document:token,blocked:occlusions.size>0,layoutRevision},origin)}
+    };
+    // The native picker can await a person. Serialize admission and occlusion
+    // reconciliation, then let visibility and retirement continue while it waits.
+    if(m.action==="artifact-open"||m.action==="modal-overlay")await native(prepare);else await prepare();
     if(!accepting||documentToken!==token)throw Error("Browser document retired");
-    if(announcedDocument!==token){announcedDocument=token;const src=frame.getAttribute("src"),origin=src?bridgeOrigin(src):undefined;if(origin)frame.contentWindow?.postMessage({version:1,type:"dsh-work/browser-blocked",document:token,blocked:occlusions.size>0},origin)}
     if(m.action==="modal-overlay") {if(typeof m.blocked!=="boolean")throw Error("Invalid modal intent");await this.setOcclusion("provider-modal",m.blocked);return true}
     if(typeof slot!=="string"||slot.length>1024)throw Error("Invalid browser slot");
     switch(m.action){
-     case "update":if(typeof m.address!=="string"||m.address.length>8192||typeof m.visible!=="boolean")throw Error("Invalid browser request");{const rect=clamp(m.rect),visible=m.visible&&!frame.hidden;try{const result=await EmbeddedBrowserService.Update(token,slot,m.address,rect,visible);if(accepting&&documentToken===token){if(result.visible)visibleSlots.set(slot,rect);else visibleSlots.delete(slot);if(nativeOverlay!=="clear"&&(visible||coveredSlots.has(slot))){if(rect.Width>0&&rect.Height>0)coveredSlots.set(slot,rect);else coveredSlots.delete(slot)}}return result}catch(error){visibleSlots.delete(slot);coveredSlots.delete(slot);throw error}}
+     case "update":{
+      if(typeof m.address!=="string"||m.address.length>8192||typeof m.visible!=="boolean")throw Error("Invalid browser request");
+      const fresh=(m.layoutRevision??0)===layoutRevision;
+      if(!fresh&&!m.address)throw Object.assign(Error("Browser layout was superseded"),{code:"CEF_PRESENTATION_LAYOUT_STALE"});
+      // Navigation remains a valid intent for this document. A late request
+      // can navigate, but only with geometry already admitted for this slot.
+      const admitted=visibleSlots.get(slot);
+      const rect=fresh?clamp(m.rect):admitted??{X:0,Y:0,Width:0,Height:0};
+      const visible=(fresh?m.visible:!!admitted)&&!frame.hidden&&rect.Width>0&&rect.Height>0;
+      if(visible&&menuBounds&&intersects(menuBounds,rect)&&changeSource("shell-menu",true)){
+       await applyOcclusion(++overlayRevision,token);
+       if(!accepting||documentToken!==token)throw Error("Browser document retired");
+      }
+      try{
+       const result=await EmbeddedBrowserService.Update(token,slot,m.address,rect,visible);
+       if(accepting&&documentToken===token){
+        if(result.visible)visibleSlots.set(slot,rect);else visibleSlots.delete(slot);
+        if(nativeOverlay!=="clear"&&fresh){
+         if(!visible)coveredSlots.delete(slot);
+         else coveredSlots.set(slot,rect);
+        }
+       }
+       return result;
+      }catch(error){visibleSlots.delete(slot);if(fresh)coveredSlots.delete(slot);throw error}
+     }
      case "artifact-open":return EmbeddedBrowserService.OpenArtifact(token,slot);
      case "state":return EmbeddedBrowserService.State(token,slot);
      case "select-control":if(typeof m.session!=="string"||m.session.length>1024||typeof m.lease!=="string")throw Error("Invalid browser selection");return EmbeddedBrowserService.SelectControl(token,new URL(frame.src).searchParams.get("generation")||"",m.session,slot,m.lease);

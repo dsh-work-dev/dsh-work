@@ -7,10 +7,10 @@ import (
 )
 
 // The pinned HTML renderer already owns the real deliverables/files/document
-// occurrence. Replace only its body on the explicitly enabled Windows provider;
-// the unprojected runtime and other platforms keep their original renderer.
+// occurrence. Replace its body on platforms with the native artifact presenter.
 func projectEmbeddedArtifact(source string) (string, error) {
-	if runtime.GOOS != "windows" || !strings.Contains(source, `id: "@deepseek-ai/dsh-client-ui-sidebar-documentpreview"`) {
+	if (runtime.GOOS != "windows" && runtime.GOOS != "darwin") ||
+		!strings.Contains(source, `id: "@deepseek-ai/dsh-client-ui-sidebar-documentpreview"`) {
 		return source, nil
 	}
 	seam := "function HtmlBody({ content, resourceAddress, readRelated, useTabInfo, useInteractivePreview, addResource, setResources, t }) {"

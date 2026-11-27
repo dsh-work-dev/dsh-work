@@ -1,6 +1,7 @@
-param([switch]$Runner,[switch]$PrepareOnly,[switch]$BuildOnly,[ValidateSet('1','2')][string]$UiInstance='1',[string]$Runtime='')
+param([switch]$Runner,[switch]$PrepareOnly,[switch]$BuildOnly,[ValidateSet('1','2')][string]$UiInstance='1',[string]$Runtime='', [string]$CefExecutable='')
 $ErrorActionPreference='Stop'
 if($Runner -and ($PrepareOnly -or $BuildOnly -or $UiInstance -ne '1')){throw 'Runner mode owns both UI instances; do not combine it with PrepareOnly, BuildOnly or UiInstance 2.'}
+if ($Runner -and $CefExecutable) { throw 'Runner mode rebuilds its own native broker. Use -CefExecutable with the ordinary development session.' }
 $repo=Split-Path -Parent $PSScriptRoot
 $bin=Join-Path $repo 'bin'
 New-Item -ItemType Directory -Path $bin -Force|Out-Null
@@ -51,8 +52,9 @@ try {
  if($PrepareOnly){Write-Host "Prepared candidate module: $mod";return}
  node (Join-Path $PSScriptRoot 'verify-node.mjs')
  if($LASTEXITCODE -ne 0){throw 'Node/npm preflight failed. Select Node >=24.9.0 in this ordinary terminal before starting the candidate.'}
- $cef=Join-Path $bin 'embedded-cef-vs2022/Release/dsh_cef_broker.exe'
- if(!(Test-Path -LiteralPath $cef)){throw "Build the approved native broker first: $cef"}
+ $cef = if ($CefExecutable) { $CefExecutable } else { Join-Path $bin 'embedded-cef-vs2022/Release/dsh_cef_broker.exe' }
+ if (!(Test-Path -LiteralPath $cef -PathType Leaf)) { throw "Build the approved native broker first: $cef" }
+ $cef = (Resolve-Path -LiteralPath $cef).Path
  # Only module package loading/build receives this flag. Global GOFLAGS also
  # reaches x/tools' GO111MODULE=off language-version probe and breaks bindings.
  $env:DSH_WORK_EMBEDDED_MODFILE=$mod.Replace('\','/')

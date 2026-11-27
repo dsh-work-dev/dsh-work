@@ -28,7 +28,7 @@ func embeddedDevelopmentRoot() string {
 func embeddedComposition(*application.WebviewWindowOptions) {}
 func embeddedRunnerPeer(daemon.ProcessPeer) bool            { return false }
 func embeddedConfigureManager(c *dshmanager.Config, adapter *dshadapter.Adapter) error {
-	if embeddedDevelopmentRoot() == "" {
+	if embeddedDevelopmentRoot() == "" || os.Getenv("DSH_WORK_CEF_MAC_PUBLICATION") == "" {
 		return nil
 	}
 	if os.Getenv("DSH_WORK_DESKTOP_REPORT") != "" {

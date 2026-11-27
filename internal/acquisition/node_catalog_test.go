@@ -44,6 +44,33 @@ func TestNodeCatalogResolvesLatestStableExactWindowsArtifact(t *testing.T) {
 	}
 }
 
+func TestNodeCatalogResolvesLatestStableExactMacArtifact(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.json":
+			_, _ = w.Write([]byte(`[
+				{"version":"v27.0.0-rc.1","files":["osx-arm64-tar"]},
+				{"version":"v26.2.0","files":["osx-x64-tar"]},
+				{"version":"v26.1.0","files":["osx-arm64-tar"]}
+			]`))
+		case "/v26.1.0/SHASUMS256.txt":
+			_, _ = w.Write([]byte(digest + "  node-v26.1.0-darwin-arm64.tar.gz\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	catalog := NodeCatalogClient{
+		Client: server.Client(), OfficialBaseURL: server.URL + "/",
+		Platform: "darwin", Architecture: "arm64", StagingRoot: t.TempDir(),
+	}
+	release, err := catalog.RefreshLatest(context.Background())
+	if err != nil || release.Version != "v26.1.0" || release.Filename != "node-v26.1.0-darwin-arm64.tar.gz" || release.SHA256 != digest || release.Route != RouteOfficial {
+		t.Fatalf("release = %#v, error = %v", release, err)
+	}
+}
+
 func TestNodeCatalogUsesMirrorOnlyAfterOfficialReachabilityFailure(t *testing.T) {
 	digest := strings.Repeat("b", 64)
 	official := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {

@@ -76,6 +76,37 @@ func TestCancelledUncertainAttemptRetainsRetryableOwner(t *testing.T) {
 	}
 }
 
+func TestRecoveryAcrossPublicationsRequiresOldJobPins(t *testing.T) {
+	current := Publication{Owner: "/release/New.app/Contents/MacOS/dsh-cef-owner", verified: true}
+	adapter := &Adapter{publication: current}
+	old := launchAttempt{
+		Program: "/release/Old.app/Contents/MacOS/dsh-cef-owner", Submitted: true,
+		FileIdentityVersion: 1, ProgramInode: 42, PlistInode: 43,
+	}
+	if !adapter.recoverableAttemptProgram(old) {
+		t.Fatal("eligible old publication did not reach launchd identity checks")
+	}
+	unpinned := old
+	unpinned.FileIdentityVersion = 0
+	if adapter.recoverableAttemptProgram(unpinned) {
+		t.Fatal("submitted attempt from another publication accepted without versioned pins")
+	}
+	unpinned = old
+	unpinned.ProgramInode = 0
+	if adapter.recoverableAttemptProgram(unpinned) {
+		t.Fatal("submitted attempt accepted without a program pin")
+	}
+	foreign := old
+	foreign.Program = "/usr/bin/true"
+	if adapter.recoverableAttemptProgram(foreign) {
+		t.Fatal("non-owner executable was accepted")
+	}
+	adapter.publication.verified = false
+	if adapter.recoverableAttemptProgram(old) {
+		t.Fatal("an unverified successor publication was accepted")
+	}
+}
+
 func TestJobOwnershipUsesFileIdentity(t *testing.T) {
 	root := t.TempDir()
 	expected := filepath.Join(root, "owner.plist")

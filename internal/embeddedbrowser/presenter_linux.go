@@ -16,7 +16,6 @@ import (
 	"github.com/local/dsh-work/internal/localipc"
 	"github.com/local/dsh-work/internal/logging"
 	"golang.org/x/sys/unix"
-	"math"
 	"os"
 	"sync"
 )
@@ -127,21 +126,15 @@ func admitPresenter(peer PresenterPeer, parent uintptr) (presenterOwner, error) 
 }
 func presenterBounds(peer PresenterPeer, parent uintptr, b SlotBounds, zoom float64) (PixelBounds, error) {
 	// Linux callers provide trusted GTK scale * WebView zoom, not Agent data.
-	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom < 0.25 || zoom > 20 {
-		return PixelBounds{}, errors.New("CEF_ZOOM_REJECTED")
+	if err := validatePresenterZoom(zoom, 20); err != nil {
+		return PixelBounds{}, err
 	}
-	for _, v := range []float64{b.X, b.Y, b.Width, b.Height} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > 1e6 {
-			return PixelBounds{}, errors.New("CEF_SLOT_BOUNDS_REJECTED")
-		}
+	if err := b.validate(); err != nil {
+		return PixelBounds{}, err
 	}
 	w, h, e := parentBounds(peer, parent)
 	if e != nil {
 		return PixelBounds{}, e
 	}
-	left := math.Min(float64(w), math.Max(0, b.X*zoom))
-	top := math.Min(float64(h), math.Max(40*zoom, b.Y*zoom))
-	right := math.Min(float64(w), (b.X+b.Width)*zoom)
-	bottom := math.Min(float64(h), (b.Y+b.Height)*zoom)
-	return PixelBounds{X: int(math.Ceil(left)), Y: int(math.Ceil(top)), Width: max(0, int(math.Floor(right)-math.Ceil(left))), Height: max(0, int(math.Floor(bottom)-math.Ceil(top)))}, nil
+	return clipPresenterBounds(b, w, h, zoom, presenterChromeHeight*zoom), nil
 }

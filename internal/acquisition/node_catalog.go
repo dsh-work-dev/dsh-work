@@ -43,7 +43,7 @@ type NodeCatalogClient struct {
 
 func (c NodeCatalogClient) RefreshLatest(ctx context.Context) (NodeRelease, error) {
 	c = c.normalized()
-	archiveTag, archiveSuffix, err := nodeArchiveTarget(c.Platform, c.Architecture)
+	archiveTag, archiveSuffix, extension, err := nodeArchiveTarget(c.Platform, c.Architecture)
 	if err != nil {
 		return NodeRelease{}, err
 	}
@@ -63,7 +63,7 @@ func (c NodeCatalogClient) RefreshLatest(ctx context.Context) (NodeRelease, erro
 	if err != nil {
 		return NodeRelease{}, err
 	}
-	filename := "node-" + version + "-" + archiveSuffix + ".zip"
+	filename := "node-" + version + "-" + archiveSuffix + extension
 	checksumPath := version + "/SHASUMS256.txt"
 	checksumResult, err := c.fetch(ctx, "node-checksums-"+version, ArtifactIdentity{
 		Kind: ArtifactNode, Name: "node", Version: version, Platform: c.Platform,
@@ -246,17 +246,21 @@ func checksumForFile(data []byte, filename string) (string, error) {
 	return "", Failure{Kind: FailureIntegrity, Summary: "Node archive checksum is missing"}
 }
 
-func nodeArchiveTarget(platform, architecture string) (string, string, error) {
-	if platform != "windows" {
-		return "", "", Failure{Kind: FailureNotFound, Summary: "Node archive is unavailable for this platform"}
-	}
+func nodeArchiveTarget(platform, architecture string) (string, string, string, error) {
 	switch architecture {
-	case "amd64", "x64":
-		return "win-x64-zip", "win-x64", nil
-	case "arm64":
-		return "win-arm64-zip", "win-arm64", nil
+	case "amd64":
+		architecture = "x64"
+	case "x64", "arm64":
 	default:
-		return "", "", Failure{Kind: FailureNotFound, Summary: "Node archive is unavailable for this architecture"}
+		return "", "", "", Failure{Kind: FailureNotFound, Summary: "Node archive is unavailable for this architecture"}
+	}
+	switch platform {
+	case "windows":
+		return "win-" + architecture + "-zip", "win-" + architecture, ".zip", nil
+	case "darwin":
+		return "osx-" + architecture + "-tar", "darwin-" + architecture, ".tar.gz", nil
+	default:
+		return "", "", "", Failure{Kind: FailureNotFound, Summary: "Node archive is unavailable for this platform"}
 	}
 }
 

@@ -111,7 +111,7 @@ func TestLiveArtifactProductSelection(t *testing.T) {
 	if state.Visible || state.ArtifactName != "index.html" {
 		t.Fatal("selection prematurely visible or missing local source", state)
 	}
-	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, "session/artifact/tab", "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, "session/artifact/tab", "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestLiveArtifactProductSelection(t *testing.T) {
 	t.Log("actual tab close drained artifact context/resources; old identity rejected")
 	t.Logf("graph after close: %+v", broker.FrameGraph())
 	fresh := selectFile()
-	fresh, err = reg.Update(ctx, peer, "window", parent, admission.Lease, "session/artifact/tab", "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+	fresh, err = reg.Update(ctx, peer, "window", parent, admission.Lease, "session/artifact/tab", "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -131,7 +131,7 @@ func runApprovedAttachmentNative(t *testing.T, mode string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	view, e := registry.Update(ctx, peer, "window", parent, admission.Lease, "download/fixture", server.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+	view, e := registry.Update(ctx, peer, "window", parent, admission.Lease, "download/fixture", server.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 	if e != nil {
 		t.Fatal(e)
 	}

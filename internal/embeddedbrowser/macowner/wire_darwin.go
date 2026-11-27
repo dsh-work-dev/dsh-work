@@ -21,6 +21,7 @@ type message struct {
 	Generation     string                  `json:"generation,omitempty"`
 	Secret         string                  `json:"secret,omitempty"`
 	Type           string                  `json:"type,omitempty"`
+	RendererChild  uint32                  `json:"rendererChild,omitempty"`
 	Broker         Process                 `json:"broker,omitempty"`
 	Group          Census                  `json:"group,omitempty"`
 	Children       Census                  `json:"children,omitempty"`
@@ -39,6 +40,7 @@ type launchConfig struct {
 	Secret     string                `json:"secret"`
 	Host       Process               `json:"host"`
 	Helpers    []string              `json:"helpers"`
+	Renderer   string                `json:"renderer,omitempty"`
 	Plan       supervisor.LaunchPlan `json:"plan"`
 	Job        string                `json:"job"`
 }

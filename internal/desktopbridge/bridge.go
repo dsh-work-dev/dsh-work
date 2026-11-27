@@ -22,6 +22,7 @@ type Bridge struct {
 	OpenExternal           func(string) error
 	ReportBoot             func(context.Context, string, string) error
 	SaveSessionExport      func(context.Context, string, func(io.Writer) error) (bool, error)
+	PickWorkspaceDirectory func(context.Context) (string, error)
 }
 
 // ByteConn permits exercising the same Fetch implementation without a WebView.
@@ -159,6 +160,8 @@ func (b *Bridge) Serve(c ByteConn) error {
 	var response *http.Response
 	if u.Path == "/__work/session-export" {
 		response = b.sessionExport(ctx, u, meta)
+	} else if u.Path == "/__work/workspace-directory" {
+		response = b.workspaceDirectory(ctx, u, meta)
 	} else if u.Path == "/__work/external" {
 		target, e := url.Parse(u.Query().Get("url"))
 		if e != nil || len(u.Query().Get("url")) > 4096 || target.User != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" || b.OpenExternal == nil || meta.Method != "POST" {

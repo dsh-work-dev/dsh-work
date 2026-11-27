@@ -97,7 +97,7 @@ func TestLiveWindowsFilePickerBoundary(t *testing.T) {
 	for _, scenario := range []string{"file"} {
 		t.Run(scenario, func(t *testing.T) {
 			slot := "slot-" + scenario
-			view, e := reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+			view, e := reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -354,7 +354,7 @@ func TestLiveWindowsFilePickerBoundary(t *testing.T) {
 						if e = reg.Hide(ctx, peer, "window"); e != nil {
 							t.Fatal(e)
 						}
-						_, e = reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+						_, e = reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 					case "navigate":
 						e = target.Navigate(ctx, fixture.URL+"/next")
 					case "close":

@@ -638,6 +638,10 @@ func newUpdateRunner(stagingBase string, selected settings.UpdateChannel, stopUI
 			SelectedChannel: string(channel),
 		},
 	}
+	// This backend's feed artifacts and installation handoff are Windows-specific.
+	if runtime.GOOS != "windows" {
+		return runner
+	}
 	feedRoot := resolveUpdateFeed()
 	if feedRoot == "" {
 		logging.Module(logging.ModUpdate).Info("update feed not configured")

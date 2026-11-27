@@ -520,7 +520,7 @@ func (r *InstancePresenterRegistry) Close() error {
 	}
 	return result
 }
-func (r *InstancePresenterRegistry) Update(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, lease, slot, address string, b SlotBounds, z float64, visible bool) (ViewState, error) {
+func (r *InstancePresenterRegistry) Update(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, lease, slot, address string, b SlotBounds, z float64, visible bool, displayRevision uint64) (ViewState, error) {
 	i, e := r.lockSurface(peer, surface)
 	if e != nil {
 		return ViewState{}, e
@@ -540,7 +540,7 @@ func (r *InstancePresenterRegistry) Update(ctx context.Context, peer PresenterPe
 			}
 		}
 	}
-	v, e := i.views.Update(ctx, peer, surface, parent, lease, slot, address, b, z, visible)
+	v, e := i.views.Update(ctx, peer, surface, parent, lease, slot, address, b, z, visible, displayRevision)
 	r.report(i, r.rememberLocked(i))
 	return r.identityLocked(i, v), e
 }

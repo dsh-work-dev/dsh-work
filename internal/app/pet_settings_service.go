@@ -289,6 +289,13 @@ func PersistPetPosition(ctx context.Context, service *PetSettingsService, positi
 	if err != nil {
 		return err
 	}
+	// A native move publishes the frame's anchor and display. Sprite size is
+	// owned by Settings, including a resize committed while the move queued.
+	position.Width = values.Pet.Position.Width
+	position.Height = values.Pet.Position.Height
+	if position == values.Pet.Position {
+		return nil
+	}
 	next := copyPetPreference(values.Pet)
 	next.Position = position
 	// This records a native move. Reapplying visibility would call Show and

@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || (darwin && cgo)
 
 package embeddedbrowser
 
@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-func (c *windowsDownloads) quiesce() (func(), error) {
+func (c *ownedDownloads) quiesce() (func(), error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.quiescing || (c.closed && c.process != 0) {
+	var empty downloadProcess
+	if c.quiescing || (c.closed && c.process != empty) {
 		return nil, errors.New("DOWNLOAD_SHUTDOWN_BUSY")
 	}
 	c.quiescing = true
@@ -27,7 +28,7 @@ func downloadUnfinished(state string) bool {
 	}
 	return true
 }
-func (c *windowsDownloads) busy() bool {
+func (c *ownedDownloads) busy() bool {
 	c.mu.Lock()
 	prompts := len(c.prompts)
 	c.mu.Unlock()
@@ -45,7 +46,7 @@ func (c *windowsDownloads) busy() bool {
 // Prompts own the whole approval/start handshake. Join them before canceling
 // grants, so a late Save/confirmation answer cannot race a final native GET.
 // Terminal manager state is set only after native writer drain and file cleanup.
-func (c *windowsDownloads) drain(ctx context.Context, cancel bool) error {
+func (c *ownedDownloads) drain(ctx context.Context, cancel bool) error {
 	if cancel {
 		var stop context.CancelFunc
 		ctx, stop = context.WithTimeout(ctx, 15*time.Second)
@@ -63,7 +64,8 @@ func (c *windowsDownloads) drain(ctx context.Context, cancel bool) error {
 		}
 		prompts := len(c.prompts)
 		closed := c.closed
-		joined := c.process == 0
+		var empty downloadProcess
+		joined := c.process == empty
 		c.mu.Unlock()
 		if closed {
 			if joined {

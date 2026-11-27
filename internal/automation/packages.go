@@ -14,7 +14,11 @@ import (
 // PackageRevision identifies a frozen dependency set, independently of DSH.
 func PackageRevision(c Capability) string {
 	files, _ := DependencyFiles(c)
-	sum := sha256.Sum256(files["package-lock.json"])
+	lock := files["package-lock.json"]
+	if c == Computer && nativeMacAutomation() {
+		lock = append(append([]byte{}, lock...), MacDriverSHA256...)
+	}
+	sum := sha256.Sum256(lock)
 	return hex.EncodeToString(sum[:16])
 }
 

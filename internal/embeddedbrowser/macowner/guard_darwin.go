@@ -24,6 +24,8 @@ import (
 
 func fmtKey(pid uint32, started uint64) string { return fmt.Sprintf("%d:%d", pid, started) }
 
+var errCEFBrokerExited = errors.New("MAC_CEF_BROKER_NO_LONGER_LIVE")
+
 type guard struct {
 	mu, daemonWrite, nativeWrite                  sync.Mutex
 	cfg                                           launchConfig
@@ -37,6 +39,8 @@ type guard struct {
 	knownError                                    error
 	pendingSnapshot                               *message
 	mcpStopAt                                     time.Time
+	mcpForceAt                                    time.Time
+	brokerDevice, brokerInode                     uint64
 }
 
 func (g *guard) wakeup() {
@@ -122,11 +126,17 @@ func (g *guard) serve(c net.Conn) {
 	if readFrame(c, &hello) != nil {
 		return
 	}
-	target, err := localipc.TargetFromConn(c)
-	if err != nil {
+	if hello.Generation != g.cfg.Plan.GenerationID {
 		return
 	}
-	if hello.Generation != g.cfg.Plan.GenerationID {
+	brokerRegistration := hello.Kind == "broker" && g.cfg.Restricted == nil && g.cfg.MCP == nil
+	target, err := localipc.TargetFromConn(c)
+	if err != nil {
+		if brokerRegistration {
+			g.mu.Lock()
+			g.recordNativeEventLocked("owner-register-target-unavailable")
+			g.mu.Unlock()
+		}
 		return
 	}
 	if hello.Kind == "daemon" {
@@ -173,16 +183,28 @@ func (g *guard) serve(c net.Conn) {
 	select {
 	case <-g.brokerReady:
 	case <-time.After(3 * time.Second):
+		if brokerRegistration {
+			g.mu.Lock()
+			g.recordNativeEventLocked("owner-register-launch-not-ready")
+			g.mu.Unlock()
+		}
 		return
 	}
 	p, err := process(target.PID)
-	if err != nil || p.Started != target.Started || p.State != "live" {
-		return
-	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if err != nil || p.Started != target.Started || p.State != "live" {
+		if brokerRegistration {
+			g.recordNativeEventLocked("owner-register-process-unavailable")
+		}
+		return
+	}
 	if hello.Kind == "broker" {
-		if p.PID != g.state.Broker.PID || p.Started != g.state.Broker.Started || p.PPID != g.state.Owner.PID || p.Path != g.cfg.Plan.Executable {
+		if hello.RendererChild != 0 {
+			return
+		}
+		if failure := g.brokerRegistrationFailure(p); failure != "" {
+			g.recordNativeEventLocked(failure)
 			return
 		}
 	} else if hello.Kind == "helper" {
@@ -203,15 +225,25 @@ func (g *guard) serve(c net.Conn) {
 			return
 		}
 		switch hello.Type {
-		case "renderer", "gpu-process", "utility", "code-sign-clone-cleanup":
+		case "renderer":
+			if hello.RendererChild == 0 || hello.RendererChild > 0x7fffffff || !sameJobFile(p.Path, g.cfg.Renderer) {
+				return
+			}
+		case "gpu-process", "utility", "code-sign-clone-cleanup":
+			if hello.RendererChild != 0 {
+				return
+			}
 		default:
 			return
 		}
 	} else {
 		return
 	}
-	g.state.Owned[processKey(p)] = owned{Process: p, Target: &target, Role: hello.Kind + ":" + hello.Type}
+	g.state.Owned[processKey(p)] = owned{Process: p, Target: &target, Role: hello.Kind + ":" + hello.Type, RendererChild: hello.RendererChild}
 	if err = g.persist(); err != nil {
+		if brokerRegistration {
+			g.recordNativeEventLocked("owner-register-journal-failed")
+		}
 		g.knownError = err
 		g.wakeup()
 		return
@@ -219,9 +251,29 @@ func (g *guard) serve(c net.Conn) {
 	if writeFrame(c, struct {
 		Kind string `json:"kind"`
 	}{"registered"}) != nil {
+		if brokerRegistration {
+			g.recordNativeEventLocked("owner-register-reply-failed")
+		}
 		return
 	}
 	g.wakeup()
+}
+
+func (g *guard) brokerRegistrationFailure(p Process) string {
+	switch {
+	case p.PID != g.state.Broker.PID || p.Started != g.state.Broker.Started:
+		return "owner-register-process-mismatch"
+	case p.PPID != g.state.Owner.PID:
+		return "owner-register-parent-mismatch"
+	case p.Path == "":
+		return "owner-register-path-unavailable"
+	// Chromium's code signing clone hard-links the executable. Darwin can
+	// return a clone's path for the same running vnode after a name lookup.
+	case !pinnedJobFile(p.Path, g.cfg.Plan.Executable, g.brokerDevice, g.brokerInode):
+		return "owner-register-path-mismatch"
+	default:
+		return ""
+	}
 }
 
 func (g *guard) startBroker() error {
@@ -230,6 +282,10 @@ func (g *guard) startBroker() error {
 	}
 	if g.cfg.MCP != nil {
 		return g.startMCPBroker()
+	}
+	device, inode, err := fileIdentity(g.cfg.Plan.Executable)
+	if err != nil {
+		return err
 	}
 	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
 	if err != nil {
@@ -267,6 +323,7 @@ func (g *guard) startBroker() error {
 	}
 	g.mu.Lock()
 	g.state.Broker = p
+	g.brokerDevice, g.brokerInode = device, inode
 	g.state.Owned[processKey(p)] = owned{Process: p, Role: "broker"}
 	err = g.persist()
 	g.mu.Unlock()
@@ -285,6 +342,10 @@ func (g *guard) readNative(c net.Conn) {
 			return
 		}
 		g.mu.Lock()
+		if g.exited {
+			g.mu.Unlock()
+			return
+		}
 		switch m.Kind {
 		case "initialize":
 			if g.stopping {
@@ -367,7 +428,14 @@ func (g *guard) admitLocked(c Census, children bool) error {
 		return ErrCleanupPending
 	}
 	root, err := instance(g.state.Broker)
-	if err != nil || root.State != "live" {
+	if err != nil {
+		return err
+	}
+	switch root.State {
+	case "gone", "reused", "zombie":
+		return errCEFBrokerExited
+	case "live":
+	default:
 		return ErrCleanupPending
 	}
 	for _, p := range c.Members {
@@ -499,6 +567,9 @@ func RunGuard(configPath string) error {
 	}
 	if cfg.MCP != nil {
 		leaseName = ".dsh-mcp-component.lock"
+		if cfg.MCP.AUVDriver != "" {
+			leaseName = ".dsh-auv-component.lock"
+		}
 	}
 	fd, err := unix.Open(filepath.Join(cfg.Profile, leaseName), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
 	if err != nil {
@@ -523,6 +594,9 @@ func RunGuard(configPath string) error {
 	}
 	if cfg.MCP != nil {
 		g.state.Component = "owned-cef-mcp"
+		if cfg.MCP.AUVDriver != "" {
+			g.state.Component = "owned-auv"
+		}
 	}
 	if err = g.persist(); err != nil {
 		return err
@@ -567,6 +641,7 @@ func RunGuard(configPath string) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	pendingNotified := false
+	crashForced := false
 	for {
 		select {
 		case <-ticker.C:
@@ -575,12 +650,24 @@ func RunGuard(configPath string) error {
 			return ctx.Err()
 		}
 		g.mu.Lock()
-		if (cfg.MCP != nil || cfg.Restricted != nil) && !g.mcpStopAt.IsZero() && time.Since(g.mcpStopAt) > 3*time.Second {
+		stopGraceExpired := !g.mcpStopAt.IsZero() && time.Since(g.mcpStopAt) > 3*time.Second
+		if cfg.Restricted != nil && stopGraceExpired && g.mcpForceAt.IsZero() {
+			// A registered Worker can ignore SIGTERM. Force the pinned process
+			// while the guard still owns the group, then let its waiter reap it.
+			g.mu.Unlock()
+			g.stopMCP(true)
+			continue
+		}
+		awaitingRestrictedExit := cfg.Restricted != nil && !g.mcpForceAt.IsZero() && time.Since(g.mcpForceAt) < time.Second
+		if (cfg.MCP != nil || cfg.Restricted != nil) && stopGraceExpired && !awaitingRestrictedExit {
 			// The LaunchAgent still holds the original PGID here. Returning
 			// lets launchd finish its owned inherited group, including a child
 			// stopped before its mandatory registration. Recovery still needs
 			// actual instance/group empty; this is not a completion record.
 			g.state.Phase = "mcp-retiring"
+			if cfg.MCP != nil && cfg.MCP.AUVDriver != "" {
+				g.state.Phase = "auv-retiring"
+			}
 			if cfg.Restricted != nil {
 				g.state.Phase = "restricted-retiring"
 			}
@@ -613,6 +700,11 @@ func RunGuard(configPath string) error {
 			if e == nil && before != len(g.state.Owned) {
 				e = g.persist()
 			}
+			if errors.Is(e, errCEFBrokerExited) {
+				// The kernel can report death before cmd.Wait publishes it.
+				g.mu.Unlock()
+				continue
+			}
 			if e != nil {
 				g.knownError = e
 				g.mu.Unlock()
@@ -640,7 +732,13 @@ func RunGuard(configPath string) error {
 				continue
 			}
 		}
-		if g.exited && (g.quiescent || !g.engine) {
+		if g.state.Phase == "broker-exited" && !crashForced {
+			crashForced = true
+			g.mu.Unlock()
+			g.force()
+			continue
+		}
+		if g.exited && (g.quiescent || !g.engine || g.state.Phase == "broker-exited") {
 			ready, e := empty(g.state, true)
 			if e != nil {
 				g.knownError = e
@@ -665,7 +763,7 @@ func RunGuard(configPath string) error {
 				return nil
 			}
 		}
-		if g.exited && g.engine && !g.quiescent {
+		if g.exited && g.engine && !g.quiescent && g.state.Phase != "broker-exited" {
 			g.knownError = ErrCleanupPending
 			g.mu.Unlock()
 			g.notify("pending")
@@ -734,6 +832,22 @@ func (w *nativeEventWriter) record(line string) {
 		name = "mcp-sdk-connected"
 	case "DSH_MCP_EVENT tools-ready":
 		name = "mcp-tools-ready"
+	case "DSH_MCP_EVENT call-start":
+		name = "mcp-call-start"
+	case "DSH_MCP_EVENT tab-list-start":
+		name = "mcp-tab-list-start"
+	case "DSH_MCP_EVENT tab-list-returned":
+		name = "mcp-tab-list-returned"
+	case "DSH_MCP_EVENT tab-select-returned":
+		name = "mcp-tab-select-returned"
+	case "DSH_MCP_EVENT private-destroy":
+		name = "mcp-private-destroy"
+	case "DSH_MCP_EVENT call-dispatch":
+		name = "mcp-call-dispatch"
+	case "DSH_MCP_EVENT call-result":
+		name = "mcp-call-result"
+	case "DSH_MCP_EVENT call-error":
+		name = "mcp-call-error"
 	case "DSH_MCP_EVENT inspect-start":
 		name = "mcp-inspect-start"
 	case "DSH_MCP_EVENT inspect-complete":
@@ -778,6 +892,26 @@ func (w *nativeEventWriter) record(line string) {
 		name = "mcp-stop-call-fatal"
 	case "DSH_CEF_EVENT shutdown-enter":
 		name = "shutdown-enter"
+	case "DSH_CEF_EVENT startup-owner-carrier-failed":
+		name = "startup-owner-carrier-failed"
+	case "DSH_CEF_EVENT startup-owner-registration-failed":
+		name = "startup-owner-registration-failed"
+	case "DSH_CEF_EVENT startup-owner-registration-identity-failed":
+		name = "startup-owner-registration-identity-failed"
+	case "DSH_CEF_EVENT startup-owner-registration-write-failed":
+		name = "startup-owner-registration-write-failed"
+	case "DSH_CEF_EVENT startup-owner-registration-reply-failed":
+		name = "startup-owner-registration-reply-failed"
+	case "DSH_CEF_EVENT startup-owner-descriptor-failed":
+		name = "startup-owner-descriptor-failed"
+	case "DSH_CEF_EVENT startup-host-carrier-failed":
+		name = "startup-host-carrier-failed"
+	case "DSH_CEF_EVENT startup-host-hmac-failed":
+		name = "startup-host-hmac-failed"
+	case "DSH_CEF_EVENT startup-owner-initialize-failed":
+		name = "startup-owner-initialize-failed"
+	case "DSH_CEF_EVENT download-writer-admission-failed":
+		name = "download-writer-admission-failed"
 	case "DSH_CEF_EVENT before-close":
 		name = "before-close"
 	case "DSH_CEF_EVENT before-close-tab-erased":
@@ -819,16 +953,26 @@ func (w *nativeEventWriter) record(line string) {
 	}
 	w.guard.mu.Lock()
 	defer w.guard.mu.Unlock()
-	if len(w.guard.state.NativeEvents) == 64 {
-		w.guard.state.NativeEventsTruncated = true
+	w.guard.recordNativeEventLocked(name)
+}
+
+func (g *guard) recordNativeEventLocked(name string) {
+	if len(g.state.NativeEvents) == 64 {
+		g.state.NativeEventsTruncated = true
 		return
 	}
-	w.guard.state.NativeEvents = append(w.guard.state.NativeEvents, nativeEvent{Name: name, At: time.Now().UTC()})
+	g.state.NativeEvents = append(g.state.NativeEvents, nativeEvent{Name: name, At: time.Now().UTC()})
 }
 
 func (g *guard) watchProcess(cmd *exec.Cmd) {
 	go func() {
 		e := cmd.Wait()
+		if stdout, ok := cmd.Stdout.(*restrictedOutput); ok {
+			stdout.flush()
+		}
+		if stderr, ok := cmd.Stderr.(*restrictedOutput); ok {
+			stderr.flush()
+		}
 		g.mu.Lock()
 		g.exited = true
 		g.state.Exit = supervisor.ExitResult{Started: true, Code: cmd.ProcessState.ExitCode()}
@@ -839,7 +983,20 @@ func (g *guard) watchProcess(cmd *exec.Cmd) {
 		if e != nil {
 			g.state.Exit.Err = "MAC_CEF_BROKER_EXIT_FAILED"
 		}
-		_ = g.persist()
+		if g.state.Component == "" && g.engine && !g.quiescent &&
+			(g.knownError == nil || errors.Is(g.knownError, errCEFBrokerExited)) {
+			// A helper must register durably before it can load CEF. Keep its
+			// recorded instance and group in the empty check, alongside the
+			// LaunchAgent's group even if a child never registered.
+			g.knownError = nil
+			g.state.Phase = "broker-exited"
+			if g.state.Exit.Err == "" {
+				g.state.Exit.Err = "MAC_CEF_BROKER_EXIT_WITHOUT_QUIESCENCE"
+			}
+		}
+		if err := g.persist(); err != nil && g.state.Phase == "broker-exited" {
+			g.knownError = err
+		}
 		g.mu.Unlock()
 		g.notify("exited")
 		g.wakeup()

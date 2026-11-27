@@ -17,21 +17,23 @@ void DownloadOriginObserved(const std::string& state,const std::string& method,i
  event->SetString("owner",owner_route_);event->SetString("scope",state);event->SetString("method",method);event->SetInt("code",code);Write(event);
 }
 void DownloadOriginRetire(){
- CancelDownloadPending();download_contexts_.clear();download_frames_.clear();
+ CancelDownloadPending("observer-retired");download_contexts_.clear();download_frames_.clear();
  download_origin_retired_sessions_.insert(download_origin_sessions_.begin(),download_origin_sessions_.end());download_origin_sessions_.clear();
  download_origin_session_.clear();++download_observation_revision_;
 }
 void DownloadOriginClearSession(const std::string& session){
- bool changed=false;
- for(auto it=download_contexts_.begin();it!=download_contexts_.end();){if(it->second.session==session){it=download_contexts_.erase(it);changed=true;}else ++it;}
- if(changed)CancelDownloadPending();++download_observation_revision_;
+ for(auto it=download_contexts_.begin();it!=download_contexts_.end();){
+  if(it->second.session!=session){++it;continue;}
+  CancelDownloadPending("observer-session-cleared",it->first);it=download_contexts_.erase(it);
+ }
+ ++download_observation_revision_;
 }
 void DownloadSetFrame(Dict frame,uint64_t revision){
  if(!frame)return;const auto id=frame->GetString("id").ToString(),url=frame->GetString("url").ToString(),loader=frame->GetString("loaderId").ToString();
  if(id.empty()||loader.empty())return;
  auto it=download_frames_.find(id);if(it!=download_frames_.end()&&it->second.revision>revision)return;
  if(it!=download_frames_.end()&&(it->second.loader!=loader||it->second.url!=url)){
-  download_contexts_.erase(id);CancelDownloadPending();
+  download_contexts_.erase(id);CancelDownloadPending("observer-frame-changed",id);
  }
  download_frames_[id]={url,loader,revision};
 }
@@ -107,26 +109,29 @@ bool DownloadOriginEvent(const std::string& method,Dict params,const std::string
  else if(method=="Page.navigatedWithinDocument"){
   const auto frame=params->GetString("frameId").ToString();auto current=download_frames_.find(frame);
   if(current!=download_frames_.end()){current->second.url=params->GetString("url");current->second.revision=++download_observation_revision_;}
-  if(std::any_of(download_pending_.begin(),download_pending_.end(),[&](const auto& pending){return pending.second.frame==frame;}))CancelDownloadPending();
+  CancelDownloadPending("observer-same-document-navigation",frame);
  }
  else if(method=="Page.frameDetached"){
-  const auto frame=params->GetString("frameId").ToString();download_frames_.erase(frame);download_contexts_.erase(frame);++download_observation_revision_;CancelDownloadPending();
+  const auto frame=params->GetString("frameId").ToString();download_frames_.erase(frame);download_contexts_.erase(frame);++download_observation_revision_;CancelDownloadPending("observer-frame-detached",frame);
  }else if(method=="Runtime.executionContextCreated"){
   auto context=params->GetDictionary("context");auto aux=context?context->GetDictionary("auxData"):nullptr;
   if(!context||!aux||aux->GetType("isDefault")!=VTYPE_BOOL||!aux->GetBool("isDefault"))return true;
   const auto frame=aux->GetString("frameId").ToString(),unique=context->GetString("uniqueId").ToString(),origin=context->GetString("origin").ToString();
-  auto source=download_frames_.find(frame);download_contexts_.erase(frame);CancelDownloadPending();
+  auto source=download_frames_.find(frame);
+  download_contexts_.erase(frame);CancelDownloadPending("observer-context-created",frame);
   // Opaque V8 context origins serialize as ://. Only canonical HTTP(S) tuples
   // are accepted; Page.Frame.securityOrigin and frame URL are never authority.
   if(source==download_frames_.end()||unique.empty()||context->GetInt("id")<=0||origin.empty()||DownloadOrigin(origin)!=origin){DownloadOriginObserved("rejected-context",method);return true;}
   download_contexts_[frame]={session,unique,origin,source->second.loader,context->GetInt("id"),++download_observation_revision_};
   DownloadOriginObserved("context",method);
  }else if(method=="Runtime.executionContextDestroyed"){
-  const auto unique=params->GetString("executionContextUniqueId").ToString();bool changed=false;
+  const auto unique=params->GetString("executionContextUniqueId").ToString();
   for(auto it=download_contexts_.begin();it!=download_contexts_.end();){
-   if(it->second.session==session&&(unique.empty()||it->second.unique==unique)){it=download_contexts_.erase(it);changed=true;}else ++it;
+   if(it->second.session==session&&(unique.empty()||it->second.unique==unique)){
+    CancelDownloadPending("observer-context-destroyed",it->first);it=download_contexts_.erase(it);
+   }else ++it;
   }
-  if(changed)CancelDownloadPending();++download_observation_revision_;
+  ++download_observation_revision_;
  }else if(method=="Runtime.executionContextsCleared")DownloadOriginClearSession(session);
  return true; // all internal session events stay out of the SDK/Agent channel
 }

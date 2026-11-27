@@ -13,6 +13,23 @@ import (
 
 const maxProfileManifestBytes = 1 << 20
 
+var (
+	ErrProfilePackageRecoveryConflict = errors.New("profile dependencies changed after an interrupted plugin operation")
+	ErrProfilePackageRecoveryPending  = errors.New("the interrupted plugin operation could not be recovered")
+)
+
+// ProfilePackageRecoveryFailure exposes recovery failures at the Workbench
+// entry points that normally wrap platform errors in a generic failure.
+func ProfilePackageRecoveryFailure(err error) error {
+	switch {
+	case errors.Is(err, ErrProfilePackageRecoveryConflict):
+		return failureWithMeta(lifecycle.ErrorPluginCommandFailed, "Profile dependencies changed after an interrupted plugin operation", "Your changes were preserved", true, false)
+	case errors.Is(err, ErrProfilePackageRecoveryPending):
+		return failureWithMeta(lifecycle.ErrorPluginCommandFailed, "Plugin recovery could not finish", "Retry after the earlier plugin operation has stopped and the profile packages are available", true, true)
+	}
+	return nil
+}
+
 // PrepareRunContext is the switch-time seam for rebuilding generated profile
 // state. It is intentionally separate from ResolveLaunch: resolving a target
 // remains a read-only catalog operation, while a Host switch prepares the
@@ -56,6 +73,9 @@ func (m *Manager) PrepareRunContext(ctx context.Context, launch ResolvedLaunch) 
 		if cancellation := contextError(ctx); cancellation != nil {
 			return cancellation
 		}
+		if failure := ProfilePackageRecoveryFailure(err); failure != nil {
+			return failure
+		}
 		if items := parseIncompatiblePlugins(result.Stdout + "\n" + result.Stderr); len(items) > 0 {
 			return failureWithMeta(lifecycle.ErrorPluginIncompatible, "A profile plugin does not declare support for the current DSH version", incompatiblePluginError{items: items}.Error(), true, false)
 		}
@@ -90,6 +110,9 @@ func (m *Manager) materializeBuiltInProfile(ctx context.Context, config Config, 
 	if _, err := config.CommandRunner.Run(ctx, runtime.Path, args, env, dataDirectory.Path); err != nil {
 		if cancellation := contextError(ctx); cancellation != nil {
 			return cancellation
+		}
+		if failure := ProfilePackageRecoveryFailure(err); failure != nil {
+			return failure
 		}
 		return failureWithMeta(lifecycle.ErrorProfileCloneFailed, "the built-in profile could not be initialized", "DSH could not create the profile state", true, true)
 	}

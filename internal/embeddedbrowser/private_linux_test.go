@@ -117,7 +117,7 @@ func TestLiveLinuxManagedPrivateCEFService(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	view, e := registry.Update(ctx, peer, "window", parent, window.Lease, "slot", fixture.URL, SlotBounds{Width: 700, Height: 450}, 1, true)
+	view, e := registry.Update(ctx, peer, "window", parent, window.Lease, "slot", fixture.URL, SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 	if e != nil {
 		t.Fatal(e)
 	}

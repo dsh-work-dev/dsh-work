@@ -769,6 +769,21 @@ only on owned objects. MSIX package-context registration is explicitly
 unsupported by this backend. User procedures and recovery actions live in
 [Set up browser control](browser-setup.md).
 
+### macOS embedded browser Keychain
+
+New installed CEF profiles use the macOS Keychain item named
+`DSH Work Browser Safe Storage` under the account `DSH Work Browser`. The daemon
+records the Keychain scope in `dsh-cef-engine.json` under the exclusive profile
+lease. The owned broker reads that scope at launch and configures CEF before it
+opens the profile. Existing markers without a Keychain scope keep the original
+Chromium Keychain identity and its encrypted data.
+
+Using Chromium's shared Keychain item for new profiles can cause an authorization
+prompt and stall browser shutdown. Changing the item for an existing profile can
+make its encrypted cookies unreadable. Revisit the legacy scope when a migration
+can prove it preserves encrypted data. Verify Keychain access across replacement
+when qualifying each release signing identity.
+
 ## Version recovery and window geometry
 
 `internal/dshmanager/restore_points.go` records verified version inputs in each

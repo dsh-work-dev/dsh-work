@@ -170,7 +170,7 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 	for _, scenario := range []string{"dialog", "download", "frame"} {
 		t.Run(scenario, func(t *testing.T) {
 			slot := "slot-" + scenario
-			view, e := reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+			view, e := reg.Update(ctx, peer, "window", parent, window.Lease, slot, fixture.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -407,7 +407,7 @@ func TestLiveManagedMCPFrameDialogDownloadPolicy(t *testing.T) {
 				if e != nil || hidden.Dialog != "" || hidden.DialogVisible || hidden.ViewVisible {
 					t.Fatal("hide did not cancel panel dialog", hidden, e)
 				}
-				view, e = reg.Update(ctx, peer, "window", parent, window.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+				view, e = reg.Update(ctx, peer, "window", parent, window.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 				if e != nil {
 					t.Fatal(e)
 				}

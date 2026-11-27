@@ -36,6 +36,7 @@ tasks:
       - format:check
       - docs:check
       - dev:check
+      - release:check
       - test
       - frontend:test
       - frontend:typecheck
@@ -46,8 +47,9 @@ tasks:
   verify:toolchain:
     summary: Check the locked local toolchain
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-toolchain.ps1
-      - node scripts/verify-node.mjs
+      - cmd: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-toolchain.ps1
+        platforms: [windows]
+      - node scripts/verify-node.mjs {{if ne OS "windows"}}--desktop-toolchain{{end}}
 
   docs:check:
     summary: Check public-content and Git hygiene contracts
@@ -59,22 +61,31 @@ tasks:
     cmds:
       - node scripts/check-wails-dev.mjs
 
+  release:check:
+    summary: Check package signing and disk image verification
+    platforms: [darwin]
+    cmds:
+      - node --test scripts/sign-macos-package.test.mjs
+
   format:
     summary: Format Go source
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-go.ps1
+      - node scripts/format-go.mjs --write
 
   format:check:
     summary: Ensure Go source is formatted
     cmds:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-gofmt.ps1
+      - node scripts/format-go.mjs
 
   test:
     summary: Run the complete Go unit and contract suite
     deps:
-      - worker:assets
+      # The root Go package embeds the generated frontend.
+      - frontend:build
     cmds:
-      - go test . ./cmd/... ./internal/...
+      - cmd: node scripts/test-macos.mjs
+        platforms: [darwin/arm64]
+      - '{{if or (ne OS "darwin") (ne ARCH "arm64")}}go test . ./cmd/... ./internal/...{{end}}'
 
   frontend:install:
     run: once
@@ -137,7 +148,6 @@ tasks:
     deps:
       - frontend:build
     cmds:
-      - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
       - go build -trimpath -buildvcs=false {{if .DSH_WORK_EMBEDDED_MODFILE}}-modfile="{{.DSH_WORK_EMBEDDED_MODFILE}}" -tags=e67presenter{{end}} -o "{{.BIN_DIR}}/{{.APP_NAME}}{{exeExt}}" .
 
   build:smoke:
@@ -150,7 +160,6 @@ tasks:
   build:dsh-work:
     summary: Build the explicit dsh-work runtime/profile manager CLI
     cmds:
-      - powershell -NoProfile -Command "New-Item -ItemType Directory -Path '{{.BIN_DIR}}' -Force | Out-Null"
       - go build -trimpath -buildvcs=false -o "{{.BIN_DIR}}/dsh-work-cli{{exeExt}}" ./cmd/dsh-work
 
   version:check:
@@ -184,6 +193,19 @@ tasks:
       - build:windows
     cmds:
       - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Arch "{{.ARCH | default "amd64"}}"
+
+  package:darwin:
+    summary: Build an Apple silicon app and disk image with optional Developer ID signing and notarization
+    platforms: [darwin]
+    deps:
+      - frontend:build
+    requires:
+      vars: [DSH_WORK_MAC_CEF_SDK]
+    env:
+      DSH_WORK_MAC_CEF_SDK: "{{.DSH_WORK_MAC_CEF_SDK}}"
+      DSH_WORK_MAC_PACKAGE_OUTPUT: "{{.BIN_DIR}}/macos"
+    cmds:
+      - node scripts/package-macos.mjs --cef-root "$DSH_WORK_MAC_CEF_SDK" --output-dir "$DSH_WORK_MAC_PACKAGE_OUTPUT"
 
   worker:assets:
     run: once

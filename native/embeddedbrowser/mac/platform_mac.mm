@@ -25,6 +25,8 @@
 
 namespace {
 int transport=-1, owner=-1;
+uint32_t download_host_pid=0;
+uint64_t download_host_started=0;
 std::atomic<bool> monitor_running{false};
 std::thread owner_monitor;
 std::atomic<bool> owner_failed{false};
@@ -95,7 +97,17 @@ bool RegisterProcess(const char* kind,int argc,char** argv);
 namespace dsh_platform {
 void Lifecycle(const char* event) {
   // Fixed state markers only; never write a URL, page data, token or error body.
-  for (const char* allowed : {"shutdown-enter","before-close","before-close-tab-erased","before-close-return","frame-destroyed-enter","frame-destroyed-return","loop-returned","owner-stop","owner-read-failed","monitor-join-start","monitor-joined","shutdown-request","shutdown-ack","shutdown-ack-failed","shutdown-returned","quiescent-sent","quiescent-failed","release-received","release-failed"}) {
+  for (const char* allowed : {
+    "startup-owner-carrier-failed","startup-owner-registration-failed",
+    "startup-owner-registration-identity-failed","startup-owner-registration-write-failed",
+    "startup-owner-registration-reply-failed",
+    "startup-owner-descriptor-failed","startup-host-carrier-failed",
+    "startup-host-hmac-failed","startup-owner-initialize-failed","download-writer-admission-failed",
+    "shutdown-enter","before-close","before-close-tab-erased","before-close-return",
+    "frame-destroyed-enter","frame-destroyed-return","loop-returned","owner-stop",
+    "owner-read-failed","monitor-join-start","monitor-joined","shutdown-request",
+    "shutdown-ack","shutdown-ack-failed","shutdown-returned","quiescent-sent",
+    "quiescent-failed","release-received","release-failed"}) {
     if(std::strcmp(event,allowed)!=0)continue;
     char line[128];const int n=std::snprintf(line,sizeof(line),"DSH_CEF_EVENT %s\n",allowed);
     if(n>0&&n<static_cast<int>(sizeof(line))) (void)write(STDERR_FILENO,line,n);
@@ -105,16 +117,34 @@ void Lifecycle(const char* event) {
 
 std::string TakeEnvironment(const char* name) { auto text=Get(name); unsetenv(name); return text; }
 bool OpenTransport(const std::string& path) {
-  if(!Number(TakeEnvironment("DSH_WORK_CEF_OWNER_FD"),owner) || fcntl(owner,F_SETFD,FD_CLOEXEC)<0) return false;
-  const int owner_one=1;if(setsockopt(owner,SOL_SOCKET,SO_NOSIGPIPE,&owner_one,sizeof(owner_one)))return false;
+  const int owner_one=1;
+  if(!Number(TakeEnvironment("DSH_WORK_CEF_OWNER_FD"),owner) ||
+     fcntl(owner,F_SETFD,FD_CLOEXEC)<0 ||
+     setsockopt(owner,SOL_SOCKET,SO_NOSIGPIPE,&owner_one,sizeof(owner_one))) {
+    Lifecycle("startup-owner-descriptor-failed");
+    return false;
+  }
   if(!RegisterProcess("broker",0,nullptr))return false;
   uint32_t pid=0; uint64_t started=0;
   if(!Number(TakeEnvironment("DSH_WORK_CEF_HOST_PID"),pid) || !Number(TakeEnvironment("DSH_WORK_CEF_HOST_STARTED"),started)) return false;
   int result=EIO; dsh_ipc_peer peer{};
   std::thread io([&]{result=dsh_ipc_connect(path.c_str(),-1,&transport,&peer);}); io.join();
-  if(result || peer.pid!=pid || peer.started!=started) return false;
+  if(result || peer.pid!=pid || peer.started!=started) {
+    Lifecycle("startup-host-carrier-failed");
+    return false;
+  }
+  download_host_pid=peer.pid;
+  download_host_started=peer.started;
   int flags=fcntl(transport,F_GETFL),one=1;
   return flags>=0 && fcntl(transport,F_SETFL,flags&~O_NONBLOCK)==0 && setsockopt(transport,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one))==0;
+}
+int ReceiveDownloadWriter(const std::string& endpoint) {
+  int fd=-1;
+  if(dsh_ipc_receive_writer(endpoint.c_str(),-1,download_host_pid,download_host_started,&fd)){
+    Lifecycle("download-writer-admission-failed");
+    return -1;
+  }
+  return fd;
 }
 bool Transfer(bool write,void* data,uint32_t size) {
   auto* p=static_cast<char*>(data);
@@ -124,12 +154,27 @@ bool Transfer(bool write,void* data,uint32_t size) {
 bool Authenticate(const std::string& token) {
   std::array<unsigned char,32> nonce{},actual{},expected{};
   auto end=Clock::now()+std::chrono::seconds(3);
-  if(!Bytes(transport,false,nonce.data(),32,end)) return false;
+  if(!Bytes(transport,false,nonce.data(),32,end)) {
+    Lifecycle("startup-host-hmac-failed");
+    return false;
+  }
   auto mac=[&](const char* role) { std::string data=role; data.append(reinterpret_cast<char*>(nonce.data()),32); CCHmac(kCCHmacAlgSHA256,token.data(),token.size(),data.data(),data.size(),expected.data()); };
-  mac("worker"); if(!Bytes(transport,true,expected.data(),32,end)||!Bytes(transport,false,actual.data(),32,end))return false;
+  mac("worker");
+  if(!Bytes(transport,true,expected.data(),32,end)||!Bytes(transport,false,actual.data(),32,end)) {
+    Lifecycle("startup-host-hmac-failed");
+    return false;
+  }
   mac("host"); unsigned char difference=0; for(size_t i=0;i<32;i++)difference|=actual[i]^expected[i];
+  if(difference!=0) {
+    Lifecycle("startup-host-hmac-failed");
+    return false;
+  }
   std::string reply;
-  return difference==0 && OwnerSend(@{@"kind":@"initialize"}) && Frame(owner,false,reply) && reply=="{\"kind\":\"initialize\"}";
+  if(!OwnerSend(@{@"kind":@"initialize"}) || !Frame(owner,false,reply) || reply!="{\"kind\":\"initialize\"}") {
+    Lifecycle("startup-owner-initialize-failed");
+    return false;
+  }
+  return true;
 }
 void Erase(std::string& value) {
   // Darwin exposes non-elidable C11 Annex K erasure via <string.h> (10.9+).
@@ -175,16 +220,40 @@ bool RegisterProcess(const char* kind,int argc,char** argv) {
   auto generation=Get("DSH_WORK_CEF_OWNER_GENERATION");
   uint32_t pid=0;uint64_t started=0;
   if(path.empty()||generation.empty()||!Number(Get("DSH_WORK_CEF_OWNER_PID"),pid)||!Number(Get("DSH_WORK_CEF_OWNER_STARTED"),started))return false;
-  int fd=-1;dsh_ipc_peer peer{};if(dsh_ipc_connect(path.c_str(),-1,&fd,&peer)!=0)return false;
+  int fd=-1;dsh_ipc_peer peer{};
+  if(dsh_ipc_connect(path.c_str(),-1,&fd,&peer)!=0){
+    if(std::strcmp(kind,"broker")==0)dsh_platform::Lifecycle("startup-owner-carrier-failed");
+    return false;
+  }
   int one=1;setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one));
   bool matched=peer.pid==pid&&peer.started==started;
-  std::string type;
-  for(int i=1;i<argc;i++){std::string value=argv[i];if(value.rfind("--type=",0)==0)type=value.substr(7);}
+  std::string type, renderer_id;
+  bool type_seen=false, renderer_id_seen=false;
+  for(int i=1;i<argc;i++){
+    std::string value=argv[i];
+    if(value.rfind("--type=",0)==0){
+      if(type_seen)matched=false;
+      type_seen=true;
+      type=value.substr(7);
+    }
+    if(value.rfind("--renderer-client-id=",0)==0){
+      if(renderer_id_seen)matched=false;
+      renderer_id_seen=true;
+      renderer_id=value.substr(21);
+    }
+  }
   // These switches are Chromium-owned identifiers, not arbitrary page values.
+  uint32_t child=0;
+  if(type=="renderer" && (!Number(renderer_id,child)||child>0x7fffffff||renderer_id!=std::to_string(child)))matched=false;
+  if(type!="renderer" && renderer_id_seen)matched=false;
   if(type.find_first_not_of("abcdefghijklmnopqrstuvwxyz-0123456789")!=std::string::npos)matched=false;
-  std::string request="{\"kind\":\""+std::string(kind)+"\",\"generation\":\""+generation+"\",\"type\":\""+type+"\"}",reply;
-  bool result=matched&&Frame(fd,true,request)&&Frame(fd,false,reply)&&reply=="{\"kind\":\"registered\"}";
-  close(fd);return result;
+  std::string request="{\"kind\":\""+std::string(kind)+"\",\"generation\":\""+generation+"\",\"type\":\""+type+"\",\"rendererChild\":"+std::to_string(child)+"}",reply;
+  const char* failure=nullptr;
+  if(!matched)failure="startup-owner-registration-identity-failed";
+  else if(!Frame(fd,true,request))failure="startup-owner-registration-write-failed";
+  else if(!Frame(fd,false,reply)||reply!="{\"kind\":\"registered\"}")failure="startup-owner-registration-reply-failed";
+  if(failure&&std::strcmp(kind,"broker")==0)dsh_platform::Lifecycle(failure);
+  close(fd);return failure==nullptr;
 }
 }
 bool RegisterOwnedHelper(int argc,char** argv) {

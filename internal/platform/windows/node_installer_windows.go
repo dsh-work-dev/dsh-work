@@ -53,7 +53,7 @@ type ManagedNodeInstaller struct {
 func NewManagedNodeInstaller(executor dshadapter.CommandExecutor, storeRoot string, options ...ManagedNodeInstallerOption) *ManagedNodeInstaller {
 	installer := &ManagedNodeInstaller{
 		executor: executor, storeRoot: storeRoot,
-		downloader:   httpArtifactDownloader{client: &http.Client{Timeout: 15 * time.Minute}},
+		downloader:   httpArtifactDownloader{Client: &http.Client{Timeout: 15 * time.Minute}},
 		officialBase: defaultOfficialNodeBase, mirrorBase: defaultMirrorNodeBase,
 	}
 	for _, option := range options {

@@ -9,9 +9,22 @@ const targets=await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
 const target=targets.find(t=>t.type==='page'&&!/pet/i.test(t.url));
 assert(target,'Workbench target required');
 const ws=new WebSocket(target.webSocketDebuggerUrl),pending=new Map(),contexts=[];let id=0;
-ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}}else if(m.method==='Runtime.executionContextCreated')contexts.push(m.params.context)};
+ws.onmessage=event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}}else if(m.method==='Runtime.executionContextCreated')contexts.push(m.params.context)};
 await new Promise((resolve,reject)=>{ws.onopen=resolve;ws.onerror=reject});
-const send=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});ws.send(JSON.stringify({id:key,method,params}))});
+const send=(method,params={})=>new Promise((resolve,reject)=>{
+ if(ws.readyState!==WebSocket.OPEN){reject(Error('Workbench CDP disconnected'));return}
+ const key=++id;
+ const timer=setTimeout(()=>{pending.delete(key);reject(Error(`CDP command timed out: ${method}`))},12000);
+ pending.set(key,{resolve,reject,timer});
+ ws.send(JSON.stringify({id:key,method,params}));
+});
+ws.onclose=()=>{
+ for(const {reject,timer} of pending.values()){
+  clearTimeout(timer);
+  reject(Error('Workbench CDP disconnected'));
+ }
+ pending.clear();
+};
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const main=(await send('Page.getFrameTree')).frameTree.frame.id;
 await send('Runtime.enable');await pause(200);
@@ -47,11 +60,16 @@ try{
  report.reopened=await until('same page visible',async()=>{const s=await snapshot();return s.rows.find(r=>r.slot===report.identity.slot&&r.state?.visible)?s:undefined});
  const after=report.reopened.rows.find(r=>r.slot===report.identity.slot).state;
  for(const field of ['target','document','lease','brokerGeneration'])if(report.identity.state[field]!==undefined)assert.equal(after[field],report.identity.state[field],field+' changed on collapse/reopen');
- report.passed=true;
 }catch(error){report.error=String(error);process.exitCode=1}
 finally{
  try{if(original){await evaluate(dsh,`(()=>{const b=document.querySelector('[data-sidebar-right-expand]');if(b&&!b.disabled&&b.getClientRects().length)b.click();return true})()`);await pause(400);const current=await evaluate(dsh,`(()=>{const p=[...document.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(e=>e.getClientRects().length),h=document.querySelector('[data-side="rightbar"]'),r=h?.getBoundingClientRect();return{width:p?.getBoundingClientRect().width,x:r?.x+r?.width/2,y:r?.y+Math.min(100,r?.height/2)}})()`);if(Math.abs(current.width-original.width)>2){const offset=await evaluate(shell,`(()=>{const r=document.querySelector('iframe').getBoundingClientRect();return{x:r.x,y:r.y}})()`),x=current.x+offset.x,y=current.y+offset.y,end=x+current.width-original.width;await mouse('mousePressed',x,y);try{for(let n=1;n<=16;n++){await mouse('mouseMoved',x+(end-x)*n/16,y);await pause(16)}}finally{await mouse('mouseReleased',end,y)}await pause(200)}report.restoredWidth=await evaluate(dsh,`(()=>{const p=[...document.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(e=>e.getClientRects().length);return p?.getBoundingClientRect().width})()`);if(Math.abs(report.restoredWidth-original.width)>2)throw Error('Sidebar width was not restored')}}catch(error){report.restoreError=String(error);process.exitCode=1}
- if(installed){report.dispatcherPreserved=await evaluate(shell,`(()=>{const same=__browserLayoutProbe.dispatcher===window._wails.dispatchWailsEvent;removeEventListener('message',__browserLayoutProbe.listen);delete globalThis.__browserLayoutProbe;return same})()`);if(!report.dispatcherPreserved){report.restoreError='Wails event dispatcher changed';process.exitCode=1}}
+ if(installed){
+  try{
+   report.dispatcherPreserved=await evaluate(shell,`(()=>{const same=__browserLayoutProbe.dispatcher===window._wails.dispatchWailsEvent;removeEventListener('message',__browserLayoutProbe.listen);delete globalThis.__browserLayoutProbe;return same})()`);
+   if(!report.dispatcherPreserved)throw Error('Wails event dispatcher changed');
+  }catch(error){report.restoreError??=String(error);process.exitCode=1}
+ }
+ report.passed=!report.error&&!report.restoreError;
  writeFileSync(output,JSON.stringify(report,null,2));ws.close();console.log(JSON.stringify({output,passed:report.passed,error:report.error,restoreError:report.restoreError}));
 }
 

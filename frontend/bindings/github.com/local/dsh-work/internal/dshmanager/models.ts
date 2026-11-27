@@ -583,6 +583,7 @@ export enum RuntimeToolchain {
 };
 
 export interface Snapshot {
+    "bootstrapDshVersion"?: string;
     "restorePoints"?: RestorePointsView | null;
     "runtimes": RuntimeInfo[] | null;
     "dshReleases": DSHReleaseInfo[] | null;

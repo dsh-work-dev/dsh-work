@@ -2,6 +2,7 @@ package dshadapter
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -81,6 +82,58 @@ func (PluginCommands) AllowVersion(profile, packageVersion, dshVersion string) (
 		return nil, fmt.Errorf("invalid DSH plugin exemption target")
 	}
 	return []string{"plugin", "--profile", profile, "allow-version", packageVersion, "--dsh-version", dshVersion, "--accept-risk"}, nil
+}
+
+// IsVersionApproval identifies the exact DSH-owned approval command. It does
+// not admit any of the plugin subcommands that DSH forwards to pnpm.
+func (c PluginCommands) IsVersionApproval(args []string) bool {
+	if len(args) != 8 {
+		return false
+	}
+	expected, err := c.AllowVersion(args[2], args[4], args[6])
+	return err == nil && slices.Equal(args, expected)
+}
+
+// IsPackageMaintenance identifies the pnpm operations assembled by the manager.
+// Each accepted option belongs to the operation that generates it.
+func (c PluginCommands) IsPackageMaintenance(args []string) bool {
+	if len(args) < 4 || args[0] != "plugin" || args[1] != "--profile" || !validProfileName(args[2]) || strings.HasPrefix(args[2], "-") {
+		return false
+	}
+	profile, params := args[2], args[4:]
+	matches := func(expected []string, err error) bool {
+		return err == nil && slices.Equal(args, expected)
+	}
+	switch args[3] {
+	case "add":
+		switch len(params) {
+		case 1:
+			return matches(c.Install(profile, params[0]))
+		case 3:
+			return matches(c.InstallAt(profile, params[0], params[2]))
+		}
+	case "update":
+		switch len(params) {
+		case 2:
+			return matches(c.Update(profile, params[0], ""))
+		case 4:
+			return matches(c.Update(profile, params[0], params[3]))
+		}
+	case "list":
+		return matches(c.List(profile))
+	case "outdated":
+		return matches(c.Outdated(profile))
+	case "install":
+		return matches(c.Prepare(profile)) || matches(c.ForceInstall(profile, false)) || matches(c.ForceInstall(profile, true))
+	case "remove":
+		if len(params) == 1 {
+			return matches(c.Remove(profile, params[0]))
+		}
+		if len(params) >= 3 {
+			return matches(c.RemoveVersions(profile, params[:len(params)-2]))
+		}
+	}
+	return false
 }
 
 func (PluginCommands) Remove(profile, packageName string) ([]string, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -16,6 +17,34 @@ type PresenterPeer struct {
 }
 type SlotBounds struct{ X, Y, Width, Height float64 }
 type PixelBounds struct{ X, Y, Width, Height int }
+
+const presenterChromeHeight = 40
+
+func validatePresenterZoom(zoom, maxZoom float64) error {
+	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom < 0.25 || zoom > maxZoom {
+		return errors.New("CEF_ZOOM_REJECTED")
+	}
+	return nil
+}
+
+func (b SlotBounds) validate() error {
+	for _, coordinate := range []float64{b.X, b.Y, b.Width, b.Height} {
+		if math.IsNaN(coordinate) || math.IsInf(coordinate, 0) || math.Abs(coordinate) > 1e6 {
+			return errors.New("CEF_SLOT_BOUNDS_REJECTED")
+		}
+	}
+	return nil
+}
+
+// clipPresenterBounds intersects the scaled slot with the native content area.
+// Round toward the interior so the hosted view cannot cover a clipped edge.
+func clipPresenterBounds(b SlotBounds, width, height int, scale, topInset float64) PixelBounds {
+	left := int(math.Ceil(math.Min(float64(width), math.Max(0, b.X*scale))))
+	top := int(math.Ceil(math.Min(float64(height), math.Max(topInset, b.Y*scale))))
+	right := int(math.Floor(math.Min(float64(width), (b.X+b.Width)*scale)))
+	bottom := int(math.Floor(math.Min(float64(height), (b.Y+b.Height)*scale)))
+	return PixelBounds{X: left, Y: top, Width: max(0, right-left), Height: max(0, bottom-top)}
+}
 
 // Preview is an ephemeral, display-only image of an admitted visible view.
 // It is never an automation artifact or a file grant.
@@ -87,15 +116,21 @@ type presenterOwner interface {
 	Close() error
 }
 type presentation struct {
-	serial  sync.Mutex
-	peer    PresenterPeer
-	surface string
-	parent  uintptr
-	owner   presenterOwner
-	target  *OwnedTarget
-	view    ViewState
-	epoch   uint64
-	cleaned bool
+	serial          sync.Mutex
+	peer            PresenterPeer
+	surface         string
+	parent          uintptr
+	owner           presenterOwner
+	target          *OwnedTarget
+	view            ViewState
+	epoch           uint64
+	displayRevision uint64
+	cleaned         bool
+}
+
+func (p *presentation) matchesLayout(bounds PixelBounds, visible bool, displayRevision uint64) bool {
+	return p.view.Bounds == bounds && p.view.Visible == visible && p.displayRevision == displayRevision &&
+		p.view.State != "empty" && p.view.State != "presentationFailed"
 }
 
 // PresenterRegistry owns admitted UI instances, native windows and view leases.
@@ -129,15 +164,15 @@ func (r *PresenterRegistry) watch(p *presentation, owner presenterOwner) {
 		_ = r.loseLocked(p)
 	}()
 }
-func (r *PresenterRegistry) Update(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, windowLease, slot, address string, bounds SlotBounds, zoom float64, visible bool) (ViewState, error) {
+func (r *PresenterRegistry) Update(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, windowLease, slot, address string, bounds SlotBounds, zoom float64, visible bool, displayRevision uint64) (ViewState, error) {
 	w, err := r.lockWindow(peer, surface, parent, windowLease)
 	if err != nil {
 		return ViewState{}, err
 	}
 	defer w.serial.Unlock()
-	return r.updateLocked(ctx, peer, surface, parent, slot, address, bounds, zoom, visible)
+	return r.updateLocked(ctx, peer, surface, parent, slot, address, bounds, zoom, visible, displayRevision)
 }
-func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, slot, address string, bounds SlotBounds, zoom float64, visible bool) (ViewState, error) {
+func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer, surface string, parent uintptr, slot, address string, bounds SlotBounds, zoom float64, visible bool, displayRevision uint64) (ViewState, error) {
 	if len(slot) == 0 || len(slot) > 1024 {
 		return ViewState{}, errors.New("CEF_SLOT_REJECTED")
 	}
@@ -208,6 +243,9 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 		p.owner = owner
 		r.watch(p, owner)
 	}
+	if address != "" && p.view.ArtifactName != "" {
+		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
+	}
 	if p.target == nil {
 		if address == "" {
 			return ViewState{}, errors.New("CEF_TARGET_REQUIRED")
@@ -217,16 +255,12 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 			return p.view, e
 		}
 		p.target = target
-	}
-	if address != "" && p.view.ArtifactName != "" {
-		return p.view, errors.New("CEF_ARTIFACT_RESELECT_REQUIRED")
-	}
-	if address != "" && address != p.view.URL {
+	} else if address != "" && (address != p.view.URL || p.view.State == "navigationFailed") {
 		if e := p.target.Navigate(ctx, address); e != nil {
 			return p.view, e
 		}
 	}
-	if address == "" && p.view.Bounds == pixels && p.view.Visible == visible && p.view.State != "empty" && p.view.State != "presentationFailed" {
+	if address == "" && p.matchesLayout(pixels, visible, displayRevision) {
 		if err := r.refreshLocked(ctx, p); err != nil {
 			return p.view, err
 		}
@@ -247,25 +281,43 @@ func (r *PresenterRegistry) updateLocked(ctx context.Context, peer PresenterPeer
 	parameters["pid"] = int(peer.PID)
 	parameters["started"] = fmt.Sprint(peer.Started)
 	parameters["view"] = p.view.Lease
-	parameters["epoch"] = fmt.Sprint(p.epoch)
+	view, err := r.presentLocked(ctx, p, pixels, visible, parameters)
+	if err == nil {
+		p.displayRevision = displayRevision
+	}
+	return view, err
+}
+
+func (r *PresenterRegistry) presentLocked(ctx context.Context, p *presentation, pixels PixelBounds, visible bool, parameters map[string]any) (ViewState, error) {
+	epoch := fmt.Sprint(p.epoch)
+	parameters["epoch"] = epoch
 	parameters["bounds"] = pixels
 	parameters["visible"] = visible
-	_, err = p.target.broker.controlCall(ctx, "target.present", p.target.owner, parameters)
+	_, err := p.target.broker.controlCall(ctx, "target.present", p.target.owner, parameters)
 	if err != nil {
 		p.view.State = "presentationFailed"
 		p.view.Visible = false
 		p.view.Failure = err.Error()
+		p.clearViewEvidence()
 		return p.view, err
 	}
+	p.view.Visible = visible
+	p.view.Epoch = epoch
+	p.view.Bounds = pixels
 	if err := r.refreshLocked(ctx, p); err != nil {
 		p.view.State = "loading"
 		p.view.Failure = err.Error()
+		p.clearViewEvidence()
 	}
-	p.view.Failure = ""
-	p.view.Visible = visible
-	p.view.Epoch = fmt.Sprint(p.epoch)
-	p.view.Bounds = pixels
 	return p.view, nil
+}
+
+func (p *presentation) clearViewEvidence() {
+	p.view.Frame = ""
+	p.view.Popup = nil
+	p.view.PopupVisible = false
+	p.view.Dialog = nil
+	p.view.DialogVisible = false
 }
 
 // A paused document may stay alive, but never at obsolete visible geometry.
@@ -275,14 +327,10 @@ func (r *PresenterRegistry) pausePresentationLocked(ctx context.Context, p *pres
 	p.view.State = "controlPaused"
 	p.view.Failure = ErrControlPaused.Error()
 	if p.target != nil && (!visible || p.view.Bounds != bounds) {
-		p.epoch++
-		_, err := p.target.broker.controlCall(ctx, "target.hide", p.target.owner, map[string]any{"epoch": fmt.Sprint(p.epoch)})
-		if err != nil {
+		if err := p.hide(ctx); err != nil {
 			p.view.Failure = err.Error()
 			return p.view, err
 		}
-		p.view.Visible = false
-		p.view.Epoch = fmt.Sprint(p.epoch)
 	}
 	return p.view, nil
 }
@@ -313,30 +361,15 @@ func (r *PresenterRegistry) State(ctx context.Context, peer PresenterPeer, surfa
 	return p.view, nil
 }
 func (r *PresenterRegistry) Hide(ctx context.Context, peer PresenterPeer, surface string) error {
-	r.mu.Lock()
-	views := make([]*presentation, 0, len(r.views))
-	for _, p := range r.views {
-		if p.surface == surface {
-			views = append(views, p)
-		}
-	}
-	r.mu.Unlock()
-	var result error
-	for _, p := range views {
-		p.serial.Lock()
-		if p.peer == peer && p.target != nil && p.view.State != "NeedsReload" {
-			p.epoch++
-			_, err := p.target.broker.controlCall(ctx, "target.hide", p.target.owner, map[string]any{"epoch": fmt.Sprint(p.epoch)})
-			result = errors.Join(result, err)
-			p.view.Visible = false
-			p.view.Epoch = fmt.Sprint(p.epoch)
-		}
-		p.serial.Unlock()
-	}
-	return result
+	_, err := r.hideViews(ctx, peer, surface, false)
+	return err
 }
 
 func (r *PresenterRegistry) Cover(ctx context.Context, peer PresenterPeer, surface string) ([]Preview, error) {
+	return r.hideViews(ctx, peer, surface, true)
+}
+
+func (r *PresenterRegistry) hideViews(ctx context.Context, peer PresenterPeer, surface string, capture bool) ([]Preview, error) {
 	r.mu.Lock()
 	views := make(map[string]*presentation)
 	for key, p := range r.views {
@@ -346,24 +379,50 @@ func (r *PresenterRegistry) Cover(ctx context.Context, peer PresenterPeer, surfa
 	}
 	r.mu.Unlock()
 	previews := make([]Preview, 0, len(views))
+	var result error
 	for key, p := range views {
 		p.serial.Lock()
-		if p.peer == peer && p.target != nil && p.view.Visible && p.view.State == "ready" && p.view.Frame != "" {
-			shotCtx, cancel := context.WithTimeout(ctx, time.Second)
-			raw, err := p.target.broker.controlCall(shotCtx, "target.preview", p.target.owner, map[string]string{"view": p.view.Lease, "presentation": p.view.Epoch, "document": p.view.Document, "frame": p.view.Frame})
-			cancel()
-			if err == nil {
-				var shot struct {
-					Data string `json:"data"`
-				}
-				if json.Unmarshal(raw, &shot) == nil && len(shot.Data) > 0 && len(shot.Data) <= 6*1024*1024 {
-					previews = append(previews, Preview{Slot: key[len(surface)+1:], Data: shot.Data, Lease: p.view.Lease, Document: p.view.Document, Frame: p.view.Frame, URL: p.view.URL})
-				}
-			}
+		if p.peer != peer || p.target == nil || p.view.State == "NeedsReload" {
+			p.serial.Unlock()
+			continue
+		}
+		var preview Preview
+		if capture && p.view.Visible && p.view.State == "ready" && p.view.Frame != "" {
+			preview = capturePresentation(ctx, p, key[len(surface)+1:])
+		}
+		if err := p.hide(ctx); err != nil {
+			result = errors.Join(result, err)
+		} else if preview.Data != "" {
+			previews = append(previews, preview)
 		}
 		p.serial.Unlock()
 	}
-	return previews, r.Hide(ctx, peer, surface)
+	return previews, result
+}
+
+func capturePresentation(ctx context.Context, p *presentation, slot string) Preview {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	view := p.view
+	raw, err := p.target.broker.controlCall(ctx, "target.preview", p.target.owner, map[string]string{"view": view.Lease, "presentation": view.Epoch, "document": view.Document, "frame": view.Frame})
+	var shot struct {
+		Data string `json:"data"`
+	}
+	if err != nil || json.Unmarshal(raw, &shot) != nil || len(shot.Data) > 6*1024*1024 {
+		return Preview{}
+	}
+	return Preview{Slot: slot, Data: shot.Data, Lease: view.Lease, Document: view.Document, Frame: view.Frame, URL: view.URL}
+}
+
+func (p *presentation) hide(ctx context.Context) error {
+	p.epoch++
+	epoch := fmt.Sprint(p.epoch)
+	if _, err := p.target.broker.controlCall(ctx, "target.hide", p.target.owner, map[string]any{"epoch": epoch}); err != nil {
+		return err
+	}
+	p.view.Visible = false
+	p.view.Epoch = epoch
+	return nil
 }
 
 // loss invalidates the descriptor before awaiting native frame-close evidence.
@@ -443,7 +502,7 @@ func (r *PresenterRegistry) Recover(ctx context.Context, peer PresenterPeer, sur
 	}
 	p.view.URL = ""
 	p.serial.Unlock()
-	return r.updateLocked(ctx, peer, surface, parent, slot, address, SlotBounds{}, 1, false)
+	return r.updateLocked(ctx, peer, surface, parent, slot, address, SlotBounds{}, 1, false, 0)
 }
 
 // drain invalidates admission before waiting for native execution-context
@@ -515,6 +574,7 @@ type navigationState struct {
 	Popup                            *WebPopup `json:"popup"`
 	PopupVisible                     bool
 	PresentationFailure              string
+	NavigationFailed                 bool
 	DialogVisible                    bool
 	Dialog                           *WebDialog `json:"dialog"`
 	URL, Title                       string
@@ -540,8 +600,10 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 		p.view.State = "presentationFailed"
 		p.view.Visible = false
 		p.view.Failure = state.PresentationFailure
+		p.clearViewEvidence()
 		return nil
 	}
+	p.view.Failure = ""
 	p.view.Popup = state.Popup
 	p.view.PopupVisible = state.PopupVisible
 	p.view.Dialog = state.Dialog
@@ -550,6 +612,12 @@ func (r *PresenterRegistry) refreshLocked(ctx context.Context, p *presentation) 
 	p.view.Title = state.Title
 	p.view.CanGoBack = state.CanGoBack
 	p.view.CanGoForward = state.CanGoForward
+	if state.NavigationFailed {
+		p.view.State = "navigationFailed"
+		p.view.Failure = "CEF_NAVIGATION_FAILED"
+		p.clearViewEvidence()
+		return nil
+	}
 	p.view.State = "ready"
 	if state.Loading {
 		p.view.State = "loading"

@@ -131,6 +131,22 @@ func TestProfileBackupsFollowOwnerAndDelete(t *testing.T) {
 	}
 }
 
+func TestListProfileBackupsWhileProfileIsBeingCreated(t *testing.T) {
+	m := newTestManager(t)
+	ctx := context.Background()
+	ref := ProfileRef{DataDirectoryID: "dsh-work", Name: "pending-profile"}
+	directory := filepath.Join(m.config.DataDirectories[0].Path, "profiles", ref.Name)
+	backups, err := m.ListProfileBackups(ctx, ref)
+	if err != nil || backups == nil || len(backups) != 0 {
+		t.Fatalf("backups before profile creation = %#v, %v", backups, err)
+	}
+	if _, err := os.Lstat(directory); !os.IsNotExist(err) {
+		t.Fatalf("listing modified the absent profile: %v", err)
+	}
+	_, err = m.ProfileBackupDirectory(ctx, ref)
+	assertFailureCode(t, err, lifecycle.ErrorProfileBackupFailed)
+}
+
 func TestProfileBackupRestoreRoundTripPreservesSource(t *testing.T) {
 	m := newTestManager(t)
 	m.config.ProfileCatalog = testProfileCatalog{definitions: []ProfileDefinition{{Name: "web"}}}

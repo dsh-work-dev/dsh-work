@@ -21,6 +21,9 @@ typedef struct {
 int dsh_ipc_authenticate(int fd, int cancel_fd, dsh_ipc_peer *peer);
 int dsh_ipc_connect(const char *path, int cancel_fd, int *fd, dsh_ipc_peer *peer);
 int dsh_ipc_recheck(int fd, const dsh_ipc_peer *peer);
+// Receive one write-only regular file from this exact offering process.
+// The returned descriptor is close-on-exec and must be closed by the caller.
+int dsh_ipc_receive_writer(const char *path, int cancel_fd, uint32_t pid, uint64_t started, int *fd);
 uint64_t dsh_ipc_process_started(uint32_t pid);
 #ifdef __cplusplus
 }

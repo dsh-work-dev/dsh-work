@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/local/dsh-work/internal/logging"
 	"github.com/local/dsh-work/internal/supervisor"
 )
 
@@ -37,6 +40,27 @@ type rendererFault struct {
 	resolved  bool
 }
 
+type rendererCensusFailure struct {
+	reason string
+	stage  string
+	cause  error
+}
+
+func (e rendererCensusFailure) Error() string { return e.reason }
+
+func (e rendererCensusFailure) log() {
+	var inventoryStage interface{ RendererInventoryStage() string }
+	if errors.As(e.cause, &inventoryStage) {
+		e.stage = inventoryStage.RendererInventoryStage()
+	}
+	attrs := []any{"code", e.reason, "stage", e.stage}
+	var errno syscall.Errno
+	if errors.As(e.cause, &errno) {
+		attrs = append(attrs, "errno", uint64(errno))
+	}
+	logging.Module(logging.ModRuntime).Warn("renderer census rejected", attrs...)
+}
+
 type rendererTracker struct {
 	broker           *Broker
 	inventory        supervisor.ProcessInventory
@@ -50,6 +74,7 @@ type rendererTracker struct {
 	established      bool
 	artifactRetiring map[string]bool
 	joinUncertain    bool
+	joinFailure      rendererCensusFailure
 	conflicted       map[uint32]bool
 	faults           map[uint64]*rendererFault
 	held             map[uint32]*rendererLease
@@ -63,8 +88,13 @@ func newRendererTracker(b *Broker, executable string) *rendererTracker {
 	if !ok {
 		return nil
 	}
-	image, err := os.Stat(executable)
-	if err != nil {
+	var image os.FileInfo
+	if pinned, ok := inventory.(interface{ RendererImage() os.FileInfo }); ok {
+		image = pinned.RendererImage()
+	} else {
+		image, _ = os.Stat(executable)
+	}
+	if image == nil {
 		return nil
 	}
 	tracker := &rendererTracker{broker: b, inventory: inventory, image: image, stop: make(chan struct{}), joined: make(chan struct{}), update: make(chan struct{}, 1), held: map[uint32]*rendererLease{}}
@@ -130,6 +160,10 @@ func (r *rendererTracker) refresh() {
 	complete := inventoryErr == nil && snapshot.TopologyComplete
 	uncertain := inventoryErr != nil
 	reason := "CEF_RENDERER_CENSUS_UNCERTAIN"
+	failureStage, failureCause := "renderer-identity", inventoryErr
+	if inventoryErr != nil {
+		failureStage = "process-inventory"
+	}
 
 	var retired []supervisor.ProcessLease
 	var cleanupErr error
@@ -170,6 +204,9 @@ func (r *rendererTracker) refresh() {
 		args, err := lease.Arguments(ctx)
 		if err != nil {
 			reason = "CEF_RENDERER_ARGUMENTS_UNCERTAIN"
+			if failureCause == nil {
+				failureStage, failureCause = "renderer-arguments", err
+			}
 			complete = false
 			uncertain = true
 			release(lease)
@@ -235,7 +272,7 @@ func (r *rendererTracker) refresh() {
 		}
 		r.mu.Unlock()
 		if pause {
-			r.broker.pauseRendererGraph(errors.New(reason))
+			r.broker.pauseRendererGraph(rendererCensusFailure{reason, failureStage, failureCause})
 		}
 	}()
 	if r.conflicted == nil {
@@ -264,6 +301,9 @@ func (r *rendererTracker) refresh() {
 	for child, held := range r.held {
 		alive, err := held.process.Alive()
 		if err != nil {
+			if failureCause == nil {
+				failureStage, failureCause = "renderer-liveness", err
+			}
 			uncertain = true
 			complete = false
 		}
@@ -287,7 +327,7 @@ func (r *rendererTracker) refresh() {
 		}
 	}
 	for child := range wanted {
-		if r.held[child] == nil {
+		if lease := r.held[child]; lease == nil || lease.identity.Exited {
 			complete = false
 		}
 	}
@@ -302,6 +342,7 @@ func (r *rendererTracker) refresh() {
 	r.epoch = snapshot.FaultEpoch
 	r.frames = snapshot.Frames
 	r.joinUncertain = uncertain
+	r.joinFailure = rendererCensusFailure{reason, failureStage, failureCause}
 	r.complete = complete
 
 }
@@ -346,11 +387,11 @@ func (r *rendererTracker) fence(graph FrameGraphSnapshot, reported RendererTermi
 }
 func (r *rendererTracker) snapshot(revision, epoch uint64) ([]RendererInstance, RendererInfluence, bool) {
 	r.mu.Lock()
-	uncertain := false
+	var observationError error
 	defer func() {
 		r.mu.Unlock()
-		if uncertain {
-			r.broker.pauseRendererGraph(errors.New("CEF_RENDERER_JOIN_UNCERTAIN"))
+		if observationError != nil {
+			r.broker.pauseRendererGraph(rendererCensusFailure{"CEF_RENDERER_JOIN_UNCERTAIN", "renderer-liveness", observationError})
 		}
 	}()
 	complete := r.complete && r.revision == revision && r.epoch == epoch
@@ -364,9 +405,14 @@ func (r *rendererTracker) snapshot(revision, epoch uint64) ([]RendererInstance, 
 		alive, err := held.process.Alive()
 		if err != nil {
 			complete = false
-			uncertain = r.established
+			if r.established {
+				observationError = err
+			}
 		}
 		identity.Exited = err == nil && !alive
+		if identity.Exited && slices.ContainsFunc(r.frames, func(frame FrameRecord) bool { return frame.Child == identity.Child }) {
+			complete = false
+		}
 		processes = append(processes, identity)
 	}
 	sort.Slice(processes, func(i, j int) bool { return processes[i].Child < processes[j].Child })
@@ -428,11 +474,12 @@ func (r *rendererTracker) arm() error {
 	r.mu.Lock()
 	r.established = true
 	uncertain := r.joinUncertain
+	failure := r.joinFailure
 	r.mu.Unlock()
 	if uncertain {
-		cause := errors.New("CEF_RENDERER_JOIN_UNCERTAIN")
-		r.broker.pauseRendererGraph(cause)
-		return cause
+		failure.reason = "CEF_RENDERER_JOIN_UNCERTAIN"
+		r.broker.pauseRendererGraph(failure)
+		return failure
 	}
 	return nil
 }

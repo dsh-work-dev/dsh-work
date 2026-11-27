@@ -119,7 +119,7 @@ func TestLiveManagedPopupPendingDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	const slot = "source-session/source-tab"
-	state, err := reg.Update(ctx, peer, "window", parent, admission.Lease, slot, server.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true)
+	state, err := reg.Update(ctx, peer, "window", parent, admission.Lease, slot, server.URL, embeddedbrowser.SlotBounds{Width: 700, Height: 450}, 1, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestLiveManagedPopupPendingDispatch(t *testing.T) {
 	}
 	// Same source/window remains valid across visible resize; old presentation
 	// snapshots cannot answer the new presentation but the request is retained.
-	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 200, Height: 180}, 1, true)
+	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 200, Height: 180}, 1, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestLiveManagedPopupPendingDispatch(t *testing.T) {
 	if _, e := reg.Popup(ctx, peer, "window", slot, p, "allow"); e == nil {
 		t.Fatal("hidden source dispatched")
 	}
-	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 200, Height: 180}, 1, true)
+	state, err = reg.Update(ctx, peer, "window", parent, admission.Lease, slot, "", embeddedbrowser.SlotBounds{Width: 200, Height: 180}, 1, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

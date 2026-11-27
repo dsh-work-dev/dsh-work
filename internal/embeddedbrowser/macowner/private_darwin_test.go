@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 	"testing"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/embeddedbrowser"
+	"github.com/local/dsh-work/internal/localipc"
 )
 
 // First production checkpoint: official bundle, real LaunchAgent/profile
@@ -29,6 +31,7 @@ import (
 // It does not qualify UI presentation, managed admission, Service or MCP yet.
 func TestLiveMacPrivateCEF(t *testing.T) {
 	manifest, evidence := os.Getenv("DSH_WORK_CEF_MAC_PUBLICATION"), os.Getenv("DSH_WORK_CEF_TEST_EVIDENCE")
+	crash := os.Getenv("DSH_WORK_CEF_TEST_BROKER_CRASH") == "1"
 	if manifest == "" || evidence == "" {
 		t.Fatal("explicit formal Mac publication and evidence directory required")
 	}
@@ -128,7 +131,12 @@ func TestLiveMacPrivateCEF(t *testing.T) {
 		call := func(method string, params map[string]any) json.RawMessage {
 			t.Helper()
 			serial++
-			data, _ := json.Marshal(map[string]any{"id": serial, "method": "devtools.dispatch", "params": []any{map[string]any{"tabId": tab, "sessionId": ""}, method, params}})
+			request := map[string]any{"id": serial, "method": method, "params": params}
+			if method != "dsh.indicator" {
+				request["method"] = "devtools.dispatch"
+				request["params"] = []any{map[string]any{"tabId": tab, "sessionId": ""}, method, params}
+			}
+			data, _ := json.Marshal(request)
 			if e = r.Send(ctx, data); e != nil {
 				t.Fatal(e)
 			}
@@ -180,6 +188,32 @@ func TestLiveMacPrivateCEF(t *testing.T) {
 				}
 			}
 		}
+		if generation == 1 {
+			if got := evaluate(`(() => {
+				const input = document.querySelector('input');
+				Object.assign(input.style, {position:'fixed', left:'48px', top:'100px', width:'180px', height:'48px'});
+				window.dshFixtureMouseEvents = [];
+				for (const type of ['mousedown', 'mouseup', 'click']) input.addEventListener(type, () => {
+					window.dshFixtureMouseEvents.push(type + ':' + !!document.querySelector('div[aria-hidden=true]'));
+				});
+				return String(!!document.querySelector('div[aria-hidden=true]'));
+			})()`); got != "false" {
+				t.Fatal("indicator unexpectedly visible before an action", got)
+			}
+			call("dsh.indicator", map[string]any{"running": true, "action": "browser_click"})
+			for _, event := range []string{"mousePressed", "mouseReleased"} {
+				buttons := 0
+				if event == "mousePressed" {
+					buttons = 1
+				}
+				call("Input.dispatchMouseEvent", map[string]any{"type": event, "button": "left", "buttons": buttons, "clickCount": 1, "x": 130, "y": 124})
+			}
+			call("dsh.indicator", map[string]any{"running": false})
+			if got := evaluate("window.dshFixtureMouseEvents.join(',')"); got != "mousedown:true,mouseup:true,click:true" {
+				t.Fatal("native click did not reach the intended element after indicator creation", got)
+			}
+			mark(generation, "native-action-indicator-preceded-click")
+		}
 		frame := call("Page.getFrameTree", map[string]any{})
 		value := evaluate("window.fixtureDirty='private-edited';document.querySelector('input').value=window.fixtureDirty;window.fixtureNonce")
 		if value != nonce {
@@ -230,17 +264,66 @@ func TestLiveMacPrivateCEF(t *testing.T) {
 				writeTerminalEvidence(t, name+"-terminal.json", a.worker)
 			}
 		})
-		mark(generation, "normal-close-requested")
-		if e = r.Close(); e != nil {
-			t.Fatal(e)
+		crashed := crash && generation == 1
+		if crashed {
+			a.worker.mu.Lock()
+			broker := a.worker.state.Owned[processKey(a.worker.state.Broker)]
+			a.worker.mu.Unlock()
+			if broker.Target == nil {
+				t.Fatal("missing authenticated broker target")
+			}
+			if e = localipc.SignalTarget(*broker.Target, syscall.SIGKILL); e != nil {
+				t.Fatal("terminate isolated native broker", e)
+			}
+			mark(generation, "broker-killed")
+		} else {
+			mark(generation, "normal-close-requested")
+			if e = r.Close(); e != nil {
+				t.Fatal(e)
+			}
 		}
-		if e = b.Close(); e != nil {
-			t.Fatal(e)
+		if generation == 1 && !crashed {
+			artifactRoot := filepath.Join(root, "artifact")
+			if e = os.Mkdir(artifactRoot, 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e = os.WriteFile(filepath.Join(artifactRoot, "fixture.html"), []byte("<!doctype html><title>Mac artifact fixture</title>"), 0600); e != nil {
+				t.Fatal(e)
+			}
+			for range 2 {
+				artifact, e := b.OpenArtifact(ctx, artifactRoot, "fixture.html")
+				if e != nil {
+					t.Fatal("load local artifact in native CEF", e)
+				}
+				deadline := time.NewTimer(10 * time.Second)
+				poll := time.NewTicker(100 * time.Millisecond)
+				for {
+					identity, stateErr := artifact.OwnedTarget().OwnedIdentity(ctx)
+					graph := b.FrameGraph()
+					if stateErr == nil && identity.URL == artifact.Origin()+"/fixture.html" && identity.Frame != "" && identity.Document != "" &&
+						graph.ProcessJoinComplete && len(graph.Processes) > 0 {
+						break
+					}
+					select {
+					case <-deadline.C:
+						poll.Stop()
+						t.Fatalf("native artifact document or renderer join did not settle: %#v (%v), topology=%t join=%t renderers=%d reason=%s",
+							identity, stateErr, graph.TopologyComplete, graph.ProcessJoinComplete, len(graph.Processes), graph.UnknownReason)
+					case <-poll.C:
+					}
+				}
+				deadline.Stop()
+				poll.Stop()
+				if e = artifact.Revoke(ctx); e != nil {
+					t.Fatal("retire local artifact", e)
+				}
+			}
+			mark(generation, "artifact-document-loaded-and-revoked")
+		}
+		if e = b.Close(); (e != nil) != crashed || b.CleanupPending() {
+			t.Fatalf("broker close after crash=%t: %v (cleanup pending=%t)", crashed, e, b.CleanupPending())
 		}
 		mark(generation, "close-returned")
-		if b.CleanupPending() {
-			t.Fatal("owner incomplete after normal shutdown")
-		}
 		if e = a.worker.WaitEmpty(ctx); e != nil {
 			t.Fatal(e)
 		}
@@ -254,15 +337,22 @@ func TestLiveMacPrivateCEF(t *testing.T) {
 			t.Fatalf("completed profile lease: free=%v err=%v", free, err)
 		}
 		mark(generation, "profile-lease-free-observed")
-		if a.worker.ExitResult().Code != 0 {
-			t.Fatal("CEF normal shutdown failed")
-		}
 		state, e := loadGeneration(a.directory, a.worker.key, ownerGeneration)
 		if e != nil || state.Phase != "empty" {
 			t.Fatal("generation terminal record missing:", e)
 		}
 		if len(state.Owned) < 2 || !strings.Contains(state.RuntimeVersion, "156.0.15") {
 			t.Fatal("native inventory/runtime evidence incomplete")
+		}
+		if crashed {
+			if state.ExitSignal != int(syscall.SIGKILL) || len(state.Children) != 0 || !a.worker.jobRetired || !a.worker.runRetired {
+				t.Fatal("crash termination or launch attempt retirement was not established")
+			}
+			if ready, err := empty(state, false); err != nil || !ready {
+				t.Fatalf("crashed generation still has a live owner or child: %t (%v)", ready, err)
+			}
+		} else if state.Exit.Code != 0 {
+			t.Fatal("CEF normal shutdown failed")
 		}
 		t.Logf("generation %d: actual broker %d, %d owned instances, empty; same profile retained", generation, state.Broker.PID, len(state.Owned))
 	}

@@ -324,10 +324,12 @@ func (s *Server) invoke(ctx context.Context, call Call) (data json.RawMessage, e
 	if s.draining.Load() && !maintenanceCallAllowed(call) {
 		return nil, maintenanceFailure()
 	}
-	// Accepted manager operations belong to the daemon, not to the lifetime of
-	// the HTTP connection. Keep that property while retaining a daemon-level
-	// cancellation path for the installer stop handshake.
-	base := app.LocalClientContext(context.WithoutCancel(ctx), call.Surface)
+	// Manager operations survive a disconnected client. A window-owned picker
+	// must close when its client disconnects. Both remain tracked for shutdown.
+	if call.Service != "EmbeddedBrowserService" || call.Method != "OpenArtifact" {
+		ctx = context.WithoutCancel(ctx)
+	}
+	base := app.LocalClientContext(ctx, call.Surface)
 	operationCtx, cancel := context.WithCancel(base)
 	defer cancel()
 	stopTracking := s.trackCall(cancel)

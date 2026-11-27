@@ -11,8 +11,12 @@ import (
 
 func TestPinnedArtifactCompositionProjection(t *testing.T) {
 	path := filepath.Join("..", "..", "tools", "dsh", "node_modules", "@deepseek-ai", "dsh-client-ui-sidebar-documentpreview", "lib", "client.js")
+	fixture := os.Getenv("DSH_WORK_ARTIFACT_PROJECTION_FIXTURE")
+	if fixture != "" {
+		path = fixture
+	}
 	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) && fixture == "" {
 		t.Skip("installed pinned runtime not supplied")
 	}
 	if err != nil {
@@ -23,7 +27,7 @@ func TestPinnedArtifactCompositionProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		if source != projected {
 			t.Fatal("unsupported platform preview changed")
 		}

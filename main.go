@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"runtime"
 
 	"github.com/local/dsh-work/internal/desktopapp"
 )
@@ -25,8 +26,14 @@ func main() {
 	if supervisorBootstrap() {
 		return
 	}
+	icon := appIcon
+	if runtime.GOOS == "darwin" {
+		// AppKit loads icons.icns from the bundle. Wails would otherwise
+		// replace it with the full-bleed icon shared by the other platforms.
+		icon = nil
+	}
 	desktopapp.Run(desktopapp.Resources{
-		Assets: assets, AppIcon: appIcon, TrayIcon: trayIcon,
+		Assets: assets, AppIcon: icon, TrayIcon: trayIcon,
 		TrayDarkIcon: trayDarkIcon, TrayTemplateIcon: trayTemplateIcon,
 	})
 }

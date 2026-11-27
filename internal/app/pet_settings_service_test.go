@@ -117,6 +117,10 @@ func TestPersistPetPositionSurvivesReloadWithoutWindowActions(t *testing.T) {
 	if err := PersistPetPosition(context.Background(), service, position); err != nil {
 		t.Fatal(err)
 	}
+	// A window move can include stale frame dimensions after a Settings
+	// resize. Persist the monitor and anchor while keeping the sprite size.
+	position.Width = settings.DefaultPetPosition().Width
+	position.Height = settings.DefaultPetPosition().Height
 	reloaded := newPetServiceManagerWithStore(t, store, settings.DefaultValues())
 	values, err := reloaded.Snapshot(context.Background())
 	if err != nil {

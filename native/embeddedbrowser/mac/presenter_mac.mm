@@ -22,7 +22,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <string_view>
 #include <thread>
+#include <utility>
 
 namespace {
 using Dict=CefRefPtr<CefDictionaryValue>;
@@ -46,8 +49,25 @@ struct Link:std::enable_shared_from_this<Link>{
  std::string view,epoch,endpoint,path;uint64_t next=0;int width=1024,height=768;double scale=1;
  std::atomic<bool> connected{false},visible{false},physical_visible{false},pending_hidden{false},stopped{false};
  std::mutex mu,write_mu;std::condition_variable cv;std::string waiting;Dict reply;std::thread reader;
+ std::string picker;
+ std::function<void(std::vector<CefString>)> picker_done;
+ bool focus_known=false,focused=false;
+ void SetFocus(bool current){
+  if(focus_known&&focused==current)return;
+  focus_known=true;focused=current;
+  auto host=browser->GetHost();
+  if(!focused)host->ImeCancelComposition();
+  host->SetFocus(focused);
+ }
  ~Link(){Close();}
  void Close(){stopped=true;visible=false;if(fd>=0)shutdown(fd,SHUT_RDWR);cv.notify_all();if(reader.joinable()&&reader.get_id()!=std::this_thread::get_id())reader.join();if(fd>=0)close(fd);fd=-1;if(memory)munmap(memory,bytes);memory=nullptr;if(frame_fd>=0)close(frame_fd);frame_fd=-1;}
+ void Retire(){
+  Close();
+  // Release CEF references on the UI thread before OnBeforeClose returns.
+  browser=nullptr;
+  manual={};
+  FinishPicker({});
+ }
  bool Write(Dict d){std::lock_guard lock(write_mu);auto text=JSON(d);return !stopped&&Frame(fd,true,text);}
  Dict Request(Dict d){std::unique_lock lock(mu);waiting=std::to_string(++next);d->SetString("id",waiting);reply=nullptr;lock.unlock();if(!Write(d))return nullptr;lock.lock();cv.wait_for(lock,std::chrono::seconds(3),[&]{return reply||!connected;});auto value=reply;waiting.clear();reply=nullptr;return value;}
  bool Connect(const std::string& token,uint32_t pid,uint64_t started){int result=EIO;dsh_ipc_peer peer{};std::thread auth([&]{result=dsh_ipc_connect(endpoint.c_str(),-1,&fd,&peer);int one=1;if(!result&&setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one)))result=errno;if(!result&&(peer.pid!=pid||peer.started!=started||!Authenticate(fd,token)))result=EACCES;});auth.join();if(result)return false;int one=1;setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one));connected=true;reader=std::thread([self=shared_from_this()]{self->Read();});return true;}
@@ -59,9 +79,31 @@ struct Link:std::enable_shared_from_this<Link>{
    std::string text;if(!Frame(fd,false,text))break;auto d=Parse(text);if(!d)break;
    if(d->GetString("op")=="ack") {std::lock_guard lock(mu);if(!waiting.empty()&&d->GetString("id")==waiting){reply=d;cv.notify_all();}continue;}
    if(d->GetString("op")=="visibility"&&d->GetString("view")==view&&!d->GetBool("visible"))pending_hidden=true;
-   CefPostTask(TID_UI,base::BindOnce([](std::shared_ptr<Link> self,Dict event){self->Input(event);},shared_from_this(),d));
+   CefPostTask(TID_UI,base::BindOnce([](std::weak_ptr<Link> link,Dict event){
+    if(auto self=link.lock())self->Input(event);
+   },weak_from_this(),d));
   }
   connected=false;visible=false;cv.notify_all();
+  if(!stopped)CefPostTask(TID_UI,base::BindOnce([](std::weak_ptr<Link> link){
+   if(auto self=link.lock())self->FinishPicker({});
+  },weak_from_this()));
+ }
+ void FinishPicker(std::vector<CefString> files){
+  auto done=std::exchange(picker_done,{});picker.clear();
+  if(done)done(std::move(files));
+ }
+ void PickerResult(Dict d){
+  if(!picker_done||d->GetString("picker")!=picker)return;
+  auto paths=d->GetList("paths");
+  std::vector<CefString> selected;
+  if(connected&&visible&&d->GetString("view")==view&&d->GetString("epoch")==epoch&&paths&&paths->GetSize()<=128){
+   for(size_t i=0;i<paths->GetSize();++i){
+    auto path=paths->GetString(i).ToString();
+    if(path.empty()||path.front()!='/'||path.find('\0')!=std::string::npos){selected.clear();break;}
+    selected.emplace_back(path);
+   }
+  }
+  FinishPicker(std::move(selected));
  }
  bool Map(Dict ack){
   auto candidate=ack->GetString("path").ToString();int size=ack->GetInt("bytes");double dpr=Numeric(ack,"scale");
@@ -74,10 +116,17 @@ struct Link:std::enable_shared_from_this<Link>{
   if(memory)munmap(memory,bytes);if(frame_fd>=0)close(frame_fd);memory=mapped;bytes=size;frame_fd=owned;path=candidate;scale=dpr;return true;
  }
  void Input(Dict d){
-  auto found=links.find(browser->GetIdentifier());if(stopped||!connected||!visible||found==links.end()||found->second.get()!=this||!browser->IsValid()||d->GetString("view")!=view||d->GetString("epoch")!=epoch)return;
+  if(stopped||!browser)return;
+  if(d->GetString("op")=="picker-result"){PickerResult(d);return;}
+  auto found=links.find(browser->GetIdentifier());if(!connected||!visible||found==links.end()||found->second.get()!=this||!browser->IsValid()||d->GetString("view")!=view||d->GetString("epoch")!=epoch)return;
   auto op=d->GetString("op").ToString();auto h=browser->GetHost();
-  if(op=="visibility"){physical_visible=d->GetBool("visible");if(!physical_visible&&manual)manual();h->WasHidden(!physical_visible);if(physical_visible)h->Invalidate(PET_VIEW);return;}
-  if(op=="focus"){h->SetFocus(d->GetBool("focused"));return;}
+  if(op=="visibility"){
+   physical_visible=d->GetBool("visible");
+   if(!physical_visible){if(manual)manual();SetFocus(false);}
+   h->WasHidden(!physical_visible);if(physical_visible)h->Invalidate(PET_VIEW);return;
+  }
+  if(op=="focus"){SetFocus(physical_visible&&d->GetBool("focused"));return;}
+  if(!physical_visible)return;
   if(op!="mouse"&&op!="key"&&op!="text"&&op!="composition"&&op!="cancel-composition")return;
   if(manual)manual();
   if(op=="mouse") {CefMouseEvent e;e.x=(int)Numeric(d,"x");e.y=(int)Numeric(d,"y");e.modifiers=d->GetInt("modifiers");if(e.x<0||e.y<0||e.x>width||e.y>height)return;auto kind=d->GetString("kind");if(kind=="move")h->SendMouseMoveEvent(e,false);else if(kind=="wheel")h->SendMouseWheelEvent(e,d->GetInt("dx"),d->GetInt("dy"));else if(kind=="down"||kind=="up"){int b=d->GetInt("button");if(b<0||b>2)return;h->SendMouseClickEvent(e,b==1?MBT_RIGHT:b==2?MBT_MIDDLE:MBT_LEFT,kind=="up",std::min(3,std::max(1,d->GetInt("count"))));}}
@@ -99,9 +148,11 @@ std::string PresentBrowser(CefRefPtr<CefBrowser> browser,Dict args,std::function
  auto request=CefDictionaryValue::Create();request->SetString("op","present");request->SetString("view",view);request->SetString("epoch",epoch);request->SetInt("browser",browser->GetIdentifier());request->SetDictionary("bounds",bounds->Copy(false));request->SetBool("visible",args->GetBool("visible"));
  auto ack=link->Request(request);if(!ack||!ack->GetString("error").empty()||ack->GetString("view")!=view||ack->GetString("epoch")!=epoch||!link->Map(ack)){RetireBrowser(browser->GetIdentifier());return "CEF_MAC_PRESENT_ACK_FAILED";}
  link->physical_visible=ack->GetBool("visible");link->epoch=epoch;link->width=std::max(1,bounds->GetInt("Width"));link->height=std::max(1,bounds->GetInt("Height"));link->visible=args->GetBool("visible")&&bounds->GetInt("Width")>0&&bounds->GetInt("Height")>0;
- browser->GetHost()->WasHidden(!(link->visible&&link->physical_visible));browser->GetHost()->NotifyScreenInfoChanged();browser->GetHost()->WasResized();if(link->visible)browser->GetHost()->Invalidate(PET_VIEW);return {};
+ bool shown=link->visible&&link->physical_visible;
+ browser->GetHost()->WasHidden(!shown);link->SetFocus(shown&&ack->GetBool("focused"));
+ browser->GetHost()->NotifyScreenInfoChanged();browser->GetHost()->WasResized();if(shown)browser->GetHost()->Invalidate(PET_VIEW);return {};
 }
-std::string HideBrowser(CefRefPtr<CefBrowser> browser,Dict args){auto link=Find(browser->GetIdentifier());if(!link)return {};auto epoch=args?args->GetString("epoch").ToString():link->epoch;auto request=CefDictionaryValue::Create();request->SetString("op","hide");request->SetString("view",link->view);request->SetString("epoch",epoch);auto ack=link->Request(request);if(!ack||!ack->GetString("error").empty())return "CEF_MAC_HIDE_ACK_FAILED";link->epoch=epoch;link->visible=false;browser->GetHost()->WasHidden(true);browser->GetHost()->SetFocus(false);return {};}
+std::string HideBrowser(CefRefPtr<CefBrowser> browser,Dict args){auto link=Find(browser->GetIdentifier());if(!link)return {};auto epoch=args?args->GetString("epoch").ToString():link->epoch;auto request=CefDictionaryValue::Create();request->SetString("op","hide");request->SetString("view",link->view);request->SetString("epoch",epoch);auto ack=link->Request(request);if(!ack||!ack->GetString("error").empty())return "CEF_MAC_HIDE_ACK_FAILED";link->epoch=epoch;link->visible=false;browser->GetHost()->WasHidden(true);link->SetFocus(false);return {};}
 bool BrowserVisible(CefRefPtr<CefBrowser> browser){
  auto link=Find(browser->GetIdentifier());if(!link||!link->connected||!link->visible||link->stopped)return false;
  // Final dispatch asks the trusted Cocoa host, rather than reusing the last
@@ -109,9 +160,58 @@ bool BrowserVisible(CefRefPtr<CefBrowser> browser){
  auto d=CefDictionaryValue::Create();d->SetString("op","state");d->SetString("view",link->view);d->SetString("epoch",link->epoch);auto ack=link->Request(d);
  bool actual=ack&&ack->GetString("error").empty()&&ack->GetString("view")==link->view&&ack->GetString("epoch")==link->epoch&&ack->GetBool("visible");
  bool invalidated=link->pending_hidden.exchange(false);
- link->physical_visible=actual;if((invalidated||!actual)&&link->manual)link->manual();browser->GetHost()->WasHidden(!actual);return actual&&!invalidated;
+ link->physical_visible=actual;if((invalidated||!actual)&&link->manual)link->manual();
+ browser->GetHost()->WasHidden(!actual);link->SetFocus(actual&&ack->GetBool("focused"));return actual&&!invalidated;
 }
-void RetireBrowser(int id){auto link=Find(id);if(!link)return;links.erase(id);link->Close();}
+bool BrowserSuspendedInVisibleHost(CefRefPtr<CefBrowser> browser){
+ auto link=Find(browser->GetIdentifier());if(!link||!link->connected||link->visible||link->stopped)return false;
+ auto request=CefDictionaryValue::Create();request->SetString("op","state");request->SetString("view",link->view);request->SetString("epoch",link->epoch);auto ack=link->Request(request);
+ return ack&&ack->GetString("error").empty()&&ack->GetString("view")==link->view&&ack->GetString("epoch")==link->epoch&&ack->GetBool("hostVisible")&&!ack->GetBool("visible");
+}
+bool OpenBrowserFilePicker(CefRefPtr<CefBrowser> browser,const std::string& origin,const std::vector<CefString>& extensions,
+                           bool multiple,bool folder,std::function<void(std::vector<CefString>)> done){
+ auto link=Find(browser->GetIdentifier());
+ if(!link||!link->connected||!link->visible||link->picker_done||origin.size()>2048)return false;
+ auto extensions_list=CefListValue::Create();
+ size_t index=0;
+ std::set<std::string> seen;
+ for(const auto& group:extensions){
+  if(index==128)break;
+  if(group.length()>512)continue;
+  const auto value=group.ToString();
+  // CEF expands a MIME type into a semicolon-separated extension group.
+  // Bound the individual extensions and the complete presenter frame.
+  std::string_view remaining=value;
+  while(!remaining.empty()&&index<128){
+   const auto end=remaining.find(';');
+   auto extension=remaining.substr(0,end);
+   remaining=end==std::string_view::npos?std::string_view{}:remaining.substr(end+1);
+   if(extension.starts_with('.'))extension.remove_prefix(1);
+   if(extension.empty()||extension.size()>64||
+      extension.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+-")!=std::string_view::npos)continue;
+   const auto [entry,inserted]=seen.emplace(extension);
+   if(inserted)extensions_list->SetString(index++,*entry);
+  }
+ }
+ auto request=CefDictionaryValue::Create();
+ request->SetString("op","picker-open");request->SetString("view",link->view);request->SetString("epoch",link->epoch);
+ const auto picker=std::to_string(link->next+1);
+ request->SetString("picker",picker);request->SetString("origin",origin);
+ request->SetBool("multiple",multiple);request->SetBool("folder",folder);request->SetList("extensions",extensions_list);
+ auto ack=link->Request(request);
+ if(!ack||!ack->GetString("error").empty()||ack->GetString("view")!=link->view||ack->GetString("epoch")!=link->epoch){RetireBrowser(browser->GetIdentifier());return false;}
+ if(!ack->GetBool("opened"))return false;
+ link->picker=picker;link->picker_done=std::move(done);
+ return true;
+}
+void CancelBrowserFilePicker(int id){
+ auto link=Find(id);if(!link||!link->picker_done)return;
+ auto request=CefDictionaryValue::Create();
+ request->SetString("op","picker-cancel");request->SetString("view",link->view);request->SetString("epoch",link->epoch);
+ request->SetString("picker",link->picker);
+ if(!link->Request(request))RetireBrowser(id);
+}
+void RetireBrowser(int id){auto link=Find(id);if(!link)return;links.erase(id);link->Retire();}
 void BrowserViewRect(int id,CefRect& rect){auto link=Find(id);rect=CefRect(0,0,link?link->width:1024,link?link->height:768);}
 bool BrowserScreenInfo(int id,CefScreenInfo& info){auto link=Find(id);if(!link)return false;info.device_scale_factor=(float)link->scale;info.depth=32;info.depth_per_component=8;info.is_monochrome=false;info.rect=info.available_rect=CefRect(0,0,link->width,link->height);return true;}
 void BrowserPaint(int id,CefRenderHandler::PaintElementType type,const void* buffer,int width,int height){auto link=Find(id);if(!link||!link->connected||!link->visible||!link->memory||type!=PET_VIEW||width<=0||height<=0||width>8192||height>8192)return;size_t count=(size_t)width*height*4;if(count>link->bytes-sizeof(FrameHeader)||flock(link->frame_fd,LOCK_EX|LOCK_NB))return;auto* h=(FrameHeader*)link->memory;memcpy((char*)link->memory+sizeof(FrameHeader),buffer,count);h->width=width;h->height=height;h->sequence++;if(!h->sequence)h->sequence++;flock(link->frame_fd,LOCK_UN);}

@@ -2,6 +2,8 @@ package nativeui
 
 import (
 	"context"
+	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"github.com/local/dsh-work/internal/lifecycle"
@@ -14,12 +16,18 @@ import (
 // NotificationService owns the optional Wails notification adapter without
 // exposing it as a WebView-bound service.
 type NotificationService struct {
-	service       *wailsnotifications.NotificationService
-	startupFailed atomic.Bool
+	service           *wailsnotifications.NotificationService
+	startupFailed     atomic.Bool
+	requestPermission func() (bool, error)
+	permissionOnce    sync.Once
 }
 
 func NewNotificationService(service *wailsnotifications.NotificationService) *NotificationService {
-	return &NotificationService{service: service}
+	host := &NotificationService{service: service}
+	if runtime.GOOS == "darwin" && service != nil {
+		host.requestPermission = service.RequestNotificationAuthorization
+	}
+	return host
 }
 
 func (s *NotificationService) ServiceName() string {
@@ -49,6 +57,29 @@ func (s *NotificationService) ServiceShutdown() error {
 
 func (s *NotificationService) Unavailable() bool {
 	return s == nil || s.startupFailed.Load()
+}
+
+// RequestNotificationAuthorization starts the system prompt after Wails has
+// initialized notifications. Its timeout must never delay a settings write.
+func RequestNotificationAuthorization(s *NotificationService, enabled bool, onGranted, onFailure func()) {
+	if !enabled || s.Unavailable() || s.requestPermission == nil {
+		return
+	}
+	s.permissionOnce.Do(func() {
+		go func() {
+			granted, err := s.requestPermission()
+			if err != nil {
+				logging.Module(logging.ModNotify).Warn("notification authorization failed", logging.ErrAttrs(err, lifecycle.ErrorNotificationDeliveryFailed)...)
+			}
+			if granted && err == nil {
+				if onGranted != nil {
+					onGranted()
+				}
+			} else if onFailure != nil {
+				onFailure()
+			}
+		}()
+	})
 }
 
 type notificationSender interface {

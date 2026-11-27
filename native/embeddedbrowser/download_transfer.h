@@ -5,7 +5,10 @@
 // deliberately lives inside its anonymous namespace.
 class DownloadTransfer;
 std::map<std::string,CefRefPtr<DownloadTransfer>> download_transfers;
-struct DownloadWriter { HANDLE value; bool closed; };
+#ifdef _WIN32
+using DownloadFile = HANDLE;
+const DownloadFile kNoDownloadFile=INVALID_HANDLE_VALUE;
+struct DownloadWriter { DownloadFile value; bool closed; };
 std::map<std::string,DownloadWriter> download_writers;
 void DownloadTransferFinished(const std::string& id);
 inline void DownloadDiscardWriter(CefRefPtr<CefDictionaryValue> args){
@@ -20,8 +23,22 @@ inline void DownloadDiscardWriter(CefRefPtr<CefDictionaryValue> args){
  }catch(...){}
 }
 
+#else
+using DownloadFile = int;
+constexpr DownloadFile kNoDownloadFile=-1;
+// Only the UI thread updates this set. Remember cancel-before-start even when
+// the cancellable writer has not yet been requested by the file thread.
+std::set<std::string> download_writers;
+void DownloadTransferFinished(const std::string& id);
+#endif
+
 inline std::string DownloadNonce(){
- unsigned char bytes[20];if(BCryptGenRandom(nullptr,bytes,sizeof(bytes),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0)return {};
+ unsigned char bytes[20];
+#ifdef _WIN32
+ if(BCryptGenRandom(nullptr,bytes,sizeof(bytes),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0)return {};
+#else
+ arc4random_buf(bytes,sizeof(bytes));
+#endif
  static constexpr char hex[]="0123456789abcdef";std::string result;for(auto b:bytes){result+=hex[b>>4];result+=hex[b&15];}return result;
 }
 inline std::string DownloadOrigin(const std::string& url){
@@ -31,7 +48,8 @@ inline std::string DownloadOrigin(const std::string& url){
 }
 class DownloadTransfer final:public CefURLRequestClient{
  std::string id_,owner_,url_,origin_,volume_,error_;CefRefPtr<CefRequestContext> context_;
- CefRefPtr<CefURLRequest> request_;HANDLE file_=INVALID_HANDLE_VALUE;
+ CefRefPtr<CefURLRequest> request_;
+ DownloadFile file_=kNoDownloadFile;
  uint64_t limit_,reserve_,written_=0,total_=0;unsigned redirects_=0;bool done_=false,canceling_=false;std::atomic_bool drained_{false},cancel_requested_{false};
  std::mutex cancel_mutex_;
  std::chrono::steady_clock::time_point last_progress_{};
@@ -44,21 +62,40 @@ class DownloadTransfer final:public CefURLRequestClient{
  void Finish(std::string error){
   if(done_)return;done_=true;if(error_.empty())error_=std::move(error);
   request_=nullptr;
-  if(file_!=INVALID_HANDLE_VALUE){if(!FlushFileBuffers(file_)&&error_.empty())error_="DOWNLOAD_WRITE_FAILED";CloseHandle(file_);file_=INVALID_HANDLE_VALUE;}
+  if(file_!=kNoDownloadFile){
+#ifdef _WIN32
+   bool flushed=FlushFileBuffers(file_);
+   CloseHandle(file_);
+#else
+   int result;
+   do {result=fsync(file_);} while(result<0&&errno==EINTR);
+   bool flushed=result==0;
+   close(file_);
+#endif
+   file_=kNoDownloadFile;
+   if(!flushed&&error_.empty())error_="DOWNLOAD_WRITE_FAILED";
+  }
   drained_=true;Emit(true);auto id=id_;CefPostTask(TID_UI,base::BindOnce(DownloadTransferFinished,id));
  }
  void Begin(){
+#ifdef __APPLE__
+  // The peer handshake performs bounded I/O. Keep it off the UI thread and
+  // outside the cancellation mutex. Cancel closes the offering socket first.
+  if(file_==kNoDownloadFile&&!cancel_requested_.load())
+   file_=ReceiveDownloadWriter(volume_);
+#endif
   std::lock_guard<std::mutex> lock(cancel_mutex_);
   if(done_)return;if(cancel_requested_.load()){CancelOnThread();return;}
+  if(file_==kNoDownloadFile){Finish("DOWNLOAD_WRITER_REQUIRED");return;}
   auto r=CefRequest::Create();r->SetURL(url_);r->SetMethod("GET");
   r->SetFlags(UR_FLAG_SKIP_CACHE|UR_FLAG_ALLOW_STORED_CREDENTIALS|UR_FLAG_STOP_ON_REDIRECT|UR_FLAG_NO_RETRY_ON_5XX);
   request_=CefURLRequest::Create(r,this,context_);if(!request_)Finish("DOWNLOAD_REQUEST_FAILED");
  }
  void CancelOnThread(){if(done_)return;canceling_=true;if(request_)request_->Cancel();else Finish("DOWNLOAD_CANCELED");}
 public:
- DownloadTransfer(std::string id,std::string owner,std::string url,CefRefPtr<CefRequestContext> context,HANDLE file,uint64_t limit,uint64_t reserve,std::string volume):
+ DownloadTransfer(std::string id,std::string owner,std::string url,CefRefPtr<CefRequestContext> context,DownloadFile file,uint64_t limit,uint64_t reserve,std::string volume):
  id_(std::move(id)),owner_(std::move(owner)),url_(std::move(url)),origin_(DownloadOrigin(url_)),volume_(std::move(volume)),context_(context),file_(file),limit_(limit),reserve_(reserve){}
- void Start(){CefPostTask(TID_FILE_USER_VISIBLE,base::BindOnce([](CefRefPtr<DownloadTransfer> self){self->Begin();},CefRefPtr<DownloadTransfer>(this)));}
+ bool Start(){return CefPostTask(TID_FILE_USER_VISIBLE,base::BindOnce([](CefRefPtr<DownloadTransfer> self){self->Begin();},CefRefPtr<DownloadTransfer>(this)));}
  bool Drained()const{return drained_.load();}
  void Cancel(){{std::lock_guard<std::mutex> lock(cancel_mutex_);cancel_requested_=true;}CefPostTask(TID_FILE_USER_VISIBLE,base::BindOnce([](CefRefPtr<DownloadTransfer> self){self->CancelOnThread();},CefRefPtr<DownloadTransfer>(this)));}
  void OnRequestComplete(CefRefPtr<CefURLRequest> r)override{
@@ -79,19 +116,36 @@ public:
   if(done_||canceling_||cancel_requested_.load()||!error_.empty())return;
   auto response=r->GetResponse();if(!response||response->GetStatus()!=200)return;
   if(n>limit_-written_){error_="DOWNLOAD_BUDGET_EXCEEDED";r->Cancel();return;}
+#ifdef _WIN32
   ULARGE_INTEGER free{};if(!GetDiskFreeSpaceExW(CefString(volume_).ToWString().c_str(),&free,nullptr,nullptr)||free.QuadPart<reserve_||n>free.QuadPart-reserve_){error_="DOWNLOAD_DISK_SPACE_REQUIRED";r->Cancel();return;}
   size_t offset=0;
   while(offset<n){DWORD count=static_cast<DWORD>(std::min<size_t>(n-offset,1<<20)),actual=0;
    if(!WriteFile(file_,static_cast<const char*>(data)+offset,count,&actual,nullptr)||actual==0){error_="DOWNLOAD_WRITE_FAILED";r->Cancel();return;}
    offset+=actual;written_+=actual;
   }
+#else
+  struct statfs fs{};
+  const auto required=reserve_+n;
+  if(fstatfs(file_,&fs)<0||!fs.f_bsize||fs.f_bavail<required/fs.f_bsize+(required%fs.f_bsize!=0)){
+   error_="DOWNLOAD_DISK_SPACE_REQUIRED";r->Cancel();return;
+  }
+  const auto* bytes=static_cast<const char*>(data);
+  for(size_t offset=0;offset<n;){
+   auto actual=write(file_,bytes+offset,std::min<size_t>(n-offset,1<<20));
+   if(actual<0&&errno==EINTR)continue;
+   if(actual<=0){error_="DOWNLOAD_WRITE_FAILED";r->Cancel();return;}
+   offset+=actual;written_+=actual;
+  }
+#endif
   auto now=std::chrono::steady_clock::now();if(now-last_progress_>=std::chrono::milliseconds(250)){last_progress_=now;Emit(false);}
  }
  bool GetAuthCredentials(bool,const CefString&,int,const CefString&,const CefString&,CefRefPtr<CefAuthCallback>)override{return false;}
 private:IMPLEMENT_REFCOUNTING(DownloadTransfer);
 };
 inline void DownloadTransferFinished(const std::string& id){
+#ifdef _WIN32
  if(auto writer=download_writers.find(id);writer!=download_writers.end())writer->second.closed=true;
+#endif
  download_transfers.erase(id);
  if(stopping&&tabs.empty()&&artifacts.empty()&&closing_clients.empty()&&download_transfers.empty())CefQuitMessageLoop();
 }

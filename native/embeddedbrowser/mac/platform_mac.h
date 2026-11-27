@@ -11,6 +11,7 @@ using Window = CefWindowHandle;
 bool Transfer(bool write, void* bytes, uint32_t size);
 std::string TakeEnvironment(const char* name);
 bool OpenTransport(const std::string& path);
+int ReceiveDownloadWriter(const std::string& endpoint);
 bool Authenticate(const std::string& token);
 void Erase(std::string& value);
 void CancelTransport();

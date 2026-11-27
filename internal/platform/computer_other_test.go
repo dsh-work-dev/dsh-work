@@ -6,25 +6,23 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/local/dsh-work/internal/automation"
 	"github.com/local/dsh-work/internal/settings"
 )
 
-func TestNonWindowsComputerEntryPointsRemainUnavailable(t *testing.T) {
-	if target, err := automation.InspectComputerTarget(1, 1); !errors.Is(err, automation.ErrUnavailable) || target != (automation.ComputerTarget{}) {
-		t.Fatalf("native target inspection must be unavailable: %+v, %v", target, err)
-	}
-	if release, err := automation.AcquireComputerDesktopLease(); !errors.Is(err, automation.ErrUnavailable) || release != nil {
-		t.Fatalf("native desktop lease must be unavailable: %v", err)
+func TestNonWindowsComputerBackendRemainsUnavailable(t *testing.T) {
+	if target, err := automation.InspectComputerTarget(0, 0); err == nil || target != (automation.ComputerTarget{}) {
+		t.Fatalf("invalid native target must be rejected: %+v, %v", target, err)
 	}
 	for _, engine := range []string{"cua-driver", "auv"} {
 		t.Run(engine, func(t *testing.T) {
 			preparer := NewAutomationPreparer(t.TempDir())
-			if preparer != nil {
+			if preparer != nil && (runtime.GOOS != "darwin" || runtime.GOARCH != "arm64") {
 				if !errors.Is(preparer.Prepare(context.Background(), automation.Computer, func(automation.Progress) {}), automation.ErrUnavailable) {
-					t.Fatal("non-Windows must not install a computer backend")
+					t.Fatal("unsupported platform installed a computer component")
 				}
 			}
 			manager, err := settings.New(settings.Config{Path: filepath.Join(t.TempDir(), "settings.json")})
@@ -37,10 +35,16 @@ func TestNonWindowsComputerEntryPointsRemainUnavailable(t *testing.T) {
 			}
 			s := automation.New(manager, preparer)
 			t.Cleanup(s.Close)
-			factoryCalled := false
+			factoryCalled, leaseCalled, inspectCalled := false, false, false
 			s.ConfigureComputerGateway(automation.ComputerGatewayConfig{
-				Inspect: automation.InspectComputerTarget,
-				Acquire: automation.AcquireComputerDesktopLease,
+				Inspect: func(pid uint32, window uint64) (automation.ComputerTarget, error) {
+					inspectCalled = true
+					return automation.InspectComputerTarget(pid, window)
+				},
+				Acquire: func() (func() error, error) {
+					leaseCalled = true
+					return nil, errors.New("unexpected desktop lease acquisition")
+				},
 				Factory: func(context.Context, string) (automation.Resource, error) {
 					factoryCalled = true
 					return nil, errors.New("unexpected backend launch")
@@ -59,7 +63,7 @@ func TestNonWindowsComputerEntryPointsRemainUnavailable(t *testing.T) {
 			if decision, err := s.AuthorizeComputer(ctx, r); !errors.Is(err, automation.ErrRevoked) || decision.Permit != "" {
 				t.Fatalf("unsupported backend authorized dispatch: %+v, %v", decision, err)
 			}
-			if factoryCalled || s.Snapshot().ComputerAccess.Use != nil {
+			if factoryCalled || leaseCalled || inspectCalled || s.Snapshot().ComputerAccess.Use != nil {
 				t.Fatal("unsupported backend started or retained desktop access")
 			}
 		})

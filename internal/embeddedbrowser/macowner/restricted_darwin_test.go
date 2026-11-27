@@ -72,9 +72,8 @@ console.log(JSON.stringify({kernelForkDenied:true,nativeSpawnDenied:true,nativeP
 	if json.Unmarshal(output, &kernel) != nil || len(kernel) != 5 {
 		t.Fatalf("invalid kernel result: %s", output)
 	}
-	// Node's native execve failure is fatal after native RunAtExit cleanup; it
-	// cannot be caught as a JavaScript exception. Keep that real failure in a
-	// separate, reaped probe rather than aborting the shared owner checkpoint.
+	// Probe native execve in a separate process. Node can abort or throw an
+	// uncaught system error on denial, depending on its version.
 	execScript := filepath.Join(t.TempDir(), "exec-denial.mjs")
 	execSource := `import fs from 'node:fs';import {createRequire} from 'node:module';
 if(createRequire(import.meta.url)(process.argv[2]).apply()!==true)throw Error('sandbox missing');
@@ -89,14 +88,17 @@ throw Error('execve unexpectedly returned');`
 	execOutput, execErr := execProbe.CombinedOutput()
 	var exitError *exec.ExitError
 	if !errors.As(execErr, &exitError) {
-		t.Fatalf("native exec denial did not produce the expected fatal boundary: %v: %s", execErr, execOutput)
+		t.Fatalf("native exec denial did not terminate the probe: %v: %s", execErr, execOutput)
 	}
 	status, ok := exitError.Sys().(syscall.WaitStatus)
-	if !ok || !status.Signaled() || status.Signal() != syscall.SIGABRT || !strings.Contains(string(execOutput), "MAC_PREVIEW_EXEC_ARMED\n") || !strings.Contains(string(execOutput), "process.execve failed") || !strings.Contains(string(execOutput), "EPERM") {
-		t.Fatalf("native exec failure was not the isolated EPERM abort: %v: %s", execErr, execOutput)
+	outputText := string(execOutput)
+	aborted := status.Signaled() && status.Signal() == syscall.SIGABRT && strings.Contains(outputText, "process.execve failed")
+	threw := status.Exited() && status.ExitStatus() == 1 && strings.Contains(outputText, "code: 'EPERM'") && strings.Contains(outputText, "syscall: 'execve'")
+	if !ok || !strings.Contains(outputText, "MAC_PREVIEW_EXEC_ARMED\n") || !strings.Contains(outputText, "EPERM") || (!aborted && !threw) {
+		t.Fatalf("native exec failure did not report EPERM from the isolated probe: %v: %s", execErr, execOutput)
 	}
 	kernel["execDenied"] = true
-	t.Log("isolated native execve: sandbox EPERM, Node SIGABRT observed and reaped")
+	t.Logf("isolated native execve: sandbox EPERM, Node process reaped (%v)", execErr)
 	env := map[string]string{}
 	for _, item := range os.Environ() {
 		if k, v, ok := strings.Cut(item, "="); ok {
@@ -166,4 +168,68 @@ throw Error('execve unexpectedly returned');`
 		t.Fatal("second generation reused original instance")
 	}
 	t.Logf("kernel checks=%v; two fixed DSH generations fully retired: %+v", kernel, instances)
+}
+
+func TestLiveMacRestrictedWorkerEscalatesBeforeRetirement(t *testing.T) {
+	executable := os.Getenv("DSH_WORK_MAC_PRODUCTION_EXECUTABLE")
+	if executable == "" {
+		t.Fatal("explicit packaged Mac executable required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	publication, err := OpenInstalledPublication(ctx, executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewManagedDSHAdapter(publication, filepath.Join(t.TempDir(), "owner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(t.TempDir(), "worker.mjs")
+	source := "process.on('SIGTERM', () => {}); console.log('ready-to-stop'); setTimeout(() => process.exit(0), 12000);"
+	if err := os.WriteFile(entry, []byte(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	entry, err = filepath.EvalSymlinks(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := make(chan struct{}, 1)
+	worker, err := adapter.StartWithComponent(ctx, node, entry, supervisor.LaunchPlan{
+		GenerationID: "restricted-stop-check", Executable: entry, Args: []string{"--version"},
+		WorkingDirectory: t.TempDir(), ExpectedOrigin: workeripc.Origin,
+	}, func(_ supervisor.OutputStream, line string) {
+		if strings.Contains(line, "ready-to-stop") {
+			ready <- struct{}{}
+		}
+	})
+	if worker != nil {
+		defer worker.Close()
+	}
+	if err != nil {
+		if worker != nil {
+			t.Logf("Worker stderr: %s", worker.Diagnostics().StderrTail)
+		}
+		t.Fatal(err)
+	}
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	stop, stopCancel := context.WithTimeout(ctx, 7*time.Second)
+	defer stopCancel()
+	if err := worker.RequestStop(stop); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.WaitEmpty(stop); err != nil {
+		t.Fatalf("Worker outlived its guard after ignoring SIGTERM: %v", err)
+	}
+	if err := worker.Close(); err != nil {
+		t.Fatalf("retire stopped Worker: %v", err)
+	}
 }

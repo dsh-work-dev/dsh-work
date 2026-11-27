@@ -51,6 +51,10 @@ jobs:
         if: runner.os == 'Linux'
         run: node scripts/check-public-content.mjs
 
+      - name: Test release feed promotion
+        if: runner.os == 'Linux'
+        run: bash .github/workflows/promote-feed.test.sh .github/workflows/promote-feed.sh
+
       - name: Install frontend dependencies
         if: runner.os == 'Linux'
         run: npm ci --prefix frontend
@@ -72,6 +76,55 @@ jobs:
         run: go test -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/...
       - name: Build Go packages
         run: go build ./internal/...
+
+  macos-build:
+    name: macOS arm64 Wails build
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CEF_ARCHIVE: cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64
+      CEF_ARCHIVE_SHA1: 77fc8778dfd008c6c85c1668b38462597804dc89
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25.14
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '>=24.9.0'
+          check-latest: true
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+          package-manager-cache: false
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.16
+
+      - name: Download pinned macOS CEF SDK
+        run: |
+          archive="$RUNNER_TEMP/$CEF_ARCHIVE.tar.bz2"
+          encoded_name="${CEF_ARCHIVE//+/%2B}"
+          curl --fail --location --retry 3 --output "$archive" "https://cef-builds.spotifycdn.com/$encoded_name.tar.bz2"
+          printf '%s  %s\n' "$CEF_ARCHIVE_SHA1" "$archive" | shasum -a 1 -c -
+          tar -xjf "$archive" -C "$RUNNER_TEMP"
+          rm "$archive"
+
+      - name: Build and verify macOS disk image
+        run: wails3 task package:darwin DSH_WORK_MAC_CEF_SDK="$RUNNER_TEMP/$CEF_ARCHIVE"
+
+      - name: Upload macOS disk image
+        uses: actions/upload-artifact@v6
+        with:
+          name: dsh-work-macos-arm64-dmg
+          path: bin/macos/build-*/DSH Work.dmg
+          if-no-files-found: error
 
   windows-build:
     name: Windows Wails build
@@ -156,6 +209,7 @@ jobs:
           path: |
             bin/dsh-work-*-windows-amd64-installer.exe
             bin/dsh-work-*-windows-amd64-installer.exe.sha256
+          if-no-files-found: error
 
       - name: Run Windows Go suite
         run: go test . ./cmd/...

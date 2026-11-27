@@ -266,7 +266,7 @@ func runCEFActionFeedback(t *testing.T, scenario string) {
 	makeDoc := func(name string) *doc {
 		t.Helper()
 		t.Log("makeDoc", name)
-		view, err := reg.Update(ctx, peer, "feedback-window", parent, window.Lease, name, server.URL+"/?document="+name, embeddedbrowser.SlotBounds{Width: 2400, Height: 1400}, 1, true)
+		view, err := reg.Update(ctx, peer, "feedback-window", parent, window.Lease, name, server.URL+"/?document="+name, embeddedbrowser.SlotBounds{Width: 2400, Height: 1400}, 1, true, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,7 +300,7 @@ func runCEFActionFeedback(t *testing.T, scenario string) {
 	present := func(d *doc, visible bool) {
 		t.Helper()
 		t.Log("present", d.name, visible)
-		_, err := reg.Update(ctx, peer, "feedback-window", parent, window.Lease, d.name, "", embeddedbrowser.SlotBounds{Width: 2400, Height: 1400}, 1, visible)
+		_, err := reg.Update(ctx, peer, "feedback-window", parent, window.Lease, d.name, "", embeddedbrowser.SlotBounds{Width: 2400, Height: 1400}, 1, visible, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

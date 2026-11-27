@@ -37,6 +37,7 @@ export function mountHost() {
   let cancelRequested = false;
   let polling = false;
   let disposed = false;
+  let bootstrapAttempted = false;
   let selectedNode = "";
   let selectedRuntime = "";
   let lastError = "";
@@ -294,20 +295,46 @@ export function mountHost() {
     }
   }
 
-  node.addEventListener("change", () => { selectedNode = node.value; render(); });
+  node.addEventListener("change", () => {
+    selectedNode = node.value;
+    render();
+    refreshStartupReleases();
+  });
   dsh.addEventListener("change", () => { selectedRuntime = dsh.value; render(); });
-  releases.addEventListener("click", () => void action(async () => { snapshot = await ManagerService.RefreshDSHReleases();
-    if (!installedRuntime() && !snapshot.dshReleases?.some(r => r.version === selectedVersion())) {
-      const release = snapshot.dshReleases?.[0]; if (release) selectedRuntime = `dsh-${release.version}`;
+  async function refreshReleases() {
+    snapshot = await ManagerService.RefreshDSHReleases();
+    if (!installedRuntime() && !downloadableVersion()) {
+      const release = snapshot.dshReleases?.find(r => !r.unsupported);
+      if (release) selectedRuntime = `dsh-${release.version}`;
     }
-    renderEnvironment(); }));
+    renderEnvironment();
+  }
+  function refreshStartupReleases() {
+    // Release discovery shares the acquisition slot with Node installation.
+    if (!busy && !active() && installedNode() && !installedRuntime() && !downloadableVersion()) {
+      void action(refreshReleases);
+    }
+  }
+  function prepareInitialEnvironment() {
+    if (disposed || busy || active() || !snapshot) return;
+    const version = snapshot.bootstrapDshVersion;
+    if (version && !snapshot.configured && !snapshot.current && !snapshot.knownGood && status.error?.code === "PROFILE_REQUIRED") {
+      if (!bootstrapAttempted) {
+        bootstrapAttempted = true;
+        void action(() => prepareAndStart(version), installedNode() ? "dsh" : "node");
+      }
+      return;
+    }
+    refreshStartupReleases();
+  }
+  releases.addEventListener("click", () => void action(refreshReleases));
   downloadNode.addEventListener("click", () => void action(async () => {
     snapshot = await ManagerService.InstallLatestNode();
     const installed = snapshot.nodes?.find(n => n.version === snapshot?.latestNode?.version && n.installed && n.verified);
     if (installed) selectedNode = installed.id;
     renderEnvironment();
     if (installedNode() && installedRuntime()) await prepareAndStart();
-  }, "node"));
+  }, "node").then(refreshStartupReleases));
   downloadDsh.addEventListener("click", () => void action(async () => {
     const version = selectedVersion();
     if (!version) return;
@@ -326,9 +353,13 @@ export function mountHost() {
     renderEnvironment();
     if (installedNode() && installedRuntime()) await prepareAndStart();
   }, "dsh"));
-  async function prepareAndStart() {
+  async function prepareAndStart(bootstrapVersion?: string) {
     if (cancelRequested || !snapshot) return;
-    if (!installedNode()) {
+    if (bootstrapVersion) {
+      selectedRuntime = snapshot.runtimes?.find(r => r.installed && r.version === bootstrapVersion)?.id ?? `dsh-${bootstrapVersion}`;
+    }
+    const needsInstallToolchain = !!bootstrapVersion && !installedRuntime() && selectedNode === "system" && !snapshot.systemNode?.npmPath;
+    if (!installedNode() || needsInstallToolchain) {
       const available = snapshot.nodes?.find(n => n.installed && n.verified);
       if (available) selectedNode = available.id;
       else {
@@ -339,12 +370,14 @@ export function mountHost() {
     }
     if (cancelRequested) return;
     if (!installedRuntime()) {
-      const version = selectedVersion();
-      if (!version) throw new Error("No DSH version selected");
       progressMessage.textContent = t("startup.fetchingReleases");
-      await ManagerService.RefreshDSHReleases();
+      snapshot = await ManagerService.RefreshDSHReleases();
       if (cancelRequested) return;
+      renderEnvironment();
+      const version = bootstrapVersion ?? selectedVersion();
+      if (!version) throw new Error(t("startup.noCompatibleDSH"));
       snapshot = await ManagerService.InstallRuntime(version);
+      selectedRuntime = snapshot.runtimes?.find(r => r.installed && r.version === version)?.id ?? selectedRuntime;
     }
     if (cancelRequested || !snapshot) return;
     acquiring = false; acquisitionKind = undefined;
@@ -353,7 +386,7 @@ export function mountHost() {
     starting = ManagerService.SetRunContext(target);
     try { await starting; } finally { starting = undefined; }
   }
-  retry.addEventListener("click", () => void action(connectionFailed ? initialize : prepareAndStart, connectionFailed ? undefined : !installedNode() ? "node" : !installedRuntime() ? "dsh" : undefined));
+  retry.addEventListener("click", () => void action(connectionFailed ? initialize : () => prepareAndStart(), connectionFailed ? undefined : !installedNode() ? "node" : !installedRuntime() ? "dsh" : undefined));
   cancel.addEventListener("click", () => {
     cancelRequested = true; render();
     void (async () => {
@@ -407,7 +440,14 @@ export function mountHost() {
     panels[kind].hidden = false;
     if (update.log) {
       logs[kind].append(update.operationId, update.log);
-      if (update.step === "output") return;
+      if (update.step === "output") {
+        if (busy && update.log.startsWith("npm http fetch ")) {
+          const message = t("startup.downloadingDependencies");
+          progressMessage.textContent = message;
+          panels[kind].querySelector("p")!.textContent = message;
+        }
+        return;
+      }
     }
     let text = runtimePreparationText(preparation);
     if (update.artifact.version) text += ` · ${update.artifact.version}`;
@@ -432,7 +472,7 @@ export function mountHost() {
     status = event.data as LifecycleStatus;
     if (status.state === "Starting") lastPhase = status.phase;
     render();
-    if (!active()) void refreshEnvironment().catch(showError);
+    if (!active()) void refreshEnvironment().then(prepareInitialEnvironment).catch(showError);
   });
   // Keep observing later retries and recovery attempts; avoid overlapping calls.
   async function poll() {
@@ -463,7 +503,7 @@ export function mountHost() {
       render();
       await refreshEnvironment();
       connectionFailed = false; lastError = ""; render();
-      void ManagerService.RefreshDSHReleases().then(next => { snapshot = next; renderEnvironment(); }).catch(showError);
+      prepareInitialEnvironment();
       await poll();
     } catch {
       connectionFailed = true; showError(new Error(t("startup.readError"))); render();

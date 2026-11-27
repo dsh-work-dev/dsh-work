@@ -10,3 +10,5 @@ import (
 func preparePresenterWindow(context.Context, *EmbeddedBrowserService, application.Window) error {
 	return nil
 }
+
+func presenterDisplayRevision(uint64) uint64 { return 0 }

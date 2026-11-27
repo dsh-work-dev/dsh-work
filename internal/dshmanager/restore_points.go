@@ -99,6 +99,20 @@ type RuntimeForceInstaller interface {
 	ForceInstall(context.Context, string, ResolvedNode) (RuntimeInfo, error)
 }
 
+// ProfileRestorePackageManager checks and prepares a platform's snapshot
+// package manager before recovery can replace any live dependencies.
+type ProfileRestorePackageManager interface {
+	PrepareProfilePackageManager(context.Context, ResolvedNode, string) error
+}
+
+type restorePackageManagerKey struct{}
+
+// RestorePackageManager returns the package manager recorded by the recovery point.
+func RestorePackageManager(ctx context.Context) string {
+	version, _ := ctx.Value(restorePackageManagerKey{}).(string)
+	return version
+}
+
 type resumedVersionRecoveryKey struct{}
 
 func profilePointKey(ref ProfileRef) string { return ref.DataDirectoryID + "/" + ref.Name }
@@ -430,7 +444,7 @@ func (m *Manager) PreviewRestorePoint(ctx context.Context, id string) (RestorePo
 		if err := p.Input.Automation.Validate(); err != nil {
 			return p.RestorePoint, err
 		}
-		if config.AutomationVersions == nil || config.AutomationVersions() != *p.Input.Automation {
+		if config.AutomationVersions == nil || !p.Input.Automation.MatchesHost(config.AutomationVersions()) {
 			return p.RestorePoint, errors.New("automation dependencies require the host version recorded with this point")
 		}
 	}
@@ -501,6 +515,14 @@ func (m *Manager) RecoverVersionPoint(ctx context.Context, id string) (launch Re
 	node, err := resolveNode(ctx, config.NodeResolver, p.Target.Node, config.Nodes)
 	if err != nil {
 		return launch, err
+	}
+	if len(p.Input.Plugins) > 0 || p.Input.Lock != "" {
+		if preparer, ok := config.CommandRunner.(ProfileRestorePackageManager); ok {
+			if err = preparer.PrepareProfilePackageManager(ctx, node, p.PackageManager); err != nil {
+				return launch, fmt.Errorf("prepare snapshot package manager: %w", err)
+			}
+		}
+		ctx = context.WithValue(ctx, restorePackageManagerKey{}, p.PackageManager)
 	}
 	installed, err := config.RuntimeInstaller.(RuntimeForceInstaller).ForceInstall(ctx, p.DSHVersion, node)
 	if err != nil {
@@ -578,14 +600,23 @@ func (m *Manager) RecoverVersionPoint(ctx context.Context, id string) (launch Re
 	return launch, nil
 }
 
-// Legacy points did not record host dependencies. Compare their original
-// input shape; subsequent healthy startup records the current host inputs.
+// Compare the fields a recovery point recorded. A healthy start records
+// any now-available host dependencies and exact package-manager version.
 func matchesRestoredVersions(expected, actual *storedRestorePoint) bool {
 	check := *actual
 	if expected.Input.Automation == nil {
 		check.Input.Automation = nil
-		finishVersionPoint(&check)
+	} else if actual.Input.Automation != nil && *expected.Input.Automation != *actual.Input.Automation &&
+		expected.Input.Automation.MatchesHost(*actual.Input.Automation) {
+		check.Input.Automation = expected.Input.Automation
 	}
+	if expected.PackageManager == "pnpm" && expected.Input.PackageManager == "pnpm" && actual.PackageManager == actual.Input.PackageManager {
+		if version, ok := strings.CutPrefix(actual.PackageManager, "pnpm@"); ok && validRuntimeVersion(version) {
+			check.PackageManager = expected.PackageManager
+			check.Input.PackageManager = expected.Input.PackageManager
+		}
+	}
+	finishVersionPoint(&check)
 	return check.Digest == expected.Digest
 }
 func (m *Manager) setRecoveryStage(ctx context.Context, stage, status, detail string) error {

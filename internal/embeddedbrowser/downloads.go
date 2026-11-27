@@ -9,7 +9,7 @@ import (
 var ErrDownloadShutdownDeclined = errors.New("DOWNLOAD_SHUTDOWN_DECLINED")
 
 // DownloadConsent is a trusted Host dependency, never an RPC/site argument.
-// Prepared must be a live Windows downloads.Destination object, not a path DTO.
+// Prepared must be a live downloads.Destination object, not a path DTO.
 // The default is the owner-bound native Save/confirmation UI.
 type DownloadConsentRequest struct{ ID, SourceOrigin, URL, MIME, SuggestedName string }
 type DownloadConsentDecision struct {

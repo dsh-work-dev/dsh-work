@@ -39,7 +39,7 @@ func TestWindowRetirementSerializesTargetCreation(t *testing.T) {
 	if p.view.State != "NeedsReload" || !p.cleaned {
 		t.Fatal("retirement missed newly created view")
 	}
-	if _, e := r.Update(context.Background(), peer, "workspace", 11, "window-lease", "late", "https://example.test", SlotBounds{}, 1, true); e == nil {
+	if _, e := r.Update(context.Background(), peer, "workspace", 11, "window-lease", "late", "https://example.test", SlotBounds{}, 1, true, 0); e == nil {
 		t.Fatal("retired window accepted late Update")
 	}
 	if r.get("workspace", "late") != nil {

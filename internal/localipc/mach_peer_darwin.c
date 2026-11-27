@@ -55,7 +55,13 @@ static int bytes(int fd,int cancel,void *data,size_t size,int writing,int64_t en
 }
 uint64_t dsh_ipc_process_started(uint32_t pid) {
   struct proc_bsdinfo info={0};
-  if(proc_pidinfo((pid_t)pid,PROC_PIDTBSDINFO,0,&info,sizeof(info))!=(int)sizeof(info) || info.pbi_status==SZOMB) return 0;
+  int n;
+  for(int attempt=0;attempt<3;attempt++) {
+    errno=0;
+    n=proc_pidinfo((pid_t)pid,PROC_PIDTBSDINFO,0,&info,sizeof(info));
+    if(n==(int)sizeof(info) || errno!=EINTR) break;
+  }
+  if(n!=(int)sizeof(info) || info.pbi_status==SZOMB) return 0;
   return info.pbi_start_tvsec*1000000ULL+info.pbi_start_tvusec;
 }
 static int peer_token(int fd,audit_token_t *token) {
@@ -161,4 +167,81 @@ int dsh_ipc_connect(const char *path,int cancel,int *output,dsh_ipc_peer *peer) 
   *output=fd; return 0;
 failure:
   close(fd); return error;
+}
+
+int dsh_ipc_receive_writer(const char *path, int cancel, uint32_t pid, uint64_t started, int *output) {
+  *output = -1;
+  if (!pid || !started) return EINVAL;
+  int socket = -1;
+  dsh_ipc_peer peer = {0};
+  int error = dsh_ipc_connect(path, cancel, &socket, &peer);
+  if (error) return error;
+  if (peer.pid != pid || peer.started != started) {
+    close(socket);
+    return EACCES;
+  }
+  const int one = 1;
+  if (setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one))) {
+    error = errno;
+    close(socket);
+    return error;
+  }
+
+  const int64_t end = now_ms() + 3000;
+  for (;;) {
+    if ((error = ready(socket, cancel, POLLIN, end))) break;
+    char marker = 0;
+    struct iovec data = {&marker, 1};
+    union { struct cmsghdr alignment; char bytes[CMSG_SPACE(4 * sizeof(int))]; } control = {0};
+    struct msghdr message = {0};
+    message.msg_iov = &data;
+    message.msg_iovlen = 1;
+    message.msg_control = control.bytes;
+    message.msg_controllen = sizeof(control.bytes);
+    ssize_t n = recvmsg(socket, &message, MSG_DONTWAIT);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) continue;
+    if (n < 0) { error = errno; break; }
+
+    int writer = -1;
+    unsigned count = 0;
+    int valid = n == 1 && marker == 'D' && !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC));
+    for (struct cmsghdr *h = CMSG_FIRSTHDR(&message); h; h = CMSG_NXTHDR(&message, h)) {
+      if (h->cmsg_level != SOL_SOCKET || h->cmsg_type != SCM_RIGHTS || h->cmsg_len < CMSG_LEN(0)) {
+        valid = 0;
+        continue;
+      }
+      const size_t available = (control.bytes + message.msg_controllen) - (char *)h;
+      size_t length = h->cmsg_len;
+      if (length > available) {
+        length = available;
+        valid = 0;
+      }
+      if (length < CMSG_LEN(0)) { valid = 0; break; }
+      length -= CMSG_LEN(0);
+      if (length % sizeof(int)) valid = 0;
+      for (size_t i = 0; i < length / sizeof(int); i++) {
+        int received;
+        memcpy(&received, CMSG_DATA(h) + i * sizeof(int), sizeof(int));
+        if (count++ == 0) writer = received;
+        else close(received);
+      }
+    }
+    if (valid && count == 1 && writer >= 0 && fcntl(writer, F_SETFD, FD_CLOEXEC) == 0) {
+      struct stat info = {0};
+      int flags = fcntl(writer, F_GETFL);
+      if (flags >= 0 && (flags & O_ACCMODE) == O_WRONLY && fstat(writer, &info) == 0 &&
+          S_ISREG(info.st_mode) && info.st_nlink == 1 && info.st_uid == geteuid()) {
+        char ack = 'A';
+        error = bytes(socket, cancel, &ack, 1, 1, end);
+        if (error == 0) *output = writer;
+        else close(writer);
+        break;
+      }
+    }
+    if (writer >= 0) close(writer);
+    error = EACCES;
+    break;
+  }
+  close(socket);
+  return error;
 }

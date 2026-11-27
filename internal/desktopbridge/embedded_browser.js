@@ -4,11 +4,28 @@
  globalThis.__DSH_WORK_EMBEDDED_VERSION__='0.2.2-rc.1';
  const shellOrigin=location.ancestorOrigins?.[0];if(!shellOrigin||shellOrigin==='null'||parent===window)return;
  const documentToken=decodeURIComponent(location.hash.slice(1).match(/(?:^|&)__dsh_work_doc=([^&]+)/)?.[1]||'');
- const pending=new Map();let blocked=false;
+ const pending=new Map();let blocked=false,layoutRevision=0;
  const pages=new Set(),artifactPages=new Map();let artifactLabels,artifactLabelRevision=0;
  const applyArtifactLabels=value=>{artifactLabels=value;artifactLabelRevision++;for(const page of pages)page.labelsChanged()};
  function request(action,data={}){return new Promise((resolve,reject)=>{const id=crypto.randomUUID();const timer=action==='artifact-open'?undefined:setTimeout(()=>{pending.delete(id);reject(Error('Browser request timed out'))},12000);pending.set(id,{resolve,reject,timer});parent.postMessage({version:1,type:'dsh-work/browser',id,action,document:documentToken,...data},shellOrigin)})}
- addEventListener('message',event=>{if(event.source!==parent||event.origin!==shellOrigin)return;const m=event.data;if(m?.version!==1)return;if(m.type==='dsh-work/browser-artifact-labels'&&m.document===documentToken){applyArtifactLabels(m.value);return}if(m.type==='dsh-work/browser-previews'&&m.document===documentToken){for(const page of pages)page.applyPreview(m.value?.find(p=>p.slot===page.slot));return}if(m.type==='dsh-work/browser-layout'){for(const page of pages)page.schedule();return}if(m.type==='dsh-work/browser-blocked'&&m.document===documentToken){blocked=!!m.blocked;for(const page of pages)page.schedule();return}if(m.type!=='dsh-work/browser-result')return;const held=pending.get(m.id);if(!held)return;pending.delete(m.id);clearTimeout(held.timer);if(m.error){const failure=Error(m.error);if(typeof m.errorCode==='string')failure.code=m.errorCode;held.reject(failure)}else held.resolve(m.value)});
+ addEventListener('message',event=>{
+  if(event.source!==parent||event.origin!==shellOrigin)return;
+  const m=event.data;if(m?.version!==1)return;
+  if(m.type==='dsh-work/browser-artifact-labels'&&m.document===documentToken){applyArtifactLabels(m.value);return}
+  if(m.type==='dsh-work/browser-previews'&&m.document===documentToken){for(const page of pages)page.applyPreview(m.value?.find(p=>p.slot===page.slot));return}
+  if(m.type==='dsh-work/browser-layout'&&m.document===documentToken){for(const page of pages)page.schedule(m.remeasure===true);return}
+  if(m.type==='dsh-work/browser-blocked'&&m.document===documentToken){
+   const nextRevision=m.layoutRevision??layoutRevision;
+   if(!Number.isSafeInteger(nextRevision)||nextRevision<layoutRevision)return;
+   const remeasure=nextRevision!==layoutRevision||(blocked&&!m.blocked);
+   blocked=!!m.blocked;layoutRevision=nextRevision;
+   for(const page of pages)page.schedule(remeasure);
+   return;
+  }
+  if(m.type!=='dsh-work/browser-result')return;
+  const held=pending.get(m.id);if(!held)return;pending.delete(m.id);clearTimeout(held.timer);
+  if(m.error){const failure=Error(m.error);if(typeof m.errorCode==='string')failure.code=m.errorCode;held.reject(failure)}else held.resolve(m.value);
+ });
  // New modals cannot paint or receive input before native Hide is ACKed.
  // Visibility preserves layout so the observer can read the display intent.
  const modalSelector='[role="dialog"][aria-modal="true"], [data-shortcut-modal][role="dialog"], dialog[open]';
@@ -26,6 +43,13 @@
   modalQueue=modalQueue.catch(()=>{}).then(async()=>{if(revision!==modalRevision)return;await request('modal-overlay',{blocked:active.length>0});if(revision!==modalRevision)return;for(const e of active)if(e.isConnected){e.setAttribute('data-dsh-work-modal-ready','');readyModals.add(e)}for(const mask of pendingMasks)mask.removeAttribute('data-dsh-work-modal-pending');pendingMasks.clear()}).catch(error=>console.error('Browser modal pause failed',String(error)));
  };
  const modalObserver=new MutationObserver(()=>{scanModals();for(const page of pages)page.schedule()});modalObserver.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['role','aria-modal','data-shortcut-modal','hidden','open','class','style','aria-hidden','data-sidebar-right-open']});
+ // A CSS transition can finish without a resize or a new intersection entry.
+ const onLayoutTransition=event=>{
+  if(event.propertyName==='visibility')for(const page of pages)page.schedule();
+  if(event.propertyName==='transform')for(const page of pages)page.refreshIntersection(event.target);
+ };
+ addEventListener('transitionend',onLayoutTransition,true);
+ addEventListener('transitioncancel',onLayoutTransition,true);
  addEventListener('DOMContentLoaded',scanModals,{once:true});
  // A webpage dialog belongs to its viewport, never the application's top layer.
  const dialogStyle=document.createElement('style');dialogStyle.textContent=`
@@ -60,12 +84,11 @@
   const candidates=[...pages].filter(page=>page.key===key&&page.visible());if(candidates.length!==1)throw Error('Visible browser page required');
   return candidates[0].select();
  },createPage(session,options){
-  const slot=`${session}/${options.key}`;let container,observer,intersection,intersecting=false,choosing=false,disposed=false,mounted=false,registered=false,issued=false,mountGeneration=0,state={target:undefined,address:'empty',loading:false,canGoBack:false,canGoForward:false,error:undefined,sandboxEnabled:undefined};
-  let view,queued=Promise.resolve(),pendingURL,revision=0,lastGeometry='',persistedKey='',layoutQueued=false,pollQueued=false,previewLayer,previewIdentity='';const listeners=new Set();
+  const slot=`${session}/${options.key}`;let container,observer,intersection,intersecting=false,intersectionClip,choosing=false,disposed=false,mounted=false,registered=false,issued=false,mountGeneration=0,state={target:undefined,address:'empty',loading:false,canGoBack:false,canGoForward:false,error:undefined,sandboxEnabled:undefined};
+  let view,queued=Promise.resolve(),pendingURL,revision=0,lastGeometry='',persistedKey='',layoutQueued=false,pollQueued=false,previewLayer,previewIdentity='',acknowledgedLayout=0,acknowledgedMount=0;const listeners=new Set();
   const clearPreview=()=>{previewLayer?.remove();previewLayer=undefined;previewIdentity=''};
   const identity=v=>v&&[v.lease,v.document,v.frame,v.url].join('|');
-  let dialogCard,dialogSync=false,dialogRound=0;
-  let popupCard,popupSync=false,popupRound=0;const dispatchedPopups=new Set();
+  let dialogCard,popupCard,overlayPreparation;const dispatchedPopups=new Set();
   let downloadTray,downloadHeight=0;const downloadRows=new Map(),hiddenDownloads=new Set();
   const syncPreviewBounds=()=>{if(previewLayer)previewLayer.style.bottom=`${downloadHeight}px`};
   const clearDownloads=()=>{downloadTray?.remove();downloadTray=undefined;downloadRows.clear();downloadHeight=0;syncPreviewBounds()};
@@ -100,7 +123,7 @@
    }
    const height=downloadTray.offsetHeight;if(height!==downloadHeight){downloadHeight=height;syncPreviewBounds();page.schedule()}
   };
-  const clearDialog=()=>{dialogRound++;dialogCard?.layer.remove();dialogCard=undefined};
+  const clearDialog=()=>{dialogCard?.layer.remove();dialogCard=undefined};
   const renderDialog=(dialog,ready)=>{
    if(dialogCard?.dialog.epoch===dialog.epoch){dialogCard.dialog=dialog;dialogCard.ready=ready;for(const b of dialogCard.buttons)b.disabled=!ready||dialogCard.busy;return}
    clearDialog();
@@ -117,7 +140,7 @@
    if(input){input.type='text';input.value=dialog.defaultPrompt;input.setAttribute('aria-label','回复网页');card.append(input)}
    const current={layer,dialog,ready,busy:false,buttons:[],input};
    const submit=async allowed=>{
-    if(dialogCard!==current||!current.ready||current.busy||!geometry().visible)return;
+    if(dialogCard!==current||!current.ready||current.busy||!canInteract())return;
     current.busy=true;for(const b of current.buttons)b.disabled=true;
     try{await enqueue(async()=>{await request('dialog-answer',{slot,dialog:current.dialog,accept:allowed,text:input?.value||''});accept(await request('state',{slot}))})}
     catch(error){
@@ -134,23 +157,7 @@
    if(getComputedStyle(container).position==='static')container.style.position='relative';
    container.append(layer);dialogCard=current;
   };
-  const syncDialog=()=>{
-   if(disposed||!mounted||!view?.dialog||!geometry().visible){if(dialogCard)clearDialog();return}
-   if(view.dialogVisible){renderDialog(view.dialog,true);return}
-   if(dialogSync)return;
-   dialogSync=true;
-   void enqueue(async()=>{
-    const dialog=view?.dialog,generation=mountGeneration;if(!dialog||!geometry().visible)return;
-    await request('dialog-suspend',{slot,dialog});
-    if(disposed||generation!==mountGeneration||!geometry().visible)return;
-    renderDialog(dialog,false);const round=dialogRound;
-    await new Promise(resolve=>requestAnimationFrame(resolve));
-    if(disposed||round!==dialogRound||generation!==mountGeneration||!geometry().visible)return;
-    await request('dialog-ready',{slot,dialog});accept(await request('state',{slot}));
-   }).catch(error=>{if(!String(error).includes('CEF_DIALOG_AUTHORIZATION_CHANGED')&&!disposed)fail(error)})
-   .finally(()=>{dialogSync=false});
-  };
-  const clearPopup=()=>{popupRound++;popupCard?.layer.remove();popupCard=undefined};
+  const clearPopup=()=>{popupCard?.layer.remove();popupCard=undefined};
   const renderPopup=(popup,ready)=>{
    if(popupCard?.popup.id===popup.id){popupCard.popup=popup;popupCard.ready=ready;for(const b of popupCard.buttons)b.disabled=!ready||popupCard.busy;return}
    clearPopup();
@@ -163,7 +170,7 @@
     element('p','dsh-web-dialog-origin',popup.origin),element('p','dsh-popup-target',popup.url));
    const actions=element('div','dsh-web-dialog-actions'),current={layer,popup,ready,busy:false,buttons:[]};
    const submit=async allowed=>{
-    if(popupCard!==current||!current.ready||current.busy||!geometry().visible||dispatchedPopups.has(current.popup.id))return;
+    if(popupCard!==current||!current.ready||current.busy||!canInteract()||dispatchedPopups.has(current.popup.id))return;
     current.busy=true;for(const b of current.buttons)b.disabled=true;
     const source=current.popup,generation=mountGeneration;
     try{await enqueue(async()=>{
@@ -173,9 +180,9 @@
      if(!allowed){clearPopup();if(!disposed)accept(await request('state',{slot}));return}
      if(dispatchedPopups.has(source.id))return;
      dispatchedPopups.add(source.id);
-     if(disposed||generation!==mountGeneration||!mounted||!geometry().visible)return;
+     if(disposed||generation!==mountGeneration||!mounted||!canInteract())return;
      const latest=await request('state',{slot});
-     if(disposed||generation!==mountGeneration||!mounted||!geometry().visible)return;
+     if(disposed||generation!==mountGeneration||!mounted||!canInteract())return;
      accept(latest);
      if(url!==source.url||latest.state!=='ready'||latest.document!==source.document||latest.lease!==source.view)return;
      clearPopup();
@@ -189,47 +196,157 @@
    card.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();void submit(false)}});
    card.append(actions);layer.append(card);if(getComputedStyle(container).position==='static')container.style.position='relative';container.append(layer);popupCard=current;
   };
-  const syncPopup=()=>{
-   if(disposed||!mounted||!view?.popup||view.dialog||!geometry().visible||dispatchedPopups.has(view.popup.id)){if(popupCard)clearPopup();return}
-   if(view.popupVisible){renderPopup(view.popup,true);return}
-   if(popupSync)return;popupSync=true;
-   void enqueue(async()=>{
-    const popup=view?.popup,generation=mountGeneration;if(!popup||!geometry().visible)return;
-    await request('popup',{slot,popup,command:'suspend'});
-    if(disposed||generation!==mountGeneration||!geometry().visible)return;
-    renderPopup(popup,false);const round=popupRound;
-    await new Promise(resolve=>requestAnimationFrame(resolve));
-    if(disposed||round!==popupRound||generation!==mountGeneration||!geometry().visible)return;
-    await request('popup',{slot,popup,command:'ready'});accept(await request('state',{slot}));
-   }).catch(error=>{
-    if(!disposed){clearPopup();if(!String(error).includes('CEF_POPUP_AUTHORIZATION_CHANGED'))fail(error)}
-   }).finally(()=>{popupSync=false});
+  const currentOverlay=()=>{
+   if(disposed||!canInteract())return;
+   if(view?.dialog)return {kind:'dialog',value:view.dialog,ready:view.dialogVisible};
+   if(view?.popup&&!dispatchedPopups.has(view.popup.id))return {kind:'popup',value:view.popup,ready:view.popupVisible};
+  };
+  const sameOverlay=(first,second)=>first&&second&&first.kind===second.kind&&
+   (first.value.epoch??first.value.id)===(second.value.epoch??second.value.id)&&
+   first.value.document===second.value.document&&first.value.view===second.value.view&&first.value.presentation===second.value.presentation;
+  const overlayCommand=(overlay,command)=>overlay.kind==='dialog'
+   ?request('dialog-'+command,{slot,dialog:overlay.value})
+   :request('popup',{slot,popup:overlay.value,command});
+  const syncOverlay=()=>{
+   const overlay=currentOverlay();
+   if(overlay?.kind!=='dialog'&&dialogCard)clearDialog();
+   if(overlay?.kind!=='popup'&&popupCard)clearPopup();
+   if(!overlay||overlay.ready){
+    overlayPreparation=undefined;
+    if(overlay?.kind==='dialog')renderDialog(overlay.value,true);
+    if(overlay?.kind==='popup')renderPopup(overlay.value,true);
+    return;
+   }
+   const generation=mountGeneration;
+   if(overlayPreparation?.generation===generation&&sameOverlay(overlayPreparation.overlay,overlay))return;
+   const preparation={overlay,generation};
+   overlayPreparation=preparation;
+   const current=()=>overlayPreparation===preparation&&mountGeneration===generation&&sameOverlay(overlay,currentOverlay());
+   const currentCard=()=>overlay.kind==='dialog'?dialogCard:popupCard;
+   const prepare=async()=>{
+    try{
+     const card=await enqueue(async()=>{
+      if(!current())return;
+      await overlayCommand(overlay,'suspend');
+      if(!current())return;
+      if(overlay.kind==='dialog')renderDialog(overlay.value,false);else renderPopup(overlay.value,false);
+      return currentCard();
+     });
+     if(!card)return;
+     // Visible paint may be delayed when a workspace or its tab is hidden.
+     // Leave the presentation queue free to hide, switch, or retire the slot.
+     await new Promise(resolve=>requestAnimationFrame(resolve));
+     if(!current())return;
+     await enqueue(async()=>{
+      if(!current()||currentCard()!==card||!card.layer.isConnected)return;
+      await overlayCommand(overlay,'ready');
+      if(!current())return;
+      const state=await request('state',{slot});
+      if(current())accept(state);
+     });
+    }catch{
+     if(current()){
+      if(overlay.kind==='dialog')clearDialog();else clearPopup();
+     }
+    }finally{
+     if(overlayPreparation===preparation)overlayPreparation=undefined;
+    }
+   };
+   void prepare();
   };
   const publish=(next,force=false)=>{if(artifactLabels)next={...next,artifactLabels};if(!force&&JSON.stringify(state)===JSON.stringify(next))return;state=next;for(const listener of listeners)listener()};
-  const accept=value=>{const changedPreview=!!previewLayer&&identity(value)!==previewIdentity;if(previewLayer&&(changedPreview||value.visible&&!blocked))clearPreview();view=value;if(changedPreview&&blocked)page.applyPreview();registered=value.state!=='empty';const entry=target(value.url),needsReload=value.state==='NeedsReload';if(entry&&value.title)entry.title=value.title;
+  const accept=value=>{const changedPreview=!!previewLayer&&identity(value)!==previewIdentity;if(previewLayer&&(changedPreview||value.visible&&canInteract()))clearPreview();view=value;if(changedPreview&&blocked)page.applyPreview();registered=value.state!=='empty';const entry=target(value.url),needsReload=value.state==='NeedsReload';if(entry&&value.title)entry.title=value.title;
    // A safe descriptor is not a live frame. Feed the existing DSH restore
    // checkpoint before notifying so its standard title/address/action render
    // even when the provider initially has the same empty frame snapshot.
    let saved=false;if(entry&&['ready','NeedsReload'].includes(value.state)&&persistedKey!==entry.url+'|'+entry.title){persistedKey=entry.url+'|'+entry.title;options.persist({entries:[entry],index:0,request:undefined,navigation:{status:'known',revision:++revision},failure:undefined});saved=true}
-   renderDownloads();syncDialog();syncPopup();
-   publish({artifactName:value.artifactName,needsReload,target:needsReload?undefined:entry,address:!needsReload&&entry?'observed':'empty',loading:value.state==='loading',canGoBack:value.state!=='controlPaused'&&!!value.canGoBack,canGoForward:value.state!=='controlPaused'&&!!value.canGoForward,error:value.state==='controlPaused'?{code:-32099,description:'Browser control is paused.'}:value.state==='presentationFailed'?{code:undefined,description:'Reload to continue.'}:undefined,sandboxEnabled:undefined},needsReload&&saved);return value};
+   renderDownloads();syncOverlay();
+   publish({artifactName:value.artifactName,needsReload,target:needsReload?undefined:entry,address:!needsReload&&entry?'observed':'empty',loading:value.state==='loading',canGoBack:value.state!=='controlPaused'&&!!value.canGoBack,canGoForward:value.state!=='controlPaused'&&!!value.canGoForward,error:value.state==='controlPaused'?{code:-32099,description:'Browser control is paused.'}:['presentationFailed','navigationFailed'].includes(value.state)?{code:undefined,description:'Reload to continue.'}:undefined,sandboxEnabled:undefined},needsReload&&saved);return value};
   const fail=error=>{if(String(error).includes('CEF_BROKER_CONTROL_PAUSED')){if(view)accept({...view,state:'controlPaused'});return}console.error('Browser presentation failed',String(error));const unavailable=['CEF_INSTALL_MISSING','CEF_INSTALL_CORRUPT','CEF_INSTALL_INCOMPATIBLE','CEF_DSH_RUNTIME_UNSUPPORTED','CEF_PLATFORM_UNSUPPORTED'].includes(error?.code);publish({...state,loading:false,error:{code:undefined,description:unavailable?error.message:'The page is unavailable. Reload to continue.'}})};
-  const geometry=()=>{const rect=container?.getBoundingClientRect();if(!rect)return{rect:{x:0,y:0,width:0,height:0},visible:false};const dock=container.closest?.('[data-dockkit-host="dock"]'),panel=dock?.closest('[data-sidebar-right-panel]'),collapsed=panel&&!panel.hasAttribute('data-sidebar-right-open');const left=Math.min(innerWidth,Math.max(0,rect.left)),top=Math.min(innerHeight,Math.max(0,rect.top)),right=Math.min(innerWidth,rect.right),bottom=Math.min(innerHeight,rect.bottom-downloadHeight);return{rect:{x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)},visible:mounted&&!choosing&&!collapsed&&intersecting&&!blocked&&container.isConnected&&container.getClientRects().length>0&&getComputedStyle(container).visibility!=='hidden'&&right>left&&bottom>top}};
-  const enqueue=task=>{const result=queued.then(task);queued=result.catch(error=>{if(!disposed&&!String(error).includes('CEF_POPUP_AUTHORIZATION_CHANGED'))fail(error)});return result};
-  const update=(address='',explicit=false)=>{const generation=mountGeneration;return enqueue(async()=>{if(disposed)return;const g=geometry();lastGeometry=JSON.stringify(g);issued=true;let value=await request('update',{slot,address,...g});if(value.state==='NeedsReload'&&explicit&&generation===mountGeneration&&mounted){value=await request('recover',{slot,address});value=await request('update',{slot,address:'',...geometry()})}if(generation!==mountGeneration){await request('update',{slot,address:'',rect:g.rect,visible:false});return value}return accept(value)})};
-  const page={key:options.key,slot,intersectsOverlay(e){if(!mounted||!container||!container.isConnected)return false;const a=container.getBoundingClientRect(),b=e.getBoundingClientRect();const l=Math.max(a.left,b.left),t=Math.max(a.top,b.top),r=Math.min(a.right,b.right),bottom=Math.min(a.bottom,b.bottom);if(r<=l||bottom<=t)return false;const x=(l+r)/2,y=(t+bottom)/2;const top=document.elementFromPoint(x,y);return !!top&&(e===top||e.contains(top))},labelsChanged:()=>publish({...state}),applyPreview(p){if(!mounted||!container||!view)return;clearPreview();previewIdentity=identity(view);previewLayer=document.createElement('div');previewLayer.className='dsh-browser-preview';previewLayer.setAttribute('aria-hidden','true');if(p&&identity(p)===previewIdentity&&/^[-A-Za-z0-9+/=]+$/.test(p.data)&&p.data.length<=6*1024*1024)previewLayer.style.backgroundImage=`url(data:image/png;base64,${p.data})`;else previewLayer.textContent=view.state==='loading'?'页面加载中…':'页面暂时隐藏';if(getComputedStyle(container).position==='static')container.style.position='relative';syncPreviewBounds();container.prepend(previewLayer)},visible:()=>mounted&&geometry().visible,select:()=>{if(!view?.lease||view.state!=='ready'||!geometry().visible)throw Error('Reload the visible page first');return request('select-control',{session,slot,lease:view.lease})},schedule(){if(disposed||!mounted)return;scanModals();syncDialog();syncPopup();
+  const geometry=()=>{
+   const rect=container?.getBoundingClientRect();
+   if(!rect)return{rect:{x:0,y:0,width:0,height:0},visible:false};
+   const dock=container.closest?.('[data-dockkit-host="dock"]'),panel=dock?.closest('[data-sidebar-right-panel]');
+   const collapsed=panel&&!panel.hasAttribute('data-sidebar-right-open');
+   const left=Math.min(innerWidth,Math.max(0,rect.left+(intersectionClip?.left??0)));
+   const top=Math.min(innerHeight,Math.max(0,rect.top+(intersectionClip?.top??0)));
+   const right=Math.min(innerWidth,rect.right-(intersectionClip?.right??0));
+   const bottom=Math.min(innerHeight,rect.bottom-downloadHeight,rect.bottom-(intersectionClip?.bottom??0));
+   return{rect:{x:left,y:top,width:Math.max(0,right-left),height:Math.max(0,bottom-top)},visible:mounted&&!choosing&&!collapsed&&intersecting&&container.isConnected&&container.getClientRects().length>0&&getComputedStyle(container).visibility!=='hidden'&&right>left&&bottom>top};
+  };
+  const canInteract=()=>!blocked&&acknowledgedLayout===layoutRevision&&acknowledgedMount===mountGeneration&&geometry().visible;
+  const enqueue=task=>{const result=queued.then(task);queued=result.catch(error=>{if(!disposed&&error?.code!=='CEF_PRESENTATION_LAYOUT_STALE'&&!/CEF_(DIALOG|POPUP)_AUTHORIZATION_CHANGED/.test(String(error)))fail(error)});return result};
+  const present=async(address,g)=>{
+   const sampledRevision=layoutRevision,generation=mountGeneration;
+   const value=await request('update',{slot,address,...g,layoutRevision:sampledRevision});
+   if(generation===mountGeneration&&sampledRevision===layoutRevision&&value.visible){acknowledgedLayout=sampledRevision;acknowledgedMount=generation}
+   return value;
+  };
+  const update=(address='',explicit=false)=>{
+   let generation=mountGeneration;
+   return enqueue(async()=>{
+    if(disposed||generation!==mountGeneration&&!address)return;
+    const g=geometry();lastGeometry=JSON.stringify(g);issued=true;
+    let value=await present(address,g);
+    if(value.state==='NeedsReload'&&explicit&&mounted&&!disposed){
+     // Restoring belongs to this tab. DSH may replace its viewport while Update waits.
+     generation=mountGeneration;
+     await request('recover',{slot,address});
+     if(generation===mountGeneration)value=await present('',geometry());
+    }
+    if(generation!==mountGeneration){
+     if(!mounted&&!disposed)await request('update',{slot,address:'',rect:g.rect,visible:false,layoutRevision});
+     return value;
+    }
+    return accept(value);
+   });
+  };
+  const page={key:options.key,slot,intersectsOverlay(e){if(!mounted||!container||!container.isConnected)return false;const a=container.getBoundingClientRect(),b=e.getBoundingClientRect();const l=Math.max(a.left,b.left),t=Math.max(a.top,b.top),r=Math.min(a.right,b.right),bottom=Math.min(a.bottom,b.bottom);if(r<=l||bottom<=t)return false;const x=(l+r)/2,y=(t+bottom)/2;const top=document.elementFromPoint(x,y);return !!top&&(e===top||e.contains(top))},labelsChanged:()=>publish({...state}),applyPreview(p){if(!mounted||!container||!view)return;clearPreview();previewIdentity=identity(view);previewLayer=document.createElement('div');previewLayer.className='dsh-browser-preview';previewLayer.setAttribute('aria-hidden','true');if(p&&identity(p)===previewIdentity&&/^[-A-Za-z0-9+/=]+$/.test(p.data)&&p.data.length<=6*1024*1024)previewLayer.style.backgroundImage=`url(data:image/png;base64,${p.data})`;else previewLayer.textContent=view.state==='loading'?'页面加载中…':'页面暂时隐藏';if(getComputedStyle(container).position==='static')container.style.position='relative';syncPreviewBounds();container.prepend(previewLayer)},visible:canInteract,select:()=>{if(!view?.lease||view.state!=='ready'||!canInteract())throw Error('Reload the visible page first');return request('select-control',{session,slot,lease:view.lease})},schedule(remeasure=false){if(disposed||!mounted)return;if(remeasure)lastGeometry='';scanModals();syncOverlay();
    // ResizeObserver already follows layout frames. Timers are throttled in
    // covered WebViews, so dispatch directly and coalesce while native is busy.
-   if(layoutQueued)return;const key=JSON.stringify(geometry());if(key===lastGeometry)return;lastGeometry=key;layoutQueued=true;void update().then(()=>{layoutQueued=false;page.schedule()},()=>{layoutQueued=false})
+   if(layoutQueued)return;const key=JSON.stringify(geometry());if(key===lastGeometry)return;
+   const scheduledRevision=layoutRevision;lastGeometry=key;layoutQueued=true;
+   void update().then(()=>{layoutQueued=false;page.schedule()},()=>{layoutQueued=false;if(scheduledRevision!==layoutRevision||lastGeometry==='')page.schedule()});
+  },refreshIntersection(ancestor){
+   if(!shellOrigin.startsWith('wails:')||!mounted||!intersection||!ancestor?.contains?.(container))return;
+   // The one-pixel clip check can change within an area-ratio threshold band.
+   intersection.takeRecords();
+   intersection.unobserve(container);
+   intersection.observe(container);
   }};pages.add(page);
   const polling=setInterval(()=>{if(disposed||!registered||pollQueued||layoutQueued)return;pollQueued=true;void enqueue(async()=>accept(await request('state',{slot}))).then(()=>{pollQueued=false},()=>{pollQueued=false})},250);
-  const frame={async openArtifact(){if(disposed||!mounted||choosing)throw Error("Artifact view unavailable");choosing=true;issued=true;try{await update();if(disposed)return;const value=await request("artifact-open",{slot});if(disposed)return;accept(value)}finally{choosing=false;if(!disposed)await update()}},getSnapshot:()=>state,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener)},loadUrl(value){if(view?.state==='controlPaused')return;clearPreview();pendingURL=value.url;publish({...state,target:value,address:'requested',loading:true,error:undefined});if(mounted){const url=pendingURL;pendingURL=undefined;void update(url,true)}},goBack(){if(view?.state==='controlPaused')return;clearPreview();void enqueue(async()=>{await request('action',{slot,command:'back'});accept(await request('state',{slot}))})},goForward(){if(view?.state==='controlPaused')return;clearPreview();void enqueue(async()=>{await request('action',{slot,command:'forward'});accept(await request('state',{slot}))})},reload(){if(view?.state==='controlPaused')return;clearPreview();if(view?.state==='presentationFailed'){void update()}else if(view?.state==='NeedsReload'){void enqueue(async()=>{accept(await request('recover',{slot,address:''}));accept(await request('update',{slot,address:'',...geometry()}))})}else if(registered){void enqueue(async()=>{await request('action',{slot,command:'reload'});accept(await request('state',{slot}))})}else if(state.target){void update(state.target.url,true)}},async dispose(){if(disposed)return;clearPreview();clearDownloads();clearDialog();clearPopup();disposed=true;mounted=false;mountGeneration++;pages.delete(page);clearInterval(polling);observer?.disconnect();intersection?.disconnect();await queued.catch(()=>{});if(issued)await request('detach',{slot});listeners.clear()}};
-  const presentation={mount(id){container=document.getElementById(id);if(!container)throw Error('Browser viewport unavailable');mounted=true;const generation=++mountGeneration;intersecting=false;lastGeometry='';observer?.disconnect();intersection?.disconnect();observer=new ResizeObserver(()=>page.schedule());observer.observe(container);
+  const frame={async openArtifact(){if(disposed||!mounted||choosing)throw Error("Artifact view unavailable");choosing=true;issued=true;try{await update();if(disposed)return;const value=await request("artifact-open",{slot});if(disposed)return;accept(value)}finally{choosing=false;if(!disposed)await update()}},getSnapshot:()=>state,subscribe(listener){listeners.add(listener);return()=>listeners.delete(listener)},loadUrl(value){if(view?.state==='controlPaused')return;clearPreview();pendingURL=value.url;publish({...state,target:value,address:'requested',loading:true,error:undefined});if(mounted){const url=pendingURL;pendingURL=undefined;void update(url,true)}},goBack(){if(view?.state==='controlPaused')return;clearPreview();void enqueue(async()=>{await request('action',{slot,command:'back'});accept(await request('state',{slot}))})},goForward(){if(view?.state==='controlPaused')return;clearPreview();void enqueue(async()=>{await request('action',{slot,command:'forward'});accept(await request('state',{slot}))})},reload(){if(view?.state==='controlPaused')return;clearPreview();if(view?.state==='presentationFailed'){void update()}else if(view?.state==='NeedsReload'){void enqueue(async()=>{accept(await request('recover',{slot,address:''}));accept(await present('',geometry()))})}else if(registered){void enqueue(async()=>{await request('action',{slot,command:'reload'});accept(await request('state',{slot}))})}else if(state.target){void update(state.target.url,true)}},async dispose(){if(disposed)return;clearPreview();clearDownloads();clearDialog();clearPopup();disposed=true;mounted=false;mountGeneration++;pages.delete(page);clearInterval(polling);observer?.disconnect();intersection?.disconnect();await queued.catch(()=>{});if(issued)await request('detach',{slot});listeners.clear()}};
+  const presentation={mount(id){container=document.getElementById(id);if(!container)throw Error('Browser viewport unavailable');mounted=true;const generation=++mountGeneration;intersecting=false;intersectionClip=undefined;lastGeometry='';observer?.disconnect();intersection?.disconnect();observer=new ResizeObserver(()=>page.schedule());observer.observe(container);
    // Ancestor overflow/transforms can hide a retained pane without resizing
    // its viewport. A native child must not outlive that DOM clip. Keep it
    // hidden until the browser confirms the whole slot is visible again.
-   intersection=new IntersectionObserver(entries=>{if(generation!==mountGeneration||!mounted)return;for(const entry of entries)if(entry.target===container){intersecting=entry.isIntersecting&&entry.intersectionRatio>=0.9999;page.schedule()}},{threshold:[0,0.9999]});intersection.observe(container);
-   const scroll=()=>page.schedule();addEventListener('scroll',scroll,true);addEventListener('resize',scroll);if(pendingURL){const url=pendingURL;pendingURL=undefined;void update(url,true)}else{page.schedule()}return()=>{clearPreview();clearDownloads();clearDialog();clearPopup();mounted=false;intersecting=false;mountGeneration++;lastGeometry='';observer?.disconnect();intersection?.disconnect();removeEventListener('scroll',scroll,true);removeEventListener('resize',scroll);void update()}}};
+   const webkit=shellOrigin.startsWith('wails:');
+   intersection=new IntersectionObserver(entries=>{
+    if(generation!==mountGeneration||!mounted)return;
+    for(const entry of entries){
+     if(entry.target!==container)continue;
+     const bounds=entry.boundingClientRect,clip=entry.intersectionRect;
+     // WKWebView can quantize the edges inward before reporting intersection.
+     // Allow a fractional edge only with bounds cropped to that measurement.
+     const subpixelClip=webkit&&bounds&&clip&&
+      clip.left-bounds.left<1&&clip.top-bounds.top<1&&bounds.right-clip.right<1&&bounds.bottom-clip.bottom<1;
+     intersecting=entry.isIntersecting&&(entry.intersectionRatio>=0.9999||!!subpixelClip);
+     intersectionClip=intersecting&&subpixelClip&&entry.intersectionRatio<1?{
+      left:Math.max(0,clip.left-bounds.left),top:Math.max(0,clip.top-bounds.top),
+      right:Math.max(0,bounds.right-clip.right),bottom:Math.max(0,bounds.bottom-clip.bottom),
+     }:undefined;
+     page.schedule();
+    }
+   },{threshold:webkit?[0,0.99,0.995,0.9975,0.999,0.9999,1]:[0,0.9999]});intersection.observe(container);
+   const scroll=()=>{if(generation===mountGeneration)page.schedule()};
+   addEventListener('scroll',scroll,true);addEventListener('resize',scroll);
+   if(pendingURL){const url=pendingURL;pendingURL=undefined;void update(url,true)}else{page.schedule()}
+   return()=>{
+    removeEventListener('scroll',scroll,true);removeEventListener('resize',scroll);
+    if(generation!==mountGeneration)return;
+    clearPreview();clearDownloads();clearDialog();clearPopup();mounted=false;intersecting=false;mountGeneration++;lastGeometry='';observer?.disconnect();intersection?.disconnect();void update();
+   };
+  }};
   return{frame,presentation};
  }};
 })();
