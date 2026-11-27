@@ -1,0 +1,15 @@
+{
+  "name": "@local/dsh-work-browser-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contracts.test.mjs",
+    "test:native": "node cli.mjs run --profile regression --consent scripted",
+    "qualify": "node cli.mjs run --profile qualification --consent scripted --network"
+  },
+  "dependencies": {
+    "playwright-core": "1.58.2",
+    "pngjs": "7.0.0"
+  }
+}

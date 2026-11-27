@@ -5,6 +5,25 @@ vars:
   BIN_DIR: bin
 
 tasks:
+  browser:test:
+    summary: Run portable browser-lab contract and local fixture checks (no native GUI)
+    dir: tools/browser-lab
+    cmds:
+      - npm ci --ignore-scripts
+      - npm test
+
+  browser:test:native:
+    summary: Run isolated native browser regression with scripted fixture consent
+    dir: tools/browser-lab
+    cmds:
+      - npm run test:native
+
+  browser:qualify:
+    summary: Strict native browser qualification; gaps/manual/blocked cases fail the gate
+    dir: tools/browser-lab
+    cmds:
+      - npm run qualify
+
   default:
     cmds:
       - task: verify
