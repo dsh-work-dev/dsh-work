@@ -2,7 +2,7 @@ name: E67 platform IPC
 
 on:
   push:
-    branches: ['codex/e67-embedded-browser']
+    branches: ['codex/e67-embedded-browser-clean']
     paths:
       - 'internal/**'
       - 'main.go'
@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       mac_validation:
-        description: Explicitly run Mac feature validation (normal development uses a Mac device)
+        description: Run Mac product validation and additional native diagnostic probes
         type: boolean
         default: false
 
@@ -46,9 +46,6 @@ jobs:
       linux_peer: ${{ steps.paths.outputs.linux_peer }}
       linux_facilities: ${{ steps.paths.outputs.linux_facilities }}
       mac_product: ${{ steps.paths.outputs.mac_product }}
-      mac_probe: ${{ steps.paths.outputs.mac_probe }}
-      mac_launchd: ${{ steps.paths.outputs.mac_launchd }}
-      mac_cef: ${{ steps.paths.outputs.mac_cef }}
       mac_native: ${{ steps.paths.outputs.mac_native }}
     steps:
       - uses: actions/checkout@v5
@@ -87,33 +84,29 @@ jobs:
               - 'scripts/build-workeripc-mac.mjs'
               - 'scripts/with-workeripc-mac.mjs'
               - 'tools/posix-ipc-probe/mach_reply_right_darwin.c'
-            mac_probe:
-              - '.github/workflows/e67-ipc.yml'
-              - 'tools/posix-ipc-probe/mach_peer_darwin.c'
-            mac_launchd:
-              - '.github/workflows/e67-ipc.yml'
-              - 'scripts/probe-mac-launchd-tree.mjs'
-              - 'tools/posix-ipc-probe/launchd_tree_darwin.c'
-            mac_cef:
-              - '.github/workflows/e67-ipc.yml'
-              - 'tools/posix-ipc-probe/cef-owner/**'
-              - 'tools/browser-lab/native/posix/**'
-              - 'scripts/build-mac-cef-owner-probe.mjs'
-              - 'scripts/probe-mac-cef-owner.mjs'
             mac_native:
               - '.github/workflows/e67-ipc.yml'
               - 'go.{mod,sum}'
               - 'internal/**'
+              - 'main.go'
+              - 'cmd/dsh-work/**'
+              - 'frontend/**'
               - 'native/embeddedbrowser/**'
               - 'cmd/dsh-cef-owner-mac/**'
               - 'scripts/build-embedded-cef-mac.mjs'
               - 'scripts/build-mac-preview*.mjs'
+              - 'scripts/build-workeripc-mac.mjs'
+              - 'scripts/with-workeripc-mac.mjs'
+              - 'tools/dsh/package*.json'
 
   mac-private-cef:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
+    if: (github.event_name == 'push' && needs.changes.outputs.mac_native == 'true') || (github.event_name == 'workflow_dispatch' && inputs.mac_validation)
     runs-on: macos-15
     timeout-minutes: 30
+    env:
+      CEF_ARCHIVE: cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64
+      CEF_ARCHIVE_SHA1: 77fc8778dfd008c6c85c1668b38462597804dc89
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -132,12 +125,16 @@ jobs:
       - name: Prepare the approved unmodified CEF SDK
         run: |
           mkdir -p "$RUNNER_TEMP/cef-sdk" results/e67-mac-private
-          curl --fail --location --retry 3 --output "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" 'https://cef-builds.spotifycdn.com/cef_binary_156.0.15%2Bgcf671c0%2Bchromium-156.0.8078.80_macosarm64.tar.bz2'
-          tar -xjf "$RUNNER_TEMP/cef-sdk/sdk.tar.bz2" -C "$RUNNER_TEMP/cef-sdk"
+          archive="$RUNNER_TEMP/cef-sdk/sdk.tar.bz2"
+          encoded_name="${CEF_ARCHIVE//+/%2B}"
+          curl --fail --location --retry 3 --output "$archive" "https://cef-builds.spotifycdn.com/$encoded_name.tar.bz2"
+          printf '%s  %s\n' "$CEF_ARCHIVE_SHA1" "$archive" | shasum -a 1 -c -
+          tar -xjf "$archive" -C "$RUNNER_TEMP/cef-sdk"
+          rm "$archive"
       - name: Build the formal Mac owner and private CEF bundle
         run: |
           set -o pipefail
-          node scripts/build-embedded-cef-mac.mjs --cef-root "$RUNNER_TEMP/cef-sdk/cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64" --output-dir "$RUNNER_TEMP/e67-formal-mac" 2>&1 | tee results/e67-mac-private/build.log
+          node scripts/build-embedded-cef-mac.mjs --cef-root "$RUNNER_TEMP/cef-sdk/$CEF_ARCHIVE" --output-dir "$RUNNER_TEMP/e67-formal-mac" 2>&1 | tee results/e67-mac-private/build.log
       - name: Verify authenticated kernel process targets
         run: |
           set -o pipefail
@@ -557,7 +554,7 @@ jobs:
 
   mac-product-ipc:
     needs: changes
-    if: github.event_name == 'workflow_dispatch' && inputs.mac_validation
+    if: (github.event_name == 'push' && needs.changes.outputs.mac_product == 'true') || (github.event_name == 'workflow_dispatch' && inputs.mac_validation)
     runs-on: macos-15
     timeout-minutes: 10
     steps:

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const scratch = mkdtempSync(join(tmpdir(), "dsh-work-go-test-"));
+const packages = process.argv.slice(2);
 
 // Go parses -exec without a shell or escape sequences.
 function goArgument(value) {
@@ -28,7 +29,10 @@ try {
       process.execPath, join(root, "scripts/with-workeripc-mac.mjs"),
       "--asset", join(scratch, "workeripc-mac.node"),
     ].map(goArgument).join(" ");
-    process.exitCode = run("go", ["test", "-exec", adapter, ".", "./cmd/...", "./internal/..."]);
+    process.exitCode = run("go", [
+      "test", "-exec", adapter,
+      ...(packages.length > 0 ? packages : [".", "./cmd/...", "./internal/..."]),
+    ]);
   }
 } finally {
   rmSync(scratch, { recursive: true, force: true });

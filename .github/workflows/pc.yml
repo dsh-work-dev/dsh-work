@@ -68,12 +68,9 @@ jobs:
       - name: Go tests
         if: runner.os != 'macOS'
         run: go test ./internal/...
-      - name: Build macOS Worker IPC bridge
-        if: runner.os == 'macOS'
-        run: node scripts/build-workeripc-mac.mjs --output-dir "$RUNNER_TEMP/e67-mac-bridge"
       - name: macOS Go tests with bundled Worker IPC bridge
         if: runner.os == 'macOS'
-        run: go test -exec "node \"$GITHUB_WORKSPACE/scripts/with-workeripc-mac.mjs\" --asset \"$RUNNER_TEMP/e67-mac-bridge/workeripc-mac.node\"" ./internal/...
+        run: node scripts/test-macos.mjs ./internal/...
       - name: Build Go packages
         run: go build ./internal/...
 
@@ -117,14 +114,23 @@ jobs:
           rm "$archive"
 
       - name: Build and verify macOS disk image
-        run: wails3 task package:darwin DSH_WORK_MAC_CEF_SDK="$RUNNER_TEMP/$CEF_ARCHIVE"
+        run: |
+          wails3 task package:darwin DSH_WORK_MAC_CEF_SDK="$RUNNER_TEMP/$CEF_ARCHIVE"
+          for image in bin/macos/build-*/'DSH Work.dmg'; do
+            (cd "$(dirname "$image")" && shasum -a 256 'DSH Work.dmg' > 'DSH Work.dmg.sha256')
+          done
 
       - name: Upload macOS disk image
         uses: actions/upload-artifact@v6
         with:
           name: dsh-work-macos-arm64-dmg
-          path: bin/macos/build-*/DSH Work.dmg
+          path: |
+            bin/macos/build-*/DSH Work.dmg
+            bin/macos/build-*/DSH Work.dmg.sha256
           if-no-files-found: error
+
+      - name: Run macOS application and command Go tests
+        run: node scripts/test-macos.mjs . ./cmd/...
 
   windows-build:
     name: Windows Wails build
